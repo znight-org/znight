@@ -1,0 +1,5 @@
+{
+  "name": "@znight/compiler",
+  "version": "0.0.1",
+  "description": "Compile-time dependency injection compiler for Znight framework"
+}
