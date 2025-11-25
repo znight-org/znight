@@ -1,0 +1,41 @@
+{
+  "name": "@znight/tsdown/plugin",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "plugins/tsdown-plugin/src",
+  "projectType": "library",
+  "tags": ["plugin"],
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "outputs": ["{options.outputPath}"],
+      "options": {
+        "outputPath": "dist/plugins/tsdown-plugin",
+        "main": "plugins/tsdown-plugin/src/index.ts",
+        "tsConfig": "plugins/tsdown-plugin/tsconfig.lib.json",
+        "assets": [
+          "plugins/tsdown-plugin/*.md",
+          {
+            "input": "./plugins/tsdown-plugin/src",
+            "glob": "**/!(*.ts)",
+            "output": "./src"
+          },
+          {
+            "input": "./plugins/tsdown-plugin/src",
+            "glob": "**/*.d.ts",
+            "output": "./src"
+          },
+          {
+            "input": "./plugins/tsdown-plugin",
+            "glob": "generators.json",
+            "output": "."
+          },
+          {
+            "input": "./plugins/tsdown-plugin",
+            "glob": "executors.json",
+            "output": "."
+          }
+        ]
+      }
+    }
+  }
+}

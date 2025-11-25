@@ -173,7 +173,7 @@ Build failed with 2 errors.
 | Metrics | prom-client | Standard |
 | Tracing | @opentelemetry/* | Standard |
 | Testing | Vitest | Rapide, TS natif |
-| Package build | tsup/vite | Rapide |
+| Package build | tsdown | Rapide, moderne, simple |
 
 ---
 

@@ -23,6 +23,7 @@
     "strict": true,
     "paths": {
       "@znight/plugin/biome": ["plugins/biome-plugin/src/index.ts"],
+      "@znight/tsdown/biome": ["plugins/tsdown-plugin/src/index.ts"],
       "@znight/core": ["packages/core/src/index.ts"],
       "@znight/compiler": ["packages/compiler/src/index.ts"],
       "@znight/http": ["packages/http/src/index.ts"],

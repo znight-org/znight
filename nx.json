@@ -5,5 +5,35 @@
     "production": ["default"],
     "sharedGlobals": []
   },
-  "plugins": []
+  "plugins": [
+    {
+      "plugin": "@znight/plugin/biome",
+      "options": {
+        "lintTargetName": "lint",
+        "formatTargetName": "format",
+        "checkTargetName": "check"
+      }
+    },
+    {
+      "plugin": "@znight/tsdown/biome",
+      "options": {
+        "buildTargetName": "build",
+        "devTargetName": "dev"
+      }
+    },
+    {
+      "plugin": "@nx/js/typescript",
+      "options": {
+        "typecheck": {
+          "targetName": "typecheck"
+        }
+      }
+    },
+    {
+      "plugin": "@nx/vite/plugin",
+      "options": {
+        "testTargetName": "test"
+      }
+    }
+  ]
 }

@@ -10,7 +10,7 @@
       "outputs": ["{options.outputPath}"],
       "options": {
         "outputPath": "dist/plugins/biome-plugin",
-        "main": "plugin/biome-plugin/src/index.ts",
+        "main": "plugins/biome-plugin/src/index.ts",
         "tsConfig": "plugins/biome-plugin/tsconfig.lib.json",
         "assets": [
           "plugins/biome-plugin/*.md",
