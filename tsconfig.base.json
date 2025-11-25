@@ -1,0 +1,33 @@
+{
+  "compileOnSave": false,
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    "rootDir": ".",
+    "sourceMap": true,
+    "declaration": false,
+    "moduleResolution": "node",
+    "allowJs": true,
+    "emitDecoratorMetadata": true,
+    "esModuleInterop": true,
+    "experimentalDecorators": true,
+    "importHelpers": true,
+    "noUncheckedIndexedAccess": true,
+    "removeComments": true,
+    "target": "ESNext",
+    "module": "ESNext",
+    "lib": ["ESNext"],
+    "skipLibCheck": true,
+    "skipDefaultLibCheck": true,
+    "baseUrl": ".",
+    "strict": true,
+    "paths": {
+      "@znight/plugin/biome": ["plugins/biome-plugin/src/index.ts"],
+      "@znight/core": ["packages/core/src/index.ts"],
+      "@znight/compiler": ["packages/compiler/src/index.ts"],
+      "@znight/http": ["packages/http/src/index.ts"],
+      "@znight/testing": ["packages/testing/src/index.ts"]
+    }
+  },
+  "exclude": ["node_modules", "dist"]
+}

@@ -218,37 +218,6 @@ MessagingPlugin.configure({
 })
 ```
 
-## Comparison with NestJS
-
-```typescript
-// ❌ NestJS - Verbose module configuration
-@Module({
-  imports: [
-    TypeOrmModule.forRoot(dbConfig),
-    TypeOrmModule.forFeature([User]),
-    ConfigModule.forRoot(),
-    LoggerModule,
-  ],
-  controllers: [UserController],
-  providers: [UserService],
-  exports: [UserService],
-})
-export class UserModule {}
-
-@Module({
-  imports: [UserModule, OrderModule, PaymentModule],
-})
-export class AppModule {}
-```
-
-```typescript
-// ✅ Znight - Flat, simple, auto-discovered
-const app = await Application.create({
-  plugins: [HttpPlugin, DatabasePlugin],
-  scan: ['./src/**/*.ts']  // Auto-discovery
-});
-```
-
 ## Roadmap
 
 - [x] Project setup & architecture

@@ -1,0 +1,98 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.3.7/schema.json",
+  "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
+  "files": {
+    "ignoreUnknown": false,
+    "includes": ["**/*", "!node_modules", "!dist", "!junit_reports", "!.nx", "!.yarn"]
+  },
+  "formatter": {
+    "formatWithErrors": false,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineEnding": "lf",
+    "lineWidth": 120,
+    "attributePosition": "auto",
+    "bracketSameLine": false,
+    "bracketSpacing": true,
+    "expand": "auto",
+    "useEditorconfig": true
+  },
+  "linter": {
+    "domains": {
+      "test": "all",
+      "project": "recommended"
+    },
+    "rules": {
+      "recommended": true,
+      "nursery": {
+        // Combinaison of @typescript-eslint/explicit-module-boundary-types and @typescript-eslint/explicit-function-return-type
+        // it is used to enforce the use of explicit types for modules and functions return types
+        // previously eslint was enforcing only return types, so a lot of code is not compliant
+        // "useExplicitType": "error",
+        "noFloatingPromises": "error",
+        "noMisusedPromises": "error"
+      },
+      "complexity": {
+        "noStaticOnlyClass": "off",
+        "noEmptyTypeParameters": "error"
+      },
+      "correctness": {
+        "noUnusedPrivateClassMembers": "error",
+        "noUnusedVariables": "error",
+        "noUnusedImports": { "level": "error", "fix": "safe" }
+      },
+      "style": {
+        "useReadonlyClassProperties": "error",
+        "useImportType": "error",
+        "noInferrableTypes": "error",
+        "useTemplate": "warn",
+        "noUnusedTemplateLiteral": "error",
+        "noMagicNumbers": "off",
+        "noNegationElse": "error",
+        "noNestedTernary": "error",
+        "noParameterAssign": "error",
+        "noRestrictedGlobals": "error",
+        "noUselessElse": "error",
+        "useArrayLiterals": "error",
+        "useConsistentArrayType": "error",
+        "useConst": "error",
+        "useThrowOnlyError": "error"
+      },
+      "performance": {
+        "noAccumulatingSpread": "off"
+      },
+      "suspicious": {
+        "useAwait": "error",
+        "noImplicitAnyLet": "error",
+        "noExplicitAny": "error",
+        "noUnassignedVariables": "error",
+        "noVar": "error"
+      }
+    }
+  },
+  "javascript": {
+    "formatter": {
+      "jsxQuoteStyle": "double",
+      "quoteProperties": "asNeeded",
+      "trailingCommas": "all",
+      "semicolons": "asNeeded",
+      "arrowParentheses": "asNeeded",
+      "quoteStyle": "single"
+    }
+  },
+  "html": { "formatter": { "selfCloseVoidElements": "always" } },
+  "assist": {
+    "enabled": true,
+    "actions": {
+      "source": {
+        "organizeImports": {
+          "level": "on",
+          "options": {
+            "identifierOrder": "natural",
+            "groups": [{ "type": true }, ":BLANK_LINE:", ":NODE:", ":PACKAGE:", ":BLANK_LINE:", ":PATH:"]
+          }
+        }
+      }
+    }
+  }
+}
