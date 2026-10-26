@@ -1,0 +1,40 @@
+{
+  "name": "@znight/testing",
+  "version": "0.1.0",
+  "description": "Znight testing utilities: TestBed with auto-mocking and TestApp for end-to-end tests",
+  "license": "MIT",
+  "author": "Ugho STEPHAN",
+  "homepage": "https://github.com/ugho49/Znight/tree/main/packages/testing#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ugho49/Znight.git",
+    "directory": "packages/testing"
+  },
+  "bugs": "https://github.com/ugho49/Znight/issues",
+  "keywords": ["znight", "testing", "mock", "testbed", "e2e"],
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=24"
+  },
+  "exports": {
+    ".": {
+      "@znight/source": "./src/index.ts",
+      "types": "./dist/index.d.mts",
+      "default": "./dist/index.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "types": "./dist/index.d.mts",
+  "files": ["dist", "src"],
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@znight/core": "workspace:*"
+  }
+}

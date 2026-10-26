@@ -26,13 +26,13 @@
 
 Modern TypeScript frameworks like NestJS rely on runtime reflection (`reflect-metadata`) to resolve dependencies. This approach has significant drawbacks:
 
-| Runtime DI (NestJS, etc.) | Compile-time DI (Znight) |
-|---------------------------|--------------------------|
-| 🐌 Reflection at runtime | ⚡ Everything resolved at build |
-| 💥 DI errors at boot time | ✅ DI errors at compilation |
-| 📦 `reflect-metadata` magic | 🔍 Generated code, fully transparent |
-| 🥶 Slow cold starts (serverless pain) | 🚀 Instant cold starts |
-| 🌳 No tree-shaking possible | ✂️ Full dead code elimination |
+| Runtime DI (NestJS, etc.)             | Compile-time DI (Znight)             |
+| ------------------------------------- | ------------------------------------ |
+| 🐌 Reflection at runtime              | ⚡ Everything resolved at build      |
+| 💥 DI errors at boot time             | ✅ DI errors at compilation          |
+| 📦 `reflect-metadata` magic           | 🔍 Generated code, fully transparent |
+| 🥶 Slow cold starts (serverless pain) | 🚀 Instant cold starts               |
+| 🌳 No tree-shaking possible           | ✂️ Full dead code elimination        |
 
 Znight takes inspiration from [Micronaut](https://micronaut.io/) (Java) and brings **compile-time DI** to the TypeScript ecosystem through a powerful Vite plugin.
 
@@ -62,27 +62,27 @@ npm install @znight/core @znight/compiler
 
 ```typescript
 // vite.config.ts
-import { defineConfig } from 'vite';
-import { znight } from '@znight/compiler';
+import { defineConfig } from 'vite'
+import { znight } from '@znight/compiler'
 
 export default defineConfig({
-  plugins: [znight()]
-});
+  plugins: [znight()],
+})
 ```
 
 ### 2. Create a Service
 
 ```typescript
 // src/services/user.service.ts
-import { Injectable } from '@znight/core';
-import { Logger } from '@znight/logging';
+import { Injectable } from '@znight/core'
+import { Logger } from '@znight/logging'
 
 @Injectable()
 export class UserService {
   constructor(private logger: Logger) {}
 
   async findById(id: string): Promise<User> {
-    this.logger.info('Finding user', { id });
+    this.logger.info('Finding user', { id })
     // ...
   }
 }
@@ -110,16 +110,14 @@ export class UserController {
 
 ```typescript
 // src/main.ts
-import { Application } from '@znight/core';
-import { HttpPlugin } from '@znight/http';
+import { Application } from '@znight/core'
+import { HttpPlugin } from '@znight/http'
 
 const app = await Application.create({
-  plugins: [
-    HttpPlugin.configure({ port: 3000 })
-  ]
-});
+  plugins: [HttpPlugin.configure({ port: 3000 })],
+})
 
-await app.start();
+await app.start()
 ```
 
 ### 5. Build & Run
@@ -160,18 +158,18 @@ Build failed with 2 errors.
 
 ## Packages
 
-| Package | Description | Status |
-|---------|-------------|--------|
-| `@znight/core` | Core runtime, decorators, lifecycle | 🚧 In Progress |
-| `@znight/compiler` | Vite plugin, AST analysis, code generation | 🚧 In Progress |
-| `@znight/http` | HTTP controllers (Fastify/Express/Hono adapters) | 📋 Planned |
-| `@znight/messaging` | Message consumers (RabbitMQ/SQS/Kafka) | 📋 Planned |
-| `@znight/config` | Type-safe configuration management | 📋 Planned |
-| `@znight/logging` | Structured logging with context | 📋 Planned |
-| `@znight/metrics` | Prometheus metrics | 📋 Planned |
-| `@znight/tracing` | OpenTelemetry integration | 📋 Planned |
-| `@znight/testing` | Test utilities, auto-mocking | 📋 Planned |
-| `@znight/cli` | Project scaffolding, generators | 📋 Planned |
+| Package             | Description                                      | Status         |
+| ------------------- | ------------------------------------------------ | -------------- |
+| `@znight/core`      | Core runtime, decorators, lifecycle              | 🚧 In Progress |
+| `@znight/compiler`  | Vite plugin, AST analysis, code generation       | 🚧 In Progress |
+| `@znight/http`      | HTTP controllers (Fastify/Express/Hono adapters) | 📋 Planned     |
+| `@znight/messaging` | Message consumers (RabbitMQ/SQS/Kafka)           | 📋 Planned     |
+| `@znight/config`    | Type-safe configuration management               | 📋 Planned     |
+| `@znight/logging`   | Structured logging with context                  | 📋 Planned     |
+| `@znight/metrics`   | Prometheus metrics                               | 📋 Planned     |
+| `@znight/tracing`   | OpenTelemetry integration                        | 📋 Planned     |
+| `@znight/testing`   | Test utilities, auto-mocking                     | 📋 Planned     |
+| `@znight/cli`       | Project scaffolding, generators                  | 📋 Planned     |
 
 ## Architecture
 
@@ -198,23 +196,23 @@ Znight is adapter-agnostic. Choose what fits your needs:
 ### HTTP Adapters
 
 ```typescript
-import { HttpPlugin, FastifyAdapter } from '@znight/http';
+import { HttpPlugin, FastifyAdapter } from '@znight/http'
 // or ExpressAdapter, HonoAdapter
 
 HttpPlugin.configure({
   adapter: new FastifyAdapter(),
-  port: 3000
+  port: 3000,
 })
 ```
 
 ### Messaging Drivers
 
 ```typescript
-import { MessagingPlugin, RabbitMQDriver } from '@znight/messaging';
+import { MessagingPlugin, RabbitMQDriver } from '@znight/messaging'
 // or SQSDriver, KafkaDriver
 
 MessagingPlugin.configure({
-  driver: new RabbitMQDriver({ url: 'amqp://localhost' })
+  driver: new RabbitMQDriver({ url: 'amqp://localhost' }),
 })
 ```
 

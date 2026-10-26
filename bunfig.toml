@@ -1,0 +1,6 @@
+[install]
+# Pin all dependencies to exact versions by default
+exact = true
+
+[test]
+coverageSkipTestFiles = true

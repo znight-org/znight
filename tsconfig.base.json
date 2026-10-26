@@ -1,34 +1,23 @@
 {
-  "compileOnSave": false,
+  "$schema": "https://json.schemastore.org/tsconfig",
   "compilerOptions": {
-    "allowImportingTsExtensions": true,
-    "rewriteRelativeImportExtensions": true,
-    "rootDir": ".",
-    "sourceMap": true,
-    "declaration": false,
-    "moduleResolution": "node",
-    "allowJs": true,
-    "emitDecoratorMetadata": true,
-    "esModuleInterop": true,
+    "target": "ES2024",
+    "lib": ["ES2024", "ESNext.Disposable"],
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "moduleDetection": "force",
+    "customConditions": ["@znight/source"],
+    "resolveJsonModule": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
     "experimentalDecorators": true,
-    "importHelpers": true,
-    "noUncheckedIndexedAccess": true,
-    "removeComments": true,
-    "target": "ESNext",
-    "module": "ESNext",
-    "lib": ["ESNext"],
-    "skipLibCheck": true,
-    "skipDefaultLibCheck": true,
-    "baseUrl": ".",
     "strict": true,
-    "paths": {
-      "@znight/plugin/biome": ["plugins/biome-plugin/src/index.ts"],
-      "@znight/tsdown/biome": ["plugins/tsdown-plugin/src/index.ts"],
-      "@znight/core": ["packages/core/src/index.ts"],
-      "@znight/compiler": ["packages/compiler/src/index.ts"],
-      "@znight/http": ["packages/http/src/index.ts"],
-      "@znight/testing": ["packages/testing/src/index.ts"]
-    }
-  },
-  "exclude": ["node_modules", "dist"]
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noPropertyAccessFromIndexSignature": false,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "sourceMap": true
+  }
 }

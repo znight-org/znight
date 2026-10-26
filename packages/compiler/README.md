@@ -22,8 +22,8 @@ pnpm add -D @znight/compiler
 Add the plugin to your `vite.config.ts`:
 
 ```typescript
-import { defineConfig } from 'vite';
-import { znightPlugin } from '@znight/compiler';
+import { defineConfig } from 'vite'
+import { znightPlugin } from '@znight/compiler'
 
 export default defineConfig({
   plugins: [
@@ -34,7 +34,7 @@ export default defineConfig({
       tsconfig: 'tsconfig.json',
     }),
   ],
-});
+})
 ```
 
 ## How It Works
@@ -45,24 +45,24 @@ export default defineConfig({
 
 ## Error Codes
 
-| Code | Description |
-|------|-------------|
-| ZNIGHT001 | Missing provider - required dependency not found |
-| ZNIGHT002 | Circular dependency detected |
+| Code      | Description                                             |
+| --------- | ------------------------------------------------------- |
+| ZNIGHT001 | Missing provider - required dependency not found        |
+| ZNIGHT002 | Circular dependency detected                            |
 | ZNIGHT003 | Scope mismatch - singleton depends on request/transient |
-| ZNIGHT004 | Duplicate provider without @Primary |
+| ZNIGHT004 | Duplicate provider without @Primary                     |
 
 ## Example
 
 ```typescript
 // user.service.ts
-import { Injectable } from '@znight/core';
+import { Injectable } from '@znight/core'
 
 @Injectable()
 export class UserService {
   constructor(
     private readonly db: DatabaseClient,
-    private readonly logger: Logger
+    private readonly logger: Logger,
   ) {}
 }
 ```
@@ -71,9 +71,9 @@ The compiler will generate:
 
 ```typescript
 // .znight/container.generated.ts
-import { UserService } from './user.service.js';
-import { DatabaseClient } from './database.client.js';
-import { Logger } from './logger.js';
+import { UserService } from './user.service.js'
+import { DatabaseClient } from './database.client.js'
+import { Logger } from './logger.js'
 
 export const __ZNIGHT_METADATA__ = {
   providers: {
@@ -81,12 +81,12 @@ export const __ZNIGHT_METADATA__ = {
       class: UserService,
       scope: 'singleton',
       dependencies: ['DatabaseClient', 'Logger'],
-      factory: (deps) => new UserService(deps['DatabaseClient'], deps['Logger']),
+      factory: deps => new UserService(deps['DatabaseClient'], deps['Logger']),
     },
     // ...
   },
   resolutionOrder: ['Logger', 'DatabaseClient', 'UserService'],
-};
+}
 ```
 
 ## License

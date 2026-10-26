@@ -1,0 +1,40 @@
+{
+  "name": "@znight/observability",
+  "version": "0.1.0",
+  "description": "Znight observability plugin: structured logging (Pino), Prometheus metrics and OpenTelemetry tracing",
+  "license": "MIT",
+  "author": "Ugho STEPHAN",
+  "homepage": "https://github.com/ugho49/Znight/tree/main/packages/observability#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ugho49/Znight.git",
+    "directory": "packages/observability"
+  },
+  "bugs": "https://github.com/ugho49/Znight/issues",
+  "keywords": ["znight", "logging", "pino", "metrics", "prometheus", "tracing", "opentelemetry"],
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=24"
+  },
+  "exports": {
+    ".": {
+      "@znight/source": "./src/index.ts",
+      "types": "./dist/index.d.mts",
+      "default": "./dist/index.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "types": "./dist/index.d.mts",
+  "files": ["dist", "src"],
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@znight/core": "workspace:*"
+  }
+}

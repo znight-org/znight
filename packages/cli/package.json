@@ -1,0 +1,43 @@
+{
+  "name": "@znight/cli",
+  "version": "0.1.0",
+  "description": "Znight CLI: scaffold projects, generate code, run dev server and builds",
+  "license": "MIT",
+  "author": "Ugho STEPHAN",
+  "homepage": "https://github.com/ugho49/Znight/tree/main/packages/cli#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ugho49/Znight.git",
+    "directory": "packages/cli"
+  },
+  "bugs": "https://github.com/ugho49/Znight/issues",
+  "keywords": ["znight", "cli", "scaffolding", "generator"],
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=24"
+  },
+  "exports": {
+    ".": {
+      "@znight/source": "./src/index.ts",
+      "types": "./dist/index.d.mts",
+      "default": "./dist/index.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "types": "./dist/index.d.mts",
+  "files": ["dist", "src"],
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@znight/core": "workspace:*"
+  },
+  "bin": {
+    "znight": "./dist/cli.mjs"
+  }
+}

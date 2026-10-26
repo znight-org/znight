@@ -22,14 +22,14 @@ L'approche est similaire à Micronaut (Java) : un plugin Vite analyse le code Ty
 
 ## Avantages vs NestJS/Spring Boot
 
-| Runtime DI (NestJS/Spring) | Compile-Time DI (Znight) |
-|---|---|
-| Reflection au runtime = lent | Tout résolu à la compilation |
-| Erreurs DI découvertes au boot | Erreurs DI à la compilation |
-| `reflect-metadata` = magic | Code généré = transparent |
-| Cold start lent (serverless killer) | Cold start instantané |
-| Tree-shaking impossible | Dead code elimination possible |
-| Modules imbriqués complexes | Flat, simple, auto-découverte |
+| Runtime DI (NestJS/Spring)          | Compile-Time DI (Znight)       |
+| ----------------------------------- | ------------------------------ |
+| Reflection au runtime = lent        | Tout résolu à la compilation   |
+| Erreurs DI découvertes au boot      | Erreurs DI à la compilation    |
+| `reflect-metadata` = magic          | Code généré = transparent      |
+| Cold start lent (serverless killer) | Cold start instantané          |
+| Tree-shaking impossible             | Dead code elimination possible |
+| Modules imbriqués complexes         | Flat, simple, auto-découverte  |
 
 ---
 
@@ -106,7 +106,7 @@ znight/
 export class UserService {
   constructor(
     private readonly db: DatabaseClient,
-    private readonly logger: Logger
+    private readonly logger: Logger,
   ) {}
 }
 ```
@@ -119,17 +119,17 @@ Le plugin Vite (via ts-morph) parse le TypeScript, extrait les métadonnées, va
 // .znight/container.generated.ts (auto-généré)
 export const __ZNIGHT_METADATA__ = {
   providers: {
-    'UserService': {
+    UserService: {
       class: UserService,
       scope: 'singleton',
       dependencies: ['DatabaseClient', 'Logger'],
-      factory: (deps) => new UserService(deps.DatabaseClient, deps.Logger)
+      factory: deps => new UserService(deps.DatabaseClient, deps.Logger),
     },
     // ...
   },
   resolutionOrder: ['Logger', 'DatabaseConfig', 'DatabaseClient', 'UserService'],
   // ...
-};
+}
 ```
 
 ### 3. Le runtime est minimal
@@ -137,9 +137,9 @@ export const __ZNIGHT_METADATA__ = {
 ```typescript
 // Le container utilise le code pré-généré
 for (const name of metadata.resolutionOrder) {
-  const provider = metadata.providers[name];
-  const deps = this.resolveDependencies(provider.dependencies);
-  this.instances.set(name, provider.factory(deps));
+  const provider = metadata.providers[name]
+  const deps = this.resolveDependencies(provider.dependencies)
+  this.instances.set(name, provider.factory(deps))
 }
 ```
 
@@ -161,25 +161,26 @@ Build failed with 2 errors.
 
 ## Stack Technique
 
-| Composant | Choix | Raison |
-|-----------|-------|--------|
-| Monorepo | Nx + pnpm | Scalable, cache, affected |
-| AST Analysis | ts-morph | API haut niveau sur TypeScript compiler |
-| Build | Vite | Rapide, plugin system |
-| HTTP (perf) | Fastify | Performance |
-| HTTP (compat) | Express, Hono | Options |
-| Validation | Zod | Type inference |
-| Logging | Pino | Performance |
-| Metrics | prom-client | Standard |
-| Tracing | @opentelemetry/* | Standard |
-| Testing | Vitest | Rapide, TS natif |
-| Package build | tsdown | Rapide, moderne, simple |
+| Composant     | Choix            | Raison                                  |
+| ------------- | ---------------- | --------------------------------------- |
+| Monorepo      | Nx + pnpm        | Scalable, cache, affected               |
+| AST Analysis  | ts-morph         | API haut niveau sur TypeScript compiler |
+| Build         | Vite             | Rapide, plugin system                   |
+| HTTP (perf)   | Fastify          | Performance                             |
+| HTTP (compat) | Express, Hono    | Options                                 |
+| Validation    | Zod              | Type inference                          |
+| Logging       | Pino             | Performance                             |
+| Metrics       | prom-client      | Standard                                |
+| Tracing       | @opentelemetry/* | Standard                                |
+| Testing       | Vitest           | Rapide, TS natif                        |
+| Package build | tsdown           | Rapide, moderne, simple                 |
 
 ---
 
 ## TODO List
 
 ### Phase 1 - Compiler Foundation (Priorité HAUTE)
+
 - [ ] Package `@znight/compiler`
   - [ ] Plugin Vite de base (hook buildStart, handleHotUpdate)
   - [ ] Analyzer: extraction @Injectable (nom, scope, dependencies, lifecycle)
@@ -195,6 +196,7 @@ Build failed with 2 errors.
   - [ ] Tests unitaires pour chaque analyzer/validator
 
 ### Phase 2 - Core Runtime
+
 - [ ] Package `@znight/core`
   - [ ] Decorators markers: @Injectable, @Inject, @Optional
   - [ ] Interfaces lifecycle: OnStart, OnStop, OnReady
@@ -206,6 +208,7 @@ Build failed with 2 errors.
   - [ ] Tests unitaires
 
 ### Phase 3 - HTTP Plugin
+
 - [ ] Package `@znight/http`
   - [ ] Decorators: @Controller, @Get, @Post, @Put, @Delete, @Patch
   - [ ] Decorators params: @Param, @Query, @Body, @Headers, @Req, @Res
@@ -222,6 +225,7 @@ Build failed with 2 errors.
   - [ ] Tests e2e
 
 ### Phase 4 - Advanced Compiler Features
+
 - [ ] Source maps pour les erreurs (pointer vers le bon fichier/ligne)
 - [ ] Watch mode optimisé (incremental analysis)
 - [ ] Validation des interfaces sans implémentation (ZNIGHT008)
@@ -230,6 +234,7 @@ Build failed with 2 errors.
 - [ ] Support @Inject avec interface token
 
 ### Phase 5 - Config Plugin
+
 - [ ] Package `@znight/config`
   - [ ] Decorators: @Config, @Env, @Default, @Secret
   - [ ] Loader: environment variables
@@ -241,6 +246,7 @@ Build failed with 2 errors.
   - [ ] ConfigPlugin.configure()
 
 ### Phase 6 - Observability Plugin
+
 - [ ] Package `@znight/observability`
   - [ ] Logging
     - [ ] Logger injectable avec contexte auto (requestId, traceId)
@@ -260,6 +266,7 @@ Build failed with 2 errors.
   - [ ] ObservabilityPlugin.configure()
 
 ### Phase 7 - Messaging Plugin
+
 - [ ] Package `@znight/messaging`
   - [ ] Decorators: @Consumer, @OnMessage, @OnError, @Retry
   - [ ] MessageBroker interface injectable
@@ -273,6 +280,7 @@ Build failed with 2 errors.
   - [ ] Tests avec testcontainers
 
 ### Phase 8 - Testing Utilities
+
 - [ ] Package `@znight/testing`
   - [ ] TestBed.create() avec auto-mocking des dépendances
   - [ ] Mock factories
@@ -282,6 +290,7 @@ Build failed with 2 errors.
   - [ ] Integration vitest
 
 ### Phase 9 - CLI
+
 - [ ] Package `@znight/cli`
   - [ ] Command: `znight new <project-name>`
   - [ ] Command: `znight generate service <name>`
@@ -293,6 +302,7 @@ Build failed with 2 errors.
   - [ ] Templates pour génération
 
 ### Phase 10 - Documentation & Examples
+
 - [ ] README.md complet
 - [ ] Documentation site (VitePress?)
 - [ ] Example: Simple REST API
@@ -306,17 +316,17 @@ Build failed with 2 errors.
 
 ## Codes d'Erreur Compiler
 
-| Code | Description |
-|------|-------------|
-| ZNIGHT001 | Missing provider - dépendance requise non trouvée |
-| ZNIGHT002 | Circular dependency - cycle détecté dans le graphe |
-| ZNIGHT003 | Scope mismatch - singleton dépend de request/transient |
-| ZNIGHT004 | Duplicate provider - même nom sans @Primary |
-| ZNIGHT005 | Invalid decorator usage |
-| ZNIGHT006 | Missing required config |
-| ZNIGHT007 | Invalid route definition |
+| Code      | Description                                             |
+| --------- | ------------------------------------------------------- |
+| ZNIGHT001 | Missing provider - dépendance requise non trouvée       |
+| ZNIGHT002 | Circular dependency - cycle détecté dans le graphe      |
+| ZNIGHT003 | Scope mismatch - singleton dépend de request/transient  |
+| ZNIGHT004 | Duplicate provider - même nom sans @Primary             |
+| ZNIGHT005 | Invalid decorator usage                                 |
+| ZNIGHT006 | Missing required config                                 |
+| ZNIGHT007 | Invalid route definition                                |
 | ZNIGHT008 | Ambiguous injection - multiple candidates sans @Primary |
-| ZNIGHT009 | Invalid lifecycle hook signature |
+| ZNIGHT009 | Invalid lifecycle hook signature                        |
 
 ---
 
@@ -326,18 +336,16 @@ Build failed with 2 errors.
 
 ```typescript
 // main.ts
-import { Application } from '@znight/core';
-import { HttpPlugin } from '@znight/http';
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated';
+import { Application } from '@znight/core'
+import { HttpPlugin } from '@znight/http'
+import { __ZNIGHT_METADATA__ } from './.znight/container.generated'
 
 const app = await Application.create({
   metadata: __ZNIGHT_METADATA__,
-  plugins: [
-    HttpPlugin.configure({ port: 3000 })
-  ]
-});
+  plugins: [HttpPlugin.configure({ port: 3000 })],
+})
 
-await app.start();
+await app.start()
 ```
 
 ### Service simple
@@ -347,12 +355,12 @@ await app.start();
 export class UserService {
   constructor(
     private readonly db: DatabaseClient,
-    private readonly logger: Logger
+    private readonly logger: Logger,
   ) {}
 
   async findById(id: string): Promise<User> {
-    this.logger.info('Finding user', { id });
-    return this.db.query('SELECT * FROM users WHERE id = $1', [id]);
+    this.logger.info('Finding user', { id })
+    return this.db.query('SELECT * FROM users WHERE id = $1', [id])
   }
 }
 ```
@@ -400,14 +408,14 @@ export class OrderConsumer {
 export class DatabaseConfig {
   @Env('DB_HOST')
   @Default('localhost')
-  host: string;
+  host: string
 
   @Env('DB_PORT')
   @Default(5432)
-  port: number;
+  port: number
 
   @Secret('DB_PASSWORD')
-  password: string;
+  password: string
 }
 ```
 
@@ -416,16 +424,16 @@ export class DatabaseConfig {
 ```typescript
 describe('UserService', () => {
   it('should create user', async () => {
-    const { service, mocks } = await TestBed.create(UserService);
-    
-    mocks.get(DatabaseClient).findOne.mockResolvedValue(null);
-    
-    const user = await service.create({ email: 'test@test.com' });
-    
-    expect(user).toBeDefined();
-    expect(mocks.get(DatabaseClient).save).toHaveBeenCalled();
-  });
-});
+    const { service, mocks } = await TestBed.create(UserService)
+
+    mocks.get(DatabaseClient).findOne.mockResolvedValue(null)
+
+    const user = await service.create({ email: 'test@test.com' })
+
+    expect(user).toBeDefined()
+    expect(mocks.get(DatabaseClient).save).toHaveBeenCalled()
+  })
+})
 ```
 
 ---
@@ -435,12 +443,7 @@ describe('UserService', () => {
 ```typescript
 // ❌ NestJS - Verbose avec modules
 @Module({
-  imports: [
-    TypeOrmModule.forRoot(dbConfig),
-    TypeOrmModule.forFeature([User]),
-    ConfigModule.forRoot(),
-    LoggerModule,
-  ],
+  imports: [TypeOrmModule.forRoot(dbConfig), TypeOrmModule.forFeature([User]), ConfigModule.forRoot(), LoggerModule],
   controllers: [UserController],
   providers: [UserService],
   exports: [UserService],
@@ -457,8 +460,8 @@ export class AppModule {}
 // ✅ Znight - Flat, simple, auto-discovered
 const app = await Application.create({
   metadata: __ZNIGHT_METADATA__,
-  plugins: [HttpPlugin, DatabasePlugin]
-});
+  plugins: [HttpPlugin, DatabasePlugin],
+})
 ```
 
 ---
@@ -542,4 +545,4 @@ nx test @znight/core
 
 ---
 
-*Last updated: Conversation du jour*
+_Last updated: Conversation du jour_

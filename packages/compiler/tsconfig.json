@@ -1,9 +1,10 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "outDir": "../../dist/out-tsc",
+    "isolatedDeclarations": true,
     "declaration": true,
-    "types": ["node"]
+    "types": ["bun"]
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src", "test"],
+  "exclude": ["test/fixtures"]
 }

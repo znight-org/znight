@@ -1,0 +1,40 @@
+{
+  "name": "@znight/messaging",
+  "version": "0.1.0",
+  "description": "Znight messaging plugin: consumers, retries and dead-letter queues with RabbitMQ, SQS or Kafka",
+  "license": "MIT",
+  "author": "Ugho STEPHAN",
+  "homepage": "https://github.com/ugho49/Znight/tree/main/packages/messaging#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ugho49/Znight.git",
+    "directory": "packages/messaging"
+  },
+  "bugs": "https://github.com/ugho49/Znight/issues",
+  "keywords": ["znight", "messaging", "rabbitmq", "sqs", "kafka", "consumer", "queue"],
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=24"
+  },
+  "exports": {
+    ".": {
+      "@znight/source": "./src/index.ts",
+      "types": "./dist/index.d.mts",
+      "default": "./dist/index.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "types": "./dist/index.d.mts",
+  "files": ["dist", "src"],
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@znight/core": "workspace:*"
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "name": "@znight/core",
+  "version": "0.1.0",
+  "description": "Znight core runtime: compile-time DI container, lifecycle, plugins and marker decorators",
+  "license": "MIT",
+  "author": "Ugho STEPHAN",
+  "homepage": "https://github.com/ugho49/Znight/tree/main/packages/core#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ugho49/Znight.git",
+    "directory": "packages/core"
+  },
+  "bugs": "https://github.com/ugho49/Znight/issues",
+  "keywords": ["znight", "dependency-injection", "di", "ioc", "container", "framework"],
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=24"
+  },
+  "exports": {
+    ".": {
+      "@znight/source": "./src/index.ts",
+      "types": "./dist/index.d.mts",
+      "default": "./dist/index.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "types": "./dist/index.d.mts",
+  "files": ["dist", "src"],
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
