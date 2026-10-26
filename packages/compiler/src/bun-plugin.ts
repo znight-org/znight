@@ -21,7 +21,7 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { ErrorCode, ZnightError } from '@znight/core'
 
-import { createCompiler } from './compiler.ts'
+import { createCompiler, generatedFiles, writeIfChanged } from './compiler.ts'
 import { formatDiagnostics } from './diagnostics/format.ts'
 import { resolvePath, toPosixPath } from './project/paths.ts'
 import { applicableRanges, blankDecorators } from './strip.ts'
@@ -129,9 +129,13 @@ export function znightBunPlugin(options: ZnightBunPluginOptions = {}): ZnightBun
 }
 
 /**
- * What the `@znight/compiler/bun` preload runs: generates the container (the disk copy is written
- * when it changed, for `tsc` and editors), makes Bun watch every file the result depends on,
- * prints the diagnostics and, without errors, registers {@link znightBunPlugin}.
+ * What the `@znight/compiler/bun` preload runs: generates the container (the disk copy — the
+ * `serve` rendering in every mode — is written when it changed, for `tsc` and editors), makes Bun
+ * watch every file the result depends on, prints the diagnostics and, without errors, registers
+ * {@link znightBunPlugin}.
+ *
+ * The module is served from memory: a disk copy that cannot be written (read-only file system of a
+ * production image) is a warning, never a failure.
  *
  * Default mode: `test` under `bun test` (`NODE_ENV=test`), `build` with `NODE_ENV=production`,
  * else `serve`.
@@ -143,7 +147,22 @@ export async function createPreload(options: PreloadOptions = {}): Promise<Gener
   const bun = bunRuntime()
   const { logLevel = 'warn', ...compileOptions } = options
   const compiler = createBunCompiler(compileOptions)
-  const result = await compiler.generate()
+  const compiled = await compiler.compile()
+  const written: string[] = []
+  for (const output of generatedFiles(compiled)) {
+    try {
+      if (await writeIfChanged(output.file, output.content)) {
+        written.push(output.file)
+      }
+    } catch (error) {
+      if (logLevel !== 'silent') {
+        console.error(
+          `[znight] cannot write ${path.relative(compiler.options.root, output.file)}: ${error instanceof Error ? error.message : String(error)} (the generated module is served from memory; tsc and editors read the disk copy)`,
+        )
+      }
+    }
+  }
+  const result: GenerateResult = { ...compiled, written, stale: false }
   await watchAsText([...result.watchFiles, ...tsconfigFiles(compiler)])
   const root = compiler.options.root
   const printed = logLevel !== 'silent' && result.diagnostics.length > 0

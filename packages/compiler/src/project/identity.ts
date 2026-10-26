@@ -83,6 +83,7 @@ export class IdentityResolver {
   readonly #symbols: SymbolResolver
   readonly #indexes = new Map<string, ReadonlyMap<string, IndexedExport>>()
   readonly #entryFiles = new Map<string, string | null>()
+  readonly #public = new Map<string, boolean>()
 
   constructor(host: ProjectHost, symbols: SymbolResolver) {
     this.#host = host
@@ -197,6 +198,21 @@ export class IdentityResolver {
   /** Identity of a declaration (application, public package export or package-internal). */
   identityOfDeclaration(declaration: Declaration): IdentityInfo {
     return this.#identityOfKey(declaration.file, declarationKey(declaration), declaration.name)
+  }
+
+  /**
+   * `false` for a package-internal identity (`<package>/<path in package>#Name`): it depends on the
+   * package layout (sources vs `dist`, chunk names), so it never becomes a runtime token. Every
+   * other identity (application, public package export, builtin, global, unresolved) is public.
+   */
+  isPublic(identity: string): boolean {
+    let cached = this.#public.get(identity)
+    if (cached === undefined) {
+      const symbol = this.lookup(identity)
+      cached = symbol.kind !== 'declaration' || this.identityOfDeclaration(symbol.declaration).public
+      this.#public.set(identity, cached)
+    }
+    return cached
   }
 
   /**

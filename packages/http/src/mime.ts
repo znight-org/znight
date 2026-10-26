@@ -100,8 +100,10 @@ export function contentTypeFor(filename: string): string | undefined {
   if (dot === -1 || dot === filename.length - 1) return undefined
   const separator = Math.max(filename.lastIndexOf('/'), filename.lastIndexOf('\\'))
   if (dot < separator) return undefined
-  const type = TYPES[filename.slice(dot + 1).toLowerCase()]
-  if (type === undefined) return undefined
+  const extension = filename.slice(dot + 1).toLowerCase()
+  // own keys only: `.constructor` / `.__proto__` must not resolve to `Object.prototype` members
+  if (!Object.hasOwn(TYPES, extension)) return undefined
+  const type = TYPES[extension] as string
   return isTextual(type) ? `${type}; charset=utf-8` : type
 }
 

@@ -34,6 +34,52 @@ describe('extension discovery', () => {
     const project = fixtureProject('extensions', { trustedExtensions: ['@acme/ext'] })
     expect(discoverExtensionModules(project)[0]?.trusted).toBe(true)
   })
+
+  it('finds the extension owning a decorator re-exported by another package (preset)', async () => {
+    const app = tempApp({
+      'node_modules/@znight/web-ext/package.json': JSON.stringify({
+        name: '@znight/web-ext',
+        version: '1.0.0',
+        type: 'module',
+        exports: {
+          '.': { types: './index.d.ts', default: './index.js' },
+          './compiler': { default: './compiler.mjs' },
+        },
+        znight: { apiVersion: 1, compiler: '@znight/web-ext/compiler' },
+      }),
+      'node_modules/@znight/web-ext/index.d.ts': 'export declare function Route(path: string): ClassDecorator\n',
+      'node_modules/@znight/web-ext/index.js': 'export const Route = () => () => {}\n',
+      'node_modules/@znight/web-ext/compiler.mjs': `export default {
+  apiVersion: 1,
+  name: 'web',
+  decorators: { '@znight/web-ext#Route': { targets: ['class'], params: ['static'] } },
+  analyzeClass(cls, ctx) {
+    ctx.registerProvider(cls)
+  },
+}
+`,
+      'node_modules/@acme/preset/package.json': JSON.stringify({
+        name: '@acme/preset',
+        version: '1.0.0',
+        type: 'module',
+        exports: { '.': { types: './index.d.ts', default: './index.js' } },
+      }),
+      'node_modules/@acme/preset/index.d.ts': "export { Route } from '@znight/web-ext'\n",
+      'node_modules/@acme/preset/index.js': "export { Route } from '@znight/web-ext'\n",
+      'src/health.ts': "import { Route } from '@acme/preset'\n\n@Route('/health')\nexport class HealthController {}\n",
+    })
+    try {
+      const result = await analyzeRoot(app.root)
+      expect(
+        discoverExtensionModules(result.project).map(module => [module.packageName, module.specifier, module.trusted]),
+      ).toEqual([['@znight/web-ext', '@znight/web-ext/compiler', true]])
+      expect(codes(result)).toEqual([])
+      expect(result.extensions.map(entry => entry.extension.name)).toEqual(['web'])
+      expect(provider(result, 'src/health.ts#HealthController').registeredBy).toBe('web')
+    } finally {
+      app.cleanup()
+    }
+  })
 })
 
 describe('extension loading', () => {

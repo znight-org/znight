@@ -1,6 +1,7 @@
 import type { HookWrapper, HttpRequestEvent, MessageDeliveryEvent } from '@znight/core'
 import type { MetricsRegistry } from './registry.ts'
 
+import { invalidOption } from '../internal/errors.ts'
 import { normalizeMethod } from '../internal/hooks.ts'
 import { guard } from '../internal/safe.ts'
 import { now, startOf } from '../internal/time.ts'
@@ -26,12 +27,26 @@ export interface HttpMetricsOptions {
   readonly ignore?: (event: HttpRequestEvent) => boolean
 }
 
+/** `type` label of deliveries that matched no handler (bounded cardinality: never the raw type). */
+export const UNMATCHED_MESSAGE_TYPE = 'unmatched'
+
+/** `type` label of the types a handler received beyond {@link MessagingMetricsOptions.maxTypesPerHandler}. */
+export const OTHER_MESSAGE_TYPE = '_OTHER'
+
+/** Default of {@link MessagingMetricsOptions.maxTypesPerHandler}. */
+export const DEFAULT_MAX_TYPES_PER_HANDLER = 50
+
 /** Options of {@link measureMessages}. */
 export interface MessagingMetricsOptions {
   /** Buckets of `messaging_process_duration_seconds`. Default: {@link DEFAULT_MESSAGE_BUCKETS}. */
   readonly buckets?: readonly number[]
   /** Deliveries that are not measured. */
   readonly ignore?: (event: MessageDeliveryEvent) => boolean
+  /**
+   * Distinct `type` label values recorded per handler (a pattern or default `@OnMessage()` handler
+   * receives whatever types producers send); later types are recorded as `_OTHER`. Default: 50.
+   */
+  readonly maxTypesPerHandler?: number
 }
 
 /**
@@ -98,7 +113,10 @@ export function measureHttpRequests(
  * | `messaging_process_duration_seconds` | histogram | `queue`, `consumer`, `type`, `outcome` |
  * | `messaging_active_messages` | gauge | `queue` |
  *
- * `outcome` is `ack`, `retry`, `dead-letter` or `error` (the pipeline threw).
+ * `outcome` is `ack`, `retry`, `dead-letter` or `error` (the pipeline threw). `type` is the message
+ * type when a handler matched, `unmatched` otherwise (never the raw type: producers choose it), and
+ * at most `maxTypesPerHandler` distinct types are recorded per handler (then `_OTHER`), so the
+ * cardinality stays bounded.
  */
 export function measureMessages(
   registry: MetricsRegistry,
@@ -119,6 +137,7 @@ export function measureMessages(
     labelNames: ['queue'],
   })
   const ignore = options.ignore
+  const typeLabel = boundedTypeLabel(options.maxTypesPerHandler)
   const record = guard('Recording messaging metrics')
   return async (event, next) => {
     if (ignore?.(event) === true) return next()
@@ -137,12 +156,38 @@ export function measureMessages(
         const labels = {
           queue,
           consumer: event.consumer,
-          type: event.type ?? '',
+          type: typeLabel(event),
           outcome: event.outcome ?? (failed ? 'error' : 'ack'),
         }
         total.inc(labels)
         duration.observe(labels, (now() - startOf(event.startTime, started)) / 1000)
       })
     }
+  }
+}
+
+/**
+ * The `type` label of a delivery: `unmatched` when no handler matched, otherwise the message type,
+ * limited to `max` distinct values per handler (`_OTHER` beyond).
+ */
+function boundedTypeLabel(max: number = DEFAULT_MAX_TYPES_PER_HANDLER): (event: MessageDeliveryEvent) => string {
+  if (!Number.isInteger(max) || max < 1) {
+    throw invalidOption('metrics.messaging.maxTypesPerHandler', `expected a positive integer, got ${String(max)}`)
+  }
+  const seen = new Map<string, Set<string>>()
+  return event => {
+    if (event.handler === undefined) return UNMATCHED_MESSAGE_TYPE
+    const type = event.type ?? ''
+    // queue, consumer and handler come from the code: the key space is bounded
+    const key = `${event.queue}\0${event.consumer}\0${event.handler}`
+    let types = seen.get(key)
+    if (types === undefined) {
+      types = new Set()
+      seen.set(key, types)
+    }
+    if (types.has(type)) return type
+    if (types.size >= max) return OTHER_MESSAGE_TYPE
+    types.add(type)
+    return type
   }
 }

@@ -62,6 +62,25 @@ describe('signal handling', () => {
     expect(proc.listenerCount('SIGTERM')).toBe(0)
   })
 
+  it('logs "Application stopped" once: at info after a signal, at debug after an explicit stop()', async () => {
+    const proc = new FakeProcess()
+    const logger = memoryLogger()
+    const app = await create(proc, { logger })
+    await app.start()
+    proc.send('SIGTERM')
+    await until(() => app.state === 'stopped')
+    await sleep(2)
+    const stopped = (entries: typeof logger.entries) => entries.filter(entry => entry.message === 'Application stopped')
+    expect(stopped(logger.entries).map(entry => entry.level)).toEqual(['info'])
+    expect(logger.entries.at(-1)?.message).toBe('Application stopped')
+
+    const quiet = memoryLogger()
+    const explicit = await create(new FakeProcess(), { logger: quiet })
+    await explicit.start()
+    await explicit.stop()
+    expect(stopped(quiet.entries).map(entry => entry.level)).toEqual(['debug'])
+  })
+
   it('sets exitCode to 1 when the signal-triggered shutdown fails', async () => {
     const proc = new FakeProcess()
     const logger = memoryLogger()

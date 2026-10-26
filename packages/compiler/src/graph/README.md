@@ -96,7 +96,9 @@ optional): library mode records it so that applications bind it again.
 - A parameter whose binding failed is `{ token: <serialized type>, optional: true }` (an error was
   reported; the graph stays well-formed).
 - Optional parameters bound to nothing are `{ token, optional: true }`: the runtime injects
-  `undefined`, which triggers JavaScript default parameter values.
+  `undefined`, which triggers JavaScript default parameter values. The token is never a provider
+  token nor an alias key: the type identity for an unqualified, public, non-generic type, the
+  qualifier for a qualified injection, otherwise the display of the type (`Repository<User>`).
 - `factory.generate` (custom) is the extension's `CustomFactory.generate`: call it with the
   extension's `GenerateContext` and splice the returned `GenNode` as the factory body.
 
@@ -116,8 +118,10 @@ when singleton, `optional` when false). `origin` is `'manifest'` (package `provi
 ### Aliases
 
 Every provided-type / heritage identity bound to exactly one provider (or one `@Primary`), except
-provider tokens, `globalThis#*` and the core marker types (`Lazy`, `OnStart`, `OnReady`, `OnStop`,
-`MethodInterceptor`).
+provider tokens, `globalThis#*`, the core marker types (`Lazy`, `OnStart`, `OnReady`, `OnStop`,
+`MethodInterceptor`), externals (manifest `provides`, `options.externals`, `CoreTokens`: the
+container resolves registrations through aliases, so plugins would overwrite the application
+provider) and package-internal identities (layout-dependent, not nameable by user code).
 
 ### Edges (`GraphEdge`)
 

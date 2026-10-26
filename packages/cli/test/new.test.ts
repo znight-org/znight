@@ -121,11 +121,22 @@ describe('project templates', () => {
   it('bun projects test with bun:test and preload the compiler', () => {
     const project = files({ packageManager: 'bun' })
     expect(packageJson(project).scripts['test']).toBe('bun test')
+    // `bun run dev` runs the znight binary (node shebang) on Node.js: the application runtime is explicit
+    expect(packageJson(project).scripts['dev']).toBe('znight dev --runtime bun')
+    expect(packageJson(project).scripts['start']).toBe('znight start --runtime bun')
     expect(packageJson(project).devDependencies['@types/bun']).toBeDefined()
     expect(packageJson(project).devDependencies['vitest']).toBeUndefined()
     expect(file(project, 'bunfig.toml')).toContain('preload = ["@znight/compiler/bun"]')
     expect(file(project, 'test/greeting.service.test.ts')).toContain("from 'bun:test'")
     expect(tsconfig(project).compilerOptions['types']).toEqual(['bun'])
+  })
+
+  it('the TestApp test starts no metrics server (it would collide on :9464 with dev or other test files)', () => {
+    const test = file(files(), 'test/greeting.controller.test.ts')
+    expect(test).toContain(
+      "ObservabilityPlugin.configure({ logging: { level: 'silent' }, metrics: { server: false } })",
+    )
+    expect(file(files({ features: [] }), 'test/greeting.controller.test.ts')).not.toContain('ObservabilityPlugin')
   })
 
   it('other package managers test with Vitest (the znight() plugin regenerates the container)', () => {

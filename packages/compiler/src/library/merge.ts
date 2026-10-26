@@ -108,29 +108,62 @@ function mergeLibrary(input: MergeInput, library: CompiledLibrary): void {
     problem('malformed file (providers, edges and bindings must be arrays)')
     return
   }
+  if (data.extensions !== undefined && !isRecord(data.extensions)) {
+    problem('malformed file ("extensions" must be an object)')
+    return
+  }
   const fileLocation: Location = { file: library.file, line: 1, column: 1, endLine: 1, endColumn: 1, start: 0, end: 0 }
+  /** Runs one entry of the fragment; a malformed entry (or one that fails to decode) is reported and skipped. */
+  const guarded = (what: string, run: () => void): void => {
+    try {
+      run()
+    } catch (error) {
+      problem(`malformed ${what} (${error instanceof Error ? error.message : String(error)})`, [
+        `Rebuild ${name} with the same release line of @znight/compiler`,
+      ])
+    }
+  }
 
   // Bindings are re-created with new handle ids before the extension data that references them.
   const handles = new Map<number, object>()
-  for (const binding of data.bindings) {
-    const id = input.state.nextBindingId++
-    handles.set(binding.id, createBindingHandle(id))
-    const request = decodeInjection(binding, input)
-    input.state.bindings.push({
-      id,
-      from: binding.from,
-      site: {
-        owner: binding.from === undefined ? name : displayNameOf(binding.from),
-        label: binding.label,
-        subject: capitalize(binding.label),
-        location: fileLocation,
-        spec: request,
-        rest: false,
-      },
+  for (const [index, binding] of data.bindings.entries()) {
+    guarded(`binding #${index}`, () => {
+      expectShape(
+        isRecord(binding) &&
+          typeof binding.id === 'number' &&
+          (binding.from === undefined || typeof binding.from === 'string'),
+        'an object { id, from?, type, label }',
+      )
+      const request = decodeInjection(binding, input)
+      const id = input.state.nextBindingId++
+      handles.set(binding.id, createBindingHandle(id))
+      input.state.bindings.push({
+        id,
+        from: binding.from,
+        site: {
+          owner: binding.from === undefined ? name : displayNameOf(binding.from),
+          label: binding.label,
+          subject: capitalize(binding.label),
+          location: fileLocation,
+          spec: request,
+          rest: false,
+        },
+      })
     })
   }
 
-  for (const provider of [...data.providers].sort((a, b) => compareStrings(a.token, b.token))) {
+  const providers: LibraryProvider[] = []
+  for (const [index, provider] of data.providers.entries()) {
+    const shape = providerProblem(provider)
+    if (shape === undefined) {
+      providers.push(provider)
+    } else {
+      problem(`malformed provider #${index}: ${shape}`, [
+        `Rebuild ${name} with the same release line of @znight/compiler`,
+      ])
+    }
+  }
+  for (const provider of providers.sort((a, b) => compareStrings(a.token, b.token))) {
     const cls = input.analyzer.infoOfIdentity(provider.class)
     if (!cls) {
       problem(`the declaration of ${provider.class} cannot be found`, [
@@ -151,11 +184,22 @@ function mergeLibrary(input: MergeInput, library: CompiledLibrary): void {
       problem(`invalid scope ${JSON.stringify(provider.scope)} for ${provider.token}`)
       continue
     }
-    input.registry.add(draftOf(input, provider, cls, name))
+    guarded(`provider ${provider.token}`, () => {
+      input.registry.add(draftOf(input, provider, cls, name))
+    })
   }
 
-  for (const edge of data.edges) {
-    input.state.edges.push({ from: edge.from, to: edge.to, location: fileLocation, reason: edge.reason })
+  for (const [index, edge] of data.edges.entries()) {
+    guarded(`edge #${index}`, () => {
+      expectShape(
+        isRecord(edge) &&
+          typeof edge.from === 'string' &&
+          typeof edge.to === 'string' &&
+          typeof edge.reason === 'string',
+        'an object { from, to, reason } of strings',
+      )
+      input.state.edges.push({ from: edge.from, to: edge.to, location: fileLocation, reason: edge.reason })
+    })
   }
 
   for (const extension of Object.keys(data.extensions ?? {}).sort(compareStrings)) {
@@ -169,14 +213,16 @@ function mergeLibrary(input: MergeInput, library: CompiledLibrary): void {
       })
       continue
     }
-    let list = input.state.stored.get(extension)
-    if (!list) {
-      list = []
-      input.state.stored.set(extension, list)
-    }
-    for (const value of stored) {
-      list.push(decode(value, input, handles, library, fileLocation))
-    }
+    guarded(`data of the compiler extension '${extension}'`, () => {
+      expectShape(Array.isArray(stored), 'an array')
+      const decoded = stored.map(value => decode(value, input, handles, library, fileLocation))
+      let list = input.state.stored.get(extension)
+      if (!list) {
+        list = []
+        input.state.stored.set(extension, list)
+      }
+      list.push(...decoded)
+    })
   }
 }
 
@@ -187,7 +233,11 @@ function draftOf(
   library: string,
 ): Parameters<ProviderRegistry['add']>[0] {
   const providedType = decodeType(provider.providedType, input)
-  const heritage = (decodeType(provider.heritage, input) as unknown as readonly ReferenceType[]) ?? []
+  const heritage = decodeType(provider.heritage, input) as unknown as readonly ReferenceType[]
+  expectShape(
+    Array.isArray(heritage) && heritage.every(type => typeProblem(type) === undefined && type.kind === 'reference'),
+    'a "heritage" array of reference types',
+  )
   const lifecycle = provider.lifecycle.flatMap(member => {
     const hook: LifecycleHookName | undefined = LIFECYCLE_MEMBERS.get(member)
     return hook
@@ -241,6 +291,11 @@ function decodeInjection(
   injection: LibraryInjection,
   input: MergeInput,
 ): { readonly type: TypeInfo; readonly qualifier: string | undefined; readonly optional: boolean } {
+  expectShape(
+    typeof injection.label === 'string' &&
+      (injection.qualifier === undefined || typeof injection.qualifier === 'string'),
+    'an injection { type, label, qualifier? }',
+  )
   return {
     type: decodeType(injection.type, input),
     qualifier: injection.qualifier,
@@ -248,8 +303,148 @@ function decodeInjection(
   }
 }
 
+/** Decodes an encoded `TypeInfo`, failing (`MalformedFragment`) when the result is not one. */
 function decodeType(value: EncodedValue, input: MergeInput): TypeInfo {
-  return decode(value, input, new Map(), undefined, undefined) as TypeInfo
+  const decoded = decode(value, input, new Map(), undefined, undefined)
+  if (Array.isArray(decoded)) {
+    // heritage closures are arrays of types
+    for (const item of decoded) {
+      expectType(item)
+    }
+    return decoded as unknown as TypeInfo
+  }
+  expectType(decoded)
+  return decoded as TypeInfo
+}
+
+/** A fragment entry that does not have the expected shape (reported as ZNIGHT018 by `mergeLibrary`). */
+class MalformedFragment extends Error {}
+
+function expectShape(condition: boolean, expected: string): asserts condition {
+  if (!condition) {
+    throw new MalformedFragment(`expected ${expected}`)
+  }
+}
+
+function expectType(value: unknown): void {
+  const problem = typeProblem(value)
+  if (problem !== undefined) {
+    throw new MalformedFragment(problem)
+  }
+}
+
+function isRecord(value: unknown): boolean {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** Field of a value already checked with {@link isRecord}. */
+function field(value: unknown, key: string): unknown {
+  return (value as Readonly<Record<string, unknown>>)[key]
+}
+
+const isString = (value: unknown): boolean => typeof value === 'string'
+const isStringArray = (value: unknown): boolean => Array.isArray(value) && value.every(isString)
+const isOptionalString = (value: unknown): boolean => value === undefined || typeof value === 'string'
+
+/** Why a provider of a fragment does not have the shape of a `LibraryProvider` (`undefined` when it has). */
+function providerProblem(value: unknown): string | undefined {
+  if (!isRecord(value)) {
+    return 'not an object'
+  }
+  const provider = value as Record<string, unknown>
+  for (const key of ['token', 'class', 'registeredBy', 'scope']) {
+    if (!isString(provider[key])) {
+      return `"${key}" must be a string`
+    }
+  }
+  if (provider['kind'] !== 'class' && provider['kind'] !== 'provides') {
+    return `"kind" must be 'class' or 'provides'`
+  }
+  for (const key of ['method', 'name', 'dispose']) {
+    if (!isOptionalString(provider[key])) {
+      return `"${key}" must be a string`
+    }
+  }
+  if (!isStringArray(provider['lifecycle'])) {
+    return '"lifecycle" must be an array of strings'
+  }
+  const params = provider['params']
+  if (!Array.isArray(params) || !params.every(param => isRecord(param))) {
+    return '"params" must be an array of injections'
+  }
+  const interceptors = provider['interceptors']
+  if (
+    !Array.isArray(interceptors) ||
+    !interceptors.every(method => {
+      const chain = isRecord(method) ? field(method, 'chain') : undefined
+      return (
+        isString(field(method, 'method')) &&
+        Array.isArray(chain) &&
+        chain.every(link => isRecord(link) && isString(field(link, 'token')) && isString(field(link, 'decorator')))
+      )
+    })
+  ) {
+    return '"interceptors" must be an array of { method, async, chain: [{ token, decorator, options? }] }'
+  }
+  return undefined
+}
+
+const TYPE_KINDS: ReadonlySet<string> = new Set([
+  'primitive',
+  'literal',
+  'reference',
+  'array',
+  'tuple',
+  'union',
+  'intersection',
+  'promise',
+  'opaque',
+  'typeParameter',
+])
+
+/** Why a decoded value is not a {@link TypeInfo} (`undefined` when it is one). */
+function typeProblem(value: unknown, depth = 0): string | undefined {
+  if (depth > 64) {
+    return 'type nested too deeply'
+  }
+  if (!isRecord(value) || !TYPE_KINDS.has(field(value, 'kind') as string)) {
+    return `not a type: ${JSON.stringify(value) ?? String(value)}`
+  }
+  const type = value as unknown as TypeInfo
+  const nested = (types: readonly unknown[]): string | undefined => {
+    for (const item of types) {
+      const problem = typeProblem(item, depth + 1)
+      if (problem !== undefined) {
+        return problem
+      }
+    }
+    return undefined
+  }
+  switch (type.kind) {
+    case 'reference':
+      if (!isString(type.identity) || !isString(type.name) || !Array.isArray(type.typeArgs)) {
+        return 'a reference type needs "identity", "name" and "typeArgs"'
+      }
+      return nested(type.typeArgs)
+    case 'array':
+      return nested([type.element])
+    case 'promise':
+      return nested([type.inner])
+    case 'union':
+    case 'intersection':
+      return Array.isArray(type.types) ? nested(type.types) : `a ${type.kind} type needs "types"`
+    case 'tuple':
+      return Array.isArray(type.elements) && type.elements.every(element => isRecord(element))
+        ? nested(type.elements.map(element => element.type))
+        : 'a tuple type needs "elements"'
+    case 'primitive':
+    case 'typeParameter':
+      return isString(type.name) ? undefined : `a ${type.kind} type needs a "name"`
+    case 'opaque':
+      return isString(type.text) ? undefined : 'an opaque type needs a "text"'
+    default:
+      return undefined
+  }
 }
 
 function decode(

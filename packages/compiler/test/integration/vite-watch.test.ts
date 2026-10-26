@@ -143,6 +143,26 @@ describe('vite build --watch', () => {
   )
 
   it(
+    'recompiles when a constant imported from outside the include globs changes',
+    async () => {
+      app.write('shared/names.ts', "export const NAME = 'alpha'\n")
+      await rebuild(() =>
+        app.write(
+          'src/named.ts',
+          "import { Injectable } from '@znight/core'\nimport { NAME } from '../shared/names.ts'\n@Injectable({ name: NAME })\nexport class Named {}\n",
+        ),
+      )
+      expect(fs.readFileSync(outFile, 'utf8')).toContain("name: 'alpha'")
+      const compiles = summaries()
+      await rebuild(() => app.write('shared/names.ts', "export const NAME = 'beta'\n"))
+      expect(summaries()).toBe(compiles + 1)
+      expect(fs.readFileSync(outFile, 'utf8')).toContain("name: 'beta'")
+      expect(fs.readFileSync(`${app.root}/dist/main.js`, 'utf8')).toContain('name: "beta"')
+    },
+    TIMEOUT,
+  )
+
+  it(
     'ignores the generated module (an external write triggers nothing)',
     async () => {
       const before = builds

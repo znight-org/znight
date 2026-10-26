@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { createProcessService, runProcess, spawnProcess } from '../src/integrations/process.ts'
@@ -8,9 +8,21 @@ import {
   createOutputTracker,
   findViteConfig,
   formatBuildError,
+  projectRootPlugin,
   readZnightPluginOptions,
 } from '../src/integrations/vite.ts'
-import { globBase, isRelevantChange, watchFiles, watchTargets } from '../src/integrations/watch.ts'
+import {
+  classifyChanges,
+  globBase,
+  includeRoots,
+  isRelevantChange,
+  realPath,
+  TargetWatchers,
+  toPosixPath,
+  type WatchFactory,
+  watchFiles,
+  watchTargets,
+} from '../src/integrations/watch.ts'
 import { formatBytes, formatDuration, plural } from '../src/output.ts'
 import { detectHostRuntime, resolveRuntime, runtimeArguments, runtimeExecutable, which } from '../src/runtime.ts'
 import { FakeVite } from './fake-vite.ts'
@@ -166,8 +178,85 @@ describe('vite helpers', () => {
     expect(lookup).toEqual({
       configFile: join(directory.path, 'vite.config.ts'),
       found: true,
-      options: { prune: true },
+      options: { prune: true, root: directory.path },
     })
+  })
+
+  it('reads the options the znight() plugin compiles with, as resolved by Vite', async () => {
+    writeFileSync(join(directory.path, 'vite.config.ts'), '')
+    const options = { root: 'server', outFile: 'src/di.ts' }
+    const vite = new FakeVite({
+      configRoot: 'app',
+      configAlias: [
+        { find: '@', replacement: '/repo/src' },
+        { find: /^~/, replacement: '/repo' },
+      ],
+      configPlugins: [{ name: 'znight', api: { options } }],
+    })
+    const lookup = await readZnightPluginOptions(vite, directory.path, undefined, 'native')
+    // `root` of the plugin against the Vite root, string aliases only
+    expect(lookup?.options).toEqual({
+      root: join(directory.path, 'app/server'),
+      outFile: 'src/di.ts',
+      aliases: [{ find: '@', replacement: '/repo/src' }],
+    })
+    expect(vite.resolvedConfigs[0]).toMatchObject({
+      configFile: join(directory.path, 'vite.config.ts'),
+      configLoader: 'native',
+      mode: 'production',
+    })
+    expect(vite.resolvedConfigs[0]?.root).toBeUndefined()
+
+    // the compiler of the plugin: its resolved root, aliases and runtime conditions
+    const compiler = {
+      options: {
+        root: '/real/app/server',
+        aliases: [{ find: '#lib', replacement: '/real/lib' }],
+        runtimeConditions: ['module', 'node', 'production', 'import', 'default'],
+      },
+    }
+    const exposed = new FakeVite({ configPlugins: [{ name: 'znight', api: { options, compiler } }] })
+    expect((await readZnightPluginOptions(exposed, directory.path))?.options).toEqual({
+      root: '/real/app/server',
+      outFile: 'src/di.ts',
+      aliases: [{ find: '#lib', replacement: '/real/lib' }],
+      runtimeConditions: ['module', 'node', 'production', 'import', 'default'],
+    })
+  })
+
+  it('leaves NODE_ENV alone when resolving the Vite config', async () => {
+    writeFileSync(join(directory.path, 'vite.config.ts'), '')
+    const vite = new FakeVite({ configPlugins: [] })
+    const resolveConfig = vite.resolveConfig
+    const before = process.env['NODE_ENV']
+    try {
+      for (const value of [undefined, 'test']) {
+        if (value === undefined) delete process.env['NODE_ENV']
+        else process.env['NODE_ENV'] = value
+        const api = {
+          build: (config: never) => vite.build(config),
+          // like Vite: NODE_ENV defaults to the command's
+          resolveConfig: (...args: Parameters<typeof resolveConfig>) => {
+            process.env['NODE_ENV'] ??= 'production'
+            return resolveConfig(...args)
+          },
+        }
+        expect((await readZnightPluginOptions(api, directory.path))?.found).toBe(false)
+        expect(process.env['NODE_ENV']).toBe(value)
+      }
+    } finally {
+      if (before === undefined) delete process.env['NODE_ENV']
+      else process.env['NODE_ENV'] = before
+    }
+  })
+
+  it('resolves the Vite root of the config file against the project root', () => {
+    const plugin = projectRootPlugin('/repo/app')
+    const hook = plugin.config as { order: string; handler: (config: { root?: string }) => { root: string } }
+    expect(hook.order).toBe('pre')
+    expect(hook.handler({})).toEqual({ root: '/repo/app' })
+    expect(hook.handler({ root: 'web' })).toEqual({ root: '/repo/app/web' })
+    expect(hook.handler({ root: '/elsewhere' })).toEqual({ root: '/elsewhere' })
   })
 
   it('tracks the entry chunk of a build', () => {
@@ -210,32 +299,156 @@ describe('vite helpers', () => {
 })
 
 describe('watching', () => {
-  it('computes glob bases and watch targets', () => {
+  it('computes glob bases, include roots and watch targets', () => {
     expect(globBase('src/**/*.{ts,tsx,mts}')).toBe('src')
     expect(globBase('apps/api/src/**/*.ts')).toBe('apps/api/src')
     expect(globBase('**/*.ts')).toBe('.')
     expect(globBase('src/main.ts')).toBe('src')
-    expect(watchTargets('/app', ['src/**/*.ts', 'src/users/**/*.ts', 'lib/*.ts'])).toEqual([
+    expect(globBase('!src/**/*.test.ts')).toBe('src')
+    // the project root, then the source libraries: nested roots dropped
+    expect(includeRoots(['/app', '/libs/shared'], ['src/**/*.ts', 'src/users/**/*.ts', 'lib/*.ts'])).toEqual([
+      '/app/lib',
+      '/app/src',
+      '/libs/shared/lib',
+      '/libs/shared/src',
+    ])
+    expect(watchTargets('/app', ['/app/src', '/app/lib', '/app/src/users'])).toEqual([
       { path: '/app/lib', recursive: true },
       { path: '/app/src', recursive: true },
       { path: '/app', recursive: false },
     ])
-    expect(watchTargets('/app', ['**/*.ts'])).toEqual([{ path: '/app', recursive: true }])
+    expect(watchTargets('/app', ['/app'])).toEqual([{ path: '/app', recursive: true }])
+    // the directories of the files of the last compile outside the include roots
+    expect(
+      watchTargets(
+        '/app',
+        ['/app/src', '/libs/shared/src'],
+        [
+          '/app/src/a.ts',
+          '/app/package.json',
+          '/libs/shared/src/index.ts',
+          '/libs/shared/package.json',
+          '/app/node_modules/@acme/compiled/package.json',
+          '/app/node_modules/@acme/compiled/dist/znight.providers.json',
+        ],
+      ),
+    ).toEqual([
+      { path: '/app/src', recursive: true },
+      { path: '/libs/shared/src', recursive: true },
+      { path: '/app', recursive: false },
+      { path: '/app/node_modules/@acme/compiled', recursive: false },
+      { path: '/app/node_modules/@acme/compiled/dist', recursive: false },
+      { path: '/libs/shared', recursive: false },
+    ])
   })
 
-  it('ignores irrelevant changes', () => {
-    expect(isRelevantChange('users/user.service.ts')).toBe(true)
-    expect(isRelevantChange('tsconfig.json')).toBe(true)
-    expect(isRelevantChange('a.mts')).toBe(true)
-    expect(isRelevantChange('.znight/container.generated.ts')).toBe(false)
-    expect(isRelevantChange('node_modules/x/index.ts')).toBe(false)
-    expect(isRelevantChange('dist/main.js')).toBe(false)
-    expect(isRelevantChange('README.md')).toBe(false)
+  it('resolves real paths, also of deleted files', () => {
+    const real = realpathSync(directory.path)
+    const link = join(directory.path, 'link')
+    mkdirSync(join(directory.path, 'target'))
+    symlinkSync(join(directory.path, 'target'), link)
+    expect(realPath(join(link, 'a.ts'))).toBe(`${real}/target/a.ts`)
+    expect(realPath(join(directory.path, 'gone/deeper/a.ts'))).toBe(`${real}/gone/deeper/a.ts`)
+    expect(realPath(link)).toBe(`${real}/target`)
+    expect(toPosixPath('C:\\repo\\src')).toBe('C:/repo/src')
   })
 
-  it('reports file changes', async () => {
+  it('tells which changes are relevant', () => {
+    const root = realpathSync(directory.path)
+    const src = `${root}/src`
+    mkdirSync(join(src, 'users'), { recursive: true })
+    mkdirSync(join(root, 'docs'))
+    for (const file of ['users/user.service.ts', 'notes.md', 'legacy.js']) writeFileSync(join(src, file), '')
+    const state = { known: new Set([`${src}/users/user.service.ts`, `${root}/package.json`]), roots: [src] }
+    expect(isRelevantChange(`${src}/users/user.service.ts`, state)).toBe(true)
+    expect(isRelevantChange(`${root}/package.json`, state)).toBe(true)
+    expect(isRelevantChange(`${root}/tsconfig.json`, state)).toBe(true)
+    expect(isRelevantChange(`${src}/a.mts`, state)).toBe(true)
+    // every source the compiler parses, `.js` included
+    expect(isRelevantChange(`${src}/legacy.js`, state)).toBe(true)
+    expect(isRelevantChange(`${src}/notes.md`, state)).toBe(false)
+    expect(isRelevantChange(`${root}/other.ts`, state)).toBe(false)
+    expect(isRelevantChange(`${root}/node_modules/x/index.ts`, state)).toBe(false)
+    expect(isRelevantChange(`${root}/node_modules/x/package.json`, state)).toBe(false)
+    // a directory created or moved into an include root (fs.watch reports the directory only)
+    expect(isRelevantChange(`${src}/users`, state)).toBe(true)
+    expect(isRelevantChange(`${root}/docs`, state)).toBe(false)
+    // a directory deleted or moved away, with compiled files
+    rmSync(join(src, 'users'), { recursive: true })
+    expect(isRelevantChange(`${src}/users`, state)).toBe(true)
+    expect(isRelevantChange(`${src}/other`, state)).toBe(false)
+  })
+
+  it('classifies changes, directories included', () => {
+    const root = realpathSync(directory.path)
+    const src = `${root}/src`
+    mkdirSync(join(src, 'accounts'), { recursive: true })
+    writeFileSync(join(src, 'accounts/user.service.ts'), '')
+    writeFileSync(join(src, 'known.ts'), '')
+    writeFileSync(join(src, 'new.ts'), '')
+    const known = new Set([`${src}/known.ts`, `${src}/users/user.service.ts`, `${src}/users/user.controller.ts`])
+    // `mv src/users src/accounts`
+    expect(classifyChanges([`${src}/users`, `${src}/accounts`, `${src}/known.ts`, `${src}/new.ts`], known)).toEqual({
+      changed: [`${src}/known.ts`],
+      added: [`${src}/accounts`, `${src}/new.ts`],
+      removed: [`${src}/users`, `${src}/users/user.service.ts`, `${src}/users/user.controller.ts`],
+    })
+    // an event on a directory itself (Windows, moved away and back): its known files are re-read
+    expect(classifyChanges([src], known)).toEqual({
+      changed: [`${src}/known.ts`],
+      added: [src],
+      removed: [`${src}/users/user.service.ts`, `${src}/users/user.controller.ts`],
+    })
+  })
+
+  it('keeps one watcher per target, restarting the ones whose directory came back', () => {
+    const started: string[] = []
+    const closed: string[] = []
+    const factory: WatchFactory = targets => {
+      const names = targets.map(target => `${target.recursive ? 'r' : 'f'}:${target.path}`)
+      started.push(...names)
+      return { close: () => closed.push(...names) }
+    }
+    const src = join(directory.path, 'src')
+    const lib = join(directory.path, 'lib')
+    mkdirSync(src)
+    const watchers = new TargetWatchers(factory, () => undefined)
+    watchers.update([
+      { path: src, recursive: true },
+      { path: lib, recursive: true },
+      { path: directory.path, recursive: false },
+    ])
+    expect(started).toEqual([`r:${src}`, `r:${lib}`, `f:${directory.path}`])
+    // unchanged targets keep their watcher; a missing directory is watched once it exists
+    watchers.update([
+      { path: src, recursive: true },
+      { path: lib, recursive: true },
+      { path: directory.path, recursive: false },
+    ])
+    expect(started).toHaveLength(3)
+    mkdirSync(lib)
+    watchers.update(
+      [
+        { path: src, recursive: true },
+        { path: lib, recursive: true },
+      ],
+      new Set([src]),
+    )
+    expect(started.slice(3)).toEqual([`r:${src}`, `r:${lib}`])
+    expect(closed).toEqual([`f:${directory.path}`, `r:${src}`, `r:${lib}`])
+    expect(watchers.targets).toEqual([
+      { path: src, recursive: true },
+      { path: lib, recursive: true },
+    ])
+    watchers.close()
+    expect(closed.slice(3)).toEqual([`r:${src}`, `r:${lib}`])
+  })
+
+  it('reports file and directory changes', async () => {
     const src = join(directory.path, 'src')
     mkdirSync(join(src, 'deep'), { recursive: true })
+    mkdirSync(join(src, 'users'), { recursive: true })
+    writeFileSync(join(src, 'users', 'user.service.ts'), '')
     const changes: string[] = []
     const watcher = watchFiles(
       [
@@ -247,9 +460,17 @@ describe('watching', () => {
     try {
       await new Promise(resolve => setTimeout(resolve, 50))
       writeFileSync(join(src, 'deep', 'a.ts'), 'export {}')
-      writeFileSync(join(src, 'notes.md'), '')
-      await waitFor(() => changes.some(file => file.endsWith('a.ts')), 3000)
-      expect(changes.every(file => file.endsWith('.ts'))).toBe(true)
+      mkdirSync(join(src, '.znight'))
+      writeFileSync(join(src, '.znight', 'container.generated.ts'), '')
+      renameSync(join(src, 'users'), join(src, 'accounts'))
+      await waitFor(
+        () =>
+          changes.some(file => file.endsWith('a.ts')) &&
+          changes.some(file => file.endsWith('users')) &&
+          changes.some(file => file.endsWith('accounts')),
+        3000,
+      )
+      expect(changes.some(file => file.includes('.znight'))).toBe(false)
     } finally {
       watcher.close()
     }

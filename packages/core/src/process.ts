@@ -33,9 +33,16 @@ export class StepTimeoutError extends ZnightError {
 }
 
 /**
+ * Longest delay a timer accepts (2^31 - 1 ms, about 24.8 days): Node and Bun clamp longer delays to
+ * 1 ms. A longer budget (or `Infinity`) therefore means no timeout.
+ */
+const MAX_TIMEOUT_MS = 2_147_483_647
+
+/**
  * Runs `step` and resolves when it completes, or rejects with a {@link StepTimeoutError} after `ms`.
  * A synchronous step (or one resolving within the current tick of microtasks) always completes,
- * even with a zero budget. A step completing after its timeout is ignored.
+ * even with a zero budget. A step completing after its timeout is ignored. A budget above
+ * {@link MAX_TIMEOUT_MS} (or `Infinity`) waits for the step without a timer.
  */
 export function runWithTimeout(label: string, step: () => unknown, ms: number): Promise<void> {
   return new Promise<void>((resolve, reject) => {
@@ -51,11 +58,14 @@ export function runWithTimeout(label: string, step: () => unknown, ms: number): 
       return
     }
     let settled = false
-    const timer = setTimeout(() => {
-      if (settled) return
-      settled = true
-      reject(new StepTimeoutError(label, ms))
-    }, ms)
+    const timer =
+      ms > MAX_TIMEOUT_MS
+        ? undefined
+        : setTimeout(() => {
+            if (settled) return
+            settled = true
+            reject(new StepTimeoutError(label, ms))
+          }, ms)
     result.then(
       () => {
         if (settled) return

@@ -105,6 +105,11 @@ my-service/
 - The adapter's peer dependencies are added (`fastify`; `express` + `@types/express`; `hono` +
   `@hono/node-server`), plus `light-my-request` (dev) for `TestApp.inject()` with the `node` and
   `express` adapters. Yarn projects get a `.yarnrc.yml` with `nodeLinker: node-modules`.
+- Bun projects run the application on Bun: their `dev` and `start` scripts pass `--runtime bun`
+  (`bun run` runs the `znight` binary, which has a `node` shebang, on Node.js).
+- The `TestApp` test configures `ObservabilityPlugin` with `metrics: { server: false }`: with
+  `prom-client` installed, the metrics server (`:9464`) would collide with `znight dev` or with other
+  test files running in parallel.
 
 ## `znight generate`
 
@@ -119,8 +124,8 @@ znight generate --watch    # regenerate on every change (incremental: only chang
 
 | Option                                     | Description                                                                               |
 | ------------------------------------------ | ----------------------------------------------------------------------------------------- |
-| `--check`                                  | Do not write; exit 1 when the generated files are missing or stale                        |
-| `-w, --watch`                              | Watch the sources (`include` directories) and `package.json` / `tsconfig.json`            |
+| `--check`                                  | Do not write; exit 1 when the generated files are missing or stale (each one is named)    |
+| `-w, --watch`                              | Regenerate on changes of the sources and of the files the compiler read (see below)       |
 | `--root <dir>`                             | Project root (default: the current directory)                                             |
 | `--config <file>`                          | Vite config to read the `znight()` options from, instead of `znight.config.*` (see below) |
 | `--config-loader <bundle\|runner\|native>` | How Vite loads the config file                                                            |
@@ -132,8 +137,11 @@ Bun preload produce the same file:
    `ZNIGHT_CONFIG` environment variable — the file the [Bun preload](../compiler/README.md#preload-options)
    reads (`loadZnightConfig()` of the compiler; its preload-only `logLevel` is ignored). Vite is not
    loaded;
-2. otherwise the options given to `znight()` in your Vite config (when the plugin exposes them, see
-   [Compiler contract](#compiler-contract)); `--config <file>` skips step 1 and reads that Vite config;
+2. otherwise the options `znight()` compiles with in your Vite config: Vite resolves the config as
+   for `znight build`, and the CLI takes the options given to the plugin with what the plugin derives
+   from the config — the Vite `root` (the config's `root` is relative to the project root), the string
+   entries of `resolve.alias` and the runtime conditions (see [Compiler contract](#compiler-contract));
+   `--config <file>` skips step 1 and reads that Vite config;
 3. otherwise the defaults (without a Vite config, Vite is not even loaded).
 
 Share one options object between the Vite plugin and the preload with a `znight.config.ts`:
@@ -164,6 +172,19 @@ npx znight generate --check   # or: npx znight generate, before tsc and the test
 npx tsc --noEmit
 npx znight build
 ```
+
+`--check` names every generated file that is missing or out of date: the module and, in library
+mode (`library: true`), `dist/znight.providers.json`. A build that cleans `dist/` (tsdown, `tsc --build
+--clean`...) deletes that manifest, which `package.json` points to: run `znight generate` after such a
+build (the Vite plugin writes it itself at the end of `vite build`).
+
+`--watch` watches what the Vite plugin and the Bun preload watch: the `include` directories of the
+project and of its source libraries (recursively), the project root (`package.json`, `tsconfig.json`,
+lockfiles) and the directories of the files the last compile read (library manifests, compiled
+libraries), refreshed after each compile. Only changes that can change the result trigger a compile
+(sources the compiler parses, `.js` included; resolution config files; files it read); a directory
+created, deleted or moved under an `include` directory triggers a rescan, since `fs.watch` reports it
+alone, without its files.
 
 ## `znight g`
 
@@ -224,9 +245,10 @@ restart is fast and always consistent.
    running (a restart still pending for a previous build is cancelled), and nothing starts until a
    build compiles. With `--log-level silent` the CLI prints the diagnostics itself.
 4. The application crashes or exits → the CLI says so and waits for the next change.
-5. `Ctrl+C` (or `SIGTERM`) → the watcher closes and the application stops gracefully; a second
-   `Ctrl+C` kills it. The application runs in its own process group, so it receives exactly one
-   signal.
+5. `Ctrl+C` (or `SIGTERM`, `SIGHUP` when the terminal is closed, `Ctrl+\` / `SIGQUIT`) → the
+   watcher closes and the application stops gracefully (`SIGINT` after `Ctrl+C`, `SIGTERM` otherwise);
+   a second signal kills it. The application runs in its own session and process group, so it
+   receives exactly one signal, and never the terminal's.
 
 Diagnostics of the compiler are printed on every rebuild by the `znight()` plugin.
 
@@ -242,7 +264,7 @@ Diagnostics of the compiler are printed on every rebuild by the `znight()` plugi
 | `--config <file>`                          | `vite.config.*`   | Vite config file                                                    |
 | `--config-loader <bundle\|runner\|native>` | Vite's            | How Vite loads the config file                                      |
 | `--mode <mode>`                            | `development`     | Vite mode                                                           |
-| `--runtime <auto\|node\|bun>`              | `auto`            | Runtime of the application (`auto`: the one running the CLI)        |
+| `--runtime <auto\|node\|bun>`              | `auto`            | Runtime of the application (`auto`: the one running the CLI, below) |
 | `--entry <file>`                           | entry chunk       | File to run (default: the entry chunk of the build, `dist/main.js`) |
 | `--inspect`                                | `false`           | Start the application with `--inspect`                              |
 | `--clear`                                  | `false`           | Clear the screen before each rebuild                                |
@@ -250,8 +272,13 @@ Diagnostics of the compiler are printed on every rebuild by the `znight()` plugi
 | `--kill-timeout <ms>`                      | `5000`            | Time to stop after `SIGTERM` before `SIGKILL`                       |
 | `--log-level <info\|warn\|error\|silent>`  | `warn`            | Vite log level                                                      |
 
-The application runs with `NODE_ENV=development` (unless set) and, on Node.js, with
+The application runs with `NODE_ENV=development` (unless set when the CLI starts: the `NODE_ENV`
+that Vite sets in the CLI process for its build is not passed on) and, on Node.js, with
 `--enable-source-maps`, so stack traces point to your TypeScript files.
+
+`--runtime auto` is the runtime running the CLI. Under `bun run` (or `bunx`) that is Node.js: the
+`znight` binary has a `node` shebang, which Bun honours. Pass `--runtime bun` (as the `dev` and
+`start` scripts of Bun projects created by `znight new` do), or run `bun --bun run dev`.
 
 ## `znight build`
 
@@ -262,7 +289,9 @@ znight build --mode staging
 
 Runs `vite build` with your Vite config. With the defaults of the `znight()` plugin, `src/main.ts`
 is built to `dist/main.js` (Node.js 24 target, source maps). Any compiler error fails the build
-(exit code 1).
+(exit code 1). The `root` of the Vite config is honoured, relative to the project root (`--root`),
+like the Vite CLI run in the project directory; `znight dev` and `znight generate` resolve it the
+same way.
 
 | Option                                     | Default           | Description                    |
 | ------------------------------------------ | ----------------- | ------------------------------ |
@@ -290,7 +319,9 @@ as a child process: `SIGINT`, `SIGTERM` and `SIGHUP` are forwarded and its exit 
 | ----------------------------- | ------------------------------- | ----------------------------------------------- |
 | `--root <dir>`                | current directory               | Project root (the working directory of the app) |
 | `--entry <file>`              | `dist/main.js`, `dist/main.mjs` | File to run                                     |
-| `--runtime <auto\|node\|bun>` | `auto`                          | Runtime (`auto`: the one running the CLI)       |
+| `--runtime <auto\|node\|bun>` | `auto`                          | Runtime (`auto`: the one running the CLI\*)     |
+
+\* Node.js under `bun run`, see [`znight dev`](#znight-dev).
 
 ## Global options, exit codes, environment
 
@@ -346,8 +377,9 @@ relies on these shapes (each is optional; missing pieces are emulated):
 | Export                                                           | Used for                                                                                                        |
 | ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
 | `generate(options)`                                              | `znight generate`; `written: string[]` tells whether the file changed                                           |
-| `generate({ ...options, check })`                                | `znight generate --check`; `stale: boolean`                                                                     |
+| `generate({ ...options, check })`                                | `znight generate --check`; `stale: boolean`, `staleFiles?: string[]` (else compared with `code` / `library`)    |
 | `createCompiler(options)`                                        | `znight generate --watch`: `generate(changes)` (`{ changed, added, removed }`), `isOutFile(file)`, `watchFiles` |
+| `includeRoots(compiler)`                                         | `--watch`: the include directories (else computed from `compiler.options` and `compiler.project.libraries()`)   |
 | `compile(options)`                                               | fallback of the above                                                                                           |
 | `formatDiagnostics(diagnostics, { color, cwd, summary: false })` | diagnostics output (a plain formatter otherwise)                                                                |
 | `loadZnightConfig(root)`                                         | `znight generate`: `{ file, options }` of `znight.config.*` / `ZNIGHT_CONFIG`                                   |
@@ -356,7 +388,9 @@ relies on these shapes (each is optional; missing pieces are emulated):
 its name (`znight`) among the plugins of the config:
 
 - `znight generate` reads `plugin.api.options` (or `plugin.api.getOptions()`) when the project has
-  no `znight.config.*`;
+  no `znight.config.*`, with the `root`, `aliases` and `runtimeConditions` of the plugin's compiler
+  (`plugin.api.compiler.options`, created when Vite resolves the config; without it, the Vite root
+  and the string aliases of `resolve.alias`);
 - `znight dev` reads `plugin.api.result` (`{ ok, diagnostics }`) once a build is written, to keep the
   last good process running when the compilation failed.
 

@@ -3,9 +3,16 @@ import type { DriverDelivery, OutboundMessage, SubscribeOptions } from '../src/i
 import { MemoryDriver, memory } from '../src/drivers/memory.ts'
 import { MessagingHeaders } from '../src/index.ts'
 import { caught, deferred, sleep } from './helpers.ts'
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it, jest } from 'bun:test'
 
 const logger = { debug() {}, info() {}, warn() {}, error() {} }
+const DAY_MS = 24 * 3_600_000
+
+/** Advances the fake clock by `ms`, letting the promise chains settle. */
+async function advance(ms: number): Promise<void> {
+  jest.advanceTimersByTime(ms)
+  for (let tick = 0; tick < 20; tick++) await Promise.resolve()
+}
 
 function subscribeOptions(overrides: Partial<SubscribeOptions> = {}): SubscribeOptions {
   return {
@@ -143,6 +150,37 @@ describe('MemoryDriver', () => {
       ['retry', 1, 20],
       ['ack', 2, undefined],
     ])
+  })
+
+  it('never delivers before delays longer than a timer can wait (2^31 - 1 ms)', async () => {
+    jest.useFakeTimers()
+    try {
+      const driver = await connected()
+      const received: number[] = []
+      await driver.subscribe(
+        'q',
+        async delivery => {
+          received.push(delivery.attempt)
+          if (delivery.attempt === 1) await delivery.retry({ attempt: 2, delayMs: 25 * DAY_MS, error: new Error('x') })
+          else await delivery.ack()
+        },
+        subscribeOptions(),
+      )
+      await driver.publish('q', outbound({ delayMs: 30 * DAY_MS }))
+      await advance(10)
+      expect(received).toEqual([]) // an overflowing timer fires after 1 ms
+      await advance(30 * DAY_MS - 20)
+      expect(received).toEqual([])
+      await advance(20)
+      expect(received).toEqual([1])
+      await advance(25 * DAY_MS - 10)
+      expect(received).toEqual([1])
+      await advance(20)
+      expect(received).toEqual([1, 2])
+      await driver.close()
+    } finally {
+      jest.useRealTimers()
+    }
   })
 
   it('dead-letters with diagnostic headers, or discards without dead-letter queue', async () => {

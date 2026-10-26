@@ -303,6 +303,36 @@ describe('currentScope', () => {
     expect(seen).toBe(replacement)
   })
 
+  it('creates on-demand singletons outside of the request scope that first uses them', async () => {
+    const seen: string[] = []
+    const holder: { container?: Container } = {}
+    const observe = (label: string): void => {
+      seen.push(`${label}: ${holder.container?.currentScope() === undefined ? 'no scope' : 'scope'}`)
+    }
+    const container = Container.create(
+      meta({
+        [t('Root')]: factoryDef(() => 'root'),
+        [t('Dep')]: factoryDef(() => {
+          observe('dep')
+          return 'dep'
+        }),
+        [t('Flusher')]: factoryDef(() => {
+          observe('factory')
+          setTimeout(() => observe('timer'), 1)
+          return { flushing: true }
+        }, [t('Dep')]),
+      }),
+    )
+    holder.container = container
+    await container.init({ only: [t('Root')] })
+    await container.runInScope(() => {
+      container.get(t('Flusher'))
+      observe('caller')
+    }, [[HTTP_CONTEXT, { id: 'req-1' }]])
+    await sleep(10)
+    expect(seen).toEqual(['dep: no scope', 'factory: no scope', 'caller: scope', 'timer: no scope'])
+  })
+
   it('marks the scope as closed after fn settles', async () => {
     const container = create()
     await container.init()

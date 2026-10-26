@@ -1,6 +1,8 @@
 import type { LifecycleHook, ProviderClass, Token, ZnightMetadata } from './metadata.ts'
 import type { Plugin, PluginContext, PluginHook } from './plugin.ts'
 
+import { AsyncLocalStorage } from 'node:async_hooks'
+
 import { bindBuiltin, Container, type InitOptions, type ManagedInstance, setRegistrationOrigin } from './container.ts'
 import { ErrorCode, ZnightError } from './errors.ts'
 import { Hooks } from './hooks.ts'
@@ -21,17 +23,27 @@ export type ProviderValues = Iterable<readonly [ProviderKey, unknown]> | Readonl
 export interface ShutdownOptions {
   /** Signals stopping the application once started. Default: `['SIGINT', 'SIGTERM']`; `false` disables. */
   readonly signals?: readonly ShutdownSignal[] | false
-  /** Global deadline of `stop()`, in milliseconds. Default: 10 000. */
+  /**
+   * Global deadline of `stop()`, in milliseconds. Default: 10 000. `Infinity` (or any value above
+   * 2^31 - 1, the range of timers) means no deadline.
+   */
   readonly timeoutMs?: number
-  /** Maximum duration of each shutdown step (hook or disposal), in milliseconds. Default: 5 000. */
+  /**
+   * Maximum duration of each shutdown step (hook or disposal), in milliseconds. Default: 5 000.
+   * `Infinity` (or any value above 2^31 - 1) means no limit.
+   */
   readonly hookTimeoutMs?: number
   /** Process used for signals, `exitCode` and forced exits. Default: the global `process`. */
   readonly process?: ProcessLike
 }
 
-/** Hot module replacement handle (`import.meta.hot`). */
+/**
+ * Hot module replacement handle (`import.meta.hot`). The dispose callback returns the `stop()`
+ * promise, so that runtimes awaiting it (Vite's module runner, Bun) load the new module once the
+ * application has stopped.
+ */
 export interface HotContext {
-  dispose(callback: (data: unknown) => void): void
+  dispose(callback: (data: unknown) => void | Promise<void>): void
 }
 
 /** Options of {@link Application.create}. */
@@ -56,6 +68,12 @@ const DEFAULT_SIGNALS: readonly ShutdownSignal[] = ['SIGINT', 'SIGTERM']
 const DEFAULT_TIMEOUT_MS = 10_000
 const DEFAULT_HOOK_TIMEOUT_MS = 5_000
 const FORCED_EXIT_CODE = 130
+
+/**
+ * Carries a marker through the async context of the start hook in progress, so that `stop()` can
+ * tell a request coming from that hook (which must not wait for the start: the start waits for it).
+ */
+const startHookContext = new AsyncLocalStorage<object>()
 
 /**
  * A Znight application: a container built from the compiled metadata, plugins and the lifecycle
@@ -92,6 +110,12 @@ export class Application {
   readonly #startedProviders = new Set<Token>()
   #listening: readonly ShutdownSignal[] = []
   #signalReceived = false
+  /** Marker of the start hook in progress (see `startHookContext`). */
+  #startHookMarker: object | undefined
+  /** A start hook called `stop()`: the remaining start hooks are skipped. */
+  #startAborted = false
+  /** Releases a `stop()` waiting for the start, when a start hook asks to stop in turn. */
+  #releaseStopWait: (() => void) | undefined
 
   private constructor(options: ApplicationOptions) {
     const plugins = [...(options.plugins ?? [])]
@@ -204,9 +228,10 @@ export class Application {
       addSuppressedErrors(error, await this.#shutdown())
       throw error
     }
-    options.hot?.dispose(() => {
-      this.stop().catch((error: unknown) => this.#logger.error('Failed to stop the application', { err: error }))
-    })
+    // the HMR runtime awaits the returned promise before it loads the new module
+    options.hot?.dispose(() =>
+      this.stop().catch((error: unknown) => this.#logger.error('Failed to stop the application', { err: error })),
+    )
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -219,6 +244,8 @@ export class Application {
    * installed when the start begins. On failure, what was started is stopped, everything is
    * disposed, `state === 'failed'` and the error is rethrown (cleanup errors attached).
    * Calling it while starting returns the same promise; once ready it resolves immediately.
+   * When a start hook calls `stop()` (e.g. a job that ends its work in `onReady`), the remaining
+   * start hooks are skipped and the promise resolves once the application is stopped.
    */
   start(): Promise<void> {
     switch (this.#state) {
@@ -239,26 +266,76 @@ export class Application {
   async #runStart(): Promise<void> {
     this.#state = 'starting'
     this.#installSignals()
+    let completed: boolean
     try {
-      const providers = this.container.instances()
-      for (const provider of providers) {
-        await this.#callProvider(provider, 'onStart')
-        this.#startedProviders.add(provider.token)
-      }
-      for (const plugin of this.#plugins) {
-        await this.#callPlugin(plugin, 'onStart')
-        this.#startedPlugins.push(plugin)
-      }
-      for (const provider of providers) await this.#callProvider(provider, 'onReady')
-      for (const plugin of this.#plugins) await this.#callPlugin(plugin, 'onReady')
+      completed = await this.#runStartHooks()
     } catch (error) {
+      if (this.#startAborted) {
+        // the shutdown requested by a start hook owns the cleanup
+        await this.#settledStop()
+        throw error
+      }
       addSuppressedErrors(error, await this.#shutdown())
       this.#removeSignals()
       this.#state = 'failed'
       throw error
     }
+    if (!completed) {
+      await this.#settledStop()
+      return
+    }
     this.#state = 'ready'
     this.#logger.debug('Application started')
+  }
+
+  /** Runs the start hooks in order; `false` when one of them called `stop()` (the others are skipped). */
+  async #runStartHooks(): Promise<boolean> {
+    const providers = this.container.instances()
+    for (const provider of providers) {
+      if (!(await this.#startHook(() => this.#callProvider(provider, 'onStart')))) return false
+      this.#startedProviders.add(provider.token)
+    }
+    for (const plugin of this.#plugins) {
+      if (!(await this.#startHook(() => this.#callPlugin(plugin, 'onStart')))) return false
+      this.#startedPlugins.push(plugin)
+    }
+    for (const provider of providers) {
+      if (!(await this.#startHook(() => this.#callProvider(provider, 'onReady')))) return false
+    }
+    for (const plugin of this.#plugins) {
+      if (!(await this.#startHook(() => this.#callPlugin(plugin, 'onReady')))) return false
+    }
+    return true
+  }
+
+  /**
+   * Runs one start hook in an async context carrying a fresh marker, so that a `stop()` called from
+   * it (or from work it awaits) is recognised. Returns `false` when the hook stopped the application.
+   */
+  async #startHook(hook: () => Promise<void>): Promise<boolean> {
+    const marker = {}
+    this.#startHookMarker = marker
+    try {
+      await startHookContext.run(marker, hook)
+    } finally {
+      this.#startHookMarker = undefined
+    }
+    return !this.#startAborted
+  }
+
+  /** Whether the caller runs in the async context of the start hook in progress. */
+  #calledFromStartHook(): boolean {
+    const marker = this.#startHookMarker
+    return this.#state === 'starting' && marker !== undefined && startHookContext.getStore() === marker
+  }
+
+  /** Waits for the stop requested by a start hook; its errors belong to the caller of `stop()`. */
+  async #settledStop(): Promise<void> {
+    try {
+      await this.#stopPromise
+    } catch {
+      // reported by the stop() promise
+    }
   }
 
   /**
@@ -267,20 +344,22 @@ export class Application {
    * plugins' `onDispose` (reverse). Every step is attempted, each within `hookTimeoutMs` and all
    * within `timeoutMs`; failures are collected into a ZnightAggregateError (ZNIGHT021). Signal
    * handlers are removed.
+   *
+   * Called from a start hook (`onStart`/`onReady` of a provider or plugin, or work it awaits), it
+   * does not wait for the start, which waits for that hook: the shutdown runs right away, stopping
+   * what completed its `onStart`, and the remaining start hooks are skipped.
    */
   stop(): Promise<void> {
+    if (this.#calledFromStartHook()) {
+      this.#startAborted = true
+      this.#releaseStopWait?.() // a stop() already waiting for the start must not wait for this hook
+    }
     this.#stopPromise ??= this.#runStop()
     return this.#stopPromise
   }
 
   async #runStop(): Promise<void> {
-    if (this.#state === 'starting') {
-      try {
-        await this.#startPromise
-      } catch {
-        // a failed start already stopped and disposed everything
-      }
-    }
+    if (this.#state === 'starting' && !this.#startAborted) await this.#waitForStart()
     if (this.#state === 'failed' || this.#state === 'stopped') {
       this.#removeSignals()
       return
@@ -296,7 +375,22 @@ export class Application {
         errors,
       )
     }
-    this.#logger.debug('Application stopped')
+    // after a signal, the end of the shutdown is reported at the level of "Received SIGTERM"
+    if (this.#signalReceived) this.#logger.info('Application stopped')
+    else this.#logger.debug('Application stopped')
+  }
+
+  /**
+   * Resolves when the start in progress settles (a failed start already stopped and disposed
+   * everything), or earlier when a start hook asks to stop (see `stop()`).
+   */
+  async #waitForStart(): Promise<void> {
+    await new Promise<void>(resolve => {
+      this.#releaseStopWait = resolve
+      const done = (): void => resolve()
+      this.#startPromise?.then(done, done)
+    })
+    this.#releaseStopWait = undefined
   }
 
   /**
@@ -398,13 +492,11 @@ export class Application {
     }
     this.#signalReceived = true
     this.#logger.info(`Received ${signal}: shutting down gracefully`)
-    this.stop().then(
-      () => this.#logger.info('Application stopped'),
-      (error: unknown) => {
-        this.#logger.error('The application stopped with errors', { err: error })
-        proc.exitCode = 1
-      },
-    )
+    // success is logged by the stop itself ("Application stopped")
+    this.stop().catch((error: unknown) => {
+      this.#logger.error('The application stopped with errors', { err: error })
+      proc.exitCode = 1
+    })
   }
 }
 
@@ -423,10 +515,14 @@ function shutdownError(step: string, error: unknown): ZnightError {
   return new ZnightError(ErrorCode.LifecycleFailed, `${step} failed: ${errorMessage(error)}`, { cause: error })
 }
 
+/** A duration in milliseconds: a non-negative number, `Infinity` meaning no limit. */
 function positive(value: number | undefined, fallback: number, name: string): number {
   if (value === undefined) return fallback
-  if (!Number.isFinite(value) || value < 0) {
-    throw new ZnightError(ErrorCode.InvalidDecorator, `Invalid ${name}: expected a positive number, got ${value}`)
+  if (typeof value !== 'number' || Number.isNaN(value) || value < 0) {
+    throw new ZnightError(
+      ErrorCode.InvalidDecorator,
+      `Invalid ${name}: expected a positive number of milliseconds (or Infinity), got ${value}`,
+    )
   }
   return value
 }

@@ -63,16 +63,21 @@ export async function normalizeInject(request: InjectRequest): Promise<Normalize
 
 const DECODER = new TextDecoder()
 
-/** Builds an {@link InjectResponse}. Header values are joined with `, `. */
+/**
+ * Builds an {@link InjectResponse}. Repeated header values are joined with `, `, except `set-cookie`
+ * (one entry per cookie: an `Expires` attribute contains `, `).
+ */
 export function injectResponse(
   status: number,
   headers: Readonly<Record<string, string | number | readonly string[] | undefined>>,
   bytes: Uint8Array,
 ): InjectResponse {
-  const normalized: Record<string, string> = {}
+  const normalized: Record<string, string | string[]> = {}
   for (const [name, value] of Object.entries(headers)) {
     if (value === undefined) continue
-    normalized[name.toLowerCase()] = typeof value === 'object' ? value.join(', ') : String(value)
+    const key = name.toLowerCase()
+    if (key === 'set-cookie') normalized[key] = typeof value === 'object' ? [...value] : [String(value)]
+    else normalized[key] = typeof value === 'object' ? value.join(', ') : String(value)
   }
   const body = DECODER.decode(bytes)
   return {

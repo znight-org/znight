@@ -81,9 +81,13 @@ const processSignals: SignalSource = {
   },
 }
 
-/** Creates a context from the current process, with optional overrides. */
+/**
+ * Creates a context from the current process, with optional overrides. The environment is a copy
+ * of `process.env` taken now: tools running in the CLI process (Vite sets `NODE_ENV`) do not change
+ * what the commands see and pass to the application.
+ */
 export function createContext(options: CliContextOptions = {}): CliContext {
-  const env = options.env ?? process.env
+  const env = options.env ?? { ...process.env }
   const stdout = options.stdout ?? process.stdout
   const stderr = options.stderr ?? process.stderr
   const colors = createColors(shouldUseColor({ env, stream: stdout, flag: options.color }))

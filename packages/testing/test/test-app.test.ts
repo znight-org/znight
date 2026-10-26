@@ -1,4 +1,13 @@
-import { type CoreLogger, ErrorCode, type Plugin, silentLogger, type ZnightError } from '@znight/core'
+import {
+  type CoreLogger,
+  ErrorCode,
+  type Plugin,
+  type PluginContext,
+  type ProviderKey,
+  silentLogger,
+  type ZnightError,
+  type ZnightMetadata,
+} from '@znight/core'
 
 import {
   createMetadata,
@@ -203,6 +212,171 @@ describe('TestApp: instantiated providers', () => {
     })
     expect(factory).toHaveBeenCalledTimes(1)
     await app.close()
+  })
+})
+
+/** A token store loaded at boot by an async `@Provides()` (e.g. JWKS). */
+class TokenStore {
+  constructor(readonly tokens: ReadonlySet<string>) {}
+}
+
+/** A global guard (`HttpPlugin.configure({ guards: [AuthGuard] })`) depending on the async store. */
+class AuthGuard {
+  constructor(readonly store: TokenStore) {}
+  canActivate(token: string): boolean {
+    return this.store.tokens.has(token)
+  }
+}
+
+class HelloController {
+  hello(): { ok: boolean } {
+    return { ok: true }
+  }
+}
+
+/** Not a provider of the metadata. */
+class NotAProvider {}
+
+const G = {
+  Store: 'src/auth.ts#StoreFactory.store',
+  AuthGuard: 'src/auth.ts#AuthGuard',
+  Hello: 'src/hello.controller.ts#HelloController',
+  Database: 'src/db.ts#Database',
+} as const
+
+/** The controller, the global guard, its async dependency and an async provider nothing needs. */
+function guardedMetadata(controllers = true): ZnightMetadata {
+  return createMetadata(
+    {
+      [G.Store]: {
+        scope: 'singleton',
+        deps: [],
+        async: true,
+        factory: () => Promise.resolve(new TokenStore(new Set(['secret']))),
+      },
+      [G.AuthGuard]: { scope: 'singleton', class: AuthGuard, deps: [G.Store], factory: d => new AuthGuard(d[0]) },
+      [G.Hello]: { scope: 'singleton', class: HelloController, deps: [], factory: () => new HelloController() },
+      [G.Database]: {
+        scope: 'singleton',
+        deps: [],
+        async: true,
+        factory: () => Promise.reject(new Error('no database in tests')),
+      },
+    },
+    {
+      aliases: { 'src/auth.ts#TokenStore': G.Store },
+      extensions: controllers
+        ? {
+            http: {
+              controllers: [{ token: G.Hello, basePath: '/hello', guards: [], interceptors: [], meta: {}, routes: [] }],
+            },
+          }
+        : {},
+    },
+  )
+}
+
+interface GlobalsPlugin extends Plugin {
+  readonly resolved: unknown[]
+  initRoots?(): readonly ProviderKey[]
+}
+
+/**
+ * Resolves the global guards of its options in `onBootstrap`, like `HttpPlugin`, and lists them in
+ * `initRoots()` (unless `roots` is `false`).
+ */
+function globalsPlugin(guards: readonly ProviderKey[], roots: readonly ProviderKey[] | false = guards): GlobalsPlugin {
+  const resolved: unknown[] = []
+  const plugin: GlobalsPlugin = {
+    name: 'globals',
+    resolved,
+    onBootstrap(ctx: PluginContext) {
+      for (const guard of guards) resolved.push(ctx.container.get(guard as never))
+    },
+  }
+  return roots === false ? plugin : { ...plugin, initRoots: () => roots }
+}
+
+describe('TestApp: providers resolved by plugins at bootstrap', () => {
+  it('global providers listed by initRoots() are created at boot with their async dependencies', async () => {
+    const plugin = globalsPlugin([AuthGuard])
+    const app = await TestApp.create({ metadata: guardedMetadata(), plugins: [plugin], logger: quiet() })
+    const guard = plugin.resolved[0] as AuthGuard
+    expect(guard).toBeInstanceOf(AuthGuard)
+    expect(guard.canActivate('secret')).toBe(true)
+    const created = app.container.instances().map(instance => instance.token)
+    expect(created).toEqual(expect.arrayContaining([G.Hello, G.Store, G.AuthGuard]))
+    // the boot is still limited to the entry points
+    expect(created).not.toContain(G.Database)
+    await app.close()
+  })
+
+  it('without initRoots(), the async dependency fails on demand with a hint about the only option', async () => {
+    const error = await rejection(
+      TestApp.create({ metadata: guardedMetadata(), plugins: [globalsPlugin([AuthGuard], false)], logger: quiet() }),
+    )
+    expect(error.code).toBe(ErrorCode.InstantiationFailed)
+    expect(error.message).toContain('on demand')
+    expect(error.hints.join('\n')).toContain('TestApp.create({ only: [...] })')
+    // the same plugin boots when the guard is listed explicitly
+    const app = await TestApp.create({
+      metadata: guardedMetadata(),
+      plugins: [globalsPlugin([AuthGuard], false)],
+      only: [HelloController, AuthGuard],
+      logger: quiet(),
+    })
+    await app.close()
+  })
+
+  it('plugin roots are added to an explicit only list', async () => {
+    const plugin = globalsPlugin([G.AuthGuard])
+    const app = await TestApp.create({
+      metadata: guardedMetadata(),
+      plugins: [plugin],
+      only: [HelloController],
+      logger: quiet(),
+    })
+    expect(plugin.resolved[0]).toBeInstanceOf(AuthGuard)
+    expect(app.container.instances().map(instance => instance.token)).not.toContain(G.Database)
+    await app.close()
+  })
+
+  it('keys that are not providers of the metadata are left to the plugin', async () => {
+    const plugin = globalsPlugin([], [NotAProvider, 'src/gone.ts#Gone', 42 as never, 'TokenStore', AuthGuard])
+    const app = await TestApp.create({ metadata: guardedMetadata(), plugins: [plugin], logger: quiet() })
+    // the alias 'TokenStore' designates the async store: created at boot
+    expect(app.get(TokenStore).tokens.has('secret')).toBe(true)
+    expect(app.container.instances().map(instance => instance.token)).toContain(G.AuthGuard)
+    await app.close()
+  })
+
+  it('plugin roots do not limit the boot when the metadata has no entry point', async () => {
+    const plain = createMetadata({
+      [G.Hello]: { scope: 'singleton', class: HelloController, deps: [], factory: () => new HelloController() },
+      [G.Store]: guardedMetadata().providers[G.Store] as never,
+    })
+    const app = await TestApp.create({ metadata: plain, plugins: [globalsPlugin([HelloController])], logger: quiet() })
+    expect(app.container.instances()).toHaveLength(2)
+    await app.close()
+  })
+
+  it("only: 'all' ignores plugin roots", async () => {
+    const error = await rejection(
+      TestApp.create({
+        metadata: guardedMetadata(),
+        plugins: [globalsPlugin([AuthGuard])],
+        only: 'all',
+        logger: quiet(),
+      }),
+    )
+    expect(error.message).toContain('no database in tests')
+  })
+
+  it('rejects a plugin whose initRoots() does not return an array', async () => {
+    const invalid = { ...globalsPlugin([]), initRoots: () => AuthGuard as never }
+    const error = await rejection(TestApp.create({ metadata: guardedMetadata(), plugins: [invalid], logger: quiet() }))
+    expect(error).toBeInstanceOf(TypeError)
+    expect(error.message).toContain('initRoots() of the plugin "globals"')
   })
 })
 

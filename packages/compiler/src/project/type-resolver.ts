@@ -3,7 +3,9 @@
  *
  * Type references are resolved through imports, barrels, namespaces and packages to canonical
  * identities; type aliases are expanded with their type arguments substituted; default type
- * arguments are filled from the declaration.
+ * arguments are filled from the declaration. Aliases supplied at runtime (manifest `provides`,
+ * `options.externals`: `RequestId = string & {...}`) are expanded too, unless
+ * {@link ResolveTypeOptions.externalAliases} keeps them as references (injection points).
  */
 import type {
   Class,
@@ -61,6 +63,19 @@ export interface HeritageClause {
   readonly span: Span
 }
 
+/** Options of {@link TypeResolver.resolveType}. */
+export interface ResolveTypeOptions {
+  /**
+   * Aliases supplied at runtime (declared in a manifest `provides` or in `options.externals`):
+   * `'expand'` (default) like any alias (`RequestId` → `string & {...}`: what a value of that type
+   * is), `'keep'` as a reference to the alias identity (`@znight/http#RequestId`: the token an
+   * injection point binds to).
+   */
+  readonly externalAliases?: 'expand' | 'keep'
+  /** Called with the identity of every alias supplied at runtime that was expanded. */
+  readonly onExternalAlias?: (identity: string) => void
+}
+
 interface Context {
   readonly scope: ScopeRef
   readonly types: TypeScope
@@ -69,12 +84,15 @@ interface Context {
   /** Aliases found to be recursive during this conversion (shared by nested contexts). */
   readonly recursive: Set<string>
   readonly depth: number
+  /** Handling of the aliases supplied at runtime (shared by nested contexts). */
+  readonly externals: ResolveTypeOptions
 }
 
 type GenericDeclarationNode = Class | TSInterfaceDeclaration | TSTypeAliasDeclaration
 
 const MAX_DEPTH = 64
 const EMPTY_SCOPE: TypeScope = new Map()
+const NO_OPTIONS: ResolveTypeOptions = {}
 
 /**
  * Adds type parameters (as unbound parameters) to a scope, e.g. those of a generic method:
@@ -121,12 +139,20 @@ export class TypeResolver {
     scope: ScopeRef,
     node: TSType | TSTypeAnnotation | null | undefined,
     types: TypeScope = EMPTY_SCOPE,
+    options: ResolveTypeOptions = {},
   ): TypeInfo {
     if (!node) {
       return opaqueType('', 'missing-annotation')
     }
     const type = node.type === 'TSTypeAnnotation' ? node.typeAnnotation : node
-    return this.#convert(type, { scope, types, aliases: new Set(), recursive: new Set(), depth: 0 })
+    return this.#convert(type, {
+      scope,
+      types,
+      aliases: new Set(),
+      recursive: new Set(),
+      depth: 0,
+      externals: options,
+    })
   }
 
   /** Type parameters of a class, interface or type alias (constraints/defaults resolved). */
@@ -143,6 +169,7 @@ export class TypeResolver {
       aliases: new Set(),
       recursive: new Set(),
       depth: 0,
+      externals: NO_OPTIONS,
     }
     return parameters.map(parameter => ({
       name: parameter.name.name,
@@ -181,6 +208,7 @@ export class TypeResolver {
       aliases: new Set(),
       recursive: new Set(),
       depth: 0,
+      externals: NO_OPTIONS,
     }
     const clauses: HeritageClause[] = []
     if (declaration.kind === 'class') {
@@ -387,8 +415,19 @@ export class TypeResolver {
       case 'declaration': {
         const declaration = symbol.declaration
         switch (declaration.kind) {
-          case 'type':
+          case 'type': {
+            // A type alias supplied at runtime (manifest `provides`, `options.externals`, e.g.
+            // `RequestId = string & {...}`): an injection point keeps its identity (its token).
+            const info = this.#identities.identityOfDeclaration(declaration)
+            if (this.#isExternal(info.identity, declaration.file)) {
+              if (context.externals.externalAliases === 'keep') {
+                const bindings = this.#bind(declaration, args(), context.depth + 1)
+                return referenceType(info.identity, info.displayName, [...bindings.values()])
+              }
+              context.externals.onExternalAlias?.(info.identity)
+            }
             return this.#expandAlias(declaration, args(), text, context)
+          }
           case 'class':
           case 'interface':
           case 'enum': {
@@ -407,6 +446,18 @@ export class TypeResolver {
     }
   }
 
+  /** `true` when `identity` is declared in `options.externals` or in the manifest `provides` of its package. */
+  #isExternal(identity: string, file: string): boolean {
+    if (this.#host.options.externals.includes(identity)) {
+      return true
+    }
+    const owner = this.#host.packages.ownerOf(file)
+    return (
+      owner.kind === 'package' &&
+      this.#host.manifestOf(owner.package)?.provides.some(entry => entry.identity === identity) === true
+    )
+  }
+
   #expandAlias(declaration: Declaration, typeArgs: readonly TypeInfo[], text: string, context: Context): TypeInfo {
     const key = declarationKey(declaration)
     const file = this.#host.getFile(declaration.file)
@@ -422,6 +473,7 @@ export class TypeResolver {
       aliases: new Set([...context.aliases, key]),
       recursive: context.recursive,
       depth: context.depth + 1,
+      externals: context.externals,
     })
     // A recursive alias (`type Json = string | Json[]`) cannot be expanded: it is opaque as a whole.
     return context.recursive.has(key) ? opaqueType(text, 'recursive-alias') : expanded
@@ -445,6 +497,7 @@ export class TypeResolver {
                 aliases: new Set(),
                 recursive: new Set(),
                 depth: depth + 1,
+                externals: NO_OPTIONS,
               })
             : primitiveType('unknown')
       }

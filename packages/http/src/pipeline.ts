@@ -18,6 +18,7 @@ import {
   NotFoundException,
 } from './exceptions.ts'
 import { isFileBody, resolveFile } from './files.ts'
+import { findInvalidHeader, isHeaderValue } from './headers.ts'
 import { decodePathValue, matchRoutePath, type RoutePath } from './path.ts'
 import { splitUrl } from './query.ts'
 import { HttpResponse, isHttpResponse } from './response.ts'
@@ -30,7 +31,7 @@ import {
   serializeFileReply,
   serializeResult,
 } from './serialize.ts'
-import { type ContextRunner, captureContext, trackStream } from './stream.ts'
+import { type ContextRunner, captureContext, discardStream, trackStream } from './stream.ts'
 import { HttpTokens } from './tokens.ts'
 import { emptyRecord, errorMessage } from './utils.ts'
 
@@ -74,7 +75,7 @@ type Target =
 const RAW = Symbol('raw response')
 type Outcome = SerializedReply | typeof RAW
 
-/** A reply, and a promise settled once the request is over (response stream sent or abandoned, scope closed). */
+/** A reply, and a promise settled once the request is over (response body sent or abandoned, scope closed). */
 interface Served {
   readonly reply: AdapterReply
   readonly done: Promise<void>
@@ -93,7 +94,7 @@ export class Pipeline {
   readonly #hooks: Hooks
   readonly #logger: CoreLogger
   readonly #options: PipelineOptions
-  readonly #table: RouteTable<unknown>
+  readonly #table: RouteTable<RoutePlan>
   #inflight = 0
   #idle: (() => void)[] = []
   /** Set while the server drains: responses ask clients to close their connection. */
@@ -104,7 +105,7 @@ export class Pipeline {
     hooks: Hooks,
     logger: CoreLogger,
     options: PipelineOptions,
-    table: RouteTable<unknown>,
+    table: RouteTable<RoutePlan>,
   ) {
     this.#container = container
     this.#hooks = hooks
@@ -126,7 +127,7 @@ export class Pipeline {
 
   /**
    * Handles a request routed to `plan` by the adapter. The request stays in flight (and its scope
-   * open) until a streamed response body has been fully read or cancelled by the adapter.
+   * open) until a streamed or file response body has been fully read or cancelled by the adapter.
    */
   async handle(plan: RoutePlan, request: AdapterRequest): Promise<AdapterReply> {
     const startTime = performance.now()
@@ -140,13 +141,14 @@ export class Pipeline {
     }
   }
 
-  #route(plan: RoutePlan, request: AdapterRequest, startTime: number): Promise<Served> {
+  #route(plan: RoutePlan, request: AdapterRequest, startTime: number, rerouted = false): Promise<Served> {
     const { path, query } = splitUrl(request.url)
     const raw = matchRoutePath(plan.path, path)
     // the native router matched a path the Znight grammar rejects (e.g. an empty `:param` in Fastify)
-    if (raw === undefined) return this.#fallback(request, undefined, startTime)
+    // or a normalised path (Hono): route the raw path with the route table instead
+    if (raw === undefined) return this.#fallback(request, undefined, startTime, !rerouted)
     if (plan.redirect === true) {
-      const canonical = path.slice(0, -1)
+      const canonical = sameOriginPath(path.slice(0, -1))
       const location = query === '' ? canonical : `${canonical}?${query}`
       return this.#serve(request, undefined, emptyRecord(), { kind: 'redirect', location }, startTime, plan.body)
     }
@@ -177,27 +179,34 @@ export class Pipeline {
     }
   }
 
-  #fallback(request: AdapterRequest, error: unknown, startTime: number): Promise<Served> {
+  #fallback(request: AdapterRequest, error: unknown, startTime: number, reroute = true): Promise<Served> {
     const body = this.#options.body
     if (error !== undefined) {
       const target: Target = { kind: 'error', error: frameworkError(error) }
       return this.#serve(request, undefined, emptyRecord(), target, startTime, body)
     }
     const { path } = splitUrl(request.url)
+    if (reroute) {
+      // routing happens on the raw path: serve a route the adapter's router missed (Hono routes the
+      // WHATWG-normalised URL, where `/files/%2e%2e/x` became `/x`)
+      const plan = this.#table.find(request.method, path)
+      if (plan !== undefined) return this.#route(plan, request, startTime, true)
+    }
     const allowed = this.#table.allowedMethods(path)
     let target: Target
     if (allowed.length === 0) {
       target = { kind: 'error', error: new NotFoundException(`Cannot ${request.method} ${truncate(path)}`) }
     } else if (request.method === 'OPTIONS') {
-      target = { kind: 'options', allow: [...allowed, 'OPTIONS'].join(', ') }
+      target = { kind: 'options', allow: allowHeader(allowed) }
     } else {
+      // OPTIONS is answered automatically, hence supported (RFC 9110 §15.5.6: the same list as OPTIONS)
       target = {
         kind: 'error',
         error: new MethodNotAllowedException(
           `Method ${request.method} is not allowed on ${truncate(path)}`,
           undefined,
           {
-            headers: { allow: allowed.join(', ') },
+            headers: { allow: allowHeader(allowed) },
           },
         ),
       }
@@ -232,11 +241,12 @@ export class Pipeline {
       responseHeaders: {},
     }
     let outcome: Outcome | undefined
+    let reply: AdapterReply | undefined
     let replied: () => void = () => undefined
     const ready = new Promise<void>(resolve => {
       replied = resolve
     })
-    // the scope (request-scoped instances) stays open until a streamed body has been sent or abandoned
+    // the scope (request-scoped instances) stays open until a streamed or file body has been sent or abandoned
     const done = this.#container
       .runInScope(async () => {
         let hookError: unknown
@@ -245,6 +255,7 @@ export class Pipeline {
         try {
           await this.#hooks.run('http:request', event, async () => {
             outcome = await this.#process(ctx, target, event)
+            if (outcome !== RAW) outcome = this.#checkHeaders(outcome, ctx, event)
             run = captureContext() // stream producers run in the context of the handler (scope, hooks)
             return outcome
           })
@@ -264,17 +275,30 @@ export class Pipeline {
             requestId,
           })
         }
-        if (outcome === RAW || !(outcome.body instanceof ReadableStream)) {
+        if (outcome === RAW) {
           replied()
           return
         }
-        const tracked = trackStream(outcome.body, run ?? captureContext())
-        outcome = { ...outcome, body: tracked.stream }
+        const serialized = this.#complete(outcome, ctx, event, requestId)
+        const body = serialized.body
+        if (!(body instanceof ReadableStream || body instanceof Blob)) {
+          reply = serialized
+          replied()
+          ctx.releaseBody()
+          return
+        }
+        // files too: a file-backed Blob is read lazily, after the handler returned
+        const tracked = trackStream(body, run ?? captureContext())
+        reply =
+          body instanceof Blob
+            ? { ...serialized, body: tracked.stream, blob: body }
+            : { ...serialized, body: tracked.stream }
         replied()
         const failure = await tracked.done
         if (failure !== undefined) {
           this.#logger.error('The response stream failed', { err: failure, requestId, path: ctx.path })
         }
+        ctx.releaseBody()
       }, [
         [HttpTokens.Context, ctx],
         [HttpTokens.RequestId, requestId],
@@ -287,24 +311,58 @@ export class Pipeline {
         },
       )
     await Promise.race([ready, done])
-    if (outcome === undefined) {
-      outcome = serializeError(500, this.#internalBody(new Error('Request not handled')), ctx.method)
-      event.status = 500
-    }
-    const reply: Outcome = outcome
-    if (reply === RAW) {
+    if (outcome === RAW) {
       const status = request.rawStatus?.() ?? 200
       event.status ??= status
       this.#emit(event)
       return { reply: { status, headers: {}, body: null, raw: true }, done }
     }
+    if (reply === undefined) {
+      const failure = new Error('Request not handled')
+      reply = this.#complete(serializeError(500, this.#internalBody(failure), ctx.method), ctx, event, requestId)
+      event.status = 500
+    }
     this.#emit(event)
+    return { reply, done }
+  }
+
+  /**
+   * Adds the headers of the `http:request` wrappers, the request id and `connection: close` while
+   * draining, then checks the final headers (see {@link #checkHeaders}).
+   */
+  #complete(
+    reply: SerializedReply,
+    ctx: RequestContext,
+    event: HttpRequestEvent,
+    requestId: RequestId,
+  ): SerializedReply {
     const headers = reply.headers
     addMissingHeaders(headers, event.responseHeaders)
     const header = this.#options.requestIdHeader
-    if (header !== undefined && headers[header] === undefined) headers[header] = requestId
+    if (header !== undefined && headers[header] === undefined && isHeaderValue(requestId)) headers[header] = requestId
     if (this.draining) headers['connection'] = 'close'
-    return { reply, done }
+    const checked = this.#checkHeaders(reply, ctx, event)
+    if (checked !== reply) {
+      if (header !== undefined && isHeaderValue(requestId)) checked.headers[header] = requestId
+      if (this.draining) checked.headers['connection'] = 'close'
+    }
+    return checked
+  }
+
+  /**
+   * A reply with a header no adapter can send (`ctx.setHeader('x', 'a\r\nb')`, a redirect to a
+   * client-provided URL with CR/LF, a non Latin-1 value...) becomes a plain 500, identical on every
+   * adapter: its body is discarded (a stream is cancelled) and the error logged.
+   */
+  #checkHeaders(reply: SerializedReply, ctx: RequestContext, event: HttpRequestEvent): SerializedReply {
+    const name = findInvalidHeader(reply.headers)
+    if (name === undefined) return reply
+    if (reply.body instanceof ReadableStream) discardStream(reply.body)
+    const error = new TypeError(`Invalid response header ${JSON.stringify(truncate(name))}: invalid name or value`)
+    event.error = error
+    event.status = 500
+    this.#log(error, ctx)
+    return serializeError(500, this.#internalBody(error), ctx.method)
   }
 
   async #process(ctx: RequestContext, target: Target, event: HttpRequestEvent): Promise<Outcome> {
@@ -535,6 +593,26 @@ function frameworkError(error: unknown): unknown {
     return new HttpException(status, errorMessage(error), undefined, { cause: error })
   }
   return error
+}
+
+/** `Allow` of a path: its methods and `OPTIONS`, answered automatically when no route declares it. */
+function allowHeader(allowed: readonly string[]): string {
+  return (allowed.includes('OPTIONS') ? allowed : [...allowed, 'OPTIONS']).join(', ')
+}
+
+/**
+ * A raw request path usable as a same-origin `Location`: backslashes, controls and spaces are
+ * percent-encoded and leading slashes collapsed, since browsers read `/\evil.com` or `//evil.com`
+ * as another host (an open redirect through `trailingSlash: 'redirect'`).
+ */
+function sameOriginPath(path: string): string {
+  let encoded = ''
+  for (const char of path) {
+    const code = char.charCodeAt(0)
+    encoded +=
+      code <= 0x20 || code === 0x7f || char === '\\' ? `%${code.toString(16).toUpperCase().padStart(2, '0')}` : char
+  }
+  return encoded.replace(/^\/{2,}/, '/')
 }
 
 function truncate(path: string): string {

@@ -2,9 +2,12 @@
  * Vite, loaded lazily from the project (it is a peer dependency). `znight build` and `znight dev` run
  * `vite build` programmatically: the `znight()` plugin of the project's `vite.config.ts` compiles the
  * container and, with its `app` defaults, configures a server build (`src/main.ts` → `dist/`).
+ *
+ * The Vite root is resolved like the Vite CLI run in the project directory: the `root` of the config
+ * file, relative to the project root (`--root`), else the project root ({@link projectRootPlugin}).
  */
 import type { InlineConfig, Plugin } from 'vite'
-import type { Diagnostic, ZnightOptions } from './compiler.ts'
+import type { Diagnostic, StringAliasLike, ZnightOptions } from './compiler.ts'
 
 import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -18,17 +21,27 @@ export type ViteLogLevel = 'info' | 'warn' | 'error' | 'silent'
 /** How Vite loads its config file (`--configLoader` of the Vite CLI). */
 export type ViteConfigLoader = 'bundle' | 'runner' | 'native'
 
+/** What the CLI reads from a config resolved by Vite (`ResolvedConfig`). */
+export interface ResolvedConfigLike {
+  /** Absolute root. */
+  readonly root: string
+  /** The config file that was loaded. */
+  readonly configFile?: string | undefined
+  /** Every plugin, flattened. */
+  readonly plugins: readonly unknown[]
+  readonly resolve?: { readonly alias?: unknown } | undefined
+}
+
 /** Subset of the `vite` module used by the CLI. */
 export interface ViteApi {
   build(config: InlineConfig): Promise<unknown>
-  loadConfigFromFile?: (
-    env: { command: 'build' | 'serve'; mode: string; isSsrBuild?: boolean },
-    configFile?: string,
-    root?: string,
-    logLevel?: ViteLogLevel,
-    customLogger?: undefined,
-    configLoader?: ViteConfigLoader,
-  ) => Promise<{ path: string; config: { plugins?: unknown } } | null>
+  /** Resolves the config as a build would, without building (absent: `znight generate` uses defaults). */
+  resolveConfig?: (
+    config: InlineConfig,
+    command: 'build' | 'serve',
+    defaultMode?: string,
+    defaultNodeEnv?: string,
+  ) => Promise<ResolvedConfigLike>
 }
 
 /** Events of a Vite build in watch mode (Rolldown/Rollup watcher events). */
@@ -106,16 +119,18 @@ export interface OutputTracker {
   compile(): CompileOutcome | undefined
 }
 
-/** Creates an {@link OutputTracker}. */
+/** Creates an {@link OutputTracker}; relative output paths are resolved against the Vite root. */
 export function createOutputTracker(root: string): OutputTracker {
   let entry: string | undefined
   let started: number | undefined
   let api: ZnightPluginApiLike | undefined
   let compile: CompileOutcome | undefined
+  let viteRoot = root
   const plugin: Plugin = {
     name: 'znight:cli-output',
     configResolved(config) {
       api = findZnightApi(config.plugins)
+      if (typeof config.root === 'string') viteRoot = config.root
     },
     buildStart() {
       started = performance.now()
@@ -132,8 +147,8 @@ export function createOutputTracker(root: string): OutputTracker {
       if (chunk === undefined) return
       entry =
         outputOptions.file === undefined
-          ? resolve(root, outputOptions.dir ?? 'dist', chunk.fileName)
-          : resolve(root, outputOptions.file)
+          ? resolve(viteRoot, outputOptions.dir ?? 'dist', chunk.fileName)
+          : resolve(viteRoot, outputOptions.file)
     },
   }
   return { plugin, entry: () => entry, startedAt: () => started, compile: () => compile }
@@ -156,15 +171,33 @@ function compileOutcome(result: unknown): CompileOutcome | undefined {
   return { ok, diagnostics: Array.isArray(diagnostics) ? (diagnostics as Diagnostic[]) : [] }
 }
 
+/** Name of {@link projectRootPlugin}. */
+const ROOT_PLUGIN = 'znight:cli-root'
+
+/**
+ * Resolves the Vite root like the Vite CLI run in the project directory: the `root` of the config
+ * file against `projectRoot`, or `projectRoot` without one. An inline `root` would override the
+ * config file's, so the CLI sets it from the first `config` hook instead.
+ */
+export function projectRootPlugin(projectRoot: string): Plugin {
+  return {
+    name: ROOT_PLUGIN,
+    config: {
+      order: 'pre',
+      handler: config => ({ root: resolve(projectRoot, config.root ?? '.') }),
+    },
+  }
+}
+
 function inlineConfig(options: BuildOptions, watch: boolean): InlineConfig {
   return {
-    root: options.root,
-    configFile: options.configFile === undefined ? undefined : resolve(options.root, options.configFile),
+    // found in the project root (not the working directory); no config file: none is searched
+    configFile: findViteConfig(options.root, options.configFile) ?? false,
     mode: options.mode,
     logLevel: options.logLevel,
     ...(options.configLoader === undefined ? {} : { configLoader: options.configLoader }),
     clearScreen: false,
-    plugins: [...(options.plugins ?? [])],
+    plugins: [projectRootPlugin(options.root), ...(options.plugins ?? [])],
     build: watch ? { watch: {} } : {},
   }
 }
@@ -195,16 +228,17 @@ function isWatcher(value: unknown): value is BuildWatcher {
   )
 }
 
+/** Vite's `DEFAULT_CONFIG_FILES`, in its order. */
 const CONFIG_FILES = [
-  'vite.config.ts',
-  'vite.config.mts',
   'vite.config.js',
   'vite.config.mjs',
-  'vite.config.cts',
+  'vite.config.ts',
   'vite.config.cjs',
+  'vite.config.mts',
+  'vite.config.cts',
 ]
 
-/** The Vite config file of the project, if any. */
+/** The Vite config file of the project (the one Vite would load from `root`), if any. */
 export function findViteConfig(root: string, configFile?: string): string | undefined {
   if (configFile !== undefined) return resolve(root, configFile)
   return CONFIG_FILES.map(file => join(root, file)).find(file => existsSync(file))
@@ -216,13 +250,19 @@ export interface ZnightPluginLookup {
   readonly configFile: string
   /** Whether the config registers the `znight()` plugin. */
   readonly found: boolean
-  /** The options passed to `znight()`, when the plugin exposes them (`plugin.api.options`). */
+  /**
+   * The options the `znight()` plugin compiles with: those given to it (`plugin.api.options`) with
+   * the absolute `root` (resolved against the Vite root) and, as derived from the Vite config, the
+   * string `aliases` of `resolve.alias` and the `runtimeConditions` (when the plugin exposes its
+   * compiler).
+   */
   readonly options?: ZnightOptions | undefined
 }
 
 /**
- * Loads the project's Vite config and reads the options given to `znight()`, so that
- * `znight generate` compiles exactly like the Vite build. Returns `undefined` without a config file.
+ * Resolves the project's Vite config as `znight build` does and reads the options the `znight()`
+ * plugin compiles with, so that `znight generate` compiles exactly like the Vite build. Returns
+ * `undefined` without a config file. `process.env.NODE_ENV`, which Vite sets, is left untouched.
  */
 export async function readZnightPluginOptions(
   vite: ViteApi,
@@ -231,40 +271,74 @@ export async function readZnightPluginOptions(
   configLoader?: ViteConfigLoader,
 ): Promise<ZnightPluginLookup | undefined> {
   const file = findViteConfig(root, configFile)
-  if (file === undefined || vite.loadConfigFromFile === undefined) return undefined
-  const loaded = await vite.loadConfigFromFile(
-    { command: 'build', mode: 'production', isSsrBuild: true },
-    file,
-    root,
-    'silent',
-    undefined,
-    configLoader,
-  )
-  if (loaded === null) return undefined
-  for (const plugin of await flattenPlugins(loaded.config.plugins)) {
+  const resolveConfig = vite.resolveConfig
+  if (file === undefined || resolveConfig === undefined) return undefined
+  const inline: InlineConfig = {
+    configFile: file,
+    mode: 'production',
+    logLevel: 'silent',
+    ...(configLoader === undefined ? {} : { configLoader }),
+    plugins: [projectRootPlugin(root)],
+  }
+  const config = await preservingNodeEnv(() => resolveConfig.call(vite, inline, 'build', 'production', 'production'))
+  const loaded = config.configFile ?? file
+  for (const plugin of config.plugins) {
+    if (typeof plugin !== 'object' || plugin === null) continue
     const name = (plugin as { name?: unknown }).name
-    if (typeof name !== 'string' || (name !== 'znight' && !name.startsWith('znight:'))) continue
-    if (name === 'znight:cli-output') continue
-    return { configFile: loaded.path, found: true, options: pluginOptions(plugin) }
+    if (typeof name !== 'string' || !isZnightPluginName(name)) continue
+    return { configFile: loaded, found: true, options: compileOptionsOf(plugin, config) }
   }
-  return { configFile: loaded.path, found: false }
+  return { configFile: loaded, found: false }
 }
 
-function pluginOptions(plugin: object): ZnightOptions | undefined {
+/** `znight` and its sub-plugins (`znight:*`), not the CLI's own plugins. */
+function isZnightPluginName(name: string): boolean {
+  return name === 'znight' || (name.startsWith('znight:') && !name.startsWith('znight:cli-'))
+}
+
+async function preservingNodeEnv<T>(run: () => Promise<T>): Promise<T> {
+  const nodeEnv = process.env['NODE_ENV']
+  try {
+    return await run()
+  } finally {
+    if (nodeEnv === undefined) delete process.env['NODE_ENV']
+    else process.env['NODE_ENV'] = nodeEnv
+  }
+}
+
+const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null
+
+/** {@link ZnightPluginLookup.options}: the compiler's resolved options when exposed, else derived. */
+function compileOptionsOf(plugin: object, config: ResolvedConfigLike): ZnightOptions {
   const api = (plugin as { api?: unknown }).api
-  if (typeof api !== 'object' || api === null) return undefined
-  const { options, getOptions } = api as { options?: unknown; getOptions?: unknown }
-  const value: unknown = typeof getOptions === 'function' ? getOptions.call(api) : options
-  return typeof value === 'object' && value !== null ? (value as ZnightOptions) : undefined
+  let options: ZnightOptions = {}
+  let resolved: Record<string, unknown> | undefined
+  if (isObject(api)) {
+    const value: unknown = typeof api['getOptions'] === 'function' ? api['getOptions'].call(api) : api['options']
+    if (isObject(value)) options = value as ZnightOptions
+    const compiler = api['compiler']
+    if (isObject(compiler) && isObject(compiler['options'])) resolved = compiler['options']
+  }
+  const root = typeof resolved?.['root'] === 'string' ? resolved['root'] : resolve(config.root, options.root ?? '.')
+  const aliases = Array.isArray(resolved?.['aliases'])
+    ? (resolved['aliases'] as StringAliasLike[])
+    : stringAliases(config.resolve?.alias)
+  const conditions = resolved?.['runtimeConditions']
+  return {
+    ...options,
+    root,
+    ...(aliases.length > 0 ? { aliases } : {}),
+    ...(Array.isArray(conditions) ? { runtimeConditions: conditions as string[] } : {}),
+  }
 }
 
-async function flattenPlugins(value: unknown): Promise<object[]> {
-  const resolved: unknown = await value
-  if (Array.isArray(resolved)) {
-    const nested = await Promise.all(resolved.map(item => flattenPlugins(item)))
-    return nested.flat()
-  }
-  return typeof resolved === 'object' && resolved !== null ? [resolved] : []
+/** The string entries of Vite's (resolved) `resolve.alias`: the compiler ignores RegExp aliases. */
+function stringAliases(alias: unknown): StringAliasLike[] {
+  if (!Array.isArray(alias)) return []
+  return alias.filter(
+    (entry): entry is StringAliasLike =>
+      isObject(entry) && typeof entry['find'] === 'string' && typeof entry['replacement'] === 'string',
+  )
 }
 
 /** Message of a Vite/Rolldown build error, with its location and code frame when available. */

@@ -79,7 +79,17 @@ export interface ChildLoggerOptions {
 /** What a logger and its children share. */
 interface Shared {
   readonly transports: readonly LogTransport[]
+  /**
+   * Set once the logger is closed or its application disposed: buffering transports would keep
+   * later entries until a timer the exiting process never waits for, so each one is flushed.
+   */
+  flushEachEntry: boolean
+  /** A flush is queued for the entries of the current tick. */
+  flushQueued: boolean
 }
+
+/** Internal: switches a logger (and its children) to flushing each entry. See {@link flushEachEntry}. */
+let enableFlushEachEntry: (logger: Logger) => void
 
 /** Second argument of the logging methods: structured context or an error. */
 type LogDetails = LogContext | Error
@@ -106,6 +116,12 @@ export class Logger {
   readonly #pino: PinoLogger
   readonly #shared: Shared
 
+  static {
+    enableFlushEachEntry = logger => {
+      logger.#shared.flushEachEntry = true
+    }
+  }
+
   constructor(options: LoggerOptions = {}) {
     const pending = Logger.#pending
     if (pending !== undefined) {
@@ -116,7 +132,7 @@ export class Logger {
     }
     const transports = transportsOf(options)
     this.#pino = pino(pinoOptions(options, transports), destinationOf(transports))
-    this.#shared = { transports }
+    this.#shared = { transports, flushEachEntry: false, flushQueued: false }
   }
 
   /** The underlying pino logger (escape hatch). */
@@ -162,42 +178,42 @@ export class Logger {
   trace(message: string, details?: LogDetails): void
   trace(details: LogDetails, message?: string): void
   trace(first: string | LogDetails, second?: string | LogDetails): void {
-    write(this.#pino, 'trace', first, second)
+    this.#write('trace', first, second)
   }
 
   debug(message: string, details?: LogDetails): void
   debug(details: LogDetails, message?: string): void
   debug(first: string | LogDetails, second?: string | LogDetails): void {
-    write(this.#pino, 'debug', first, second)
+    this.#write('debug', first, second)
   }
 
   info(message: string, details?: LogDetails): void
   info(details: LogDetails, message?: string): void
   info(first: string | LogDetails, second?: string | LogDetails): void {
-    write(this.#pino, 'info', first, second)
+    this.#write('info', first, second)
   }
 
   warn(message: string, details?: LogDetails): void
   warn(details: LogDetails, message?: string): void
   warn(first: string | LogDetails, second?: string | LogDetails): void {
-    write(this.#pino, 'warn', first, second)
+    this.#write('warn', first, second)
   }
 
   error(message: string, details?: LogDetails): void
   error(details: LogDetails, message?: string): void
   error(first: string | LogDetails, second?: string | LogDetails): void {
-    write(this.#pino, 'error', first, second)
+    this.#write('error', first, second)
   }
 
   fatal(message: string, details?: LogDetails): void
   fatal(details: LogDetails, message?: string): void
   fatal(first: string | LogDetails, second?: string | LogDetails): void {
-    write(this.#pino, 'fatal', first, second)
+    this.#write('fatal', first, second)
   }
 
   /** Logs at a level chosen at runtime. */
   log(level: LogEntryLevel, message: string, details?: LogDetails): void {
-    write(this.#pino, level, message, details)
+    this.#write(level, message, details)
   }
 
   /** Writes out what the transports buffered (Datadog batches, async stdout writes). Never rejects. */
@@ -205,11 +221,39 @@ export class Logger {
     await Promise.allSettled(this.#shared.transports.map(transport => transport.flush?.()))
   }
 
-  /** Flushes, then closes the transports (timers, sockets). Shared by every child. Never rejects. */
+  /**
+   * Flushes, then closes the transports (timers, sockets). Shared by every child. Never rejects.
+   * The logger stays usable: entries written afterwards are flushed right away (no batching), so
+   * they are delivered before the process exits.
+   */
   async close(): Promise<void> {
+    this.#shared.flushEachEntry = true
     await this.flush()
     await Promise.allSettled(this.#shared.transports.map(transport => transport.close?.()))
   }
+
+  #write(level: LogEntryLevel, first: unknown, second: unknown): void {
+    write(this.#pino, level, first, second)
+    const shared = this.#shared
+    if (!shared.flushEachEntry || shared.flushQueued || !this.#pino.isLevelEnabled(level)) return
+    // one flush for the entries of this tick; it starts the transports' I/O (fetch...), which keeps
+    // the process alive until they are delivered
+    shared.flushQueued = true
+    queueMicrotask(() => {
+      shared.flushQueued = false
+      void this.flush()
+    })
+  }
+}
+
+/**
+ * Makes `logger` (and its children) flush each entry as soon as it is written, without closing its
+ * transports. `ObservabilityPlugin` calls it when the application is disposed: the framework still
+ * logs afterwards (`Application stopped`), and buffering transports (Datadog) would otherwise hold
+ * those entries behind a timer that does not keep the process alive.
+ */
+export function flushEachEntry(logger: Logger): void {
+  enableFlushEachEntry(logger)
 }
 
 function write(logger: PinoLogger, level: LogEntryLevel, first: unknown, second: unknown): void {

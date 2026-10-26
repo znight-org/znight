@@ -20,10 +20,10 @@ import {
   normalizeRetry,
   validateMessage,
 } from '../src/index.ts'
-import { AbortedError, Semaphore, sleep, truncate } from '../src/internal/async.ts'
+import { AbortedError, MAX_TIMER_DELAY_MS, Semaphore, sleep, truncate } from '../src/internal/async.ts'
 import { assertRetrySupported, retryDelays } from '../src/retry.ts'
 import { caught } from './helpers.ts'
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it, jest } from 'bun:test'
 
 describe('jsonCodec', () => {
   it.each([
@@ -288,6 +288,31 @@ describe('internal async helpers', () => {
     expect(await caught(pending)).toBeInstanceOf(AbortedError)
     expect(await caught(sleep(1, controller.signal))).toBeInstanceOf(AbortedError)
     await sleep(1, new AbortController().signal)
+  })
+
+  it('sleeps longer than a timer can wait (2^31 - 1 ms) without firing early', async () => {
+    jest.useFakeTimers()
+    try {
+      let done = false
+      const pending = sleep(30 * 24 * 3_600_000, new AbortController().signal).then(() => {
+        done = true
+      })
+      const flush = async (): Promise<void> => {
+        for (let tick = 0; tick < 5; tick++) await Promise.resolve()
+      }
+      jest.advanceTimersByTime(10)
+      await flush()
+      expect(done).toBe(false)
+      jest.advanceTimersByTime(MAX_TIMER_DELAY_MS)
+      await flush()
+      expect(done).toBe(false)
+      jest.advanceTimersByTime(30 * 24 * 3_600_000 - MAX_TIMER_DELAY_MS - 10)
+      await flush()
+      expect(done).toBe(true)
+      await pending
+    } finally {
+      jest.useRealTimers()
+    }
   })
 
   it('limits concurrency in FIFO order and supports aborting waiters', async () => {

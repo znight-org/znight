@@ -214,3 +214,223 @@ export class QualifiedExternal {
     ])
   })
 })
+
+describe('optional injections bound to nothing', () => {
+  const app = tempApp({
+    'src/types.ts': `
+import { Inject, Injectable, type Lazy, Optional } from '@znight/core'
+
+export interface Repository<T> { find(): T }
+export interface User { readonly user: true }
+export interface Order { readonly order: true }
+export abstract class Cache { abstract kind(): string }
+export interface Missing { run(): void }
+
+@Injectable() export class OrderRepo implements Repository<Order> { find(): Order { return { order: true } } }
+@Injectable() export class MemoryCache extends Cache { kind(): string { return 'memory' } }
+
+@Injectable()
+export class Consumer {
+  constructor(
+    readonly users?: Repository<User>,
+    @Inject('redis') @Optional() readonly cache?: Cache,
+    @Inject('redis') readonly lazyCache?: Lazy<Cache>,
+    readonly missing?: Missing,
+  ) {}
+}
+`,
+  })
+  let result: FixtureAnalysis
+
+  beforeAll(async () => {
+    result = await analyzeRoot(app.root)
+  })
+  afterAll(() => app.cleanup())
+
+  it('never use a token that the runtime would resolve through an alias to a non-matching provider', () => {
+    expect(codes(result)).toEqual([])
+    // the aliases exist (single implementations)...
+    expect(result.graph.aliases).toEqual([
+      { key: 'src/types.ts#Cache', token: 'src/types.ts#MemoryCache' },
+      { key: 'src/types.ts#Repository', token: 'src/types.ts#OrderRepo' },
+    ])
+    // ...but Repository<User> (other type arguments) and Cache named 'redis' are not bound to them
+    expect(provider(result, 'src/types.ts#Consumer').deps.map(dep => dep.ref)).toEqual([
+      { token: 'Repository<User>', optional: true },
+      { token: 'redis', optional: true },
+      { token: 'redis', optional: true },
+      { token: 'src/types.ts#Missing', optional: true },
+    ])
+  })
+})
+
+describe('aliases of externals and package-internal types', () => {
+  const app = tempApp({
+    'node_modules/@fake/broker/package.json': JSON.stringify({
+      name: '@fake/broker',
+      version: '1.0.0',
+      type: 'module',
+      exports: { '.': { types: './index.d.ts', default: './index.js' } },
+      znight: { apiVersion: 1, provides: [{ export: 'MessageBroker', plugin: 'BrokerPlugin', scope: 'singleton' }] },
+    }),
+    'node_modules/@fake/broker/index.d.ts':
+      'export declare abstract class MessageBroker {\n  abstract publish(message: string): void\n}\n',
+    'node_modules/@fake/broker/index.js': 'export class MessageBroker {}\n',
+    'node_modules/@fake/client/package.json': JSON.stringify({
+      name: '@fake/client',
+      version: '1.0.0',
+      type: 'module',
+      exports: { '.': { types: './index.d.ts', default: './index.js' } },
+    }),
+    'node_modules/@fake/client/index.d.ts': "export { Client } from './client.js'\n",
+    'node_modules/@fake/client/client.d.ts':
+      "import { BaseClient } from './internal/base.js'\nexport declare class Client extends BaseClient {}\n",
+    'node_modules/@fake/client/internal/base.d.ts': 'export declare abstract class BaseClient {\n  ping(): void\n}\n',
+    'node_modules/@fake/client/index.js': 'export class Client {}\n',
+    'src/app.ts': `
+import { type CoreLogger, Factory, Injectable, Provides } from '@znight/core'
+import { MessageBroker } from '@fake/broker'
+import { Client } from '@fake/client'
+
+@Injectable()
+export class AppLogger implements CoreLogger {
+  debug(): void {}
+  info(): void {}
+  warn(): void {}
+  error(): void {}
+}
+
+@Injectable()
+export class OutboxBroker extends MessageBroker {
+  publish(): void {}
+}
+
+@Factory()
+export class Clients {
+  @Provides() client(): Client { return new Client() }
+}
+
+@Injectable()
+export class Consumer {
+  constructor(readonly logger: AppLogger, readonly broker: OutboxBroker, readonly client: Client) {}
+}
+`,
+  })
+  let result: FixtureAnalysis
+
+  beforeAll(async () => {
+    result = await analyzeRoot(app.root)
+  })
+  afterAll(() => app.cleanup())
+
+  it('never alias a token supplied at runtime (core tokens, manifest provides, externals option)', async () => {
+    expect(codes(result)).toEqual([])
+    const keys = result.graph.aliases.map(alias => alias.key)
+    expect(keys).not.toContain('@znight/core#CoreLogger')
+    expect(keys).not.toContain('@fake/broker#MessageBroker')
+    const withOption = await analyzeRoot(app.root, { externals: ['@fake/client#Client'] })
+    expect(withOption.graph.aliases.map(alias => alias.key)).not.toContain('@fake/client#Client')
+  })
+
+  it('never alias a package-internal identity (not nameable, layout-dependent)', () => {
+    expect(result.graph.aliases).toEqual([{ key: '@fake/client#Client', token: 'src/app.ts#Clients.client' }])
+  })
+})
+
+describe('type aliases supplied at runtime', () => {
+  const app = tempApp({
+    'node_modules/@fake/web/package.json': JSON.stringify({
+      name: '@fake/web',
+      version: '1.0.0',
+      type: 'module',
+      exports: { '.': { types: './index.d.ts', default: './index.js' } },
+      znight: {
+        apiVersion: 1,
+        provides: [
+          { export: 'HttpContext', plugin: 'WebPlugin', scope: 'request' },
+          { export: 'RequestId', plugin: 'WebPlugin', scope: 'request' },
+        ],
+      },
+    }),
+    'node_modules/@fake/web/index.d.ts':
+      'declare const requestIdBrand: unique symbol\nexport type RequestId = string & { readonly [requestIdBrand]: true }\nexport type Plain = string & { readonly plain: true }\nexport interface HttpContext {\n  readonly url: string\n}\n',
+    'node_modules/@fake/web/index.js': 'export {}\n',
+    'src/current-user.ts': `
+import { Inject, Injectable } from '@znight/core'
+import type { HttpContext, Plain, RequestId } from '@fake/web'
+
+@Injectable({ scope: 'request' })
+export class CurrentUser {
+  constructor(readonly ctx: HttpContext, readonly requestId: RequestId, @Inject('plain') readonly plain?: Plain) {}
+}
+`,
+  })
+  let result: FixtureAnalysis
+
+  beforeAll(async () => {
+    result = await analyzeRoot(app.root)
+  })
+  afterAll(() => app.cleanup())
+
+  it('binds a manifest `provides` type alias (`RequestId = string & {...}`) to its external', () => {
+    expect(codes(result)).toEqual([])
+    expect(provider(result, 'src/current-user.ts#CurrentUser').deps.map(dep => dep.ref)).toEqual([
+      '@fake/web#HttpContext',
+      '@fake/web#RequestId',
+      { token: 'plain', optional: true }, // other aliases are still expanded (a value type, qualified)
+    ])
+    expect(result.graph.externals.map(external => external.token)).toEqual([
+      '@fake/web#HttpContext',
+      '@fake/web#RequestId',
+    ])
+    // extensions still see what the value is (an HTTP header coerced as a string, for instance)
+    const info = result.classes.find(cls => cls.displayName === 'CurrentUser')
+    expect(info?.ctor.params.map(param => param.type.kind)).toEqual(['reference', 'intersection', 'intersection'])
+  })
+})
+
+describe('heritage through type aliases', () => {
+  const app = tempApp({
+    'src/repo.ts': `
+import { Injectable } from '@znight/core'
+
+export interface User { readonly user: true }
+export interface Readable<T> { read(): T }
+export interface Repository<T> extends Readable<T> { save(value: T): void }
+export type UserRepository = Repository<User>
+export type ReadableUsers = Readable<User>
+export interface Auditable extends ReadableUsers { audit(): void }
+
+@Injectable()
+export class UserRepo implements UserRepository {
+  read(): User { return { user: true } }
+  save(): void {}
+}
+
+@Injectable()
+export class AuditedUsers implements Auditable {
+  read(): User { return { user: true } }
+  audit(): void {}
+}
+
+@Injectable()
+export class Consumer {
+  constructor(readonly readable: Readable<User>[], readonly repository: Repository<User>) {}
+}
+`,
+  })
+  let result: FixtureAnalysis
+
+  beforeAll(async () => {
+    result = await analyzeRoot(app.root)
+  })
+  afterAll(() => app.cleanup())
+
+  it('follows `implements <alias>` and `extends <alias>` transitively', () => {
+    expect(codes(result)).toEqual([])
+    expect(provider(result, 'src/repo.ts#Consumer').deps.map(dep => dep.ref)).toEqual([
+      { multi: ['src/repo.ts#AuditedUsers', 'src/repo.ts#UserRepo'] },
+      'src/repo.ts#UserRepo',
+    ])
+  })
+})

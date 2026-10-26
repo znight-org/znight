@@ -525,6 +525,64 @@ describe('compiled provider libraries', () => {
     }
   })
 
+  it('reports malformed or version-skewed fragment entries (ZNIGHT018) instead of crashing', async () => {
+    const file = `${library.root}/dist/znight.providers.json`
+    const original = fs.readFileSync(file, 'utf8')
+    const fragment = JSON.parse(original) as {
+      providers: Record<string, unknown>[]
+      edges: unknown[]
+      bindings: unknown[]
+      extensions: Record<string, unknown>
+    }
+    const [first, ...others] = fragment.providers as [Record<string, unknown>, ...Record<string, unknown>[]]
+    const variants: [string, unknown, string][] = [
+      [
+        'provider without lifecycle',
+        { ...fragment, providers: [{ ...first, lifecycle: undefined }, ...others] },
+        `malformed provider #0: "lifecycle" must be an array of strings`,
+      ],
+      [
+        'unknown encoded tag',
+        { ...fragment, providers: [{ ...first, providedType: { $znight: 'future' } }, ...others] },
+        `malformed provider ${first['token']} (unknown encoded value tag "future")`,
+      ],
+      [
+        'bad bigint',
+        { ...fragment, providers: [{ ...first, providedType: { $znight: 'bigint', value: 'x' } }, ...others] },
+        `malformed provider ${first['token']}`,
+      ],
+      [
+        'heritage that is not a list of types',
+        { ...fragment, providers: [{ ...first, heritage: [42] }, ...others] },
+        `malformed provider ${first['token']} (not a type: 42)`,
+      ],
+      [
+        'provider that is not an object',
+        { ...fragment, providers: [null, ...fragment.providers] },
+        'malformed provider #0: not an object',
+      ],
+      ['malformed edge', { ...fragment, edges: [{ from: 1 }] }, 'malformed edge #0'],
+      ['malformed binding', { ...fragment, bindings: [{ id: 'x' }] }, 'malformed binding #0'],
+      [
+        'malformed extension data',
+        { ...fragment, extensions: { marks: 'nope' } },
+        "malformed data of the compiler extension 'marks'",
+      ],
+    ]
+    try {
+      for (const [, content, message] of variants) {
+        fs.writeFileSync(file, JSON.stringify(content))
+        const result = await compile({ root: app.root, extensions: [marks] })
+        const rendered = render(app.root, result.diagnostics)
+        expect(rendered).toContain(
+          `ZNIGHT018: Compiled provider library @acme/auth (@acme/auth/dist/znight.providers.json): ${message}`,
+        )
+      }
+    } finally {
+      fs.writeFileSync(file, original)
+    }
+  })
+
   it('rejects non-exported providers and custom factories in library mode', async () => {
     library.write('src/hidden.ts', "import { Injectable } from '@znight/core'\n@Injectable()\nexport class Hidden {}\n")
     try {

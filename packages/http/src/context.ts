@@ -125,6 +125,8 @@ export class RequestContext implements HttpContext {
   #files: Readonly<Record<string, readonly File[]>> | undefined
   #raw: Promise<Uint8Array> | undefined
   #streamed = false
+  /** Stops the body stream opened for the request, unless it was read to its end or cancelled. */
+  #stopBody: (() => void) | undefined
   #parsed: Promise<unknown> | undefined
 
   constructor(
@@ -214,7 +216,62 @@ export class RequestContext implements HttpContext {
   bodyStream(): ReadableStream<Uint8Array> {
     if (this.#raw !== undefined || this.#streamed) throw alreadyStreamed()
     this.#streamed = true
-    return openBodyStream(this.#source, this.#plan.limit)
+    return this.#openBodyStream()
+  }
+
+  /**
+   * Called by the pipeline once the request is over: a body stream that was neither read to its
+   * end nor cancelled (a handler that read the first chunk, then threw) is cancelled, which makes the
+   * adapter discard the rest of the body, so that the connection can serve the next request.
+   */
+  releaseBody(): void {
+    const stop = this.#stopBody
+    this.#stopBody = undefined
+    stop?.()
+  }
+
+  /** The body as a stream (see {@link releaseBody}). */
+  #openBodyStream(): ReadableStream<Uint8Array> {
+    const reader = openBodyStream(this.#source, this.#plan.limit).getReader()
+    let controller: ReadableStreamDefaultController<Uint8Array> | undefined
+    const settle = (): void => {
+      this.#stopBody = undefined
+    }
+    this.#stopBody = (): void => {
+      reader.cancel().catch(() => undefined)
+      try {
+        controller?.error(new Error('The request is over: its body can no longer be read'))
+      } catch {
+        // already closed or errored
+      }
+    }
+    return new ReadableStream<Uint8Array>(
+      {
+        start(current) {
+          controller = current
+        },
+        async pull(current) {
+          let result: Awaited<ReturnType<typeof reader.read>>
+          try {
+            result = await reader.read()
+          } catch (error) {
+            settle()
+            throw error
+          }
+          if (result.done) {
+            settle()
+            current.close()
+            return
+          }
+          current.enqueue(result.value)
+        },
+        cancel(reason) {
+          settle()
+          return reader.cancel(reason)
+        },
+      },
+      { highWaterMark: 0 },
+    )
   }
 
   parseBody(): Promise<unknown> {
@@ -233,7 +290,7 @@ export class RequestContext implements HttpContext {
       if (this.#raw === undefined) {
         if (this.#streamed) throw alreadyStreamed()
         this.#streamed = true
-        result = await readMultipart(openBodyStream(this.#source, this.#plan.limit), contentType as string, policy)
+        result = await readMultipart(this.#openBodyStream(), contentType as string, policy)
       } else {
         result = parseMultipart(await this.#raw, contentType as string, policy)
       }
@@ -242,8 +299,10 @@ export class RequestContext implements HttpContext {
       return result.fields
     }
     if (this.#plan.upload) {
-      // upload routes only accept multipart bodies (an empty body means "no file")
-      if (!hasBody(headers) && this.#source.hasBody?.() !== true) return undefined
+      // upload routes only accept multipart bodies (an empty body means "no file"); the framing
+      // headers decide, the adapter only for requests without them (Web `Request`s built in memory)
+      const framed = headers['content-length'] !== undefined || headers['transfer-encoding'] !== undefined
+      if (!(framed ? hasBody(headers) : this.#source.hasBody?.() === true)) return undefined
       throw new UnsupportedMediaTypeException(
         `Expected a multipart/form-data body${media === undefined ? '' : ` (received ${JSON.stringify(media.type)})`}`,
       )

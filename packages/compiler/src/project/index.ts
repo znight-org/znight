@@ -60,7 +60,7 @@ export type {
   UnresolvedReason,
   UnresolvedSymbol,
 } from './symbols.ts'
-export type { HeritageClause, TypeParameterInfo, TypeScope } from './type-resolver.ts'
+export type { HeritageClause, ResolveTypeOptions, TypeParameterInfo, TypeScope } from './type-resolver.ts'
 export type {
   ArrayType,
   IntersectionType,

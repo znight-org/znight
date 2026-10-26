@@ -153,16 +153,16 @@ container is used: interceptors, scopes and lifecycle hooks all run.
 `app.inject()` needs no listening server: configure the HTTP plugin with `port: 0` (a free port) so
 parallel test files never collide, or pass `start: false` to stop after `onBootstrap`.
 
-| Option      | Type                              | Description                                                                                                                                                                           |
-| ----------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `metadata`  | `ZnightMetadata`                  | **Required.** The generated metadata.                                                                                                                                                 |
-| `plugins`   | `Plugin[]`                        | Plugins, as in `Application.create`.                                                                                                                                                  |
-| `providers` | `Map` / `[key, value][]` / record | Values for externals (`Logger`, `ConfigSource`...), as in `Application.create`.                                                                                                       |
-| `overrides` | `Map` / `[key, value][]` / record | Values or provider definitions replacing providers, applied last. Overridden providers are instantiated at boot.                                                                      |
-| `only`      | `'all'` \| `(Class \| Token)[]`   | Providers instantiated at boot (with their dependencies). Default: HTTP controllers (with their guards and interceptors) and message consumers, or every provider when there is none. |
-| `start`     | `boolean`                         | Run `app.start()` (plugins listen/subscribe). Default `true`; `false` stops after `onBootstrap`.                                                                                      |
-| `logger`    | `CoreLogger`                      | Default: a console logger writing warnings and errors only.                                                                                                                           |
-| `shutdown`  | `{ timeoutMs?, hookTimeoutMs? }`  | Shutdown timeouts.                                                                                                                                                                    |
+| Option      | Type                              | Description                                                                                                                                                                                                                            |
+| ----------- | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `metadata`  | `ZnightMetadata`                  | **Required.** The generated metadata.                                                                                                                                                                                                  |
+| `plugins`   | `Plugin[]`                        | Plugins, as in `Application.create`.                                                                                                                                                                                                   |
+| `providers` | `Map` / `[key, value][]` / record | Values for externals (`Logger`, `ConfigSource`...), as in `Application.create`.                                                                                                                                                        |
+| `overrides` | `Map` / `[key, value][]` / record | Values or provider definitions replacing providers, applied last. Overridden providers are instantiated at boot.                                                                                                                       |
+| `only`      | `'all'` \| `(Class \| Token)[]`   | Providers instantiated at boot (with their dependencies), plus the overrides and the plugin roots (below). Default: HTTP controllers (with their guards and interceptors) and message consumers, or every provider when there is none. |
+| `start`     | `boolean`                         | Run `app.start()` (plugins listen/subscribe). Default `true`; `false` stops after `onBootstrap`.                                                                                                                                       |
+| `logger`    | `CoreLogger`                      | Default: a console logger writing warnings and errors only.                                                                                                                                                                            |
+| `shutdown`  | `{ timeoutMs?, hookTimeoutMs? }`  | Shutdown timeouts.                                                                                                                                                                                                                     |
 
 Keys of `providers` and `overrides` may be classes, tokens, aliases or unique display names
 (`'UserRepository'`), like in `TestBed`; other strings are used as tokens (values for tokens
@@ -171,6 +171,22 @@ registered at runtime by plugins).
 Limiting the boot to the controllers' closure keeps tests fast and lets them ignore unrelated
 providers (and their missing externals). Other providers are still created on first use (synchronous
 factories only).
+
+Providers a plugin resolves while it bootstraps without the metadata referencing them (the global
+`guards`, `interceptors` and `exceptionMappers` of `HttpPlugin.configure({...})`) are instantiated at
+boot too, with their dependencies, when the plugin lists them in an `initRoots()` method (see
+[Compiler contract](#compiler-contract)). Options computed from the container
+(`HttpPlugin.configure(c => ({...}))`) cannot be listed before the boot: when such a provider (or one
+of its dependencies) has an async factory, the boot fails with `ZNIGHT015` ("cannot create ... on
+demand: its factory is async"); add it to `only`, or pass `only: 'all'`:
+
+```ts
+await using app = await TestApp.create({
+  metadata: __ZNIGHT_METADATA__,
+  plugins: [HttpPlugin.configure(c => ({ port: 0, prefix: c.get(AppConfig).prefix, guards: [AuthGuard] }))],
+  only: [UserController, AuthGuard], // AuthGuard needs the async JwksStore
+})
+```
 
 | Member              | Description                                                                                    |
 | ------------------- | ---------------------------------------------------------------------------------------------- |
@@ -325,3 +341,12 @@ Runtime contract with `@znight/http`: the plugin named `'http'` exposes
 `inject(request: { method: string; url: string; headers?; body?; query? }): Promise<{ status: number; headers; body: string; bytes?: Uint8Array; json<T>(): T }>`
 (`HttpInjector`, `HttpInjectResult`), dispatching in memory; `TestApp` derives `bytes` from `body`
 when a plugin does not return them.
+
+Runtime contract with every plugin (`PluginInitRoots`): an optional `initRoots(): readonly ProviderKey[]`
+method returns the providers (classes or tokens) the plugin resolves in `onBootstrap` that the
+metadata does not reference, typically the classes given in its options. `TestApp.create()` calls it
+once, before creating the application, and adds the keys that designate providers of the metadata
+to the providers instantiated at boot (other keys are ignored: the plugin reports them); it rejects
+with a `TypeError` when the result is not an array. `HttpPlugin` returns the classes of its
+`guards`, `interceptors` and `exceptionMappers` options (nothing when the options are a function of
+the container).

@@ -52,7 +52,7 @@ const expected = (runtime: string): readonly Partial<Observed>[] => [
   { status: 200, body: '', contentLength: runtime === 'node' ? '26' : '25' },
   { status: 200, body: 'ab' },
   { status: 200 },
-  { status: 405, allow: 'GET, HEAD' },
+  { status: 405, allow: 'GET, HEAD, OPTIONS' },
   { status: 404 },
 ]
 

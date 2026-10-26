@@ -6,6 +6,7 @@ import { context as otelContext, SpanKind, trace } from '@opentelemetry/api'
 
 import { invalidOption } from '../internal/errors.ts'
 import { guard } from '../internal/safe.ts'
+import { ensureContextManager } from '../tracing/context.ts'
 import { SemanticAttributes } from '../tracing/semconv.ts'
 import { recordSpanError } from '../tracing/tracer.ts'
 import { observeCall } from './observe.ts'
@@ -69,6 +70,7 @@ export class TracedInterceptor implements MethodInterceptor<TracedOptions | unde
       parent,
     )
     const active = trace.setSpan(parent, span)
+    ensureContextManager()
     return observeCall(invocation.isAsync, () => otelContext.with(active, () => invocation.proceed()), {
       success: () => this.#record(() => span.end()),
       failure: error =>

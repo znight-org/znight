@@ -107,8 +107,8 @@ export class DecoratorReader {
   readonly #project: Project
   readonly #catalog: DecoratorCatalog
   readonly #report: Reporter
-  /** Composite decorator detection, per declaration key: the inner Znight decorator, or `null`. */
-  readonly #composites = new Map<string, string | null>()
+  /** Composite / alias decorator detection, per declaration key: the wrapped Znight decorator, or `null`. */
+  readonly #composites = new Map<string, WrappedDecorator | null>()
 
   constructor(project: Project, catalog: DecoratorCatalog, report: Reporter) {
     this.#project = project
@@ -182,33 +182,32 @@ export class DecoratorReader {
   }
 
   /**
-   * ZNIGHT005 warning for a local function whose body calls a Znight decorator (§4.6): the decorators
-   * it applies are not visible to the compiler.
+   * ZNIGHT005 warning for a decorator the compiler cannot see through (§4.6): a local function whose
+   * body calls a Znight decorator (composite decorator), or a `const` alias of one
+   * (`export const Service = Injectable`): the class it decorates is silently not analysed otherwise.
    */
   #checkComposite(symbol: SymbolResolution, name: string, location: Location): void {
     if (symbol.kind !== 'declaration') {
       return
     }
     const declaration = symbol.declaration
-    if (!this.#project.isScanned(declaration.file)) {
-      return
-    }
-    const key = declarationKey(declaration)
-    let inner = this.#composites.get(key)
+    const inner = this.#wrapped(declaration, 0)
     if (inner === undefined) {
-      inner = this.#innerDecorator(declaration) ?? null
-      this.#composites.set(key, inner)
-    }
-    if (inner === null) {
       return
     }
     const file = this.#project.getFile(declaration.file)
     this.#report({
       code: ErrorCode.InvalidDecorator,
       severity: 'warning',
-      message: `@${name} is a composite decorator: the Znight decorator @${inner} it applies is not visible to the compiler`,
+      message: inner.alias
+        ? `@${name} is an alias of the Znight decorator @${inner.name}: aliases are not visible to the compiler, the decorator is ignored`
+        : `@${name} is a composite decorator: the Znight decorator @${inner.name} it applies is not visible to the compiler`,
       location,
-      hints: [`Apply @${inner}(...) directly instead of through @${name}`],
+      hints: inner.alias
+        ? [
+            `Apply @${inner.name}(...) directly, or re-export it under another name: \`export { ${inner.name} as ${name} } from '${inner.module}'\``,
+          ]
+        : [`Apply @${inner.name}(...) directly instead of through @${name}`],
       ...(file
         ? {
             related: [
@@ -222,7 +221,49 @@ export class DecoratorReader {
     })
   }
 
-  #innerDecorator(declaration: Declaration): string | undefined {
+  /**
+   * The Znight decorator a declaration wraps: a `const` aliasing it (followed through other `const`
+   * aliases, any file), or a function of a scanned file whose body calls it. Memoized per declaration.
+   */
+  #wrapped(declaration: Declaration, depth: number): WrappedDecorator | undefined {
+    const key = declarationKey(declaration)
+    let wrapped = this.#composites.get(key)
+    if (wrapped === undefined) {
+      wrapped =
+        this.#aliased(declaration, depth) ??
+        (this.#project.isScanned(declaration.file) ? this.#innerDecorator(declaration) : undefined) ??
+        null
+      this.#composites.set(key, wrapped)
+    }
+    return wrapped ?? undefined
+  }
+
+  /** `const Service = Injectable` (or `zn.Injectable`, `Injectable as typeof Injectable`...). */
+  #aliased(declaration: Declaration, depth: number): WrappedDecorator | undefined {
+    if (declaration.kind !== 'const' || depth > MAX_ALIAS_DEPTH) {
+      return undefined
+    }
+    const init = unwrapExpression((declaration.node as VariableDeclarator).init ?? undefined)
+    const file = this.#project.getFile(declaration.file)
+    if (init === undefined || !isEntityName(init) || !file) {
+      return undefined
+    }
+    const resolved = this.#project.resolveIdentifier({ file, namespace: declaration.namespace }, init, 'value')
+    const identity = resolved.identity?.identity
+    if (identity !== undefined && this.#catalog.isZnight(identity)) {
+      return { name: displayNameOf(identity), alias: true, module: resolved.identity?.specifier ?? '...' }
+    }
+    if (
+      resolved.symbol.kind === 'declaration' &&
+      declarationKey(resolved.symbol.declaration) !== declarationKey(declaration)
+    ) {
+      // `const B = A` with `A` an alias or a composite decorator: `B` is the same
+      return this.#wrapped(resolved.symbol.declaration, depth + 1)
+    }
+    return undefined
+  }
+
+  #innerDecorator(declaration: Declaration): WrappedDecorator | undefined {
     const body = functionBody(declaration)
     const file = this.#project.getFile(declaration.file)
     if (!body || !file) {
@@ -243,8 +284,37 @@ export class DecoratorReader {
       }
       return true
     })
-    return found
+    return found === undefined ? undefined : { name: found, alias: false, module: '' }
   }
+}
+
+/** A Znight decorator applied through another declaration. */
+interface WrappedDecorator {
+  /** Display name of the Znight decorator (`Injectable`). */
+  readonly name: string
+  /** `const Service = Injectable` (alias) rather than a function calling it (composite). */
+  readonly alias: boolean
+  /** Aliases: the module exporting the Znight decorator (`@znight/core`), for the re-export hint. */
+  readonly module: string
+}
+
+/** Maximum chain of `const` aliases followed (`const A = Injectable; const B = A`). */
+const MAX_ALIAS_DEPTH = 8
+
+/** Strips parentheses and type-only wrappers (`(x)`, `x as T`, `x satisfies T`, `x!`, `<T>x`). */
+function unwrapExpression(expression: Expression | undefined): Expression | undefined {
+  let current = expression
+  while (
+    current &&
+    (current.type === 'ParenthesizedExpression' ||
+      current.type === 'TSAsExpression' ||
+      current.type === 'TSSatisfiesExpression' ||
+      current.type === 'TSNonNullExpression' ||
+      current.type === 'TSTypeAssertion')
+  ) {
+    current = current.expression
+  }
+  return current
 }
 
 /** Body of a function declaration or of a `const` initialized with a function. */
@@ -262,7 +332,7 @@ function functionBody(declaration: Declaration): FunctionNode['body'] | Expressi
 }
 
 /** Identifier or non-computed member chain (`Injectable`, `zn.Injectable`). */
-function isEntityName(expression: Expression): boolean {
+export function isEntityName(expression: Expression): boolean {
   if (expression.type === 'Identifier') {
     return true
   }

@@ -2,7 +2,9 @@
  * Validation codes of the core analysis (§4.8): one fixture application per family in
  * `test/fixtures/analysis/<name>`. Near-miss and decorator messages are snapshotted.
  */
-import { analyzeFixture, codes, renderDiagnostics, withCode } from './helpers.ts'
+import fs from 'node:fs'
+
+import { analyzeFixture, analyzeRoot, codes, provider, renderDiagnostics, tempApp, withCode } from './helpers.ts'
 import { describe, expect, test as it } from 'bun:test'
 
 describe('ZNIGHT001: missing providers and near-miss analysis', () => {
@@ -204,5 +206,129 @@ describe('ZNIGHT020: generated module imported by a provider module', () => {
   it('follows a custom outFile', async () => {
     const result = await analyzeFixture('generated', { outFile: 'src/generated/metadata.ts' })
     expect(withCode(result, 'ZNIGHT020')).toEqual([])
+  })
+})
+
+describe('ZNIGHT001 near-miss hints never contradict the registry', () => {
+  it('does not suggest @Injectable() for a provider missed by its qualifier, nor for abstract or generic classes', async () => {
+    const app = tempApp({
+      'src/svc.ts': `
+import { Inject, Injectable } from '@znight/core'
+
+export interface User { readonly user: true }
+export interface Order { readonly order: true }
+export abstract class Repository<T> { abstract find(): T }
+export class Box<T> { constructor(readonly value?: T) {} }
+
+@Injectable() export class Service {}
+@Injectable() export class OrderRepository extends Repository<Order> { find(): Order { return { order: true } } }
+
+@Injectable()
+export class Consumer {
+  constructor(@Inject('main') readonly service: Service, readonly users: Repository<User>, readonly box: Box<User>) {}
+}
+`,
+    })
+    try {
+      const result = await analyzeRoot(app.root)
+      expect(codes(result)).toEqual([
+        'ZNIGHT001 src/svc.ts:14:49',
+        'ZNIGHT001 src/svc.ts:14:74',
+        'ZNIGHT001 src/svc.ts:14:106',
+      ])
+      const [qualified, abstract, generic] = result.diagnostics.map(diagnostic => diagnostic.hints ?? [])
+      expect(qualified).toEqual(["1 provider of Service exists but none is named 'main': Service (src/svc.ts:9)"])
+      expect(abstract).toEqual([
+        'Repository (src/svc.ts:6) is abstract: it cannot be a provider itself; decorate a concrete subclass of Repository<User> with @Injectable(), or provide Repository<User> with a @Provides method',
+        'OrderRepository (src/svc.ts:10) implements Repository<Order>, not Repository<User>',
+      ])
+      expect(generic).toEqual([
+        'Box (src/svc.ts:7) is generic: it cannot be a provider itself; decorate a concrete subclass of Box<User> with @Injectable(), or provide Box<User> with a @Provides method',
+      ])
+    } finally {
+      app.cleanup()
+    }
+  })
+})
+
+describe('ZNIGHT005: decorators and providers the compiler cannot use', () => {
+  it('reports a provider class exported as a type only (the generated module value-imports it)', async () => {
+    const app = tempApp({
+      'src/svc.ts': "import { Injectable } from '@znight/core'\n@Injectable()\nclass Svc {}\nexport type { Svc }\n",
+      'src/both.ts':
+        "import { Injectable } from '@znight/core'\n@Injectable()\nclass Both {}\nexport type { Both }\nexport { Both as Service }\n",
+    })
+    try {
+      const result = await analyzeRoot(app.root)
+      expect(codes(result)).toEqual(['ZNIGHT005 src/svc.ts:2:1'])
+      expect(result.diagnostics[0]?.message).toBe(
+        'Svc must be importable by the generated module to be a provider: it is exported as a type only',
+      )
+      expect(result.diagnostics[0]?.hints).toEqual(['Export it as a value: `export { Svc }` or `export class Svc ...`'])
+      // a value export is preferred to a type-only one
+      expect(provider(result, 'src/both.ts#Both').importRoute).toMatchObject({ exportName: 'Service', typeOnly: false })
+    } finally {
+      app.cleanup()
+    }
+  })
+
+  it('warns about const aliases of Znight decorators, which are not followed', async () => {
+    const app = tempApp({
+      'src/deco.ts':
+        "import { Injectable } from '@znight/core'\nexport const Service = Injectable\nexport const Again = (Service as typeof Injectable)\n",
+      'src/svc.ts':
+        "import { Again, Service } from './deco.ts'\n@Service()\nexport class Svc {}\n@Again()\nexport class Other {}\n",
+    })
+    try {
+      const result = await analyzeRoot(app.root)
+      expect(codes(result, 'warning')).toEqual(['ZNIGHT005 src/svc.ts:2:1', 'ZNIGHT005 src/svc.ts:4:1'])
+      expect(renderDiagnostics(result.root, result.diagnostics)).toBe(
+        [
+          'warning ZNIGHT005 src/svc.ts:2:1: @Service is an alias of the Znight decorator @Injectable: aliases are not visible to the compiler, the decorator is ignored',
+          "  = hint: Apply @Injectable(...) directly, or re-export it under another name: `export { Injectable as Service } from '@znight/core'`",
+          '  - Service is declared in src/deco.ts (src/deco.ts:2:14)',
+          'warning ZNIGHT005 src/svc.ts:4:1: @Again is an alias of the Znight decorator @Injectable: aliases are not visible to the compiler, the decorator is ignored',
+          "  = hint: Apply @Injectable(...) directly, or re-export it under another name: `export { Injectable as Again } from '@znight/core'`",
+          '  - Again is declared in src/deco.ts (src/deco.ts:3:14)',
+        ].join('\n'),
+      )
+    } finally {
+      app.cleanup()
+    }
+  })
+
+  it('reports decorator arguments whose bigint evaluation throws in JavaScript', async () => {
+    const app = tempApp({
+      'src/svc.ts':
+        "import { Injectable } from '@znight/core'\nconst N = 2n ** -1n\n@Injectable({ name: `svc-${N}` })\nexport class Svc {}\n",
+    })
+    try {
+      const result = await analyzeRoot(app.root)
+      expect(codes(result)).toEqual(['ZNIGHT005 src/svc.ts:3:28'])
+    } finally {
+      app.cleanup()
+    }
+  })
+})
+
+describe('ZNIGHT020 without the generated module on disk', () => {
+  it('reports an import through a tsconfig `paths` alias on the first compile', async () => {
+    const app = tempApp({
+      'tsconfig.json': JSON.stringify({
+        compilerOptions: { strict: true, experimentalDecorators: true, paths: { '@/*': ['./src/*'] } },
+      }),
+      'src/svc.ts':
+        "import { Injectable } from '@znight/core'\nimport metadata from '@/.znight/container.generated.ts'\n@Injectable()\nexport class Svc {\n  readonly metadata = metadata\n}\n",
+      'src/other.ts': "import { Injectable } from '@znight/core'\n@Injectable()\nexport class Other {}\n",
+      'src/nested/thing.ts':
+        "import { Injectable } from '@znight/core'\nimport '@/nested/container.generated.ts'\nimport '#unknown/.znight/container.generated.ts'\n@Injectable()\nexport class Thing {}\n",
+    })
+    try {
+      expect(fs.existsSync(`${app.root}/src/.znight/container.generated.ts`)).toBe(false)
+      const result = await analyzeRoot(app.root)
+      expect(codes(result)).toEqual(['ZNIGHT020 src/svc.ts:2:22'])
+    } finally {
+      app.cleanup()
+    }
   })
 })

@@ -599,8 +599,14 @@ export class Container {
     throw notFoundError(slot.token, slot)
   }
 
-  /** Creates a singleton synchronously outside of the `init()` schedule (lazy access, `init({ only })`). */
+  /**
+   * Creates a singleton synchronously outside of the `init()` schedule (lazy access, `init({ only })`).
+   * Like during `init()`, the factory runs outside of any request scope: a singleton belongs to the
+   * application, so the timers, sockets and promises it creates must not capture the scope of the
+   * request that happens to use it first.
+   */
   #createOnDemand(slot: Slot): unknown {
+    if (this.#storage.getStore() !== undefined) return this.#storage.exit(() => this.#createOnDemand(slot))
     switch (slot.state) {
       case CREATING:
         throw reentrantCreationError(slot)
@@ -823,7 +829,10 @@ export class Container {
 
   #bindBuiltin(token: Token, value: unknown, cls?: object): void {
     this.#bind(token, LEVEL_BUILTIN, 'register', (slot, origin) => this.#applyValue(slot, value, LEVEL_BUILTIN, origin))
-    if (cls !== undefined && !this.#lookup.has(cls)) this.#lookup.set(cls, this.#slot(token))
+    if (cls === undefined) return
+    const slot = this.#slot(token)
+    slot.cls ??= cls
+    if (!this.#lookup.has(cls)) this.#lookup.set(cls, slot)
   }
 
   #assertOpen(action: string, key: unknown): void {
@@ -872,7 +881,10 @@ export class Container {
     slot.state = IDLE
     slot.level = level
     slot.origin = origin
-    if (definition.class !== undefined && !this.#lookup.has(definition.class)) this.#lookup.set(definition.class, slot)
+    if (definition.class !== undefined) {
+      slot.cls ??= definition.class
+      if (!this.#lookup.has(definition.class)) this.#lookup.set(definition.class, slot)
+    }
     this.#names = undefined
   }
 
@@ -892,7 +904,11 @@ export class Container {
     return slot
   }
 
-  /** Display-name (or class-name) lookup. Ambiguity throws ZNIGHT008 when `strict`. */
+  /**
+   * Display-name (or class-name) lookup. A class key only keeps the candidates of its hierarchy (see
+   * `classMatch`): those known to be of that class win over those whose class is unknown. Ambiguity
+   * throws ZNIGHT008 when `strict`.
+   */
   #findByName(key: unknown, strict: boolean): Slot | undefined {
     let name: string
     if (typeof key === 'string') name = key
@@ -900,8 +916,7 @@ export class Container {
     else return undefined
     const candidates = this.#nameIndex().get(name)
     if (candidates === undefined) return undefined
-    const matches =
-      typeof key === 'function' ? candidates.filter(slot => matchesClass(slot, key as ProviderClass)) : candidates
+    const matches = typeof key === 'function' ? classCandidates(candidates, key) : candidates
     if (matches.length === 1) {
       const slot = matches[0] as Slot
       if (this.#sealed) this.#lookup.set(key, slot)
@@ -938,10 +953,54 @@ export function setRegistrationOrigin(container: Container, origin: string | und
   internals.setOrigin(container, origin)
 }
 
-function matchesClass(slot: Slot, cls: ProviderClass): boolean {
+const CLASS_MISMATCH = 0
+const CLASS_UNKNOWN = 1
+const CLASS_MATCH = 2
+
+/**
+ * The candidates of a class key: those of its hierarchy when there are some, otherwise those whose
+ * class is unknown (an unbound external, a provider without a class, a value that is not an instance).
+ */
+function classCandidates(candidates: readonly Slot[], cls: object): Slot[] {
+  const matches: Slot[] = []
+  const unknown: Slot[] = []
+  for (const slot of candidates) {
+    const match = classMatch(slot, cls)
+    if (match === CLASS_MATCH) matches.push(slot)
+    else if (match === CLASS_UNKNOWN) unknown.push(slot)
+  }
+  return matches.length > 0 ? matches : unknown
+}
+
+/**
+ * How a slot relates to a class key: its class (definition class, or the class it was bound with,
+ * which survives a value override) or its value is of the class (or a subclass), its class is
+ * unrelated, or it cannot tell. A value that is not an instance of the class does not rule the slot
+ * out: types are structural, so a fake declared with `implements` stands for a class without
+ * extending it. Provider instances are not inspected, so the answer does not depend on whether the
+ * singleton was already created.
+ */
+function classMatch(slot: Slot, cls: object): number {
   const own = slot.definition?.class
-  if (own === undefined) return true
-  return own === cls || own.prototype instanceof cls
+  if (isSubclass(own, cls) || isSubclass(slot.cls, cls)) return CLASS_MATCH
+  if (slot.mode === VALUE && isInstance(slot.instance, cls)) return CLASS_MATCH
+  return own === undefined && slot.cls === undefined ? CLASS_UNKNOWN : CLASS_MISMATCH
+}
+
+function isSubclass(own: object | undefined, cls: object): boolean {
+  return own !== undefined && (own === cls || isInstance((own as { prototype?: unknown }).prototype, cls))
+}
+
+/** `value instanceof cls` through the prototype chain only (no `Symbol.hasInstance`, never throws). */
+function isInstance(value: unknown, cls: object): boolean {
+  const prototype: unknown = (cls as { prototype?: unknown }).prototype
+  return (
+    prototype !== null &&
+    typeof prototype === 'object' &&
+    value !== null &&
+    (typeof value === 'object' || typeof value === 'function') &&
+    Object.prototype.isPrototypeOf.call(prototype, value)
+  )
 }
 
 function disposeQuietly(instance: unknown, method: string | undefined): void {

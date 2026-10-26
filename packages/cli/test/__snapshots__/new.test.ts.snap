@@ -252,7 +252,7 @@ describe('GreetingController', () => {
     app = await TestApp.create({
       metadata,
       plugins: [
-        ObservabilityPlugin.configure({ logging: { level: 'silent' } }),
+        ObservabilityPlugin.configure({ logging: { level: 'silent' }, metrics: { server: false } }),
         HttpPlugin.configure({ port: 0 }),
       ],
     })
@@ -467,9 +467,9 @@ preload = ["@znight/compiler/bun"]
     "node": ">=24"
   },
   "scripts": {
-    "dev": "znight dev",
+    "dev": "znight dev --runtime bun",
     "build": "znight build",
-    "start": "znight start",
+    "start": "znight start --runtime bun",
     "generate": "znight generate",
     "typecheck": "znight generate && tsc --noEmit",
     "test": "bun test"
@@ -671,7 +671,7 @@ describe('GreetingController', () => {
     app = await TestApp.create({
       metadata,
       plugins: [
-        ObservabilityPlugin.configure({ logging: { level: 'silent' } }),
+        ObservabilityPlugin.configure({ logging: { level: 'silent' }, metrics: { server: false } }),
         MessagingPlugin.configure({ driver: memory() }),
         HttpPlugin.configure({ port: 0 }),
       ],

@@ -573,9 +573,11 @@ class PluginState {
     this.#watched = new Set(result.watchFiles)
     this.#roots = includeRoots(compiler)
     if (result.ok) {
-      await writeIfChanged(result.outFile, result.code)
+      // The disk copy (the `serve` rendering in every mode) is for `tsc` and editors: the module is
+      // served from memory, so a write failure (read-only tree) is a warning, never a failure.
+      await this.#write(compiler, result.outFile, result.diskCode)
       if (result.library !== undefined && this.#kind === 'dev') {
-        await writeIfChanged(result.library.file, result.library.content)
+        await this.#write(compiler, result.library.file, result.library.content)
       }
     }
     this.#report(compiler, result, previous)
@@ -584,6 +586,19 @@ class PluginState {
       if (previous !== undefined && previous.code !== result.code) {
         await this.#reloadGenerated(result.outFile)
       }
+    }
+  }
+
+  /** Writes a generated file when it changed; failures are reported as warnings. */
+  async #write(compiler: ZnightCompiler, file: string, content: string): Promise<void> {
+    try {
+      await writeIfChanged(file, content)
+    } catch (error) {
+      const display = path.posix.relative(compiler.options.root, file)
+      this.#config?.logger.warn(
+        `${pc.cyan('[znight]')} cannot write ${display}: ${error instanceof Error ? error.message : String(error)} (the generated module is served from memory; tsc and editors read the disk copy)`,
+        { timestamp: this.#kind !== 'build' },
+      )
     }
   }
 

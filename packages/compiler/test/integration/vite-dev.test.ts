@@ -157,6 +157,36 @@ describe('dev server (Vitest-like)', () => {
   )
 
   it(
+    'recompiles when a file read outside the include globs changes, or is created where an import failed',
+    async () => {
+      app.write('shared/names.ts', "export const NAME = 'alpha'\n")
+      app.write(
+        'src/named.ts',
+        "import { Injectable } from '@znight/core'\nimport { NAME } from '../shared/names.ts'\n@Injectable({ name: NAME })\nexport class Named {}\n",
+      )
+      await waitFor(() => api.result?.code.includes("name: 'alpha'") === true, 'the named provider')
+      expect(api.result?.watchFiles).toContain(`${app.root}/shared/names.ts`)
+
+      app.write('shared/names.ts', "export const NAME = 'beta'\n")
+      await waitFor(() => api.result?.code.includes("name: 'beta'") === true, 'the recompile')
+
+      app.write(
+        'src/named.ts',
+        "import { Injectable } from '@znight/core'\nimport { LATER } from '../shared/later.ts'\n@Injectable({ name: LATER })\nexport class Named {}\n",
+      )
+      await waitFor(() => api.result?.ok === false, 'the failed compile')
+      app.write('shared/later.ts', "export const LATER = 'later'\n")
+      await waitFor(() => api.result?.code.includes("name: 'later'") === true, 'the fixed compile')
+
+      for (const file of ['src/named.ts', 'shared']) {
+        app.remove(file)
+      }
+      await waitFor(() => api.result?.ok === true && api.result.stats.providers === 4, 'the deletions')
+    },
+    TIMEOUT,
+  )
+
+  it(
     'recompiles on package.json changes and ignores writes to the generated module',
     async () => {
       const before = api.result

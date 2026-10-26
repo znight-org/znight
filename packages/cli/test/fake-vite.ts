@@ -1,5 +1,5 @@
-import type { InlineConfig, Plugin } from 'vite'
-import type { ViteApi, WatcherEvent } from '../src/integrations/vite.ts'
+import type { InlineConfig, Plugin, UserConfig } from 'vite'
+import type { ResolvedConfigLike, ViteApi, WatcherEvent } from '../src/integrations/vite.ts'
 
 import { join } from 'node:path'
 
@@ -32,8 +32,12 @@ export interface FakeZnightApi {
 export interface FakeViteOptions {
   /** Error thrown by the build (one-shot, or when starting the watch mode). */
   readonly fail?: unknown
-  /** `loadConfigFromFile` result (plugins of the config). */
+  /** Plugins of the config file (nested arrays and promises are flattened, like Vite does). */
   readonly configPlugins?: unknown
+  /** `root` of the config file (relative: resolved by the CLI against the project root). */
+  readonly configRoot?: string
+  /** `resolve.alias` of the resolved config. */
+  readonly configAlias?: unknown
   /** A `znight()` plugin in the config of the builds, exposing this API (`configResolved`). */
   readonly znight?: FakeZnightApi
 }
@@ -43,10 +47,24 @@ export class FakeVite implements ViteApi {
   readonly builds: InlineConfig[] = []
   readonly watchers: FakeWatcher[] = []
   readonly options: FakeViteOptions
+  /** The inline configs given to `resolveConfig`. */
+  readonly resolvedConfigs: InlineConfig[] = []
   loadedConfigs = 0
 
   constructor(options: FakeViteOptions = {}) {
     this.options = options
+  }
+
+  /** The root Vite resolves for `config`: the `config` hooks of its plugins applied to the file's root. */
+  resolvedRoot(config: InlineConfig): string {
+    let current: UserConfig = this.options.configRoot === undefined ? {} : { root: this.options.configRoot }
+    for (const plugin of (config.plugins ?? []) as Plugin[]) {
+      const hook = plugin.config
+      const handler = typeof hook === 'function' ? hook : hook?.handler
+      const result = handler?.call({} as never, current, { command: 'build', mode: config.mode ?? 'production' })
+      if (typeof result === 'object' && result !== null && !('then' in result)) current = { ...current, ...result }
+    }
+    return current.root ?? config.root ?? '/'
   }
 
   build(config: InlineConfig): Promise<unknown> {
@@ -63,9 +81,16 @@ export class FakeVite implements ViteApi {
     return Promise.resolve({ output: [] })
   }
 
-  readonly loadConfigFromFile: ViteApi['loadConfigFromFile'] = (_env, configFile) => {
+  readonly resolveConfig: NonNullable<ViteApi['resolveConfig']> = async config => {
     this.loadedConfigs++
-    return Promise.resolve({ path: configFile ?? 'vite.config.ts', config: { plugins: this.options.configPlugins } })
+    this.resolvedConfigs.push(config)
+    const plugins = [...(await flatten(this.options.configPlugins)), ...((config.plugins ?? []) as object[])]
+    return {
+      root: this.resolvedRoot(config),
+      configFile: typeof config.configFile === 'string' ? config.configFile : undefined,
+      plugins,
+      resolve: { alias: this.options.configAlias ?? [] },
+    } satisfies ResolvedConfigLike
   }
 
   /** Calls `configResolved` of the plugins given to the build, with the config's `znight()` plugin. */
@@ -75,16 +100,17 @@ export class FakeVite implements ViteApi {
       ...(this.options.znight === undefined ? [] : [{ name: 'znight', api: this.options.znight }]),
       ...plugins,
     ]
+    const root = this.resolvedRoot(config)
     for (const plugin of plugins) {
       const hook = plugin.configResolved
       const handler = typeof hook === 'function' ? hook : hook?.handler
-      handler?.call({} as never, { plugins: resolved } as never)
+      handler?.call({} as never, { plugins: resolved, root } as never)
     }
   }
 
   /** Calls `writeBundle` of the plugins given to the last build, as a successful build does. */
   writeBundle(config: InlineConfig = this.lastBuild(), fileName = 'main.js'): void {
-    const root = config.root ?? '/'
+    const root = this.resolvedRoot(config)
     for (const plugin of (config.plugins ?? []) as Plugin[]) {
       const hook = plugin.writeBundle
       const handler = typeof hook === 'function' ? hook : hook?.handler
@@ -121,4 +147,11 @@ export class FakeVite implements ViteApi {
     watcher.emit({ code: 'BUNDLE_START' })
     watcher.emit({ code: 'ERROR', error })
   }
+}
+
+/** Flattens nested arrays and promises of plugins; drops falsy values. */
+async function flatten(value: unknown): Promise<object[]> {
+  const resolved: unknown = await value
+  if (Array.isArray(resolved)) return (await Promise.all(resolved.map(item => flatten(item)))).flat()
+  return typeof resolved === 'object' && resolved !== null ? [resolved] : []
 }

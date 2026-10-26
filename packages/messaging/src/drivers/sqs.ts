@@ -376,10 +376,13 @@ export class SqsDriver implements MessagingDriver {
 
     subscription.inflight++
     let lease: ReturnType<typeof setInterval> | undefined
+    /** Lease extension in flight (one at a time). */
+    let extending: Promise<void> | undefined
     const extendEvery = Math.floor((subscription.visibilityTimeout * 1000) / 2)
     if ((this.#options.extendVisibility ?? true) && extendEvery >= 1000) {
       lease = setInterval(() => {
-        client
+        if (extending !== undefined) return
+        extending = client
           .send(
             new ChangeMessageVisibilityCommand({
               QueueUrl: queue.url,
@@ -387,10 +390,26 @@ export class SqsDriver implements MessagingDriver {
               VisibilityTimeout: subscription.visibilityTimeout,
             }),
           )
-          .catch((error: unknown) => {
-            this.#logger.warn(`SQS: failed to extend the visibility of message ${id}`, { err: error })
+          .then(
+            () => undefined,
+            (error: unknown) => {
+              this.#logger.warn(`SQS: failed to extend the visibility of message ${id}`, { err: error })
+            },
+          )
+          .finally(() => {
+            extending = undefined
           })
       }, extendEvery)
+    }
+    /**
+     * Stops extending the lease before a settlement, once the extension in flight landed: otherwise it
+     * could reach SQS after the settlement and override the visibility it set (retry delay, release).
+     * When the settlement fails, the runtime releases the message (or its visibility timeout expires).
+     */
+    const stopLease = async (): Promise<void> => {
+      if (lease !== undefined) clearInterval(lease)
+      lease = undefined
+      await extending
     }
     let settled = false
     const check = (action: string): void => {
@@ -398,8 +417,6 @@ export class SqsDriver implements MessagingDriver {
     }
     const done = (): void => {
       settled = true
-      if (lease !== undefined) clearInterval(lease)
-      lease = undefined
     }
     const changeVisibility = async (seconds: number): Promise<void> => {
       await client.send(
@@ -426,21 +443,25 @@ export class SqsDriver implements MessagingDriver {
       raw: message,
       ack: async (): Promise<void> => {
         check('ack')
+        await stopLease()
         await remove()
         done()
       },
       release: async (): Promise<void> => {
         check('release')
+        await stopLease()
         await changeVisibility(0)
         done()
       },
       retry: async (request: RetryRequest): Promise<void> => {
         check('retry')
+        await stopLease()
         await changeVisibility(Math.min(MAX_VISIBILITY_SECONDS, Math.ceil(request.delayMs / 1000)))
         done()
       },
       deadLetter: async (request: DeadLetterRequest): Promise<void> => {
         check('dead-letter')
+        await stopLease()
         const target =
           request.queue === undefined ? undefined : (subscription.deadLetter ?? (await this.#queue(request.queue)))
         if (target !== undefined) {

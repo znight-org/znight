@@ -209,18 +209,54 @@ export class MetricsRegistry {
   }
 
   #collectDefaultMetrics(options: DefaultMetricsOptions): void {
-    const config: PromDefaultMetricsConfig = { register: this.registry, prefix: this.prefix + (options.prefix ?? '') }
+    const config: PromDefaultMetricsConfig = { prefix: this.prefix + (options.prefix ?? '') }
     if (options.gcDurationBuckets !== undefined) config.gcDurationBuckets = [...options.gcDurationBuckets]
     if (options.eventLoopMonitoringPrecision !== undefined) {
       config.eventLoopMonitoringPrecision = options.eventLoopMonitoringPrecision
     }
-    try {
-      this.client.collectDefaultMetrics(config)
-    } catch (error) {
-      // already collected into this (shared) registry: keep the existing collectors
-      if (!/already been registered/i.test(errorMessage(error))) throw error
+    for (const metric of sharedDefaultMetrics(this.client, config, this.registry.contentType).getMetricsAsArray()) {
+      try {
+        this.registry.registerMetric(metric as never)
+      } catch (error) {
+        // a metric of that name is already in this (shared) registry: keep it
+        if (!/already been registered/i.test(errorMessage(error))) throw error
+      }
     }
   }
+}
+
+/**
+ * Process-wide default metrics, by `prom-client` module and configuration.
+ *
+ * `collectDefaultMetrics` starts collectors that are never released (a GC `PerformanceObserver`, an
+ * enabled `monitorEventLoopDelay` histogram) and whose metrics reference the registry they were
+ * created in: on Node.js, every registry collecting them would stay in memory for the life of the
+ * process. Collecting them once per configuration in a private registry, then registering those
+ * metric objects in each `MetricsRegistry`, keeps the collectors bounded and lets the registries of
+ * disposed applications be garbage collected. The content type is part of the configuration: an
+ * OpenMetrics registry renames the counters it exposes.
+ */
+const DEFAULT_METRICS = new WeakMap<PromClient, Map<string, PromRegistry>>()
+
+function sharedDefaultMetrics(client: PromClient, config: PromDefaultMetricsConfig, contentType: string): PromRegistry {
+  let byConfig = DEFAULT_METRICS.get(client)
+  if (byConfig === undefined) {
+    byConfig = new Map()
+    DEFAULT_METRICS.set(client, byConfig)
+  }
+  const key = JSON.stringify([
+    contentType,
+    config.prefix,
+    config.gcDurationBuckets,
+    config.eventLoopMonitoringPrecision,
+  ])
+  let holder = byConfig.get(key)
+  if (holder === undefined) {
+    holder = new client.Registry()
+    client.collectDefaultMetrics({ ...config, register: holder })
+    byConfig.set(key, holder)
+  }
+  return holder
 }
 
 function sameLabels(a: readonly string[], b: readonly string[]): boolean {

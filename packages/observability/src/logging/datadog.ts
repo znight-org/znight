@@ -310,19 +310,42 @@ const DATADOG_STATUS: Readonly<Record<string, string>> = {
   fatal: 'critical',
 }
 
-/** Maps a pino record (default or CloudWatch-shaped) to Datadog reserved attributes. */
+/**
+ * Maps a pino record (default or CloudWatch-shaped) to Datadog reserved attributes.
+ *
+ * Fields of the record that clash with the reserved attributes written here are kept, not
+ * overwritten: an HTTP status code in `status` (the request logs) becomes `http.status_code`; any
+ * other `status`, a `message` next to pino's `msg`, and a `timestamp` next to pino's `time` go under
+ * `attributes`.
+ */
 export function toDatadogEntry(
   record: Readonly<Record<string, unknown>>,
   settings: Pick<Settings, 'service' | 'source' | 'hostname' | 'tags' | 'traceCorrelation'>,
 ): Record<string, unknown> {
-  const { msg, message, level, time, timestamp, err, ...rest } = record
+  const { msg, message, level, time, timestamp, status, err, ...rest } = record
   const entry: Record<string, unknown> = rest
-  entry['message'] = firstString(message, msg) ?? ''
+  // the message is `msg` (pino's default key) or `message` (CloudWatch format)
+  if (typeof msg === 'string') {
+    entry['message'] = msg
+    if (message !== undefined) preserve(entry, 'message', message)
+  } else {
+    if (msg !== undefined) entry['msg'] = msg
+    entry['message'] = typeof message === 'string' ? message : ''
+    if (message !== undefined && typeof message !== 'string') preserve(entry, 'message', message)
+  }
+  if (status !== undefined && !setHttpStatusCode(entry, status)) preserve(entry, 'status', status)
   const label = levelLabel(level)
   entry['status'] = label === undefined ? 'info' : DATADOG_STATUS[label]
   if (label !== undefined) entry['level'] = label
-  const date = timestamp ?? time
-  if (date !== undefined) entry['timestamp'] = date
+  // the log time is `time` (pino), or the ISO `timestamp` string of the CloudWatch format
+  if (time !== undefined) {
+    entry['timestamp'] = time
+    if (timestamp !== undefined) preserve(entry, 'timestamp', timestamp)
+  } else if (typeof timestamp === 'string') {
+    entry['timestamp'] = timestamp
+  } else if (timestamp !== undefined) {
+    preserve(entry, 'timestamp', timestamp)
+  }
   entry['ddsource'] = settings.source
   if (typeof entry['hostname'] !== 'string') entry['hostname'] = settings.hostname
   if (typeof entry['service'] !== 'string' && settings.service !== undefined) entry['service'] = settings.service
@@ -355,9 +378,30 @@ export function toDatadogEntry(
   return entry
 }
 
-function firstString(...values: unknown[]): string | undefined {
-  for (const value of values) if (typeof value === 'string') return value
-  return undefined
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** Writes an HTTP status code (integer 100-599) as the `http.status_code` standard attribute, when free. */
+function setHttpStatusCode(entry: Record<string, unknown>, status: unknown): boolean {
+  if (typeof status !== 'number' || !Number.isInteger(status) || status < 100 || status > 599) return false
+  const http = entry['http']
+  if (http === undefined) {
+    entry['http'] = { status_code: status }
+    return true
+  }
+  if (!isRecord(http) || http['status_code'] !== undefined) return false
+  http['status_code'] = status
+  return true
+}
+
+/** Keeps a field that clashes with a Datadog reserved attribute under `attributes.<key>`. */
+function preserve(entry: Record<string, unknown>, key: string, value: unknown): void {
+  const attributes = entry['attributes']
+  if (attributes === undefined) entry['attributes'] = { [key]: value }
+  else if (isRecord(attributes)) {
+    if (!Object.hasOwn(attributes, key)) attributes[key] = value
+  } else entry['attributes'] = { attributes, [key]: value }
 }
 
 function truncated(entry: Record<string, unknown>): Record<string, unknown> {

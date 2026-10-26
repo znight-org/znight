@@ -141,7 +141,9 @@ config.token // the real value
 Masking is installed as non-enumerable `toJSON`, `toString` and `util.inspect.custom` methods on the
 instance (`console.log` in Node and Bun use the latter); methods the class defines itself are kept.
 Error messages show `[REDACTED]` instead of secret values. Spreading (`{ ...config }`) or reading the
-property gives the real value, of course. The `ConfigSource` itself never prints its values either.
+property gives the real value, of course. The `ConfigSource` itself never prints its values either,
+and neither do loader errors: a JSON or YAML syntax error gives the line and column, not the parser
+message (which quotes the file content).
 
 ## ConfigPlugin
 
@@ -178,7 +180,8 @@ export class FeatureFlags {
 
 The plugin is optional. Without it, each config class reads `process.env` when it is created (no
 `.env` files, no other sources), and a missing value fails the creation of that class (`ZNIGHT015`
-caused by `ZNIGHT006`).
+caused by `ZNIGHT006`). On Bun, `process.env` also holds the `.env` files Bun loads by itself unless
+that is disabled (see [Bun's automatic `.env` loading](#buns-automatic-env-loading)).
 
 ## Loaders
 
@@ -191,6 +194,8 @@ A snapshot of `process.env`, taken when the loader runs.
 | `prefix`     | —             | Only read `APP_*` variables, without the prefix (`APP_DB_HOST` → `DB_HOST`) |
 | `keepPrefix` | `false`       | Keep the prefix in the names (filter only)                                  |
 | `env`        | context `env` | Variables to read                                                           |
+
+On Bun, `env()` warns when `process.env` holds `.env` files loaded by Bun itself (see below).
 
 ### `dotenv(options?)`
 
@@ -210,6 +215,29 @@ Without `path`, loads the conventional files, from the lowest to the highest pre
 By default `process.env` is left untouched and, with `[dotenv(), env()]`, the real environment wins
 over the files. Variables are not expanded (`${OTHER}` stays as is).
 
+### Bun's automatic `.env` loading
+
+Bun loads `.env`, `.env.<mode>`, `.env.local` (not in `test`) and `.env.<mode>.local` from the
+working directory into `process.env` before your code runs, with its own rules: the mode is
+`production` or `test` when `NODE_ENV` is exactly that and `development` otherwise (`staging`
+included), `.env.local` wins over `.env.<mode>`, and `${VAR}` references are expanded. `env()` then
+reads those values as if they came from the real environment, so they win over `dotenv()` and its
+precedence, are reported as coming from `process.env`, and are loaded even when `dotenv()` is not
+configured (`loaders: [env()]` in production). The same files give different values on Node.js and
+on Bun.
+
+Turn Bun's loading off and let `dotenv()` load the files, the same way on both runtimes:
+
+```toml
+# bunfig.toml
+env = false
+```
+
+or `bun --no-env-file dist/main.js` (also with `--preload`). When `env()` reads `process.env` on Bun
+and finds variables of these files in it, it emits a warning once per process
+(`process.emitWarning`, type `ZnightWarning`) naming the files. To use Bun's loading on purpose, read
+`process.env` explicitly: `env({ env: process.env })` skips the check.
+
 ### `json(path, options?)` / `yaml(path, options?)`
 
 Structured files. Nested objects are read with key paths; top-level names can also match
@@ -223,6 +251,17 @@ environment names (`{ "DB_PASSWORD": "..." }`). `yaml()` needs the optional peer
 ```ts
 ConfigPlugin.configure({ loaders: [yaml('config/app.yaml'), dotenv(), env()] })
 ```
+
+A syntax error fails with the position and, for YAML, the `yaml` error code, never the parser message:
+JSON and YAML parsers quote the offending input, which can be a secret.
+
+```
+ZnightError: ZNIGHT006: Config loader "json" failed: invalid JSON in config/secrets.json at line 2, column 16: unexpected character
+```
+
+The parser error is not kept as `cause` either (`util.inspect` and uncaught error reports print it).
+YAML warnings (an unknown tag, for instance) are emitted the same way: `process.emitWarning` with type
+`YAMLWarning`, the file, the position and the code.
 
 ### `vault(options)`
 

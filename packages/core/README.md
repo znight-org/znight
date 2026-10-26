@@ -102,7 +102,7 @@ token; keys may be tokens or classes. Override values that look like a provider 
 | `logger`    | Initial `CoreLogger` (console by default). Replace it later with `app.setLogger()`.             |
 | `shutdown`  | `{ signals?: ShutdownSignal[] \| false, timeoutMs?: 10_000, hookTimeoutMs?: 5_000, process? }`. |
 | `init`      | Forwarded to `container.init()`, e.g. `{ only: [UserController] }`.                             |
-| `hot`       | Pass `import.meta.hot` to stop the application when the module is replaced.                     |
+| `hot`       | Pass `import.meta.hot`: the application stops before the replaced module is loaded again.       |
 
 **`app.start()`** runs providers' `onStart` (resolution order: dependencies first), plugins' `onStart`
 (start listening), then providers' and plugins' `onReady`. Signal handlers are installed when the start
@@ -115,11 +115,22 @@ begins. If a step fails, what was started is stopped, everything is disposed and
 3. plugins' `onDispose`, in reverse order (close connections, flush buffers).
 
 Every step is attempted, each within `hookTimeoutMs` and all within `timeoutMs`. Failures are collected
-into a `ZnightAggregateError` (`ZNIGHT021`, `error.errors`).
+into a `ZnightAggregateError` (`ZNIGHT021`, `error.errors`). Both budgets accept `Infinity` for "no
+limit"; a budget above `2^31 - 1` ms (about 24.8 days, the range of timers) means no limit as well.
 
-On `SIGINT`/`SIGTERM` the application stops gracefully. `process.exitCode` is set to `1` when this
-shutdown fails, and a second signal forces `process.exit(130)`. An explicit `app.stop()` never touches
-the exit code.
+A start hook (`onStart` / `onReady` of a provider or plugin) may call `app.stop()`, awaited or not,
+e.g. a job that ends its work in `onReady`. The shutdown then runs right away instead of waiting for the
+start (which is waiting for that hook): what completed its `onStart` is stopped, the remaining start
+hooks are skipped and `app.start()` resolves once the application is stopped (it rejects if the hook
+throws afterwards).
+
+With `hot: import.meta.hot`, the dispose callback returns the `stop()` promise, so the HMR runtime
+(Vite's module runner, Bun) waits for the old application to release its ports and consumers before
+it loads the new module. A failed stop is logged, not thrown at the HMR runtime.
+
+On `SIGINT`/`SIGTERM` the application stops gracefully and logs `Application stopped` once, at `info`
+(at `debug` after an explicit `app.stop()`). `process.exitCode` is set to `1` when this shutdown fails,
+and a second signal forces `process.exit(130)`. An explicit `app.stop()` never touches the exit code.
 
 `app.state` is one of `created`, `starting`, `ready`, `stopping`, `stopped` or `failed`.
 
@@ -162,6 +173,16 @@ container.has(Cache)
 container.tokenOf(UserService)
 ```
 
+A class that is not a registered key (an abstract base behind an alias, a class supplied as an
+external) falls back to its name, filtered by prototype chain. A candidate matches when its class (the
+class of its definition, or the class it was compiled or registered with, kept when `override()`
+replaces it with a fake) or its value is of that class or a subclass; a candidate whose class belongs
+to another hierarchy is ignored. Candidates whose class is unknown (an unbound external, a `@Provides`
+factory, a value that is not an instance of the class, e.g. an `implements` fake) are only considered
+when no candidate matches. So `get(Logger)` finds the `ConsoleLogger` aliased as `Logger` even when
+`@znight/observability#Logger` is also declared, and a user class named `Container` never resolves the
+Znight `Container`.
+
 Registrations are only allowed before `init()` (afterwards they throw `ZNIGHT016`). When several
 registrations target the same token, the highest precedence wins:
 
@@ -179,7 +200,9 @@ location and the original `cause`; already created instances are disposed in rev
 
 `init({ only: [UserController] })` instantiates only the dependency closure of the given providers;
 other singletons are created synchronously on first use (async factories must be in the closure) and
-only receive lifecycle hooks if they exist when the application starts.
+only receive lifecycle hooks if they exist when the application starts. Like during `init()`, such a
+singleton is created outside of any request scope, even when a request uses it first: the timers,
+sockets and promises it creates never see that request's `currentScope()`.
 
 ## Scopes
 

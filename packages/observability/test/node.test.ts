@@ -29,3 +29,18 @@ it.skipIf(node === null)(
   },
   30_000,
 )
+
+it.skipIf(node === null)(
+  'releases the registries of dropped applications on Node.js (default metrics collectors do not retain them)',
+  () => {
+    const result = spawnSync(
+      node as string,
+      ['--expose-gc', '--conditions=@znight/source', 'test/fixtures/node-metrics-gc.mjs'],
+      { cwd: packageDir, encoding: 'utf8', timeout: 30_000 },
+    )
+    expect(result.stderr).toBe('')
+    expect(result.status).toBe(0)
+    expect(JSON.parse(result.stdout)).toEqual({ registries: 0, applications: 0 })
+  },
+  30_000,
+)

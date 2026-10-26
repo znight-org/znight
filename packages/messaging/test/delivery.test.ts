@@ -231,6 +231,44 @@ describe('retries', () => {
     ).toBe(true)
   })
 
+  it('logs the failure with its stack once when a messaging:message wrapper logs the deliveries', async () => {
+    const failures = (logs: readonly { message: string; context?: Record<string, unknown> | undefined }[]) =>
+      logs
+        .filter(log => log.message.includes('attempt 1/2') || log.message.includes('dead-lettered to'))
+        .map(log => ({ err: log.context?.['err'], error: log.context?.['error'] }))
+    const consumer = (attempts: number[]) => ({
+      class: flaky(10, attempts),
+      queue: 'jobs',
+      handlers: [handler('handle', { retry: { attempts: 2, backoff: 'fixed', delay: 1 } })],
+    })
+
+    // without wrapper, the runtime entries carry the error (stack included)
+    const plain = await setup([consumer([])])
+    await plain.broker.publish('jobs', { n: 1 })
+    await plain.driver.idle()
+    expect(failures(plain.logs).map(entry => messageOf(entry.err))).toEqual(['failure 1', 'failure 2'])
+    await plain.app.stop()
+
+    // with a wrapper (the ObservabilityPlugin delivery log writes the error), only its message
+    const wrapped = await setup([consumer([])], { start: false })
+    const events: MessageDeliveryEvent[] = []
+    wrapped.app.hooks.wrap('messaging:message', async (event, next) => {
+      await next()
+      events.push(event)
+    })
+    await wrapped.app.start()
+    await wrapped.broker.publish('jobs', { n: 1 })
+    await wrapped.driver.idle()
+    expect(failures(wrapped.logs)).toEqual([
+      { err: undefined, error: 'failure 1' },
+      { err: undefined, error: 'failure 2' },
+    ])
+    expect(events.map(event => [event.outcome, messageOf(event.error)])).toEqual([
+      ['retry', 'failure 1'],
+      ['dead-letter', 'failure 2'],
+    ])
+  })
+
   it('applies the plugin default policy to handlers without @Retry', async () => {
     const attempts: number[] = []
     const { broker, driver } = await setup(

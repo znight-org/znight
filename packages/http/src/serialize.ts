@@ -8,7 +8,7 @@ import { Readable } from 'node:stream'
 import { isFileBody } from './files.ts'
 import { isHttpResponse } from './response.ts'
 import { isBodylessStatus } from './status.ts'
-import { discardStream, toByteStream } from './stream.ts'
+import { discardStream, isByteStream, toByteStream } from './stream.ts'
 import { emptyRecord } from './utils.ts'
 
 const ENCODER = new TextEncoder()
@@ -170,7 +170,8 @@ function encode(payload: unknown, headers: Record<string, HeaderValue>): ReplyBo
   }
   if (payload instanceof ReadableStream) {
     headers['content-type'] = ContentType.bytes
-    return payload as ReadableStream<Uint8Array>
+    // adapters get bytes (`ReplyBody`): string / ArrayBuffer chunks of a returned stream are converted
+    return isByteStream(payload) ? (payload as ReadableStream<Uint8Array>) : toByteStream(payload)
   }
   if (payload instanceof Blob) {
     headers['content-type'] = payload.type === '' ? ContentType.bytes : payload.type

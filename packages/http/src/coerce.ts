@@ -19,7 +19,10 @@ export interface Coercers {
   readonly boolean: Coercer<boolean>
   /** A bigint (`123`, `-9007199254740993`). */
   readonly bigint: Coercer<bigint>
-  /** A `Date` from an ISO 8601 string or a millisecond timestamp. */
+  /**
+   * A `Date` from an ISO 8601 date (`2024-01-02`, UTC midnight), an ISO 8601 date-time with an
+   * offset (`2024-01-02T03:04:05Z`, `2024-01-02T03:04+02:00`) or a millisecond timestamp.
+   */
   readonly date: Coercer<Date>
   /** One of `values` (string or number literals, compared after coercion). */
   enum<const T extends readonly (string | number | boolean)[]>(value: unknown, label: string, values: T): T[number]
@@ -29,8 +32,12 @@ export interface Coercers {
   optional<T>(value: unknown, label: string, item: Coercer<T>): T | undefined
 }
 
-const NUMBER = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/
+// unambiguous (`\d+` and the fraction never compete for the same digits): linear time on any input
+const NUMBER = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/
 const INTEGER = /^[+-]?\d+$/
+/** ISO 8601 calendar date, optionally with a time and an offset (`Z`, `+02:00`, `+0200`). */
+const ISO_DATE =
+  /^(\d{4})-(\d{2})-(\d{2})(?:[Tt ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?(?:([Zz])|([+-])(\d{2}):?(\d{2}))?)?$/
 
 function invalid(label: string, expected: string, value: unknown): BadRequestException {
   return new BadRequestException(`Invalid ${label}: expected ${expected}, received ${describe(value)}`)
@@ -95,8 +102,44 @@ function toBigint(value: unknown, label: string): bigint {
 function toDate(value: unknown, label: string): Date {
   const raw = single(value, label)
   const text = raw.trim()
-  const date = INTEGER.test(text) ? new Date(Number(text)) : new Date(text)
-  if (text === '' || Number.isNaN(date.getTime())) throw invalid(label, 'a date (ISO 8601 or timestamp)', raw)
+  const date = INTEGER.test(text) ? new Date(Number(text)) : parseIsoDate(text)
+  if (date === undefined || Number.isNaN(date.getTime())) {
+    throw invalid(label, 'a date (ISO 8601 such as 2024-01-02 or 2024-01-02T10:00:00Z, or a timestamp)', raw)
+  }
+  return date
+}
+
+const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+
+/**
+ * Parses an ISO 8601 date or date-time (see `Coercers.date`), `undefined` otherwise. Nothing else is
+ * handed to the engine's lenient `Date` parser (`foo 2024`, `March 7`), impossible dates
+ * (`2024-02-30`) are rejected instead of rolled over, and a date-time without offset is rejected
+ * rather than read in the server's time zone.
+ */
+function parseIsoDate(text: string): Date | undefined {
+  const match = ISO_DATE.exec(text)
+  if (match === null) return undefined
+  const [, y, mo, d, h, mi, s, fraction, zulu, sign, oh, om] = match
+  const year = Number(y)
+  const month = Number(mo)
+  const day = Number(d)
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
+  const days = month === 2 && leap ? 29 : DAYS_IN_MONTH[month - 1]
+  if (days === undefined || day < 1 || day > days) return undefined
+  const date = new Date(0)
+  date.setUTCFullYear(year, month - 1, day) // years 0-99 are not shifted to 1900-1999 (Date.UTC)
+  if (h === undefined) return date
+  if (zulu === undefined && sign === undefined) return undefined
+  const hours = Number(h)
+  const minutes = Number(mi)
+  const seconds = s === undefined ? 0 : Number(s)
+  const offset = sign === undefined ? 0 : (sign === '-' ? -1 : 1) * (Number(oh) * 60 + Number(om))
+  if (hours > 23 || minutes > 59 || seconds > 59 || Math.abs(offset) >= 24 * 60 || Number(om ?? 0) > 59) {
+    return undefined
+  }
+  const milliseconds = fraction === undefined ? 0 : Number(fraction.slice(0, 3).padEnd(3, '0'))
+  date.setUTCHours(hours, minutes - offset, seconds, milliseconds)
   return date
 }
 

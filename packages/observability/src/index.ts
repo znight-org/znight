@@ -31,11 +31,14 @@ export {
 export { type ConsoleTransportOptions, consoleTransport, type LogTransport } from './logging/transport.ts'
 export {
   DEFAULT_DURATION_BUCKETS,
+  DEFAULT_MAX_TYPES_PER_HANDLER,
   DEFAULT_MESSAGE_BUCKETS,
   type HttpMetricsOptions,
   type MessagingMetricsOptions,
   measureHttpRequests,
   measureMessages,
+  OTHER_MESSAGE_TYPE,
+  UNMATCHED_MESSAGE_TYPE,
   UNMATCHED_ROUTE,
 } from './metrics/hooks.ts'
 export {

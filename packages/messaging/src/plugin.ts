@@ -65,6 +65,8 @@ export interface MessagingPluginInstance extends Plugin {
 }
 
 const DEFAULT_REQUEUE_DELAY_MS = 1000
+/** Period of the keep-alive timer (it never does anything: it only keeps the event loop alive). */
+const KEEP_ALIVE_INTERVAL_MS = 2 ** 30
 
 /**
  * Message consumers and publishing.
@@ -96,6 +98,16 @@ function createPlugin(rawOptions: PluginOptions<MessagingPluginOptions>): Messag
   let connected = false
   let consume = true
   let runtimes: ConsumerRuntime[] = []
+  /**
+   * Keeps the process alive while consumers run: they are its ingress, and some drivers hold no
+   * handle of their own (the memory driver only uses microtasks and short timers), so a process
+   * without other handle would exit right after `app.start()`, without graceful shutdown.
+   */
+  let keepAlive: ReturnType<typeof setInterval> | undefined
+  const stopKeepAlive = (): void => {
+    if (keepAlive !== undefined) clearInterval(keepAlive)
+    keepAlive = undefined
+  }
 
   return {
     name: 'messaging',
@@ -158,16 +170,22 @@ function createPlugin(rawOptions: PluginOptions<MessagingPluginOptions>): Messag
         await Promise.all(runtimes.map(runtime => runtime.stop()))
         throw failure.reason
       }
+      keepAlive ??= setInterval(() => undefined, KEEP_ALIVE_INTERVAL_MS)
       ctx.logger.info(`Messaging: ${runtimes.length} consumer(s) subscribed with the ${driver?.name} driver`, {
         queues: runtimes.map(runtime => runtime.consumer.queue),
       })
     },
 
     async onStop(): Promise<void> {
-      await Promise.all(runtimes.map(runtime => runtime.stop()))
+      try {
+        await Promise.all(runtimes.map(runtime => runtime.stop()))
+      } finally {
+        stopKeepAlive()
+      }
     },
 
     async onDispose(): Promise<void> {
+      stopKeepAlive()
       broker.unbind()
       if (driver !== undefined && connected) {
         connected = false

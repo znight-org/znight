@@ -3,9 +3,12 @@
  *
  * - **Explicit** extensions come from `options.extensions` (they win over discovered ones with the
  *   same name).
- * - **Auto-discovery**: every package imported by the scanned code (bare specifiers) whose manifest
- *   declares `"compiler"` modules. `@znight/*` packages are trusted; other packages must be listed in
- *   `trustedExtensions` (otherwise a ZNIGHT018 warning and the extension is not loaded).
+ * - **Auto-discovery**: every package whose manifest declares `"compiler"` modules and that is
+ *   imported by the scanned code (bare specifiers) or declares a decorator applied in it — decorators
+ *   are resolved to their declaration, so a preset re-exporting `Controller` from `@znight/http`
+ *   (`import { Controller } from '@acme/web'`) loads the `@znight/http` extension. `@znight/*`
+ *   packages are trusted; other packages must be listed in `trustedExtensions` (otherwise a ZNIGHT018
+ *   warning and the extension is not loaded).
  * - Modules are resolved from the package directory with the **runtime** conditions — plus the
  *   `@znight/source` condition when running under Bun, which imports TypeScript sources — and
  *   imported; the default export is a `CompilerExtension` or an array of them.
@@ -13,12 +16,15 @@
  *   resolved or imported, two different extensions with the same name.
  */
 
-import type { Diagnostic, Location, PackageInfo, Project } from '../project/index.ts'
+import type { Node } from 'oxc-parser'
+import type { Diagnostic, Location, PackageInfo, Project, ScopeRef } from '../project/index.ts'
 import type { CompilerExtension, DecoratorSpec } from './api.ts'
 
 import { pathToFileURL } from 'node:url'
 import { ErrorCode } from '@znight/core'
 
+import { walk } from '../analysis/ast.ts'
+import { isEntityName } from '../analysis/decorators.ts'
 import { SOURCE_CONDITION } from '../options.ts'
 import { compareStrings } from '../project/compare.ts'
 import { isBareSpecifier, LineIndex, ModuleResolver, packageNameOf, relativePath } from '../project/index.ts'
@@ -63,10 +69,17 @@ const TARGETS: readonly string[] = ['class', 'method', 'property', 'parameter', 
 const KINDS: readonly string[] = ['static', 'value']
 
 /**
- * Compiler modules declared by the manifests of the packages imported by the scanned code, sorted
- * by package name then declaration order.
+ * Compiler modules declared by the manifests of the packages imported by the scanned code or
+ * declaring a decorator applied in it, sorted by package name then declaration order.
  */
 export function discoverExtensionModules(project: Project): DiscoveredExtensionModule[] {
+  const rootDir = project.rootPackage?.dir
+  const packages = new Map<string, PackageInfo>()
+  const add = (name: string, info: PackageInfo | undefined): void => {
+    if (info && info.dir !== rootDir && !packages.has(name)) {
+      packages.set(name, info)
+    }
+  }
   const importers = new Map<string, string>()
   for (const file of project.files()) {
     for (const request of file.facts.moduleRequests) {
@@ -79,14 +92,16 @@ export function discoverExtensionModules(project: Project): DiscoveredExtensionM
       }
     }
   }
+  for (const [name, importer] of importers) {
+    add(name, project.packages.findInstalled(name, importer.slice(0, importer.lastIndexOf('/'))))
+  }
+  for (const [name, info] of decoratorOwners(project)) {
+    add(name, info)
+  }
   const trusted = new Set(project.options.trustedExtensions)
   const modules: DiscoveredExtensionModule[] = []
-  for (const name of [...importers.keys()].sort(compareStrings)) {
-    const importer = importers.get(name) as string
-    const info = project.packages.findInstalled(name, importer.slice(0, importer.lastIndexOf('/')))
-    if (!info || info.dir === project.rootPackage?.dir) {
-      continue
-    }
+  for (const name of [...packages.keys()].sort(compareStrings)) {
+    const info = packages.get(name) as PackageInfo
     const manifest = project.manifestOf(info)
     for (const specifier of manifest?.compiler ?? []) {
       modules.push({
@@ -98,6 +113,47 @@ export function discoverExtensionModules(project: Project): DiscoveredExtensionM
     }
   }
   return modules
+}
+
+/**
+ * Packages declaring the decorators applied to the classes of the scanned files (by package name).
+ * Decorators are resolved like the analysis does (renamed imports, barrels, `export *`, packages
+ * re-exporting another package's decorators).
+ */
+function decoratorOwners(project: Project): Map<string, PackageInfo> {
+  const owners = new Map<string, PackageInfo>()
+  const seen = new Set<string>()
+  for (const file of project.files()) {
+    for (const declarations of file.facts.declarations.values()) {
+      for (const declaration of declarations) {
+        if (declaration.kind !== 'class' || declaration.ambient) {
+          continue
+        }
+        const scope: ScopeRef = { file, namespace: declaration.namespace }
+        walk(declaration.node as Node, node => {
+          if (node.type === 'BlockStatement' || node.type === 'StaticBlock') {
+            return false // method bodies: no decorator of this class
+          }
+          if (node.type !== 'Decorator') {
+            return true
+          }
+          const expression = node.expression
+          const callee = expression.type === 'CallExpression' ? expression.callee : expression
+          const key = `${file.path}\0${declaration.namespace?.name ?? ''}\0${file.textOf(callee)}`
+          if (isEntityName(callee) && !seen.has(key)) {
+            seen.add(key)
+            const symbol = project.resolveIdentifier(scope, callee, 'value').symbol
+            const owner = symbol.kind === 'declaration' ? project.ownerOf(symbol.declaration.file) : undefined
+            if (owner?.kind === 'package' && owner.package.name !== undefined && !owners.has(owner.package.name)) {
+              owners.set(owner.package.name, owner.package)
+            }
+          }
+          return false
+        })
+      }
+    }
+  }
+  return owners
 }
 
 /** Loads explicit and discovered compiler extensions. */

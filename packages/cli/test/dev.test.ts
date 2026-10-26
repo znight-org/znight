@@ -35,7 +35,7 @@ describe('znight dev', () => {
     const running = start()
     await waitFor(() => vite.watchers.length === 1)
     const config = vite.lastBuild()
-    expect(config.root).toBe(project.path)
+    expect(vite.resolvedRoot(config)).toBe(project.path)
     expect(config.mode).toBe('development')
     expect(config.logLevel).toBe('warn')
     expect(config.build?.watch).toEqual({})
@@ -293,6 +293,46 @@ describe('znight dev', () => {
     expect(processes.children[0]?.options.env['NODE_ENV']).toBe('staging')
     signals.emit('SIGINT')
     await running
+  })
+
+  it('runs the application with NODE_ENV=development, although the Vite build sets NODE_ENV', async () => {
+    // the environment of the CLI process, which `vite.build()` changes (`NODE_ENV=production` for builds)
+    const env: Record<string, string | undefined> = { PATH: '/usr/bin' }
+    const build = vite.build.bind(vite)
+    vite.build = config => {
+      env['NODE_ENV'] ??= 'production'
+      return build(config)
+    }
+    const running = runCli(['dev', '--debounce', '5', '--mode', 'development'], {
+      cwd: project.path,
+      env,
+      signals,
+      services: { loadVite: () => Promise.resolve(vite), processes },
+    })
+    await waitFor(() => vite.watchers.length === 1)
+    vite.succeed()
+    await waitFor(() => processes.children.length === 1)
+    expect(env['NODE_ENV']).toBe('production')
+    expect(processes.children[0]?.options.env['NODE_ENV']).toBe('development')
+    signals.emit('SIGINT')
+    await running
+  })
+
+  it('stops the application when the terminal is closed (SIGHUP)', async () => {
+    const running = start()
+    await waitFor(() => vite.watchers.length === 1)
+    vite.succeed()
+    await waitFor(() => processes.children.length === 1)
+    signals.emit('SIGHUP')
+    const run = await running
+    expect(run.code).toBe(0)
+    expect(vite.watchers[0]?.closed).toBe(true)
+    // the application stops gracefully (it runs in its own session: the hangup does not reach it)
+    expect(processes.children[0]?.signals).toEqual(['SIGTERM'])
+    expect(processes.children[0]?.done).toBe(true)
+    // nothing is printed to the closed terminal
+    expect(run.stdout).not.toContain('Stopping')
+    for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) expect(signals.count(signal)).toBe(0)
   })
 
   it('runs the application with Bun when the CLI runs on Bun', async () => {

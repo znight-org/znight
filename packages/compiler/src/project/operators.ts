@@ -1,7 +1,8 @@
 /**
  * JavaScript operator semantics for the static evaluator, restricted to primitives. Mixing
  * `number` and `bigint` (a `TypeError` in JavaScript) and operations on objects/arrays are errors;
- * `+` with a string operand concatenates.
+ * `+` with a string operand concatenates. Operations that throw in JavaScript (`2n ** -1n`, bigint
+ * division by zero) and bigint results above {@link MAX_BIGINT_BITS} are errors too: never thrown.
  */
 import type { StaticPrimitive, StaticValue } from './static-value.ts'
 
@@ -30,6 +31,9 @@ const NUMERIC: Readonly<Record<string, readonly [NumberOperation, BigIntOperatio
   '|': [(a, b) => a | b, (a, b) => a | b],
   '^': [(a, b) => a ^ b, (a, b) => a ^ b],
 }
+
+/** Largest bigint result (in bits) the evaluator computes: `1n << 10n ** 12n` is an error, not an out-of-memory. */
+const MAX_BIGINT_BITS = 1_000_000
 
 const ok = (value: StaticValue): OperationResult => ({ ok: true, value })
 
@@ -82,7 +86,11 @@ export function applyBinary(operator: string, left: StaticValue, right: StaticVa
       if ((operator === '/' || operator === '%') && right === 0n) {
         return { ok: false, message: 'Division by zero' }
       }
-      return ok(numeric[1](left, right))
+      const tooLarge = bigintTooLarge(operator, left, right)
+      if (tooLarge) {
+        return { ok: false, message: tooLarge }
+      }
+      return attempt(numeric[1], left, right)
     }
     return mismatch
   }
@@ -107,6 +115,41 @@ export function applyBinary(operator: string, left: StaticValue, right: StaticVa
     default:
       return { ok: false, message: `Operator '${operator}' is not statically evaluable` }
   }
+}
+
+/** Applies a bigint operation, turning what JavaScript throws (`RangeError`) into an error result. */
+function attempt(operation: BigIntOperation, left: bigint, right: bigint): OperationResult {
+  try {
+    return ok(operation(left, right))
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+/** Why a bigint `**` / `<<` / `>>` result would exceed {@link MAX_BIGINT_BITS} (`undefined` when it does not). */
+function bigintTooLarge(operator: string, left: bigint, right: bigint): string | undefined {
+  let bits: bigint
+  if (operator === '**') {
+    if (right < 0n || left === 0n || left === 1n || left === -1n) {
+      return undefined
+    }
+    bits = BigInt(bitLength(left)) * right
+  } else if (operator === '<<' || operator === '>>') {
+    const shift = operator === '<<' ? right : -right
+    if (shift <= 0n || left === 0n) {
+      return undefined
+    }
+    bits = BigInt(bitLength(left)) + shift
+  } else {
+    return undefined
+  }
+  return bits > BigInt(MAX_BIGINT_BITS)
+    ? `The result of '${operator}' is too large to be evaluated statically (more than ${MAX_BIGINT_BITS} bits)`
+    : undefined
+}
+
+function bitLength(value: bigint): number {
+  return (value < 0n ? -value : value).toString(2).length
 }
 
 function compare(

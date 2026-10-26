@@ -8,8 +8,10 @@
  *   concurrently up to the consumer concurrency.
  * - Retries are non-blocking: the record is produced to the group's retry topic (`<group>.retry`) with
  *   `x-znight-attempt` and `x-znight-not-before`, then committed. A dedicated retry consumer waits
- *   until `not-before` (bounded by `maxRetryDelayMs`) without blocking the main topic. Retried records
- *   lose their ordering relative to the partition.
+ *   until `not-before` (bounded by `maxRetryDelayMs`) without blocking the main topic (each stream has
+ *   its own back-pressure). Retried records lose their ordering relative to the partition.
+ * - After a rebalance, records fetched again from the committed offset of a partition this member kept
+ *   are skipped (already buffered or handled); buffered records of the partitions it lost are dropped.
  * - Dead letters are produced to `<topic>.dlq` (acks from all in-sync replicas), then committed.
  * - On stop, unsettled records are not committed: they are consumed again after a restart or rebalance.
  * - Delayed publishing is not supported.
@@ -41,7 +43,7 @@ import {
 
 import { brokerUnavailableError, consumerError } from '../errors.ts'
 import { attemptFromHeaders, headerRecord, MessagingHeaders } from '../headers.ts'
-import { errorMessage, truncate } from '../internal/async.ts'
+import { errorMessage, MAX_TIMER_DELAY_MS, truncate } from '../internal/async.ts'
 import { durationOption, MAX_ERROR_HEADER_LENGTH } from './shared.ts'
 
 type KafkaRecord = Message<string, Buffer, string, string>
@@ -314,12 +316,35 @@ export class KafkaDriver implements MessagingDriver {
   }
 }
 
+/**
+ * A consumer of the subscription (main topic, or retry topic) with its stream and its back-pressure:
+ * each stream is paused and resumed on its own, so that retries waiting for their `not-before` never
+ * hold the main topic.
+ */
+interface StreamState {
+  readonly topic: string
+  readonly consumer: Consumer<string, Buffer, string, string>
+  stream: MessagesStream<string, Buffer, string, string> | undefined
+  /** Records of this stream in the partition queues (the ones being handled included). */
+  buffered: number
+  paused: boolean
+  /** Partitions of `topic` assigned by the last group join (`undefined` before the first one). */
+  assigned: ReadonlySet<number> | undefined
+}
+
 interface PartitionQueue {
   readonly key: string
+  readonly source: StreamState
+  readonly partition: number
   readonly records: KafkaRecord[]
   running: boolean
   queued: boolean
   timer: ReturnType<typeof setTimeout> | undefined
+  /**
+   * Offset following the last record pushed. After a rebalance the stream fetches the partitions it
+   * keeps again from their committed offset: older records were already buffered or handled.
+   */
+  next: bigint | undefined
 }
 
 interface KafkaSubscriptionConfig {
@@ -342,14 +367,11 @@ class KafkaSubscription {
   readonly #config: KafkaSubscriptionConfig
   readonly #partitions = new Map<string, PartitionQueue>()
   readonly #ready: PartitionQueue[] = []
-  readonly #streams: MessagesStream<string, Buffer, string, string>[] = []
-  readonly #consumers: Consumer<string, Buffer, string, string>[] = []
+  readonly #sources: StreamState[] = []
   readonly #highWater: number
   readonly #lowWater: number
   readonly #idle = new Set<() => void>()
   #running = 0
-  #buffered = 0
-  #paused = false
   #active = true
   #closed: Promise<void> | undefined
 
@@ -374,15 +396,17 @@ class KafkaSubscription {
     topic: string,
     fromBeginning: boolean,
   ): Promise<void> {
-    this.#consumers.push(consumer)
+    const source: StreamState = { topic, consumer, stream: undefined, buffered: 0, paused: false, assigned: undefined }
+    this.#sources.push(source)
+    consumer.on('consumer:group:join', () => this.#onGroupJoin(source))
     const stream = await consumer.consume({
       topics: [topic],
       autocommit: false,
       mode: MessagesStreamModes.COMMITTED,
       fallbackMode: fromBeginning ? MessagesStreamFallbackModes.EARLIEST : MessagesStreamFallbackModes.LATEST,
     })
-    this.#streams.push(stream)
-    stream.on('data', (record: KafkaRecord) => this.#push(record))
+    source.stream = stream
+    stream.on('data', (record: KafkaRecord) => this.#push(source, record))
     stream.on('error', (error: Error) => {
       this.#config.logger.error(`Kafka: consumer stream of "${topic}" failed`, { err: error })
     })
@@ -393,16 +417,8 @@ class KafkaSubscription {
     await Promise.resolve()
     if (!this.#active) return
     this.#active = false
-    for (const stream of this.#streams) stream.pause()
-    for (const queue of this.#partitions.values()) {
-      if (queue.timer !== undefined) clearTimeout(queue.timer)
-      queue.timer = undefined
-      // keep the record being handled, drop the others
-      const keep = queue.running ? queue.records.slice(0, 1) : []
-      this.#buffered -= queue.records.length - keep.length
-      queue.records.length = 0
-      queue.records.push(...keep)
-    }
+    for (const source of this.#sources) source.stream?.pause()
+    for (const queue of this.#partitions.values()) this.#dropBuffered(queue)
     this.#ready.length = 0
   }
 
@@ -415,26 +431,78 @@ class KafkaSubscription {
   async #close(): Promise<void> {
     await this.cancel()
     if (this.#running > 0) await new Promise<void>(resolve => this.#idle.add(resolve))
-    await Promise.allSettled(this.#streams.map(stream => stream.close()))
-    await Promise.allSettled(this.#consumers.map(consumer => consumer.close()))
+    await Promise.allSettled(this.#sources.map(source => source.stream?.close()))
+    await Promise.allSettled(this.#sources.map(source => source.consumer.close()))
   }
 
-  #push(record: KafkaRecord): void {
+  /**
+   * A (re)join of the group, with its new assignment: the partitions this member lost belong to
+   * another one now, so their buffered records are dropped (the record being handled finishes).
+   */
+  #onGroupJoin(source: StreamState): void {
+    const assigned = new Set<number>()
+    for (const assignment of source.consumer.assignments ?? []) {
+      if (assignment.topic === source.topic) for (const partition of assignment.partitions) assigned.add(partition)
+    }
+    source.assigned = assigned
+    for (const queue of this.#partitions.values()) {
+      if (queue.source !== source || assigned.has(queue.partition)) continue
+      this.#dropBuffered(queue)
+      // records older than the one being handled come back if the partition is assigned again
+      queue.next = queue.running ? (queue.records[0] as KafkaRecord).offset + 1n : undefined
+    }
+  }
+
+  /** Drops the records of `queue` that are not being handled. */
+  #dropBuffered(queue: PartitionQueue): void {
+    if (queue.timer !== undefined) clearTimeout(queue.timer)
+    queue.timer = undefined
+    const keep = queue.running ? queue.records.slice(0, 1) : []
+    this.#unbuffer(queue.source, queue.records.length - keep.length)
+    queue.records.length = 0
+    queue.records.push(...keep)
+  }
+
+  #push(source: StreamState, record: KafkaRecord): void {
     if (!this.#active) return
+    // a late record of a partition revoked by the last rebalance
+    if (source.assigned !== undefined && !source.assigned.has(record.partition)) return
     const key = `${record.topic}:${record.partition}`
     let queue = this.#partitions.get(key)
     if (queue === undefined) {
-      queue = { key, records: [], running: false, queued: false, timer: undefined }
+      queue = {
+        key,
+        source,
+        partition: record.partition,
+        records: [],
+        running: false,
+        queued: false,
+        timer: undefined,
+        next: undefined,
+      }
       this.#partitions.set(key, queue)
     }
+    // fetched again after a rebalance (from the committed offset): already buffered or handled
+    if (queue.next !== undefined && record.offset < queue.next) return
+    queue.next = record.offset + 1n
     queue.records.push(record)
-    this.#buffered++
+    source.buffered++
     if (!queue.running && !queue.queued && queue.timer === undefined) this.#enqueue(queue)
-    if (!this.#paused && this.#buffered >= this.#highWater) {
-      this.#paused = true
-      for (const stream of this.#streams) stream.pause()
+    if (source.buffered >= this.#highWater) {
+      // pause again even when paused: the client resumes its streams after a rebalance
+      source.paused = true
+      source.stream?.pause()
     }
     this.#pump()
+  }
+
+  /** `count` records of `source` left the partition queues: resume it below the low-water mark. */
+  #unbuffer(source: StreamState, count: number): void {
+    source.buffered -= count
+    if (source.paused && this.#active && source.buffered <= this.#lowWater) {
+      source.paused = false
+      source.stream?.resume()
+    }
   }
 
   #enqueue(queue: PartitionQueue): void {
@@ -450,7 +518,7 @@ class KafkaSubscription {
       if (head === undefined) continue
       const wait = notBefore(head) - Date.now()
       if (wait > 0) {
-        // a retry that is not due yet: wait without holding a slot
+        // a retry that is not due yet: wait without holding a slot (timers cannot wait more than 2^31 - 1 ms)
         queue.timer = setTimeout(
           () => {
             queue.timer = undefined
@@ -458,7 +526,7 @@ class KafkaSubscription {
             this.#enqueue(queue)
             this.#pump()
           },
-          Math.min(wait, this.#config.driver.capabilities.maxNativeDelayMs),
+          Math.min(wait, this.#config.driver.capabilities.maxNativeDelayMs, MAX_TIMER_DELAY_MS),
         )
         continue
       }
@@ -481,18 +549,21 @@ class KafkaSubscription {
     } finally {
       queue.running = false
       this.#running--
+      const assigned = queue.source.assigned
+      if (outcome === 'again' && assigned !== undefined && !assigned.has(queue.partition)) {
+        // revoked meanwhile: the new owner of the partition handles it
+        outcome = 'stop'
+        queue.next = undefined
+      }
       if (outcome === 'next') {
         queue.records.shift()
-        this.#buffered--
+        this.#unbuffer(queue.source, 1)
       } else if (outcome === 'stop') {
-        this.#buffered -= queue.records.length
+        const dropped = queue.records.length
         queue.records.length = 0
+        this.#unbuffer(queue.source, dropped)
       }
       if (this.#active && queue.records.length > 0) this.#enqueue(queue)
-      if (this.#paused && this.#active && this.#buffered <= this.#lowWater) {
-        this.#paused = false
-        for (const stream of this.#streams) stream.resume()
-      }
       if (this.#running === 0) {
         const waiters = [...this.#idle]
         this.#idle.clear()

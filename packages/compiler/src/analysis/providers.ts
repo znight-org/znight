@@ -182,6 +182,13 @@ export class ProviderBuilder {
         `${describeClass(cls)} must be importable by the generated module to be a provider: ${cls.importError?.message ?? 'not exported'}`,
         cls.importError?.hints.length ? cls.importError.hints : [`Export it: \`export class ${cls.name} ...\``],
       )
+    } else if (cls.importRoute?.typeOnly === true) {
+      // `export type { Svc }`: the generated module would value-import a binding that does not exist.
+      this.#error(
+        registration.registration,
+        `${describeClass(cls)} must be importable by the generated module to be a provider: it is exported as a type only`,
+        [`Export it as a value: \`export { ${cls.name} }\` or \`export class ${cls.name} ...\``],
+      )
     }
     if (!registration.custom) {
       if (cls.ctor.error) {
@@ -598,7 +605,12 @@ export class ProviderBuilder {
     const qualifier = inject ? this.#stringArg(inject) : undefined
     const location = cls ? this.#visible(param.typeLocation, cls) : param.typeLocation
     return {
-      spec: { type: param.type, qualifier, optional: optional || param.optional || param.hasDefault },
+      // unqualified: an alias supplied at runtime (`RequestId`) binds to its external (§4.7 step 5)
+      spec: {
+        type: qualifier === undefined ? this.#analyzer.injectionTypeOf(param) : param.type,
+        qualifier,
+        optional: optional || param.optional || param.hasDefault,
+      },
       label,
       subject: label.charAt(0).toUpperCase() + label.slice(1),
       location,

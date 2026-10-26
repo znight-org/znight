@@ -12,7 +12,7 @@ import type {
 } from '../src/integrations/compiler.ts'
 import type { WatchTarget } from '../src/integrations/watch.ts'
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 import {
@@ -50,6 +50,10 @@ class FakeCompiler implements CompilerApi {
   diagnostics: Diagnostic[] = []
   code = CODE
   watchFiles: string[] | undefined
+  /** `staleFiles` of `check()` (`undefined`: not reported). */
+  staleFiles: string[] | undefined
+  /** `includeRoots()` of the incremental compiler (`undefined`: a compiler without it). */
+  includeRoots: string[] | undefined
   /** `loadConfig` result (`znight.config.*`); `undefined`: a compiler without `loadZnightConfig()`. */
   config: ((root: string) => Promise<ZnightConfigLike>) | undefined
   readonly configRoots: string[] = []
@@ -87,16 +91,21 @@ class FakeCompiler implements CompilerApi {
     this.calls.push({ method: 'check', options })
     const result = this.#result(options)
     const current = existsSync(result.outFile) ? readFileSync(result.outFile, 'utf8') : undefined
+    if (this.staleFiles !== undefined) {
+      return Promise.resolve({ ...result, stale: this.staleFiles.length > 0, staleFiles: this.staleFiles })
+    }
     return Promise.resolve({ ...result, stale: current !== result.code })
   }
 
   createIncremental(options: ZnightOptions): IncrementalCompiler {
+    const roots = this.includeRoots
     return {
       generate: changes => {
         this.calls.push({ method: 'incremental', ...(changes === undefined ? {} : { changes }) })
         return Promise.resolve(this.#write(options))
       },
       isOutFile: file => resolve(file) === resolve(options.root ?? '.', OUT_FILE),
+      ...(roots === undefined ? {} : { includeRoots: () => roots }),
     }
   }
 
@@ -187,6 +196,28 @@ describe('znight generate', () => {
       expect(run.stdout).toContain('✓ src/.znight/container.generated.ts is up to date')
     })
 
+    it('names the stale files: the library manifest deleted by a build cleaning dist/', async () => {
+      await generate()
+      const manifest = join(project.path, 'dist/znight.providers.json')
+      compiler.staleFiles = [manifest]
+      const missing = await generate(['--check'])
+      expect(missing.code).toBe(1)
+      expect(missing.stderr).toContain('✗ dist/znight.providers.json is missing')
+      expect(missing.stderr).toContain('run "znight generate" after the build')
+      expect(missing.stderr).not.toContain('container.generated.ts')
+
+      mkdirSync(join(project.path, 'dist'))
+      writeFileSync(manifest, '{}')
+      writeFileSync(join(project.path, OUT_FILE), '// old')
+      compiler.staleFiles = [manifest, join(project.path, OUT_FILE)]
+      const stale = await generate(['--check'])
+      expect(stale.code).toBe(1)
+      // the module first
+      expect(stale.stderr).toMatch(
+        /✗ src\/\.znight\/container\.generated\.ts is out of date[\s\S]*✗ dist\/znight\.providers\.json is out of date/,
+      )
+    })
+
     it('fails on compilation errors', async () => {
       await generate()
       compiler.diagnostics = [diagnostic('error', 'Missing provider')]
@@ -236,6 +267,29 @@ describe('znight generate', () => {
         root: project.path,
       })
       expect(run.stdout).toContain('Generated src/generated/container.ts')
+    })
+
+    it('compiles like the Vite build: the Vite root, string aliases, runtime conditions', async () => {
+      writeFileSync(join(project.path, 'vite.config.ts'), "export default { root: 'app', plugins: [znight()] }")
+      const vite = new FakeVite({
+        configRoot: 'app',
+        configAlias: [{ find: '@', replacement: join(project.path, 'app/src') }],
+        configPlugins: [{ name: 'znight', api: { options: {} } }],
+      })
+      const run = await generate([], { services: { loadVite: () => Promise.resolve(vite) } })
+      expect(run.code).toBe(0)
+      expect(compiler.calls[0]?.options).toEqual({
+        root: join(project.path, 'app'),
+        aliases: [{ find: '@', replacement: join(project.path, 'app/src') }],
+      })
+      expect(run.stdout).toContain('Generated app/src/.znight/container.generated.ts')
+
+      const runtimeConditions = ['module', 'node', 'production', 'import', 'default']
+      const exposed = new FakeVite({
+        configPlugins: [{ name: 'znight', api: { options: {}, compiler: { options: { runtimeConditions } } } }],
+      })
+      await generate(['--check'], { services: { loadVite: () => Promise.resolve(exposed) } })
+      expect(compiler.calls[1]).toEqual({ method: 'check', options: { root: project.path, runtimeConditions } })
     })
 
     it('uses the defaults when the plugin does not expose its options', async () => {
@@ -335,64 +389,135 @@ describe('znight generate', () => {
     })
   })
 
-  it('regenerates incrementally on changes with --watch', async () => {
-    const signals = new FakeSignals()
-    let onChange: ((file: string) => void) | undefined
-    let targets: readonly WatchTarget[] = []
-    let closed = false
-    const src = join(project.path, 'src')
-    mkdirSync(src)
-    writeFileSync(join(src, 'known.ts'), '')
-    writeFileSync(join(src, 'new.ts'), '')
-    compiler.watchFiles = [join(src, 'known.ts'), join(src, 'gone.ts')]
-    const running = generate(['--watch'], {
+  /** `znight generate --watch` in a real directory (watched paths are real), with a fake watcher. */
+  function startWatch(root: string, signals: FakeSignals) {
+    const watcher = {
+      targets: [] as WatchTarget[],
+      onChange: undefined as ((file: string) => void) | undefined,
+      closed: 0,
+    }
+    const running = runCli(['generate', '--watch'], {
+      cwd: root,
       signals,
       services: {
-        watch: (watched, listener) => {
-          targets = watched
-          onChange = listener
+        loadCompiler: () => Promise.resolve(compiler),
+        watch: (targets, listener) => {
+          watcher.targets.push(...targets)
+          watcher.onChange = listener
           return {
             close: () => {
-              closed = true
+              watcher.closed++
             },
           }
         },
       },
     })
-    await waitFor(() => onChange !== undefined)
-    expect(targets).toEqual([
-      { path: join(project.path, 'src'), recursive: true },
-      { path: project.path, recursive: false },
+    return { running, watcher }
+  }
+
+  it('regenerates incrementally on changes with --watch', async () => {
+    const signals = new FakeSignals()
+    const root = realpathSync(project.path)
+    const src = join(root, 'src')
+    mkdirSync(src)
+    writeFileSync(join(src, 'known.ts'), '')
+    writeFileSync(join(src, 'new.ts'), '')
+    compiler.watchFiles = [join(src, 'known.ts'), join(src, 'gone.ts')]
+    const { running, watcher } = startWatch(root, signals)
+    await waitFor(() => watcher.onChange !== undefined)
+    expect(watcher.targets).toEqual([
+      { path: src, recursive: true },
+      { path: root, recursive: false },
     ])
     expect(compiler.calls).toEqual([{ method: 'incremental' }])
 
     // a burst of changes: one compile with the classified files
-    onChange?.(join(src, 'known.ts'))
-    onChange?.(join(src, 'new.ts'))
-    onChange?.(join(src, 'gone.ts'))
-    onChange?.(join(src, 'known.ts'))
+    watcher.onChange?.(join(src, 'known.ts'))
+    watcher.onChange?.(join(src, 'new.ts'))
+    watcher.onChange?.(join(src, 'gone.ts'))
+    watcher.onChange?.(join(src, 'known.ts'))
     await waitFor(() => compiler.calls.length === 2)
     expect(compiler.calls[1]).toEqual({
       method: 'incremental',
       changes: { changed: [join(src, 'known.ts')], added: [join(src, 'new.ts')], removed: [join(src, 'gone.ts')] },
     })
-    // writing the generated file does not trigger a new generation
-    onChange?.(join(project.path, OUT_FILE))
+    // writing the generated file, or a file the compiler does not read, does not trigger a new generation
+    watcher.onChange?.(join(root, OUT_FILE))
+    writeFileSync(join(src, 'notes.md'), '')
+    watcher.onChange?.(join(src, 'notes.md'))
     await new Promise(resolve => setTimeout(resolve, 80))
     expect(compiler.calls).toHaveLength(2)
 
     // errors are printed and the watch goes on
     compiler.diagnostics = [diagnostic('error', 'Missing provider')]
-    onChange?.(join(src, 'known.ts'))
+    watcher.onChange?.(join(src, 'known.ts'))
     await waitFor(() => compiler.calls.length === 3)
 
     signals.emit('SIGINT')
     const run = await running
     expect(run.code).toBe(0)
-    expect(closed).toBe(true)
+    expect(watcher.closed).toBe(2)
     expect(run.stdout).toContain('Watching for changes...')
     expect(run.stdout).toContain('✓ Generated src/.znight/container.generated.ts')
     expect(run.stderr).toContain('[formatted] ZNIGHT001 Missing provider')
+  })
+
+  it('watches the source libraries and the files of the last compile, and rescans on directory moves', async () => {
+    const signals = new FakeSignals()
+    const base = realpathSync(project.path)
+    const root = join(base, 'app')
+    const src = join(root, 'src')
+    const library = join(base, 'libs/shared')
+    mkdirSync(join(src, 'users'), { recursive: true })
+    mkdirSync(join(library, 'src'), { recursive: true })
+    writeFileSync(join(src, 'users/user.service.ts'), '')
+    compiler.includeRoots = [src, join(library, 'src')]
+    compiler.watchFiles = [
+      join(root, 'package.json'),
+      join(src, 'users/user.service.ts'),
+      join(library, 'package.json'),
+      join(library, 'src/index.ts'),
+    ]
+    const { running, watcher } = startWatch(root, signals)
+    await waitFor(() => watcher.onChange !== undefined)
+    expect(watcher.targets).toEqual([
+      { path: src, recursive: true },
+      { path: join(library, 'src'), recursive: true },
+      { path: root, recursive: false },
+      { path: library, recursive: false },
+    ])
+
+    // a provider added to the library
+    writeFileSync(join(library, 'src/timer.ts'), '')
+    watcher.onChange?.(join(library, 'src/timer.ts'))
+    await waitFor(() => compiler.calls.length === 2)
+    expect(compiler.calls[1]?.changes).toEqual({ changed: [], added: [join(library, 'src/timer.ts')], removed: [] })
+
+    // `mv src/users src/accounts`: fs.watch reports both directories, not their files
+    renameSync(join(src, 'users'), join(src, 'accounts'))
+    watcher.onChange?.(join(src, 'users'))
+    watcher.onChange?.(join(src, 'accounts'))
+    await waitFor(() => compiler.calls.length === 3)
+    expect(compiler.calls[2]?.changes).toEqual({
+      changed: [],
+      added: [join(src, 'accounts')],
+      removed: [join(src, 'users'), join(src, 'users/user.service.ts')],
+    })
+
+    signals.emit('SIGTERM')
+    expect((await running).code).toBe(0)
+  })
+
+  it('stops watching on SIGHUP (terminal closed)', async () => {
+    const signals = new FakeSignals()
+    const { running, watcher } = startWatch(realpathSync(project.path), signals)
+    await waitFor(() => watcher.onChange !== undefined)
+    signals.emit('SIGHUP')
+    expect((await running).code).toBe(0)
+    // one watcher per target: src (recursive) and the root
+    expect(watcher.targets).toHaveLength(2)
+    expect(watcher.closed).toBe(2)
+    expect(signals.count('SIGHUP')).toBe(0)
   })
 })
 
@@ -462,6 +587,29 @@ describe('compiler adapter', () => {
     expect((await api.generate({ root: directory.path })).written).toBe(true)
     expect((await api.generate({ root: directory.path })).written).toBe(false)
     expect((await api.check({ root: directory.path })).stale).toBe(false)
+  })
+
+  it('tells which generated files are stale, the library manifest included', async () => {
+    const manifest = join(directory.path, 'dist/znight.providers.json')
+    const library = { file: manifest, content: '{"providers":[]}' }
+    writeIfChanged(outFile, 'x')
+    // the compiler only says `stale`: the CLI compares each output with the disk
+    const api = adaptCompilerModule({
+      generate: options =>
+        Promise.resolve({ ...result(), library, ...(options?.check === true ? { stale: true } : {}) }),
+    })
+    expect(await api.check({ root: directory.path })).toMatchObject({ stale: true, staleFiles: [manifest] })
+    writeIfChanged(manifest, library.content)
+    writeIfChanged(outFile, 'old')
+    expect(await api.check({ root: directory.path })).toMatchObject({ stale: true, staleFiles: [outFile] })
+    // reported by the compiler
+    const reporting = adaptCompilerModule({
+      generate: () => Promise.resolve({ ...result(), stale: true, staleFiles: [manifest] }),
+    })
+    expect((await reporting.check({})).staleFiles).toEqual([manifest])
+    // never stale with errors
+    const broken = adaptCompilerModule({ compile: () => Promise.resolve(result('throw', [diagnostic('error', 'x')])) })
+    expect(await broken.check({})).toMatchObject({ stale: false, staleFiles: [] })
   })
 
   it('builds everything on compile() when generate() is missing', async () => {

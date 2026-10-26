@@ -53,6 +53,11 @@ export class Slot {
   level: number = LEVEL_UNBOUND
   mode: number = UNBOUND
   definition: ProviderDefinition | undefined = undefined
+  /**
+   * Class the token designates (class of its first provider definition, or of a built-in), kept when
+   * a value replaces the binding: matches class keys looked up by name (see `Container#findByName`).
+   */
+  cls: object | undefined = undefined
   /** `true` when the token is a provider of the compiled metadata (even if replaced since). */
   compiled = false
   /** Source location of the compiled provider, when the metadata includes it. */

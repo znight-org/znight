@@ -35,6 +35,17 @@ describe('coerce', () => {
         `Invalid param "id": expected a number, received ${JSON.stringify(value)}`,
       )
     }
+    expect(coerce.number('1.', 'x')).toBe(1)
+    expect(coerce.number('+2.5e-3', 'x')).toBe(0.0025)
+  })
+
+  it('number runs in linear time (no backtracking blow-up on long digit runs)', () => {
+    // the former pattern took ~0.8 s for 32 000 digits and grew quadratically
+    for (const value of [`${'1'.repeat(64_000)}x`, `${'1'.repeat(64_000)}.${'1'.repeat(64_000)}x`]) {
+      const started = performance.now()
+      expect(failure(() => coerce.number(value, 'query "price"')).message).toContain('expected a number')
+      expect(performance.now() - started).toBeLessThan(100)
+    }
   })
 
   it('integer', () => {
@@ -65,6 +76,40 @@ describe('coerce', () => {
     expect(coerce.date('1700000000000', 'x').getTime()).toBe(1_700_000_000_000)
     expect(failure(() => coerce.date('not a date', 'x')).message).toContain('expected a date')
     expect(failure(() => coerce.date('', 'x')).message).toContain('expected a date')
+  })
+
+  it('date accepts ISO 8601 only, independently of the server time zone', () => {
+    const iso = (value: string): string => coerce.date(value, 'x').toISOString()
+    expect(iso('2024-01-02')).toBe('2024-01-02T00:00:00.000Z')
+    expect(iso('2024-02-29')).toBe('2024-02-29T00:00:00.000Z')
+    expect(iso('2024-01-02T03:04Z')).toBe('2024-01-02T03:04:00.000Z')
+    expect(iso('2024-01-02t03:04:05.123456789z')).toBe('2024-01-02T03:04:05.123Z')
+    expect(iso('2024-01-02T03:04:05+02:00')).toBe('2024-01-02T01:04:05.000Z')
+    expect(iso('2024-01-02T03:04:05-0130')).toBe('2024-01-02T04:34:05.000Z')
+    expect(iso('2024-01-01T00:30:00+01:00')).toBe('2023-12-31T23:30:00.000Z')
+    expect(iso('0050-06-01')).toBe('0050-06-01T00:00:00.000Z')
+    for (const value of [
+      'foo 2024', // the legacy Date parser of the engine accepted these
+      '1 2 3',
+      'March 7',
+      'Tuesday',
+      '01/02/2024',
+      '2024-1-2',
+      '2024-02-30', // rolled over to March 1
+      '2023-02-29',
+      '2024-13-01',
+      '2024-01-02T24:00Z',
+      '2024-01-02T10:60Z',
+      '2024-01-02T10:00:60Z',
+      '2024-01-02T10:00+24:00',
+      '2024-01-02T10:00', // no offset: would depend on the server time zone
+      '2024-01-02T10:00:00.1234567890Z',
+    ]) {
+      expect({ value, message: failure(() => coerce.date(value, 'query "since"')).message }).toEqual({
+        value,
+        message: `Invalid query "since": expected a date (ISO 8601 such as 2024-01-02 or 2024-01-02T10:00:00Z, or a timestamp), received ${JSON.stringify(value)}`,
+      })
+    }
   })
 
   it('enum', () => {

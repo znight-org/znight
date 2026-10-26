@@ -1,6 +1,7 @@
 import type { ConfigLoader } from './types.ts'
 
 import { invalidConfig } from '../errors.ts'
+import { warnBunLoadedDotenv } from './bun.ts'
 
 /** Options of {@link env}. */
 export interface EnvLoaderOptions {
@@ -18,6 +19,12 @@ export interface EnvLoaderOptions {
 /**
  * Loads a snapshot of the environment variables (`process.env`), taken when the loader runs.
  *
+ * On Bun, `process.env` also holds the `.env` files Bun loads automatically at startup (with its own
+ * precedence and `${VAR}` expansion): `env()` then emits a warning (`ZnightWarning`, once per
+ * process) recommending to disable that loading (`env = false` in `bunfig.toml`, `bun --no-env-file`)
+ * and to let `dotenv()` load the files. `env({ env: process.env })` reads `process.env` as is,
+ * without the check.
+ *
  * ```ts
  * ConfigPlugin.configure({ loaders: [dotenv(), env({ prefix: 'APP_' })] })
  * ```
@@ -29,6 +36,7 @@ export function env(options: EnvLoaderOptions = {}): ConfigLoader {
     name: 'env',
     load(context) {
       const variables = options.env ?? context.env
+      if (options.env === undefined) warnBunLoadedDotenv(variables)
       const values: Record<string, string> = {}
       for (const [name, value] of Object.entries(variables)) {
         if (typeof value !== 'string' || !name.startsWith(prefix)) continue

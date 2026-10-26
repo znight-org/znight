@@ -318,6 +318,29 @@ describe('Logger', () => {
       expect(ok.calls).toEqual(['flush', 'flush', 'close'])
     })
 
+    it('flushes the entries written after close() right away, once per tick', async () => {
+      const ok = recording('ok')
+      const log = new Logger({ transport: ok })
+      log.info('before')
+      await Promise.resolve()
+      expect(ok.calls).toEqual([])
+      await log.close()
+      ok.calls.length = 0
+      // buffering transports would otherwise keep them behind a timer the exiting process ignores
+      log.debug('below the level: nothing to flush')
+      await Promise.resolve()
+      expect(ok.calls).toEqual([])
+      log.child({ late: true }).info('late')
+      log.error('later')
+      expect(ok.calls).toEqual([])
+      await Promise.resolve()
+      expect(ok.calls).toEqual(['flush'])
+      log.warn('next tick')
+      await Promise.resolve()
+      expect(ok.calls).toEqual(['flush', 'flush'])
+      expect(ok.lines.map(line => JSON.parse(line).msg)).toEqual(['before', 'late', 'later', 'next tick'])
+    })
+
     it('flushes a raw destination when it supports it', async () => {
       let flushed = 0
       const destination = {

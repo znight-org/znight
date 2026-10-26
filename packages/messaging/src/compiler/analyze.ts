@@ -24,12 +24,14 @@ import type { HandlerData, HandlerParamData, MessagingData, RetryPolicyData } fr
 
 import {
   CONSUMER_SCOPES,
+  EXTENSION_NAME,
   INBOUND_MESSAGE_IDENTITY,
   INVALID_CONSUMER,
   INVALID_DECORATOR,
   METHOD_DECORATORS,
   MessagingDecorator,
   PARAMETER_DECORATORS,
+  RUNTIME_MODULE,
   UNVALIDATED_INPUT,
 } from './constants.ts'
 import { isPattern, patternCovers } from './patterns.ts'
@@ -509,6 +511,18 @@ function analyzeHandlerParam(param: ParameterInfo, where: string, ctx: Context):
   const decorators = parameterDecorators(param)
   const decorator = decorators[0]
   if (decorator === undefined) {
+    const foreign = foreignParameterDecorator(param)
+    if (foreign !== undefined) {
+      // e.g. `Headers` auto-imported from '@znight/http': one precise error instead of "no decorator"
+      ctx.report({
+        code: INVALID_DECORATOR,
+        severity: 'error',
+        message: `@${foreign.decorator.name} on parameter '${param.name}' of ${where} is imported from '${foreign.module}': @OnMessage handler parameters use ${foreign.name} from '${RUNTIME_MODULE}'`,
+        location: foreign.decorator.location,
+        hints: [`Import it from '${RUNTIME_MODULE}': import { ${foreign.name} } from '${RUNTIME_MODULE}'`],
+      })
+      return { kind: 'undefined' }
+    }
     if (param.optional || param.hasDefault || param.rest) return { kind: 'undefined' }
     ctx.report({
       code: INVALID_CONSUMER,
@@ -635,19 +649,65 @@ function checkUnvalidated(param: ParameterInfo, decorator: DecoratorInfo, where:
 
 /** Methods whose parameters carry messaging decorators without being `@OnMessage` handlers. */
 function reportStrayParameterDecorators(method: MethodInfo, where: string, errorHandler: boolean, ctx: Context): void {
+  // a method handled by another extension (an HTTP route...): the decorator comes from the wrong package
+  const owner = errorHandler ? undefined : foreignHandler(method)
   for (const param of method.params) {
     for (const decorator of parameterDecorators(param)) {
+      let hint = 'Add @OnMessage() to the method, or remove the decorator'
+      if (errorHandler) hint = '@OnError methods are called with (error, message): remove the decorator'
+      else if (owner !== undefined) {
+        hint = `${where} is a @${owner.decorator.name} handler: use the parameter decorators of '${owner.module}'`
+      }
       ctx.report({
         code: INVALID_DECORATOR,
         severity: 'error',
-        message: `@${decorator.name} has no effect on parameter '${param.name}' of ${where}: it is not an @OnMessage handler`,
+        message:
+          owner === undefined
+            ? `@${decorator.name} has no effect on parameter '${param.name}' of ${where}: it is not an @OnMessage handler`
+            : `@${decorator.name} (from '${RUNTIME_MODULE}') has no effect on parameter '${param.name}' of ${where}: it is not an @OnMessage handler`,
         location: decorator.location,
-        hints: errorHandler
-          ? ['@OnError methods are called with (error, message): remove the decorator']
-          : ['Add @OnMessage() to the method, or remove the decorator'],
+        hints: [hint],
       })
     }
   }
+}
+
+/** A decorator, with the module and the export name of its identity (`'@znight/http#Get'`). */
+interface ForeignDecorator {
+  readonly decorator: DecoratorInfo
+  readonly module: string
+  readonly name: string
+}
+
+function splitIdentity(decorator: DecoratorInfo): ForeignDecorator | undefined {
+  const identity = decorator.identity
+  const separator = identity?.lastIndexOf('#') ?? -1
+  if (identity === undefined || separator <= 0) return undefined
+  return { decorator, module: identity.slice(0, separator), name: identity.slice(separator + 1) }
+}
+
+/**
+ * A parameter decorator named like a messaging one (`Headers`, `Ctx`, `Message`) but imported from
+ * another package (`@znight/http` has `Headers` and `Ctx` too).
+ */
+function foreignParameterDecorator(param: ParameterInfo): ForeignDecorator | undefined {
+  for (const decorator of param.decorators) {
+    const split = splitIdentity(decorator)
+    if (split === undefined || split.module === RUNTIME_MODULE) continue
+    if (PARAMETER_DECORATORS.has(`${RUNTIME_MODULE}#${split.name}`)) return split
+  }
+  return undefined
+}
+
+/** The decorator through which another extension handles the method (`@Get` of `@znight/http`...). */
+function foreignHandler(method: MethodInfo): ForeignDecorator | undefined {
+  for (const decorator of method.decorators) {
+    const owner = decorator.owner
+    if (owner === undefined || owner === EXTENSION_NAME || owner === 'core' || owner === 'manifest') continue
+    const split = splitIdentity(decorator)
+    if (split !== undefined) return split
+  }
+  return undefined
 }
 
 // ------------------------------------------------------------------------------------------- helpers

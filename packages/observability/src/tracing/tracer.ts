@@ -11,6 +11,7 @@ import type { HeaderCarrier } from './propagation.ts'
 import { isSpanContextValid, context as otelContext, propagation, SpanStatusCode, trace } from '@opentelemetry/api'
 
 import { errorMessage, errorType, isThenable } from '../internal/errors.ts'
+import { ensureContextManager } from './context.ts'
 import { headerGetter, headerSetter, W3CTraceContextFallback } from './propagation.ts'
 import { SemanticAttributes } from './semconv.ts'
 
@@ -26,7 +27,10 @@ export interface TracerOptions {
   /**
    * Tracer provider. Default: the global one (`trace.getTracerProvider()`), i.e. whatever SDK the
    * application registers (`NodeSDK`, `NodeTracerProvider.register()`...), even after this tracer is
-   * created. Without SDK, spans are no-ops (but incoming trace ids still reach the logs).
+   * created. Without SDK, spans are no-ops, but incoming trace ids still reach the logs and the
+   * published messages: when no context manager is registered either, the first activated context
+   * registers a fallback `AsyncLocalStorage` one (register your SDK before the application handles
+   * its first request, as SDKs require anyway).
    */
   readonly tracerProvider?: TracerProvider
   /**
@@ -91,6 +95,7 @@ export class Tracer {
     const span = this.otel.startSpan(name, spanOptions, parent)
     let result: T
     try {
+      ensureContextManager()
       result = otelContext.with(trace.setSpan(parent, span), fn, undefined, span)
     } catch (error) {
       recordSpanError(span, error)
@@ -133,6 +138,7 @@ export class Tracer {
 
   /** Runs `fn` with `context` active. */
   withContext<T>(context: Context, fn: () => T): T {
+    ensureContextManager()
     return otelContext.with(context, fn)
   }
 

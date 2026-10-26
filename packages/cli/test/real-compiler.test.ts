@@ -3,7 +3,7 @@
  * `@znight/source` condition). Fixtures are copied under `test/.tmp/` so that `@znight/core`
  * resolves from the workspace.
  */
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { main } from '../src/main.ts'
@@ -15,6 +15,9 @@ const COMPILER: string = '@znight/compiler'
 const compiler: Record<string, unknown> = await import(COMPILER).catch(() => ({}))
 const available = typeof compiler['generate'] === 'function' && typeof compiler['createCompiler'] === 'function'
 const it = available ? test : test.skip
+
+const INJECTABLE = (name: string): string =>
+  `import { Injectable } from '@znight/core'\n\n@Injectable()\nexport class ${name} {}\n`
 
 const TMP = join(import.meta.dir, '.tmp', `real-compiler-${process.pid}`)
 const OUT_FILE = 'src/.znight/container.generated.ts'
@@ -67,6 +70,35 @@ describe('znight generate with @znight/compiler', () => {
     expect(stale.stderr).toContain('is out of date')
   })
 
+  it('names the library manifest when only it is missing or stale (library mode)', async () => {
+    const root = fixture('compile')
+    writeFileSync(join(root, 'znight.config.ts'), 'export default { library: true }\n')
+    // the providers of a library are part of its public API
+    writeFileSync(
+      join(root, 'package.json'),
+      JSON.stringify({ name: 'fixture-lib', type: 'module', exports: { '.': './src/index.ts' } }),
+    )
+    writeFileSync(join(root, 'src/index.ts'), "export * from './clock.ts'\nexport * from './greeting.service.ts'\n")
+    const generated = await cli(['generate'], root)
+    expect(generated.code).toBe(0)
+    expect(existsSync(join(root, 'dist/znight.providers.json'))).toBe(true)
+    expect((await cli(['generate', '--check'], root)).code).toBe(0)
+
+    // what a build cleaning dist/ (tsdown) does
+    rmSync(join(root, 'dist'), { recursive: true })
+    const missing = await cli(['generate', '--check'], root)
+    expect(missing.code).toBe(1)
+    expect(missing.stderr).toContain('✗ dist/znight.providers.json is missing')
+    expect(missing.stderr).not.toContain('container.generated.ts')
+
+    await cli(['generate'], root)
+    writeFileSync(join(root, 'dist/znight.providers.json'), '{}')
+    const stale = await cli(['generate', '--check'], root)
+    expect(stale.code).toBe(1)
+    expect(stale.stderr).toContain('✗ dist/znight.providers.json is out of date')
+    expect(stale.stderr).not.toContain('container.generated.ts')
+  })
+
   it('prints the diagnostics with code frames and fails', async () => {
     const root = fixture('broken')
     const run = await cli(['generate'], root)
@@ -106,5 +138,60 @@ describe('znight generate with @znight/compiler', () => {
     expect(run.code).toBe(0)
     expect(run.stdout).toContain('Watching for changes...')
     expect(run.stdout).toContain('3 providers')
+  })
+
+  it('regenerates when a directory of providers is moved, with --watch', async () => {
+    const root = fixture('compile')
+    mkdirSync(join(root, 'src/users'))
+    writeFileSync(join(root, 'src/users/user.service.ts'), INJECTABLE('UserService'))
+    const signals = new FakeSignals()
+    const running = cli(['generate', '--watch'], root, signals)
+    await waitFor(() => existsSync(join(root, OUT_FILE)), 5000)
+    expect(readFileSync(join(root, OUT_FILE), 'utf8')).toContain('users/user.service')
+    await new Promise(resolve => setTimeout(resolve, 100))
+    // fs.watch reports the two directories only, not the files they contain
+    renameSync(join(root, 'src/users'), join(root, 'src/accounts'))
+    await waitFor(() => readFileSync(join(root, OUT_FILE), 'utf8').includes('accounts/user.service'), 5000)
+    expect(readFileSync(join(root, OUT_FILE), 'utf8')).not.toContain('users/user.service')
+    signals.emit('SIGINT')
+    expect((await running).code).toBe(0)
+  })
+
+  it('regenerates on changes of a source library outside the project, with --watch', async () => {
+    const root = fixture('compile')
+    const library = join(root, '..', `shared-${Math.random().toString(36).slice(2, 8)}`)
+    mkdirSync(join(library, 'src'), { recursive: true })
+    writeFileSync(
+      join(library, 'package.json'),
+      JSON.stringify({
+        name: '@acme/shared',
+        type: 'module',
+        exports: { '.': './src/index.ts' },
+        znight: { apiVersion: 1, library: 'source' },
+      }),
+    )
+    writeFileSync(join(library, 'src/calendar.ts'), INJECTABLE('Calendar'))
+    writeFileSync(join(library, 'src/index.ts'), "export * from './calendar.ts'\n")
+    writeFileSync(
+      join(root, 'package.json'),
+      JSON.stringify({ name: 'fixture-compile', private: true, type: 'module', dependencies: { '@acme/shared': '*' } }),
+    )
+    // a workspace dependency: a symbolic link to the library
+    mkdirSync(join(root, 'node_modules/@acme'), { recursive: true })
+    symlinkSync(library, join(root, 'node_modules/@acme/shared'), 'dir')
+
+    const signals = new FakeSignals()
+    const running = cli(['generate', '--watch'], root, signals)
+    await waitFor(() => existsSync(join(root, OUT_FILE)), 5000)
+    expect(readFileSync(join(root, OUT_FILE), 'utf8')).toContain('Calendar')
+    await new Promise(resolve => setTimeout(resolve, 100))
+    writeFileSync(join(library, 'src/timer.ts'), INJECTABLE('Timer'))
+    writeFileSync(join(library, 'src/index.ts'), "export * from './calendar.ts'\nexport * from './timer.ts'\n")
+    await waitFor(() => readFileSync(join(root, OUT_FILE), 'utf8').includes('Timer'), 5000)
+    signals.emit('SIGINT')
+    const run = await running
+    expect(run.code).toBe(0)
+    expect(run.stdout).toContain('3 providers')
+    expect(run.stdout).toContain('4 providers')
   })
 })

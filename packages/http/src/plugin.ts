@@ -14,6 +14,7 @@ import type { ByteSize } from './size.ts'
 import { displayName, ErrorCode, resolveOptions, ZnightError } from '@znight/core'
 
 import { nodeAdapter } from './adapters/node.ts'
+import { isHeaderName } from './headers.ts'
 import { isMediaTypePattern } from './mime.ts'
 import { compareRoutePaths, compareStrings, joinPaths, parseRoutePath, type RoutePath, RoutePathError } from './path.ts'
 import { Pipeline, type Resolvable, type RoutePlan } from './pipeline.ts'
@@ -74,7 +75,8 @@ export interface HttpPluginOptions {
   readonly generateRequestId?: () => string
   /**
    * Maximum time `onStop` waits for in-flight requests before closing the remaining connections.
-   * Keep it below the application `shutdown.hookTimeoutMs`. Default: 4 000 ms.
+   * Keep it below the application `shutdown.hookTimeoutMs`. `Infinity`: no limit of its own (the
+   * application's `hookTimeoutMs` still bounds `onStop`). Default: 4 000 ms.
    */
   readonly drainTimeoutMs?: number
 }
@@ -120,6 +122,10 @@ const DEFAULT_HOST = '0.0.0.0'
 const DEFAULT_BODY_LIMIT = 1_048_576
 const DEFAULT_DRAIN_TIMEOUT_MS = 4_000
 const DEFAULT_REQUEST_ID_HEADER = 'x-request-id'
+/** Longest `setTimeout` delay (larger ones overflow to 1 ms). */
+const MAX_TIMER_MS = 2_147_483_647
+/** Adapters bound to a plugin (an adapter instance serves one application). */
+const BOUND_ADAPTERS = new WeakSet<HttpAdapter>()
 const CONCRETE_METHODS: readonly Exclude<HttpMethod, 'ALL'>[] = [
   'GET',
   'HEAD',
@@ -129,7 +135,6 @@ const CONCRETE_METHODS: readonly Exclude<HttpMethod, 'ALL'>[] = [
   'DELETE',
   'OPTIONS',
 ]
-const HEADER_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/
 
 /**
  * The HTTP plugin: serves the controllers compiled into `metadata.extensions.http` with the chosen
@@ -154,6 +159,8 @@ export class HttpPlugin implements Plugin {
   #runtime: Runtime | undefined
   #address: HttpServerAddress | undefined
   #disposed = false
+  /** Registered in an application that was not disposed yet. */
+  #active = false
 
   private constructor(options: PluginOptions<HttpPluginOptions>) {
     this.#options = options
@@ -206,6 +213,16 @@ export class HttpPlugin implements Plugin {
   }
 
   register(ctx: PluginContext): void {
+    if (this.#active) {
+      throw new ZnightError(ErrorCode.DuplicateProvider, 'This HttpPlugin is already used by another application', {
+        hints: ['Call HttpPlugin.configure() once per application'],
+      })
+    }
+    // an instance may serve several applications one after the other (shared test setups)
+    this.#active = true
+    this.#disposed = false
+    this.#runtime = undefined
+    this.#address = undefined
     ctx.container.registerExternal({ token: HttpTokens.Context, scope: 'request', providedBy: 'HttpPlugin' })
     ctx.container.registerExternal({ token: HttpTokens.RequestId, scope: 'request', providedBy: 'HttpPlugin' })
     ctx.container.registerValue(HttpTokens.Plugin, this)
@@ -214,7 +231,19 @@ export class HttpPlugin implements Plugin {
   onBootstrap(ctx: PluginContext): void {
     const raw = resolveOptions(this.#options, ctx.container)
     const options = resolve(raw)
-    const table = new RouteTable<unknown>()
+    if (BOUND_ADAPTERS.has(options.adapter)) {
+      throw new ZnightError(
+        ErrorCode.LifecycleFailed,
+        `HttpPlugin: this ${options.adapter.name} adapter instance already served an application`,
+        {
+          hints: [
+            'An adapter instance serves one application: create it per application, e.g. HttpPlugin.configure(() => ({ adapter: fastifyAdapter() }))',
+          ],
+        },
+      )
+    }
+    BOUND_ADAPTERS.add(options.adapter)
+    const table = new RouteTable<RoutePlan>()
     const pipeline = new Pipeline(
       ctx.container,
       ctx.hooks,
@@ -267,8 +296,11 @@ export class HttpPlugin implements Plugin {
     runtime.pipeline.draining = true
     const timeoutMs = runtime.options.drainTimeoutMs
     let timer: ReturnType<typeof setTimeout> | undefined
+    // no timer for Infinity; larger delays than setTimeout supports are clamped (they would fire at once)
     const timeout = new Promise<'timeout'>(resolve => {
-      timer = setTimeout(() => resolve('timeout'), timeoutMs)
+      if (timeoutMs !== Number.POSITIVE_INFINITY) {
+        timer = setTimeout(() => resolve('timeout'), Math.min(timeoutMs, MAX_TIMER_MS))
+      }
     })
     try {
       const drained = Promise.all([runtime.adapter.close(), runtime.pipeline.whenIdle()]).then(() => 'drained' as const)
@@ -283,6 +315,7 @@ export class HttpPlugin implements Plugin {
   }
 
   async onDispose(): Promise<void> {
+    this.#active = false
     if (this.#disposed) return
     this.#disposed = true
     const runtime = this.#runtime
@@ -337,10 +370,10 @@ function resolve(options: HttpPluginOptions): Resolved {
   const uploads = resolveUploadLimits(options.uploads)
   const drainTimeoutMs = options.drainTimeoutMs ?? DEFAULT_DRAIN_TIMEOUT_MS
   if (typeof drainTimeoutMs !== 'number' || !(drainTimeoutMs >= 0)) {
-    throw invalidOption('drainTimeoutMs', 'a positive number', drainTimeoutMs)
+    throw invalidOption('drainTimeoutMs', 'a positive number (or Infinity)', drainTimeoutMs)
   }
   const requestIdHeader = options.requestIdHeader ?? DEFAULT_REQUEST_ID_HEADER
-  if (requestIdHeader !== false && (typeof requestIdHeader !== 'string' || !HEADER_NAME.test(requestIdHeader))) {
+  if (requestIdHeader !== false && (typeof requestIdHeader !== 'string' || !isHeaderName(requestIdHeader))) {
     throw invalidOption('requestIdHeader', 'a header name or false', requestIdHeader)
   }
   const generateRequestId = options.generateRequestId ?? ((): string => crypto.randomUUID())

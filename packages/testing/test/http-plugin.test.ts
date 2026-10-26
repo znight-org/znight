@@ -4,9 +4,11 @@
  * what the compiler generates for the controller below (hand-written: `@znight/testing` does not
  * depend on the compiler).
  */
-import type { HttpControllerDefinition, HttpRouteDefinition } from '../../http/src/index.ts'
+import type { ZnightError } from '@znight/core'
+import type { CanActivate, HttpContext, HttpControllerDefinition, HttpRouteDefinition } from '../../http/src/index.ts'
+import type { PluginInitRoots } from '../src/index.ts'
 
-import { silentLogger } from '@znight/core'
+import { ErrorCode, silentLogger } from '@znight/core'
 
 import { HttpPlugin, HttpResponse, uploads } from '../../http/src/index.ts'
 import { createMetadata, TestApp } from '../src/index.ts'
@@ -152,5 +154,73 @@ describe('TestApp.inject with HttpPlugin', () => {
     expect(partial.status).toBe(206)
     expect(partial.headers['content-range']).toBe('bytes 0-15/256')
     expect(partial.bytes).toEqual(BINARY.slice(0, 16))
+  })
+})
+
+/** A token store loaded at boot by an async `@Provides()` (e.g. JWKS). */
+class TokenStore {
+  constructor(readonly tokens: ReadonlySet<string>) {}
+}
+
+/** The guard pattern of the HTTP README, registered globally (`HttpPlugin.configure({ guards })`). */
+class AuthGuard implements CanActivate {
+  constructor(private readonly store: TokenStore) {}
+  canActivate(ctx: HttpContext): boolean {
+    return this.store.tokens.has(ctx.header('authorization') ?? '')
+  }
+}
+
+const STORE = 'src/auth.ts#StoreFactory.store'
+const GUARD = 'src/auth.ts#AuthGuard'
+
+const guarded = createMetadata(
+  {
+    [TOKEN]: { scope: 'singleton', class: FileController, deps: [], factory: () => new FileController() },
+    [STORE]: {
+      scope: 'singleton',
+      deps: [],
+      async: true,
+      factory: () => Promise.resolve(new TokenStore(new Set(['secret']))),
+    },
+    [GUARD]: { scope: 'singleton', class: AuthGuard, deps: [STORE], factory: d => new AuthGuard(d[0]) },
+  },
+  { aliases: { 'src/auth.ts#TokenStore': STORE }, extensions: { http: { controllers: [controller] } } },
+)
+
+/** Whether `HttpPlugin` lists the classes of its options for `TestApp` (see `PluginInitRoots`). */
+const listsGlobalProviders = typeof (HttpPlugin.prototype as Partial<PluginInitRoots>).initRoots === 'function'
+
+describe('TestApp with global guards of HttpPlugin', () => {
+  it.skipIf(!listsGlobalProviders)('boots a global guard with async dependencies (default only)', async () => {
+    await using app = await TestApp.create({
+      metadata: guarded,
+      plugins: [HttpPlugin.configure({ port: 0, guards: [AuthGuard] })],
+      logger: silentLogger,
+    })
+    expect((await app.inject({ url: '/files/download' })).status).toBe(403)
+    expect((await app.inject({ url: '/files/download', headers: { authorization: 'secret' } })).status).toBe(200)
+  })
+
+  it('options computed from the container cannot list their classes: the error tells how to fix it', async () => {
+    let error: ZnightError | undefined
+    try {
+      await TestApp.create({
+        metadata: guarded,
+        plugins: [HttpPlugin.configure(() => ({ port: 0, guards: [AuthGuard] }))],
+        logger: silentLogger,
+      })
+    } catch (caught) {
+      error = caught as ZnightError
+    }
+    expect(error?.code).toBe(ErrorCode.InstantiationFailed)
+    expect(error?.hints.join('\n')).toContain('TestApp.create({ only: [...] })')
+
+    await using app = await TestApp.create({
+      metadata: guarded,
+      plugins: [HttpPlugin.configure(() => ({ port: 0, guards: [AuthGuard] }))],
+      only: [FileController, AuthGuard],
+      logger: silentLogger,
+    })
+    expect((await app.inject({ url: '/files/download', headers: { authorization: 'secret' } })).status).toBe(200)
   })
 })

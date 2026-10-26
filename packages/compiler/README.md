@@ -44,7 +44,8 @@ scan (include/exclude + provider libraries) → parse (oxc, cached by content ha
    application recompiles in a few tens of milliseconds).
 2. **Analyse** every decorated class: `@Injectable`, `@Factory`/`@Provides`, qualifiers,
    interceptors, and the decorators of the compiler extensions of the Znight packages you use
-   (`@znight/http`, `@znight/messaging`, `@znight/config`...).
+   (`@znight/http`, `@znight/messaging`, `@znight/config`...: the packages you import, and the
+   packages declaring the decorators you apply, also through a package re-exporting them).
 3. **Bind** every constructor / `@Provides` parameter to a provider, an external supplied by a
    plugin, or `undefined` for optional parameters ([rules](#how-dependencies-are-resolved)).
 4. **Validate**: missing providers, cycles, scope mismatches, ambiguities, lifecycle hooks, version
@@ -131,13 +132,19 @@ Properties of the generated code:
 - Imports point to the **declaring module** (never through barrels), with the extension mapped by
   `importExtension` (`.ts` → `.js` by default), or to the public entry of a package.
 - Provider `source` locations (used in runtime errors) are emitted in `serve`/`test` and omitted in
-  `build` (option `sourceLocations`).
+  `build` (option `sourceLocations`). This only applies to the module served from memory (the
+  bundle): the **disk copy** is the `serve` rendering in every mode (`CompileResult.diskCode`), so
+  `znight generate`, `vite build`, the Bun preload (any `NODE_ENV`) and `znight generate --check`
+  all agree on one file.
 
 **Git policy.** Do not commit the generated file: add `.znight` to your `.gitignore`. It is
 (re)generated before it is needed: by the Vite plugin, by the Bun preload before tests, or by
 `znight generate` before `tsc`. In CI, `znight generate --check` fails when it is stale. The file is
 only written when its content changes (watchers are not triggered for nothing), and never when the
-compilation fails.
+compilation fails. The Vite plugin and the Bun preload serve the module from memory: when they
+cannot write the disk copy (read-only file system of a container image), they print a warning and
+go on (under Bun, the file must exist for the import to resolve: generate it when building the
+image).
 
 ## Vite plugin
 
@@ -172,14 +179,17 @@ Build failed with 1 error
 
 - **Generated module**: imports of `outFile` (relative, with a `.js`/`.ts` extension or none) are
   served **from memory** with the latest result — also before the file exists, so Vitest works on a
-  fresh checkout. The disk copy (for `tsc` and editors) is written only when its content changed,
-  never with errors, and watchers ignore it: writing it never triggers a rebuild.
+  fresh checkout. The disk copy (for `tsc` and editors; the same in every mode) is written only when
+  its content changed, never with errors, and watchers ignore it: writing it never triggers a
+  rebuild. A write failure is a warning, never a build failure.
 - **Decorators** (`stripDecorators`, default `true`): the Znight decorators are removed from the
   bundle — exactly the ranges recorded by the last analysis of that file content (never
   re-decided; a file changed since is left untouched), with high-resolution source maps. Their
   `@znight/*` imports are then tree-shaken. Other decorators are kept.
-- **Watching**: every file the result depends on (`watchFiles`), the include roots (created and
-  deleted files re-run the globs), `package.json` and `tsconfig.json` (they clear the module
+- **Watching**: every file the result depends on (`watchFiles`: the scanned files, and every file
+  the analysis read outside `node_modules`, such as a constant imported from `shared/` or a type of
+  `src/types.d.ts`), the include roots (created and deleted files re-run the globs), a file created
+  where a relative import did not resolve, `package.json` and `tsconfig.json` (they clear the module
   resolution caches).
 - **Logs**: `[znight] 12 providers compiled in 18 ms` (follows Vite's `logLevel`).
 - **Compile mode**: `serve` in the dev server (`test` under Vitest), `build` for `vite build`
@@ -223,8 +233,9 @@ preload = ["@znight/compiler/bun"]
 `preload` in `bunfig.toml`. The preload:
 
 1. reads the [options](#preload-options) (`znight.config.ts`);
-2. generates the container (the disk copy is written when its content changed), in `test` mode under
-   `bun test`, `build` mode with `NODE_ENV=production`, else `serve`;
+2. generates the container (the disk copy, the same in every mode, is written when its content
+   changed; a write failure is a warning), in `test` mode under `bun test`, `build` mode with
+   `NODE_ENV=production`, else `serve`;
 3. prints the diagnostics on stderr and, on errors, throws a `ZnightError`: `bun test` exits with
    code 1, `bun --watch` / `bun test --watch` wait for a fix;
 4. registers a Bun plugin serving the generated module **from memory** (recompiled when it is loaded
@@ -302,7 +313,11 @@ For a constructor (or `@Provides` method) parameter of type `T`:
 | Primitive or anonymous types (`string`, `{ port: number }`...) need `@Inject('name')`           | matched by name and kind                  |
 
 Generic types are compared with their type arguments (`Repository<User>` ≠ `Repository<Order>`),
-type aliases are expanded and default type arguments filled in. Constructors are inherited:
+type aliases are expanded and default type arguments filled in — except, for an unqualified
+injection point, an alias supplied at runtime (`RequestId` of `@znight/http`, declared in its
+manifest `provides`): it binds to that external. Interfaces and base classes reached through an
+alias (`implements UserRepository` with `type UserRepository = Repository<User>`) count for the
+transitive closure. Constructors are inherited:
 `class UserRepository extends BaseRepository<User> {}` is injected through `BaseRepository`'s
 constructor with `T = User`.
 
@@ -321,14 +336,25 @@ export class UserService {
 ```
 
 Aliases are recorded for every interface / base class / provided type bound to a single provider
-(or a single `@Primary`), so `container.get(UserRepository)` works at runtime.
+(or a single `@Primary`), so `container.get(UserRepository)` works at runtime. Types supplied at
+runtime (package manifest `provides`, the `externals` option, the `@znight/core` tokens) and
+package-internal types are never aliased: `class AppLogger implements CoreLogger` stays an
+application provider, and the core still registers its own logger under `CoreLogger`.
+
+An optional injection bound to nothing gets `undefined`: its token is the type identity for an
+unqualified, non-generic type (a plugin may register a value under it), the qualifier for
+`@Inject('name')`, otherwise the display of the type (`Repository<User>`). It never resolves to a
+provider that does not match the request (other type arguments, another name).
 
 ## Decorators
 
 Decorators are recognised by the canonical identity of their callee: renamed imports
-(`import { Injectable as Service }`), barrels, `export *` and namespace imports (`@zn.Injectable()`)
-all work. A local function wrapping a Znight decorator (`const Service = () => Injectable()`) is
-invisible to the compiler and reported as a ZNIGHT005 warning.
+(`import { Injectable as Service }`), barrels, `export *`, namespace imports (`@zn.Injectable()`)
+and packages re-exporting them (a preset re-exporting `Controller` from `@znight/http`: the compiler
+extension of the package declaring the decorator is loaded) all work. A local function wrapping a
+Znight decorator (`const Service = () => Injectable()`) or a `const` alias of one
+(`export const Service = Injectable`) is invisible to the compiler and reported as a ZNIGHT005
+warning; re-export it instead (`export { Injectable as Service } from '@znight/core'`).
 
 | Decorator (`@znight/core`)                         | Analysis                                                                                         |
 | -------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
@@ -376,21 +402,21 @@ Every problem is a `ZNIGHTxxx` diagnostic with a location, a code frame and hint
 Build failed with 2 errors
 ```
 
-| Code      | Reported when                                                                                                                                                                                          | Severity        |
-| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------- |
-| ZNIGHT001 | a required dependency has no provider (with hints: wrong import, missing `@Injectable`, excluded file, missing `implements`, other type arguments, qualifier)                                          | error           |
-| ZNIGHT002 | circular dependency (constructor, multi, optional, interceptor and factory edges); the cycle is printed                                                                                                | error           |
-| ZNIGHT003 | a singleton depends on a request-scoped provider or external, directly or through transients, multi, interceptors or extension edges                                                                   | error           |
-| ZNIGHT004 | several providers of the exact same type                                                                                                                                                               | error           |
-| ZNIGHT005 | invalid decorator usage (target, arguments, unexported reference, abstract/generic/unexported provider, several provider decorators, `@Provides` misuse, ineffective decorators, composite decorators) | error / warning |
-| ZNIGHT008 | several candidates for an interface or base type                                                                                                                                                       | error           |
-| ZNIGHT009 | lifecycle hook that is static or has required parameters (error), never called (warning)                                                                                                               | error / warning |
-| ZNIGHT010 | injection type that cannot be analysed (missing annotation, primitive without qualifier, unresolvable import, inherited constructor of `Mixin(Base)`)                                                  | error           |
-| ZNIGHT014 | async factory on a non-singleton                                                                                                                                                                       | error           |
-| ZNIGHT018 | `@znight/*` package of another release line (version skew), compiler extension problems (untrusted, `apiVersion`, failures), manifest and compiled-library problems                                    | error / warning |
-| ZNIGHT019 | provider unreachable from any root (with `reportUnused`)                                                                                                                                               | warning         |
-| ZNIGHT020 | a provider module imports (transitively) the generated module: ESM cycle                                                                                                                               | error           |
-| ZNIGHT022 | a scanned file has a syntax error (reported first; the file is ignored until it parses)                                                                                                                | error           |
+| Code      | Reported when                                                                                                                                                                                                                                              | Severity        |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------- |
+| ZNIGHT001 | a required dependency has no provider (with hints: wrong import, missing `@Injectable`, excluded file, missing `implements`, other type arguments, qualifier)                                                                                              | error           |
+| ZNIGHT002 | circular dependency (constructor, multi, optional, interceptor and factory edges); the cycle is printed                                                                                                                                                    | error           |
+| ZNIGHT003 | a singleton depends on a request-scoped provider or external, directly or through transients, multi, interceptors or extension edges                                                                                                                       | error           |
+| ZNIGHT004 | several providers of the exact same type                                                                                                                                                                                                                   | error           |
+| ZNIGHT005 | invalid decorator usage (target, arguments, unexported reference, abstract/generic/unexported provider (also `export type { X }` only), several provider decorators, `@Provides` misuse, ineffective decorators, composite decorators and `const` aliases) | error / warning |
+| ZNIGHT008 | several candidates for an interface or base type                                                                                                                                                                                                           | error           |
+| ZNIGHT009 | lifecycle hook that is static or has required parameters (error), never called (warning)                                                                                                                                                                   | error / warning |
+| ZNIGHT010 | injection type that cannot be analysed (missing annotation, primitive without qualifier, unresolvable import, inherited constructor of `Mixin(Base)`)                                                                                                      | error           |
+| ZNIGHT014 | async factory on a non-singleton                                                                                                                                                                                                                           | error           |
+| ZNIGHT018 | `@znight/*` package of another release line (version skew), compiler extension problems (untrusted, `apiVersion`, failures), manifest and compiled-library problems                                                                                        | error / warning |
+| ZNIGHT019 | provider unreachable from any root (with `reportUnused`)                                                                                                                                                                                                   | warning         |
+| ZNIGHT020 | a provider module imports (transitively) the generated module: ESM cycle (also through an alias, before the file exists)                                                                                                                                   | error           |
+| ZNIGHT022 | a scanned file has a syntax error (reported first; the file is ignored until it parses)                                                                                                                                                                    | error           |
 
 Feature packages add their own (ZNIGHT007 routes, ZNIGHT011 consumers, ZNIGHT012 config, ZNIGHT017
 unvalidated inputs...).
@@ -450,9 +476,9 @@ import { createPreload, loadZnightConfig, znight, znightBunPlugin } from '@znigh
 
 ### `generate(options)`
 
-Compiles and writes the generated module when its content changed. Nothing is written when there is
-an error. With `check: true` nothing is written and `stale` tells whether the file on disk is out of
-date (`znight generate --check`).
+Compiles and writes the generated module (`diskCode`, the same in every mode) when its content
+changed. Nothing is written when there is an error. With `check: true` nothing is written and
+`stale` tells whether the file on disk is out of date (`znight generate --check`).
 
 ```ts
 const result = await generate({ root: process.cwd() })
@@ -470,13 +496,14 @@ The same, without writing anything: returns
 | Field         | Content                                                                                                                                                                                                                                                              |
 | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `code`        | the generated module, or the **error module** when there is an error (see `renderErrorModule`)                                                                                                                                                                       |
+| `diskCode`    | the disk copy written by `generate()` and the integrations: the `serve` rendering whatever the mode (differs from `code` only in `build` mode, which omits provider `source` locations)                                                                              |
 | `outFile`     | absolute path of the generated module                                                                                                                                                                                                                                |
 | `diagnostics` | syntax errors (ZNIGHT022) first, then every other diagnostic sorted by location                                                                                                                                                                                      |
 | `ok`          | `false` when at least one diagnostic is an error                                                                                                                                                                                                                     |
 | `graph`       | the application graph (providers, externals, aliases, edges, extension data)                                                                                                                                                                                         |
 | `stats`       | `{ files, providers, durationMs, parsed }`                                                                                                                                                                                                                           |
 | `library`     | library mode: `{ file, content, data }` of `znight.providers.json`                                                                                                                                                                                                   |
-| `watchFiles`  | files the result depends on (scanned sources, package manifests)                                                                                                                                                                                                     |
+| `watchFiles`  | files the result depends on (scanned sources, every other file read outside `node_modules`, package manifests, compiled libraries); never the outFile                                                                                                                |
 | `decorators`  | Znight decorators of each analysed file (`path → { hash, ranges, memberStarts }`), removed by `stripDecorators` when the content hash still matches (the first decorator of a class member leaves a `;`, so that a field without semicolon cannot absorb the member) |
 
 ### `createCompiler(options)`
@@ -667,7 +694,8 @@ this package are:
   `znight generate`. Vitest browser-like environments (`jsdom`, `happy-dom`) import the disk copy
   of the generated module, without stripping.
 - The generated module must be imported by path (relative or absolute), not through an alias, to
-  be served from memory.
+  be served from memory. ZNIGHT020 sees aliased imports of it before it exists when the alias maps
+  a directory (`@/*` → `./src/*`), not an exact alias of the file itself.
 - `bun --watch` and `bun test --watch` restart only for files Bun has loaded: a newly created
   provider file is picked up at the next restart (save any loaded file).
 

@@ -239,6 +239,48 @@ describe('plugin API', () => {
     expect(http.inflight).toBe(0)
   })
 
+  it('serves several applications one after the other (shared test setups)', async () => {
+    const http = HttpPlugin.configure({ port: 0, host: '127.0.0.1' })
+    for (let run = 0; run < 2; run++) {
+      const app = await Application.create({
+        metadata: usersMetadata(),
+        plugins: [http],
+        logger: silentLogger,
+        shutdown: { signals: false },
+      })
+      await app.start()
+      expect((await fetch(`${String(http.address)}/users/1`)).status).toBe(200)
+      expect((await http.inject({ method: 'GET', url: '/users/2' })).json()).toEqual({ id: 2 })
+      await app.stop()
+    }
+  })
+
+  it('serves one application at a time', async () => {
+    const http = HttpPlugin.configure({ port: 0, host: '127.0.0.1' })
+    const options = {
+      metadata: usersMetadata(),
+      plugins: [http],
+      logger: silentLogger,
+      shutdown: { signals: false as const },
+    }
+    const first = await Application.create(options)
+    const error = (await caught(() => Application.create(options))) as ZnightError
+    expect(error).toBeInstanceOf(ZnightError)
+    expect(error.message).toContain('This HttpPlugin is already used by another application')
+    expect(error.hints).toEqual(['Call HttpPlugin.configure() once per application'])
+    await first.stop()
+  })
+
+  it('reports an adapter instance reused by another application', async () => {
+    const adapter = nodeAdapter()
+    const first = await createApp(usersMetadata(), { adapter })
+    await first.stop()
+    const error = await bootError(usersMetadata(), { adapter })
+    expect(error.code).toBe(ErrorCode.LifecycleFailed)
+    expect(error.message).toContain('this node adapter instance already served an application')
+    expect(error.hints?.[0]).toContain('create it per application')
+  })
+
   it('validates inject requests', async () => {
     const app = await createApp(usersMetadata(), {}, { start: false })
     expect(await caught(() => app.http.inject({ method: 'GET', url: 'users' }))).toBeInstanceOf(TypeError)
@@ -470,4 +512,31 @@ describe('request ids, errors and hooks', () => {
     expect(app.http.adapter.name).toBe('node')
     await app.stop()
   })
+})
+
+describe('inject()', () => {
+  for (const adapter of ADAPTERS) {
+    it(`keeps Set-Cookie headers apart (${adapter.name})`, async () => {
+      const expires = 'a=1; Expires=Wed, 21 Oct 2015 07:28:00 GMT'
+      const meta = usersMetadata([
+        route('cookies', '/cookies', (_c, ctx) => {
+          ctx.appendHeader('set-cookie', expires)
+          ctx.appendHeader('set-cookie', 'b=2; Path=/')
+          return 'ok'
+        }),
+        route('cookie', '/cookie', (_c, ctx) => {
+          ctx.setHeader('set-cookie', 'c=3')
+          return 'ok'
+        }),
+      ])
+      const app = await createApp(meta, { adapter: adapter.create() }, { start: false })
+      // an Expires attribute contains ", ": joined values could not be split back
+      expect((await app.http.inject({ method: 'GET', url: '/users/cookies' })).headers['set-cookie']).toEqual([
+        expires,
+        'b=2; Path=/',
+      ])
+      expect((await app.http.inject({ method: 'GET', url: '/users/cookie' })).headers['set-cookie']).toEqual(['c=3'])
+      await app.stop()
+    })
+  }
 })

@@ -8,6 +8,8 @@ import {
   MetricsServer,
   measureHttpRequests,
   measureMessages,
+  OTHER_MESSAGE_TYPE,
+  UNMATCHED_MESSAGE_TYPE,
   UNMATCHED_ROUTE,
 } from '../src/index.ts'
 import { caught, httpEvent, messageEvent } from './helpers.ts'
@@ -92,6 +94,31 @@ describe('MetricsRegistry', () => {
     new MetricsRegistry({ registry: shared })
     expect(() => new MetricsRegistry({ registry: shared })).not.toThrow()
     expect(await registry().metrics()).not.toContain('process_cpu')
+  })
+
+  it('collects the default metrics once per configuration, shared by the registries', async () => {
+    let collections = 0
+    const client = {
+      ...promClient,
+      collectDefaultMetrics: (config?: Parameters<typeof promClient.collectDefaultMetrics>[0]) => {
+        collections++
+        promClient.collectDefaultMetrics(config)
+      },
+    }
+    const options = { client, prefix: 'shared_' }
+    const first = new MetricsRegistry({ ...options, defaultLabels: { app: 'first' } })
+    const second = new MetricsRegistry({ ...options, defaultLabels: { app: 'second' } })
+    // collectors (GC observer, event loop monitor) are never released: one set, not one per registry
+    expect(collections).toBe(1)
+    const cpu = 'shared_process_cpu_user_seconds_total'
+    expect(second.registry.getSingleMetric(cpu)).toBe(first.registry.getSingleMetric(cpu))
+    expect(await first.metrics()).toContain(`${cpu}{app="first"}`)
+    expect(await second.metrics()).toContain(`${cpu}{app="second"}`)
+    // the registry's own metrics stay its own
+    first.counter('own_total').inc()
+    expect(await second.metrics()).not.toContain('shared_own_total')
+    new MetricsRegistry({ client, prefix: 'other_' })
+    expect(collections).toBe(2)
   })
 
   it('reports prom-client availability', () => {
@@ -191,6 +218,46 @@ describe('measureMessages', () => {
     ).toBe(1)
     expect(await sample(metrics, 'messaging_active_messages{queue="orders"}')).toBe(0)
     expect(await metrics.metrics()).not.toContain('ignored')
+  })
+})
+
+describe('measureMessages type label', () => {
+  const base = 'queue="orders",consumer="OrderConsumer"'
+
+  it('never uses the raw type of unmatched deliveries and caps the types per handler', async () => {
+    const metrics = registry()
+    const hooks = new Hooks({ logger: silentLogger })
+    hooks.wrap('messaging:message', measureMessages(metrics, { maxTypesPerHandler: 2 }))
+    // producers choose the type: no handler matched, the delivery is dead-lettered
+    for (let index = 0; index < 20; index++) {
+      const event = messageEvent({ type: `junk-${index}`, handler: undefined, outcome: 'dead-letter' })
+      await hooks.run('messaging:message', event, async () => undefined)
+    }
+    // a pattern (or default) handler receives whatever types producers send
+    for (const type of ['a', 'b', 'c', 'd', 'a']) {
+      await hooks.run('messaging:message', messageEvent({ type, handler: 'onAny' }), async () => undefined)
+    }
+    await hooks.run('messaging:message', messageEvent({ type: 'c' }), async () => undefined)
+
+    const text = await metrics.metrics()
+    expect(text).not.toContain('junk-')
+    const total = (labels: string) => sample(metrics, `messaging_messages_processed_total{${base},${labels}}`)
+    expect(await total(`type="${UNMATCHED_MESSAGE_TYPE}",outcome="dead-letter"`)).toBe(20)
+    expect(await total('type="a",outcome="ack"')).toBe(2)
+    expect(await total('type="b",outcome="ack"')).toBe(1)
+    expect(await total(`type="${OTHER_MESSAGE_TYPE}",outcome="ack"`)).toBe(2)
+    // the budget is per handler: onCreated still records its own types
+    expect(await total('type="c",outcome="ack"')).toBe(1)
+    expect(text.split('\n').filter(line => line.startsWith('messaging_messages_processed_total{'))).toHaveLength(5)
+  })
+
+  it('validates maxTypesPerHandler', async () => {
+    for (const maxTypesPerHandler of [0, 1.5, Number.NaN]) {
+      const error = await caught(() => measureMessages(registry(), { maxTypesPerHandler }))
+      expect(error).toBeInstanceOf(ZnightError)
+      expect((error as ZnightError).code).toBe(ErrorCode.InvalidDecorator)
+      expect((error as Error).message).toContain('maxTypesPerHandler')
+    }
   })
 })
 

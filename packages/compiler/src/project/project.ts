@@ -22,7 +22,7 @@ import type { ModuleResolution, ResolutionMode } from './resolver.ts'
 import type { ImportRouteResult } from './routes.ts'
 import type { SourceFile } from './source-file.ts'
 import type { EntityName, Meaning, ScopeRef, SymbolResolution } from './symbols.ts'
-import type { HeritageClause, TypeParameterInfo, TypeScope } from './type-resolver.ts'
+import type { HeritageClause, ResolveTypeOptions, TypeParameterInfo, TypeScope } from './type-resolver.ts'
 import type { TypeInfo } from './types.ts'
 
 import { ErrorCode } from '@znight/core'
@@ -34,7 +34,7 @@ import { IdentityResolver } from './identity.ts'
 import { discoverLibraries } from './libraries.ts'
 import { readManifest } from './manifest.ts'
 import { PackageRegistry } from './packages.ts'
-import { isResolutionConfigPath, realPath, relativePath, resolvePath } from './paths.ts'
+import { dirName, isRelativeSpecifier, isResolutionConfigPath, realPath, relativePath, resolvePath } from './paths.ts'
 import { ModuleResolver } from './resolver.ts'
 import { RouteResolver } from './routes.ts'
 import { scanDirectory } from './scanner.ts'
@@ -108,6 +108,12 @@ export class Project implements ProjectHost {
   readonly #scanDiagnostics = new DiagnosticBag()
   readonly #diagnostics = new DiagnosticBag()
   readonly #manifests = new Map<string, ManifestResult>()
+  /** Files read through {@link getFile} since the last refresh (the inputs of the current compile). */
+  readonly #loaded = new Set<string>()
+  /** Relative imports that did not resolve since the last refresh: target paths without extension. */
+  #missing = new Set<string>()
+  /** {@link #missing} of the previous refresh (watchers may ask while a compile runs). */
+  #previousMissing: ReadonlySet<string> = new Set()
   #scanned: readonly string[] = []
   #scannedSet: ReadonlySet<string> = new Set()
   #libraries: readonly SourceLibrary[] = []
@@ -179,6 +185,9 @@ export class Project implements ProjectHost {
       this.#files.get(path)
     }
     this.#diagnostics.clear()
+    this.#loaded.clear()
+    this.#previousMissing = this.#missing
+    this.#missing = new Set()
     this.#services = this.#createServices()
     return {
       files: this.#scanned.length,
@@ -234,10 +243,32 @@ export class Project implements ProjectHost {
    * demand (package declarations...). `undefined` when missing or not parseable.
    */
   getFile(path: string): SourceFile | undefined {
-    if (this.#files.has(path)) {
-      return this.#files.get(path)
+    const key = this.#files.has(path) ? path : this.#normalizePath(path)
+    const file = this.#files.get(key)
+    if (file) {
+      this.#loaded.add(key)
     }
-    return this.#files.get(this.#normalizePath(path))
+    return file
+  }
+
+  /**
+   * `true` when creating `path` can fix a relative import that did not resolve in the current or the
+   * previous compile (`../shared/names.js` → `shared/names.ts`, `./util` → `util/index.ts`):
+   * watchers must recompile, even outside the `include` globs.
+   */
+  isMissingImport(path: string): boolean {
+    const target = withoutExtension(resolvePath(path, this.root))
+    const candidates = target.endsWith('/index') ? [target, target.slice(0, -'/index'.length)] : [target]
+    return candidates.some(candidate => this.#missing.has(candidate) || this.#previousMissing.has(candidate))
+  }
+
+  /**
+   * Files read since the last {@link refresh}, scanned or not (constants imported from outside the
+   * `include` globs, `.d.ts` and `.js` modules, package declarations...): with the scanned files,
+   * the inputs of the current compile. Sorted.
+   */
+  loadedFiles(): string[] {
+    return [...this.#loaded].sort()
   }
 
   // ----------------------------------------------------------- resolution
@@ -248,6 +279,9 @@ export class Project implements ProjectHost {
    */
   resolveModule(fromFile: string, specifier: string, span?: Span, mode: ResolutionMode = 'scan'): ModuleResolution {
     const resolution = this.resolver.resolve(fromFile, specifier, mode)
+    if (resolution.kind === 'not-found' && isRelativeSpecifier(specifier)) {
+      this.#missing.add(withoutExtension(resolvePath(specifier, dirName(fromFile))))
+    }
     if (span && resolution.kind === 'file' && resolution.casingMismatch && this.#scannedSet.has(fromFile)) {
       const file = this.#files.get(fromFile)
       if (file) {
@@ -305,8 +339,13 @@ export class Project implements ProjectHost {
   // ---------------------------------------------------------------- types
 
   /** Converts a type annotation to a {@link TypeInfo} (missing annotation → opaque). */
-  resolveType(scope: ScopeInput, node: TSType | TSTypeAnnotation | null | undefined, types?: TypeScope): TypeInfo {
-    return this.#services.types.resolveType(this.#scope(scope), node, types)
+  resolveType(
+    scope: ScopeInput,
+    node: TSType | TSTypeAnnotation | null | undefined,
+    types?: TypeScope,
+    options?: ResolveTypeOptions,
+  ): TypeInfo {
+    return this.#services.types.resolveType(this.#scope(scope), node, types, options)
   }
 
   /** Type parameters of a class, interface or type alias. */
@@ -473,4 +512,9 @@ export class Project implements ProjectHost {
     const resolved = resolvePath(path, this.root)
     return realPath(resolved) ?? resolved
   }
+}
+
+/** `path` without its JavaScript/TypeScript extension (`.d.ts` included). */
+function withoutExtension(path: string): string {
+  return path.replace(/(?:\.d)?\.[cm]?[jt]sx?$/, '')
 }

@@ -106,9 +106,10 @@ function packageJson(options: ProjectOptions, flags: Flags): string {
     type: 'module',
     engines: { node: '>=24' },
     scripts: {
-      dev: 'znight dev',
+      // `bun run` honours the node shebang of the znight binary: the runtime has to be explicit
+      dev: flags.bun ? 'znight dev --runtime bun' : 'znight dev',
       build: 'znight build',
-      start: 'znight start',
+      start: flags.bun ? 'znight start --runtime bun' : 'znight start',
       generate: 'znight generate',
       typecheck: 'znight generate && tsc --noEmit',
       test: flags.bun ? 'bun test' : 'vitest run',
@@ -500,7 +501,10 @@ function greetingControllerTest(flags: Flags): string {
   if (flags.observability) imports.push("import { ObservabilityPlugin } from '@znight/observability'")
   imports.push("import { TestApp } from '@znight/testing'")
   const plugins: string[] = []
-  if (flags.observability) plugins.push("ObservabilityPlugin.configure({ logging: { level: 'silent' } })")
+  // no metrics server (port 9464 once prom-client is installed): test files and `dev` run side by side
+  if (flags.observability) {
+    plugins.push("ObservabilityPlugin.configure({ logging: { level: 'silent' }, metrics: { server: false } })")
+  }
   if (flags.messaging) plugins.push('MessagingPlugin.configure({ driver: memory() })')
   // port 0: TestApp.inject() sends requests in memory, the server listens on a free port
   plugins.push('HttpPlugin.configure({ port: 0 })')

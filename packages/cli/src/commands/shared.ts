@@ -62,8 +62,16 @@ export function displayPath(file: string, from: string): string {
 }
 
 /**
- * Resolves on the first SIGINT/SIGTERM with the signal; `onRepeat` runs on any later signal (force
- * quit). Returns a function removing the listeners.
+ * Signals stopping a long-running command: Ctrl+C, `kill`, the terminal closed (`SIGHUP`) and, on
+ * POSIX, `Ctrl+\` (`SIGQUIT`). Without a listener the last two kill the CLI without running its exit
+ * hooks, leaving the application of `znight dev` (in its own session) running.
+ */
+export const TERMINATION_SIGNALS: readonly NodeJS.Signals[] =
+  process.platform === 'win32' ? ['SIGINT', 'SIGTERM', 'SIGHUP'] : ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGQUIT']
+
+/**
+ * Calls `onFirst` on the first {@link TERMINATION_SIGNALS termination signal}; `onRepeat` runs on
+ * any later one (force quit). Returns a function removing the listeners.
  */
 export function onTermination(
   cli: CliContext,
@@ -71,8 +79,7 @@ export function onTermination(
   onRepeat: (signal: NodeJS.Signals) => void,
 ): () => void {
   let received = false
-  const signals: NodeJS.Signals[] = ['SIGINT', 'SIGTERM']
-  const listeners = signals.map(signal => {
+  const listeners = TERMINATION_SIGNALS.map(signal => {
     const listener = (): void => {
       if (received) {
         onRepeat(signal)

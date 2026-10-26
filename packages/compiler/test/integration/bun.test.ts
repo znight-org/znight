@@ -277,7 +277,27 @@ describe('bun --preload @znight/compiler/bun', () => {
           { NODE_ENV: 'production' },
         )
         expect(report(production.stdout).greeting).toBe('Hello Ada @42')
-        expect(fs.readFileSync(`${app.root}/${DEFAULT_OUT_FILE}`, 'utf8')).not.toContain('source: {')
+        // the disk copy is the same in every mode: a production start does not rewrite it
+        expect(production.stderr).toBe('')
+        expect(fs.readFileSync(`${app.root}/${DEFAULT_OUT_FILE}`, 'utf8')).toContain('source: {')
+
+        // read-only tree (container image built after \`znight generate\`): the module is served from
+        // memory, rewriting a stale disk copy is best-effort (Bun resolves the import to the existing file)
+        const directory = `${app.root}/src/.znight`
+        fs.appendFileSync(`${directory}/container.generated.ts`, '// stale\n')
+        fs.chmodSync(directory, 0o555)
+        try {
+          const readOnly = await run(
+            ['bun', SOURCE_CONDITION, '--preload', '@znight/compiler/bun', 'src/main.ts'],
+            app.root,
+            { NODE_ENV: 'production' },
+          )
+          expect(readOnly.code).toBe(0)
+          expect(report(readOnly.stdout).greeting).toBe('Hello Ada @42')
+          expect(readOnly.stderr).toContain('[znight] cannot write src/.znight/container.generated.ts')
+        } finally {
+          fs.chmodSync(directory, 0o755)
+        }
 
         const node = await run(['node', SOURCE_CONDITION, '--import', '@znight/compiler/bun', '-e', '0'], app.root)
         expect(node.code).not.toBe(0)
@@ -318,7 +338,7 @@ describe('bun --preload @znight/compiler/bun', () => {
         // main.ts runs: only the files the preload loaded as text are watched)
         const factory = fs.readFileSync(`${app.root}/src/settings.factory.ts`, 'utf8')
         app.write('src/settings.factory.ts', factory.replace('prefix(): string {', 'prefix(): string {{'))
-        await waitFor(() => output().includes('✗ ZNIGHT022'), 'the diagnostics')
+        await waitFor(() => output().includes('The Znight compilation failed'), 'the diagnostics and the error')
         expect(output()).toContain(' --> src/settings.factory.ts:')
         expect(output()).toContain('ZnightError: ZNIGHT022: The Znight compilation failed with 2 errors')
         expect(output()).not.toContain('bun-plugin.ts')

@@ -273,7 +273,7 @@ export class ConsumerRuntime {
     event.error = error
     this.#services.logger.warn(
       `Consumer ${this.consumer.name}: attempt ${message.attempt}/${message.maxAttempts} of message ${message.id} failed, retrying in ${delayMs} ms`,
-      { queue: message.queue, messageId: message.id, type: message.type, err: error },
+      { queue: message.queue, messageId: message.id, type: message.type, ...this.#errorContext(error) },
     )
     if (isInProcessDelay(delayMs, this.#services.driver.capabilities)) {
       context.followup = { kind: 'retry', delayMs, error }
@@ -341,8 +341,25 @@ export class ConsumerRuntime {
       queue === undefined
         ? `Consumer ${this.consumer.name}: message ${message.id} rejected (${reason})`
         : `Consumer ${this.consumer.name}: message ${message.id} dead-lettered to ${queue} (${reason})`,
-      { err: error, queue: message.queue, messageId: message.id, type: message.type, attempt: message.attempt, reason },
+      {
+        queue: message.queue,
+        messageId: message.id,
+        type: message.type,
+        attempt: message.attempt,
+        reason,
+        ...this.#errorContext(error),
+      },
     )
+  }
+
+  /**
+   * The error of a failed delivery in the retry / dead-letter log entries: the error itself (with its
+   * stack), or only its message when a `messaging:message` wrapper is installed. Such a wrapper (the
+   * ObservabilityPlugin delivery log) writes its own entry for the delivery with the error: the stack
+   * is logged once. Settlement failures always log their error.
+   */
+  #errorContext(error: unknown): { readonly err: unknown } | { readonly error: string } {
+    return this.#services.hooks.hasWrappers('messaging:message') ? { error: errorMessage(error) } : { err: error }
   }
 
   async #ack(context: DeliveryContext): Promise<void> {

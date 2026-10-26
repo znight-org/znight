@@ -54,6 +54,25 @@ describe('applyBinary', () => {
   it('division by zero on numbers follows JavaScript', () => {
     expect(applyBinary('/', 1, 0)).toEqual({ ok: true, value: Number.POSITIVE_INFINITY })
   })
+
+  it('turns bigint RangeErrors and huge bigint results into errors (never throws)', () => {
+    expect(applyBinary('**', 2n, -1n)).toMatchObject({ ok: false })
+    for (const [operator, left, right] of [
+      ['**', 2n, 10n ** 12n],
+      ['**', -3n, 2_000_000n],
+      ['<<', 1n, 10n ** 12n],
+      ['>>', 1n, -(10n ** 12n)],
+    ] as const) {
+      expect(applyBinary(operator, left, right)).toEqual({
+        ok: false,
+        message: `The result of '${operator}' is too large to be evaluated statically (more than 1000000 bits)`,
+      })
+    }
+    expect(applyBinary('**', 2n, 64n)).toEqual({ ok: true, value: 2n ** 64n })
+    expect(applyBinary('**', 1n, 10n ** 12n)).toEqual({ ok: true, value: 1n })
+    expect(applyBinary('<<', 1n, 64n)).toEqual({ ok: true, value: 1n << 64n })
+    expect(applyBinary('>>', 1n, 10n ** 12n)).toEqual({ ok: true, value: 0n })
+  })
 })
 
 describe('applyUnary', () => {

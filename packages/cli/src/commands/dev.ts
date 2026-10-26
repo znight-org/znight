@@ -83,6 +83,8 @@ export const devCommand: Command = defineCommand({
     }
     const logLevel = args['log-level'] as ViteLogLevel
     const { colors, reporter } = cli
+    // before Vite runs: its build sets process.env.NODE_ENV (to "production") when it is not set
+    const env = { ...cli.env }
     const vite = await cli.services.loadVite(root)
     const tracker = createOutputTracker(root)
     let entry: string | undefined
@@ -95,7 +97,7 @@ export const devCommand: Command = defineCommand({
         return cli.services.processes.spawn(
           executable,
           [...runtimeArguments(runtime, args.inspect === true ? ['--inspect'] : []), file, ...passthrough],
-          { cwd: root, env: { ...cli.env, NODE_ENV: cli.env['NODE_ENV'] ?? 'development' }, detached: true },
+          { cwd: root, env: { ...env, NODE_ENV: env['NODE_ENV'] ?? 'development' }, detached: true },
         )
       },
       events: {
@@ -217,12 +219,14 @@ function waitForTermination(cli: CliContext, watcher: BuildWatcher, supervisor: 
     const dispose = onTermination(
       cli,
       signal => {
-        cli.reporter.info(cli.colors.dim('Stopping... (press Ctrl+C again to force)'))
+        // SIGHUP: the terminal is gone, nothing can be printed
+        if (signal !== 'SIGHUP') cli.reporter.info(cli.colors.dim('Stopping... (press Ctrl+C again to force)'))
         void (async () => {
           try {
             await watcher.close()
           } finally {
-            await supervisor.stop(signal)
+            // the application stops gracefully on SIGINT or SIGTERM
+            await supervisor.stop(signal === 'SIGINT' ? 'SIGINT' : 'SIGTERM')
             dispose()
             resolveExit(0)
           }

@@ -6,6 +6,7 @@ import { isSpanContextValid, context as otelContext, SpanKind, SpanStatusCode, t
 
 import { normalizeMethod, OTHER_METHOD } from '../internal/hooks.ts'
 import { guard } from '../internal/safe.ts'
+import { ensureContextManager } from './context.ts'
 import { formatTraceparent } from './propagation.ts'
 import { SemanticAttributes as Attr } from './semconv.ts'
 import { recordSpanError } from './tracer.ts'
@@ -35,7 +36,9 @@ export interface MessagingTracingOptions {
 /**
  * `http:request` hook wrapper creating a `SERVER` span per request, child of the W3C trace context
  * found in the request headers (`traceparent`), active while the request is handled (so logs and
- * nested spans are correlated). Attributes follow the stable HTTP semantic conventions; 5xx
+ * nested spans are correlated, and published messages carry the trace context; without SDK, the
+ * span is a no-op carrying the incoming trace context, and a fallback `AsyncLocalStorage` context
+ * manager is registered when none is). Attributes follow the stable HTTP semantic conventions; 5xx
  * responses and unhandled errors set the span status to `ERROR` and record the exception.
  */
 export function traceHttpRequests(tracer: Tracer, options: HttpTracingOptions = {}): HookWrapper<'http:request'> {
@@ -64,6 +67,7 @@ export function traceHttpRequests(tracer: Tracer, options: HttpTracingOptions = 
       const spanContext = span.spanContext()
       if (isSpanContextValid(spanContext)) event.responseHeaders[responseHeader] = formatTraceparent(spanContext)
     }
+    ensureContextManager()
     return otelContext.with(trace.setSpan(parent, span), async () => {
       let failed = false
       let thrown: unknown
@@ -154,6 +158,7 @@ export function traceMessages(tracer: Tracer, options: MessagingTracingOptions =
       { kind: SpanKind.CONSUMER, attributes, ...startTimeOf(event.startTime) },
       parent,
     )
+    ensureContextManager()
     return otelContext.with(trace.setSpan(parent, span), async () => {
       let failed = false
       let thrown: unknown
@@ -233,6 +238,7 @@ export function traceMessagePublish(tracer: Tracer, options: MessagePublishTraci
     )
     const active = trace.setSpan(parent, span)
     if (typeof event.headers === 'object' && event.headers !== null) record(() => tracer.inject(event.headers, active))
+    ensureContextManager()
     return otelContext.with(active, async () => {
       let thrown: unknown
       let failed = false

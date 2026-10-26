@@ -1,6 +1,7 @@
 import type { ResolvedOptions } from '../options.ts'
 import type { Span } from './location.ts'
-import type { PackageRegistry } from './packages.ts'
+import type { PackageManifest } from './manifest.ts'
+import type { PackageInfo, PackageRegistry } from './packages.ts'
 import type { ModuleResolution, ResolutionMode } from './resolver.ts'
 import type { SourceFile } from './source-file.ts'
 
@@ -20,4 +21,6 @@ export interface ProjectHost {
   resolveModule(fromFile: string, specifier: string, span?: Span, mode?: ResolutionMode): ModuleResolution
   /** Resolves `specifier` from a directory without tsconfig lookup (package self-references). */
   resolveFromDirectory(directory: string, specifier: string, mode?: ResolutionMode): ModuleResolution
+  /** Validated `package.json#znight` manifest of a package (`undefined` without one). */
+  manifestOf(info: PackageInfo): PackageManifest | undefined
 }

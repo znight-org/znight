@@ -11,6 +11,7 @@ import { dirname, relative, resolve } from 'node:path'
 import { CliError } from '../errors.ts'
 import { createColors } from '../output.ts'
 import { importFromProject } from './resolve.ts'
+import { includeRoots } from './watch.ts'
 
 /** Location of a diagnostic (`Diagnostic.location`, §6.2). */
 export interface DiagnosticLocation {
@@ -29,11 +30,22 @@ export interface Diagnostic {
   readonly related?: readonly { readonly message: string; readonly location: DiagnosticLocation }[] | undefined
 }
 
-/** Compiler options (`ZnightOptions`, §6.2). The CLI reads `root`, `include` and `outFile`; the others are passed through. */
+/** A string alias of Vite's `resolve.alias` (`CompileOptions.aliases` of the compiler). */
+export interface StringAliasLike {
+  readonly find: string
+  readonly replacement: string
+}
+
+/**
+ * Compiler options (`ZnightOptions`, §6.2, plus the `CompileOptions` the Vite plugin derives from the
+ * Vite config). The CLI reads `root`, `include` and `outFile`; the others are passed through.
+ */
 export interface ZnightOptions {
   readonly root?: string | undefined
   readonly include?: readonly string[] | undefined
   readonly outFile?: string | undefined
+  /** String aliases of the Vite config (`resolve.alias`). */
+  readonly aliases?: readonly StringAliasLike[] | undefined
   readonly [option: string]: unknown
 }
 
@@ -59,6 +71,12 @@ export interface GenerateResultLike extends CompileResultLike {
 export interface CheckResultLike extends CompileResultLike {
   /** The generated files on disk are missing or differ from what would be generated. */
   readonly stale: boolean
+  /**
+   * The generated files that are missing or out of date (the module, and `znight.providers.json` in
+   * library mode). Empty when `stale` is `false`; empty or absent with `stale` when the compiler
+   * does not say which file is stale.
+   */
+  readonly staleFiles?: readonly string[] | undefined
 }
 
 /** Files changed since the previous compile of an {@link IncrementalCompiler}. */
@@ -74,6 +92,12 @@ export interface IncrementalCompiler {
   generate(changes?: CompilerChanges): Promise<GenerateResultLike>
   /** Whether `file` is the generated module (watchers ignore it). */
   isOutFile(file: string): boolean
+  /**
+   * Directories where a created or deleted source changes the scan, after a compile: the bases of the
+   * `include` globs in the project root and in every source library (`includeRoots()` of the
+   * compiler). `undefined` when the compiler does not tell (the CLI then uses the project's only).
+   */
+  includeRoots?(): readonly string[] | undefined
 }
 
 /** Options of {@link CompilerApi.formatDiagnostics}. */
@@ -119,11 +143,20 @@ const COMPILER_PACKAGE: string = '@znight/compiler'
 interface ModuleResult extends CompileResultLike {
   readonly written?: readonly string[]
   readonly stale?: boolean
+  /** The stale generated files (check mode), when the compiler tells. */
+  readonly staleFiles?: readonly string[]
+  /** Library mode: `znight.providers.json` (`library` of a `CompileResult`). */
+  readonly library?: { readonly file?: unknown; readonly content?: unknown } | undefined
 }
 
-interface ModuleIncrementalCompiler {
+/** The parts of a `ZnightCompiler` (`createCompiler()`) the CLI uses; all optional. */
+export interface ModuleIncrementalCompiler {
   generate?: (changes?: CompilerChanges, options?: { check?: boolean }) => Promise<ModuleResult>
   isOutFile?: (file: string) => boolean
+  /** Resolved options: absolute `root`, normalized `include`. */
+  readonly options?: { readonly root?: unknown; readonly include?: unknown } | undefined
+  /** The project: its source libraries once compiled (`libraries()[i].package.dir`). */
+  readonly project?: { readonly libraries?: () => readonly { readonly package?: { readonly dir?: unknown } }[] }
 }
 
 /** The shape of the `@znight/compiler` module (every export optional: partial versions are adapted). */
@@ -133,6 +166,8 @@ export interface CompilerModule {
   createCompiler?: (options?: ZnightOptions) => ModuleIncrementalCompiler
   formatDiagnostics?: (diagnostics: readonly Diagnostic[], options?: FormatDiagnosticsOptions) => string
   loadZnightConfig?: (cwd?: string) => Promise<ZnightConfigLike>
+  /** The watch roots of a compiler (`includeRoots(compiler)`), when exported. */
+  includeRoots?: (compiler: ModuleIncrementalCompiler) => readonly string[]
 }
 
 /**
@@ -198,13 +233,11 @@ export function adaptCompilerModule(module: CompilerModule): CompilerApi {
   return {
     generate: generateOnce,
     check: async options => {
-      if (typeof generate === 'function') {
-        const result = await generate({ ...options, check: true })
-        if (typeof result.stale === 'boolean') return { ...result, stale: result.stale }
-        return { ...result, stale: readText(result.outFile) !== result.code }
-      }
-      const result = await compileOnly(options)
-      return { ...result, stale: readText(result.outFile) !== result.code }
+      const result =
+        typeof generate === 'function' ? await generate({ ...options, check: true }) : await compileOnly(options)
+      const staleFiles = Array.isArray(result.staleFiles) ? result.staleFiles : staleOutputs(result)
+      const stale = typeof result.stale === 'boolean' ? result.stale : staleFiles.length > 0
+      return { ...result, stale, staleFiles: stale ? staleFiles : [] }
     },
     createIncremental: options => {
       const compiler = typeof createCompiler === 'function' ? createCompiler(options) : undefined
@@ -218,6 +251,7 @@ export function adaptCompilerModule(module: CompilerModule): CompilerApi {
         },
         isOutFile: file =>
           typeof compiler?.isOutFile === 'function' ? compiler.isOutFile(file) : resolve(file) === outFile,
+        includeRoots: () => (compiler === undefined ? undefined : compilerIncludeRoots(module, compiler)),
       }
     },
     formatDiagnostics: (diagnostics, options) => format(diagnostics, options),
@@ -225,6 +259,43 @@ export function adaptCompilerModule(module: CompilerModule): CompilerApi {
       ? { loadConfig: (root: string): Promise<ZnightConfigLike> => loadZnightConfig(root) }
       : {}),
   }
+}
+
+/**
+ * The generated files of a compile result that differ from the disk: the module, and
+ * `znight.providers.json` in library mode. None with errors (nothing would be written).
+ */
+function staleOutputs(result: ModuleResult): string[] {
+  if (hasErrors(result.diagnostics)) return []
+  const outputs: { file: string; content: string }[] = [{ file: result.outFile, content: result.code }]
+  const { file, content } = result.library ?? {}
+  if (typeof file === 'string' && typeof content === 'string') outputs.push({ file, content })
+  return outputs.filter(output => readText(output.file) !== output.content).map(output => output.file)
+}
+
+/**
+ * {@link IncrementalCompiler.includeRoots}: `includeRoots()` of the compiler when exported, else the
+ * same computation on the compiler's resolved options and source libraries (`undefined` when the
+ * compiler does not expose them).
+ */
+function compilerIncludeRoots(
+  module: CompilerModule,
+  compiler: ModuleIncrementalCompiler,
+): readonly string[] | undefined {
+  if (typeof module.includeRoots === 'function') return module.includeRoots(compiler)
+  const root = compiler.options?.root
+  const include = compiler.options?.include
+  if (typeof root !== 'string' || !Array.isArray(include)) return undefined
+  const libraries = typeof compiler.project?.libraries === 'function' ? compiler.project.libraries() : []
+  const bases = [root]
+  for (const library of libraries) {
+    const dir = library.package?.dir
+    if (typeof dir === 'string') bases.push(dir)
+  }
+  return includeRoots(
+    bases,
+    include.filter((glob): glob is string => typeof glob === 'string'),
+  )
 }
 
 /** Default `outFile` of the compiler (§6.2). */

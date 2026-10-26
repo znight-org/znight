@@ -6,9 +6,9 @@
 import type { Command } from '../command.ts'
 import type { CliContext } from '../context.ts'
 import type {
+  CheckResultLike,
   CompileResultLike,
   CompilerApi,
-  CompilerChanges,
   GenerateResultLike,
   IncrementalCompiler,
   ZnightConfigLike,
@@ -22,7 +22,16 @@ import { defineCommand } from '../command.ts'
 import { CliError, errorMessage } from '../errors.ts'
 import { DEFAULT_INCLUDE, hasErrors } from '../integrations/compiler.ts'
 import { findViteConfig, readZnightPluginOptions, type ViteConfigLoader } from '../integrations/vite.ts'
-import { watchTargets } from '../integrations/watch.ts'
+import {
+  classifyChanges,
+  includeRoots,
+  isRelevantChange,
+  realPath,
+  TargetWatchers,
+  toPosixPath,
+  type WatchState,
+  watchTargets,
+} from '../integrations/watch.ts'
 import { formatDuration, plural } from '../output.ts'
 import { displayPath, onTermination, resolveRoot } from './shared.ts'
 
@@ -179,6 +188,20 @@ async function generateOnce(
   return result
 }
 
+/**
+ * The generated files `--check` reports, the module first: those the compiler says are stale (the
+ * module when it does not say which), and the module when it is missing.
+ */
+function staleFilesOf(result: CheckResultLike): string[] {
+  const stale = new Set<string>()
+  if (!existsSync(result.outFile)) stale.add(result.outFile)
+  if (result.stale) {
+    const files = result.staleFiles ?? []
+    for (const file of files.length > 0 ? files : [result.outFile]) stale.add(file)
+  }
+  return [...stale].sort((a, b) => Number(b === result.outFile) - Number(a === result.outFile))
+}
+
 async function check(cli: CliContext, compiler: CompilerApi, options: ZnightOptions): Promise<number> {
   const root = options.root ?? cli.cwd
   const started = performance.now()
@@ -189,42 +212,46 @@ async function check(cli: CliContext, compiler: CompilerApi, options: ZnightOpti
     return 1
   }
   const file = displayPath(result.outFile, cli.cwd)
-  if (!existsSync(result.outFile)) {
-    cli.reporter.error(`${file} is missing`, [
-      'run "znight generate" (it is git-ignored: generate it before tsc and tests)',
-    ])
-    return 1
+  const stale = staleFilesOf(result)
+  for (const path of stale) {
+    const shown = displayPath(path, cli.cwd)
+    // the other generated file is the library manifest (`dist/znight.providers.json`)
+    const hint =
+      path === result.outFile
+        ? 'run "znight generate" (it is git-ignored: generate it before tsc and tests)'
+        : 'run "znight generate" after the build: a build cleaning dist/ (tsdown, tsc --build --clean...) deletes it'
+    if (existsSync(path)) cli.reporter.error(`${shown} is out of date`, ['run "znight generate"'])
+    else cli.reporter.error(`${shown} is missing`, [hint])
   }
-  if (result.stale) {
-    cli.reporter.error(`${file} is out of date`, ['run "znight generate"'])
-    return 1
-  }
+  if (stale.length > 0) return 1
   cli.reporter.success(
     `${cli.colors.bold(file)} is up to date ${cli.colors.dim(`(${statsOf(result, performance.now() - started)})`)}`,
   )
   return 0
 }
 
-/** Classifies changed paths for the incremental compiler. */
-function changesOf(files: ReadonlySet<string>, known: ReadonlySet<string>): CompilerChanges {
-  const changed: string[] = []
-  const added: string[] = []
-  const removed: string[] = []
-  for (const file of files) {
-    if (!existsSync(file)) removed.push(file)
-    else if (known.has(file)) changed.push(file)
-    else added.push(file)
-  }
-  return { changed, added, removed }
-}
-
 async function watch(cli: CliContext, compiler: CompilerApi, options: ZnightOptions): Promise<number> {
   const root = options.root ?? cli.cwd
+  const realRoot = realPath(root)
   const incremental: IncrementalCompiler = compiler.createIncremental(options)
-  let known = new Set<string>()
+  // before the first compile, and with compilers that do not tell: the project's include directories
+  const projectRoots = includeRoots([realRoot], options.include ?? DEFAULT_INCLUDE)
+  let state: WatchState = { known: new Set(), roots: projectRoots }
   let pending = new Set<string>()
   let running = false
   let timer: ReturnType<typeof setTimeout> | undefined
+
+  const watchers = new TargetWatchers(cli.services.watch, file => {
+    if (incremental.isOutFile(file)) return
+    const path = realPath(file)
+    if (incremental.isOutFile(path) || !isRelevantChange(path, state)) return
+    pending.add(path)
+    if (timer !== undefined) clearTimeout(timer)
+    timer = setTimeout(() => {
+      timer = undefined
+      void run(false)
+    }, 50)
+  })
 
   const run = async (initial: boolean): Promise<void> => {
     if (running) return
@@ -236,12 +263,20 @@ async function watch(cli: CliContext, compiler: CompilerApi, options: ZnightOpti
         pending = new Set()
         const started = performance.now()
         try {
-          const result = await incremental.generate(first ? undefined : changesOf(files, known))
-          if (result.watchFiles !== undefined) known = new Set(result.watchFiles.map(file => resolve(file)))
+          const result = await incremental.generate(first ? undefined : classifyChanges(files, state.known))
+          state = {
+            known:
+              result.watchFiles === undefined
+                ? state.known
+                : new Set(result.watchFiles.map(file => toPosixPath(resolve(file)))),
+            // the include directories of the source libraries are known once compiled
+            roots: (incremental.includeRoots?.() ?? projectRoots).map(toPosixPath),
+          }
           report(cli, compiler, result, root, performance.now() - started)
         } catch (error) {
           cli.reporter.error(`Generation failed: ${errorMessage(error)}`)
         }
+        watchers.update(watchTargets(realRoot, state.roots, state.known), files)
         first = false
       } while (pending.size > 0)
     } finally {
@@ -250,15 +285,6 @@ async function watch(cli: CliContext, compiler: CompilerApi, options: ZnightOpti
   }
 
   await run(true)
-  const watcher = cli.services.watch(watchTargets(root, options.include ?? DEFAULT_INCLUDE), file => {
-    if (incremental.isOutFile(file)) return
-    pending.add(resolve(file))
-    if (timer !== undefined) clearTimeout(timer)
-    timer = setTimeout(() => {
-      timer = undefined
-      void run(false)
-    }, 50)
-  })
   cli.reporter.info(cli.colors.dim('Watching for changes... (Ctrl+C to stop)'))
 
   return new Promise<number>(resolveExit => {
@@ -266,7 +292,7 @@ async function watch(cli: CliContext, compiler: CompilerApi, options: ZnightOpti
       cli,
       () => {
         if (timer !== undefined) clearTimeout(timer)
-        watcher.close()
+        watchers.close()
         dispose()
         resolveExit(0)
       },

@@ -7,6 +7,7 @@ import fs from 'node:fs'
 import { renderErrorModule } from '../src/codegen/error-module.ts'
 import { compile, createCompiler, generate } from '../src/compiler.ts'
 import { compatibleVersions, parseVersion } from '../src/version.ts'
+import { includeRoots, isRelevantChange } from '../src/watch.ts'
 import { tempApp } from './analysis/helpers.ts'
 import { codesOf, render } from './codegen/helpers.ts'
 import { afterAll, describe, expect, test as it } from 'bun:test'
@@ -14,6 +15,12 @@ import { afterAll, describe, expect, test as it } from 'bun:test'
 const SERVICE = `import { Injectable } from '@znight/core'
 @Injectable()
 export class Service {}
+`
+
+const NAMED_LATER = `import { Injectable } from '@znight/core'
+import { LATER } from '../shared/later.js'
+@Injectable({ name: LATER })
+export class Named {}
 `
 
 describe('compile()', () => {
@@ -27,7 +34,12 @@ describe('compile()', () => {
     expect(result.code).toContain("['src/service.ts#Service']")
     expect(fs.existsSync(result.outFile)).toBe(false)
     expect(result.stats).toMatchObject({ files: 1, providers: 1, parsed: 1 })
-    expect(result.watchFiles).toEqual([`${app.root}/package.json`, `${app.root}/src/service.ts`])
+    // (files read outside node_modules are watched too: here @znight/core is linked from the repository)
+    expect(result.watchFiles.filter(file => file.startsWith(`${app.root}/`))).toEqual([
+      `${app.root}/package.json`,
+      `${app.root}/src/service.ts`,
+    ])
+    expect(result.diskCode).toBe(result.code)
     expect(result.library).toBeUndefined()
     const source = fs.readFileSync(`${app.root}/src/service.ts`, 'utf8')
     const ranges = result.decorators.get(`${app.root}/src/service.ts`)
@@ -312,5 +324,84 @@ describe('createCompiler()', () => {
     expect(result.written).toEqual([`${app.root}/src/.znight/container.generated.ts`])
     expect((await compiler.generate(undefined, { check: true })).stale).toBe(false)
     expect((await compiler.generate({ changed: [] })).written).toEqual([])
+  })
+
+  it('watches and re-reads the files the analysis reads outside the scan', async () => {
+    const outside = tempApp({
+      'shared/names.ts': "export const NAME = 'alpha'\n",
+      'src/types.d.ts': "export declare const PREFIX: 'v1'\n",
+      'src/constants.js': "export const SUFFIX = 'x'\n",
+      'src/named.ts': `import { Injectable } from '@znight/core'
+import { NAME } from '../shared/names.ts'
+import { PREFIX } from './types.js'
+import { SUFFIX } from './constants.js'
+@Injectable({ name: \`\${PREFIX}-\${NAME}-\${SUFFIX}\` })
+export class Named {}
+`,
+      'src/other.ts': SERVICE.replace('Service', 'Other'),
+    })
+    try {
+      const compiler = createCompiler({ root: outside.root })
+      const first = await compiler.compile()
+      expect(first.code).toContain("name: 'v1-alpha-x'")
+      const inputs = [
+        `${outside.root}/shared/names.ts`,
+        `${outside.root}/src/constants.js`,
+        `${outside.root}/src/types.d.ts`,
+      ]
+      for (const input of inputs) {
+        expect(first.watchFiles).toContain(input)
+        expect(isRelevantChange(compiler, 'changed', input, new Set(first.watchFiles), includeRoots(compiler))).toBe(
+          true,
+        )
+      }
+      expect(first.watchFiles).not.toContain(first.outFile)
+      expect(first.watchFiles.some(file => file.includes('/node_modules/'))).toBe(false)
+
+      outside.write('shared/names.ts', "export const NAME = 'beta'\n")
+      const second = await compiler.compile({ changed: [`${outside.root}/shared/names.ts`] })
+      expect(second.code).toContain("name: 'v1-beta-x'")
+
+      // a file created where an import did not resolve, outside the include roots
+      outside.write('src/named.ts', NAMED_LATER)
+      const failed = await compiler.compile({ changed: [`${outside.root}/src/named.ts`] })
+      expect(failed.ok).toBe(false)
+      const created = `${outside.root}/shared/later.ts`
+      const watched = new Set(failed.watchFiles)
+      expect(isRelevantChange(compiler, 'added', created, watched, includeRoots(compiler))).toBe(true)
+      expect(
+        isRelevantChange(compiler, 'added', `${outside.root}/shared/other.ts`, watched, includeRoots(compiler)),
+      ).toBe(false)
+      outside.write('shared/later.ts', "export const LATER = 'later'\n")
+      const fixed = await compiler.compile({ added: [created] })
+      expect(fixed.ok).toBe(true)
+      expect(fixed.code).toContain("name: 'later'")
+    } finally {
+      outside.cleanup()
+    }
+  })
+})
+
+describe('disk copy', () => {
+  const app = tempApp({ 'src/service.ts': SERVICE })
+  afterAll(() => app.cleanup())
+  const outFile = `${app.root}/src/.znight/container.generated.ts`
+
+  it('is the same in every mode, so `generate --check` agrees with a build', async () => {
+    const build = await generate({ root: app.root, mode: 'build' })
+    expect(build.code).not.toContain('source: {')
+    expect(build.diskCode).toContain("source: { file: 'src/service.ts', line: 3, column: 14 }")
+    expect(build.written).toEqual([outFile])
+    expect(fs.readFileSync(outFile, 'utf8')).toBe(build.diskCode)
+    for (const mode of ['serve', 'test', 'build'] as const) {
+      const check = await generate({ root: app.root, mode, check: true })
+      expect(check.diskCode).toBe(build.diskCode)
+      expect(check.stale).toBe(false)
+      expect((await generate({ root: app.root, mode })).written).toEqual([])
+    }
+    // without source locations in dev (or with them always), both renderings are the same
+    const always = await compile({ root: app.root, mode: 'build', sourceLocations: 'always' })
+    expect(always.diskCode).toBe(always.code)
+    expect(always.code).toContain('source: {')
   })
 })

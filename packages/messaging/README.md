@@ -185,6 +185,15 @@ dead-lettering: RabbitMQ rejects the message (a queue DLX policy applies), SQS a
 to the broker, never dropped), aborts `message.signal`, waits for the handlers in flight, then closes
 the connections. Keep handlers shorter than `shutdown.hookTimeoutMs` (5 s by default) or raise it.
 
+While consumers run (from `onStart` to the end of `onStop`), the plugin keeps the process alive: a
+worker whose only ingress is a consumer does not exit after `app.start()`, whatever the driver (the
+memory driver holds no socket), and stops only through `app.stop()` or a signal.
+
+The runtime logs each retry (`warn`) and each dead letter (`error`) with the error. When a
+`messaging:message` wrapper is installed (the `ObservabilityPlugin` delivery log writes one entry per
+delivery with the error), these entries carry only the error message (`error`) instead of the error
+and its stack (`err`), so that the stack is logged once.
+
 ### Request scope
 
 Each delivery runs in its own request scope seeded with the `InboundMessage`
@@ -256,6 +265,10 @@ MessagingPlugin.configure(c => ({ driver: rabbitmq({ url: c.get(AmqpConfig).url 
 The plugin (`name: 'messaging'`) exposes `broker`, `driver` and `consumers()` (state, in-flight count,
 dead-letter queue of each consumer).
 
+Options are validated in `onBootstrap`, so invalid options (a `driver` that is not a messaging driver,
+a `defaults.concurrency` that is not a positive integer...) make `Application.create()` fail with
+**ZNIGHT011**, the code of invalid consumer settings, like a `@Retry` policy the driver cannot honour.
+
 ## Drivers
 
 | Capability             | memory    | RabbitMQ                                | SQS                              | Kafka                                |
@@ -265,15 +278,16 @@ dead-letter queue of each consumer).
 | Attempt counting       | native    | `x-znight-attempt` + `x-delivery-count` | `ApproximateReceiveCount`        | `x-znight-attempt`                   |
 | Native retry delay     | timers    | delay queues (TTL + DLX), ≤ 49 days     | visibility timeout, ≤ 12 h       | retry topic, ≤ `maxRetryDelayMs`     |
 | In-process budget      | 1 s       | 5 s                                     | 1 s                              | 0 (always the retry topic)           |
-| Delayed publish        | yes       | yes (delay queues)                      | ≤ 15 min (not FIFO)              | no                                   |
+| Delayed publish        | yes       | yes (32 shared delay levels), ≤ 49 days | ≤ 15 min (not FIFO)              | no                                   |
 | Dead letters           | `<q>.dlq` | `<q>.dlq` (publish confirmed + ack)     | `<q>-dlq` / RedrivePolicy target | `<topic>.dlq` (acks all + commit)    |
 | Ordering               | FIFO      | none across retries                     | FIFO groups                      | per partition                        |
 | Topology               | implicit  | declared (`assertTopology`) or verified | verified (queues must exist)     | verified or created (`createTopics`) |
 
 ### Memory
 
-Deterministic in-process broker: FIFO queues, round-robin between competing subscribers, delays,
-native delivery counts, dead-letter queues. Ideal for tests:
+Deterministic in-process broker: FIFO queues, round-robin between competing subscribers, delays (of
+any length: timers longer than 2^31 - 1 ms are chained), native delivery counts, dead-letter queues.
+Ideal for tests:
 
 ```ts
 import { memory } from '@znight/messaging/memory'
@@ -308,9 +322,10 @@ rabbitmq({ url: 'amqp://guest:guest@localhost:5672' })
 | `socketOptions`       | —                                            | TLS / socket options.                                                       |
 | `assertTopology`      | `true`                                       | Declare consumed, dead-letter and delay queues; `false`: verify they exist. |
 | `queueType`           | `'quorum'`                                   | Type of declared queues (`'classic'` for existing classic queues).          |
-| `queueArguments`      | —                                            | Extra arguments of declared queues.                                         |
+| `queueArguments`      | —                                            | Extra arguments of declared queues (`x-delivery-limit` overrides `-1`).     |
 | `maxInProcessDelayMs` | `5000`                                       | Longest retry delay waited in-process.                                      |
-| `delayQueueName`      | `` `${q}.delay.${ms}` ``                     | Delay queue naming.                                                         |
+| `delayQueueName`      | `` `${q}.delay.${ms}` ``                     | Retry delay queue naming.                                                   |
+| `delayLevelPrefix`    | `'znight.delays'`                            | Names of the delay levels of delayed publications (`<prefix>.0` to `.31`).  |
 | `deadLetterName`      | `` `${q}.dlq` ``                             | Default dead-letter queue.                                                  |
 | `mandatory`           | `true`                                       | Fail `publish()` when no queue receives the message.                        |
 | `persistent`          | `true`                                       | Persistent messages.                                                        |
@@ -318,13 +333,40 @@ rabbitmq({ url: 'amqp://guest:guest@localhost:5672' })
 | `reconnect`           | `{ initialDelayMs: 100, maxDelayMs: 30000 }` | Reconnection with exponential backoff; `false` disables.                    |
 | `connectionName`      | `'znight'`                                   | Connection name in the management UI.                                       |
 
-Publishing goes through a confirm channel and the default exchange (routing key = queue). Each
-consumer has its own channel with `prefetch = concurrency`. Retries are republished copies carrying
-`x-znight-attempt` (to the queue, or to a per-delay queue `orders.delay.2000` whose TTL dead-letters
-back into `orders`, so delays never block each other); quorum delay queues use at-least-once
-dead-lettering. The type is read from the `type` property (then `x-znight-type`), the id from
-`message-id`. After a connection loss the driver reconnects and resumes the consumers; messages in
-flight on the lost connection are redelivered by RabbitMQ.
+Publishing goes through a confirm channel and the default exchange (routing key = queue); a returned
+(unroutable) message fails its own `publish()` only, even when concurrent publications share its id.
+Each consumer has its own channel with `prefetch = concurrency`. Retries are republished copies
+carrying `x-znight-attempt` (to the queue, or to a per-delay queue `orders.delay.2000` whose TTL
+dead-letters back into `orders`, so delays never block each other); quorum delay queues use
+at-least-once dead-lettering. Retry delays come from the `@Retry` policies, so their delay queues are
+a bounded set declared at subscribe time. The type is read from the `type` property (then
+`x-znight-type`, then the routing key with `typeFromRoutingKey`), the id from `message-id`; retried
+and dead-lettered copies carry the type that selected the handler (a type read from the routing key
+included) but never the `CC` / `BCC` headers nor the broker's `x-death` headers.
+
+Delayed publications (`publish(queue, payload, { delay })`, any delay up to 2^32 - 1 ms) do not create
+one queue per delay: they go through 32 **delay levels** shared by every queue of the virtual host,
+`znight.delays.0` to `znight.delays.31` (a topic exchange and a queue each, the queue of level n with a
+TTL of 2^n ms). The delay, rounded up to an odd number of milliseconds, is written in binary in the
+routing key: the message waits in the level of each set bit, then level 0 dead-letters it to the
+default exchange, which delivers it to its queue (named in the `CC` header). A delay is never shortened;
+each level crossed adds a few milliseconds. The levels are declared on the first delayed publication
+of each connection, whatever `assertTopology`; quorum levels use at-least-once dead-lettering. Use
+`delayLevelPrefix` when applications sharing a virtual host use different `queueType`s.
+
+On RabbitMQ 4 and later, declared quorum queues (consumed and dead-letter queues) get
+`x-delivery-limit: -1`: Znight counts the attempts itself, whereas the broker's default limit (20
+deliveries, releases included) would silently drop a message released repeatedly, for instance while
+its dead-letter queue is unavailable. A queue that already exists without this argument cannot be
+changed by a declaration: the driver declares it as it is and logs a warning; apply a policy with
+`"delivery-limit": -1` (or re-create the queue). With `assertTopology: false`, set that policy on your
+quorum queues.
+
+After a connection loss the driver reconnects (exponential backoff) and resumes the consumers;
+messages in flight on the lost connection are redelivered by RabbitMQ. A consumer channel closed by a
+channel error, or a consumer cancelled by the broker (queue deleted, node down: the queues are then
+declared again with `assertTopology`), is resumed the same way. The recovery retries until every
+consumer consumes again, including when the connection is lost again while it runs.
 
 ### Amazon SQS
 
@@ -352,7 +394,9 @@ fails). With a redrive policy and the default naming, Znight dead-letters to the
 Headers are message attributes: SQS allows 10 per message and Znight uses up to 4 (`x-znight-id`,
 `x-znight-type`, `content-type`, `x-znight-encoding`). FIFO queues use `key` as `MessageGroupId`
 (default `'default'`), the message id as deduplication id, and messages of a group are handled in
-order. IAM permissions: `sqs:ReceiveMessage`, `sqs:DeleteMessage`, `sqs:ChangeMessageVisibility`,
+order. The lease extension of a message stops (once any extension in flight completed) before its
+settlement is sent, so that it never overrides the visibility set by a retry or a release. IAM
+permissions: `sqs:ReceiveMessage`, `sqs:DeleteMessage`, `sqs:ChangeMessageVisibility`,
 `sqs:SendMessage`, `sqs:GetQueueUrl`, `sqs:GetQueueAttributes`.
 
 ### Kafka
@@ -382,7 +426,12 @@ consumers cannot share a group). Offsets are committed manually, once a record i
 a partition are handled sequentially, partitions concurrently (`concurrency`). Retries are
 non-blocking: the record goes to the group's retry topic with `x-znight-not-before`; a dedicated
 consumer (group `<group>.retry`, always from the beginning) waits until then without holding a
-concurrency slot. On shutdown, unsettled records are not committed and are consumed again later.
+concurrency slot, and the main and retry streams have their own back-pressure (a backlog of retries
+waiting for their time never pauses the main topic). After a rebalance, the records of a partition this
+member kept are fetched again from the committed offset: those already buffered or handled are
+skipped (committed offsets never move back); the buffered records of the partitions it lost are
+dropped, their new owner handles them. On shutdown, unsettled records are not committed and are
+consumed again later.
 
 ## Hooks
 
@@ -450,7 +499,9 @@ Invalid consumers fail the build with a precise location instead of failing at b
   `@Consumer`, `@Retry` or `@OnError` applied twice; handler the generated code cannot call (static,
   private, protected, `#private`, accessor, computed name, generator); `@OnMessage` and `@OnError` on
   one method; `@Retry` or a parameter decorator outside of an `@OnMessage` handler; several decorators
-  on one parameter; rest parameter; `@Message(...)` argument that is not an exported schema (a class,
+  on one parameter; a handler parameter decorator imported from another package (`Headers` or `Ctx`
+  of `@znight/http`), or a messaging parameter decorator on another extension's handler (an HTTP
+  route); rest parameter; `@Message(...)` argument that is not an exported schema (a class,
   an object, an inline expression); invalid `@Headers` name or `@OnMessage` type; messaging methods on
   a class that is neither a consumer nor a base class of one (abstract classes are fine). Warning:
   `@Headers('name')` parameter whose type does not accept `undefined`.

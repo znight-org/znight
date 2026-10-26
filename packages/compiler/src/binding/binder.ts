@@ -10,8 +10,8 @@
  * 4. single: the unique exact candidate, else the unique `@Primary`, else the unique candidate;
  *    several candidates all providing the exact same type → ZNIGHT004, otherwise ZNIGHT008;
  * 5. no candidate: a type declared in a manifest `provides` (or `options.externals`) is an
- *    external; an optional point binds `{ token, optional: true }`; otherwise ZNIGHT001 with the
- *    near-miss analysis;
+ *    external; an optional point binds `{ token, optional: true }` (`undefined` is injected, see
+ *    `Binder#unboundToken`); otherwise ZNIGHT001 with the near-miss analysis;
  * 6. primitive/opaque types require a qualifier and are matched by `(qualifier, kind)`; a qualifier
  *    match of another kind is ZNIGHT010;
  * 7. `Lazy<T>` binds `T` with the same rules and emits `{ lazy: token }`.
@@ -146,7 +146,7 @@ export class Binder {
         }
       }
       if (injection.optional) {
-        return { ref: { token: type.identity, optional: true }, targets: [], type }
+        return { ref: { token: this.#unboundToken(type, qualifier), optional: true }, targets: [], type }
       }
       const nearMiss = this.#nearMiss.analyze({ type, qualifier, unqualified })
       const qualified = qualifier === undefined ? '' : ` (qualifier '${qualifier}')`
@@ -252,6 +252,27 @@ export class Binder {
       related: listed.map(draft => ({ message: `candidate ${draft.displayName}`, location: draft.location })),
     })
     return undefined
+  }
+
+  /**
+   * Token of an optional reference injection bound to nothing (§4.7 steps 5 and 7): the runtime
+   * injects `undefined` unless something is registered under it. It must never be a provider token
+   * or an alias key, which the runtime would resolve to a provider that does not match the request:
+   *
+   * - the type identity for an unqualified injection of a public, non-generic type (an alias of
+   *   that identity would be a candidate; a plugin may register a value under it);
+   * - the qualifier for a qualified injection (like a qualified value type);
+   * - otherwise (type arguments, package-internal type) the display of the type (`Repository<User>`):
+   *   independent of the package layout, so sources and `dist` give the same output.
+   */
+  #unboundToken(type: ReferenceType, qualifier: string | undefined): Token {
+    if (qualifier !== undefined) {
+      return qualifier
+    }
+    if (type.typeArgs.length === 0 && this.#project.identities.isPublic(type.identity)) {
+      return type.identity
+    }
+    return formatType(type)
   }
 
   #ref(token: Token, injection: NormalizedInjection, external: ExternalInfo | undefined): DependencyRef {

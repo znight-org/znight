@@ -8,19 +8,34 @@ export class AbortedError extends Error {
   }
 }
 
-/** Resolves after `ms` milliseconds, or rejects with {@link AbortedError} as soon as `signal` aborts. */
+/**
+ * Longest delay of one timer (2^31 - 1 ms, about 24.8 days): longer `setTimeout` delays overflow and
+ * fire after 1 ms. Longer waits chain several timers.
+ */
+export const MAX_TIMER_DELAY_MS = 2_147_483_647
+
+/**
+ * Resolves after `ms` milliseconds (any duration: long waits chain timers), or rejects with
+ * {@link AbortedError} as soon as `signal` aborts.
+ */
 export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted === true) return Promise.reject(new AbortedError())
   if (ms <= 0 && signal === undefined) return Promise.resolve()
   return new Promise((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout> | undefined
     const onAbort = (): void => {
       clearTimeout(timer)
       reject(new AbortedError())
     }
-    const timer = setTimeout(() => {
-      signal?.removeEventListener('abort', onAbort)
-      resolve()
-    }, ms)
+    const arm = (remaining: number): void => {
+      const wait = Math.min(remaining, MAX_TIMER_DELAY_MS)
+      timer = setTimeout(() => {
+        if (remaining > wait) return arm(remaining - wait)
+        signal?.removeEventListener('abort', onAbort)
+        resolve()
+      }, wait)
+    }
+    arm(ms)
     signal?.addEventListener('abort', onAbort, { once: true })
   })
 }

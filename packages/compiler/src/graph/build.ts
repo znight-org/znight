@@ -19,6 +19,8 @@ import type {
   ProviderNode,
 } from './types.ts'
 
+import { CoreTokens } from '@znight/core'
+
 import { LAZY_IDENTITY } from '../analysis/core-decorators.ts'
 import { compareStrings } from '../project/compare.ts'
 import { displayNameOf, GLOBAL_IDENTITY_PREFIX, relativePath, serializeType } from '../project/index.ts'
@@ -224,7 +226,7 @@ export function buildGraph(input: {
         optional: external.optional,
         origin: external.origin,
       })),
-    aliases: computeAliases(registry),
+    aliases: computeAliases(project, registry, manifests),
     resolutionOrder: topologicalOrder(tokens, token => orderEdges.get(token) ?? []),
     bindings,
     bindingRequests,
@@ -302,12 +304,23 @@ const NOT_ALIASED: ReadonlySet<string> = new Set([
   '@znight/core#MethodInterceptor',
 ])
 
+/** Tokens `@znight/core` registers itself (also declared in its manifest `provides`). */
+const CORE_TOKENS: ReadonlySet<string> = new Set(Object.values(CoreTokens))
+
 /**
  * Aliases (§4.7): every provided-type / heritage identity that resolves to exactly one provider (or
- * one `@Primary` among several). Provider tokens, globals and the core marker interfaces (`Lazy`,
- * `OnStart`, `OnReady`, `OnStop`, `MethodInterceptor`) are never aliased.
+ * one `@Primary` among several). Never aliased:
+ *
+ * - provider tokens, globals and the core marker interfaces (`Lazy`, `OnStart`, `OnReady`, `OnStop`,
+ *   `MethodInterceptor`);
+ * - externals (manifest `provides`, `options.externals`, the core tokens): plugins and the core
+ *   register them at runtime, and the container resolves registrations through aliases, so an alias
+ *   would redirect the registration to the application provider (`class AppLogger implements
+ *   CoreLogger` would be replaced by the core logger);
+ * - package-internal identities (`<package>/<path>#Name`): user code cannot name them, and they
+ *   depend on the package layout (sources vs `dist`, hashed chunk names).
  */
-function computeAliases(registry: ProviderRegistry): AliasNode[] {
+function computeAliases(project: Project, registry: ProviderRegistry, manifests: ManifestIndex): AliasNode[] {
   const byKey = new Map<string, Map<Token, ProviderDraft>>()
   const add = (key: string, draft: ProviderDraft): void => {
     let entry = byKey.get(key)
@@ -327,7 +340,14 @@ function computeAliases(registry: ProviderRegistry): AliasNode[] {
   }
   const aliases: AliasNode[] = []
   for (const [key, drafts] of byKey) {
-    if (registry.has(key) || NOT_ALIASED.has(key) || key.startsWith(GLOBAL_IDENTITY_PREFIX)) {
+    if (
+      registry.has(key) ||
+      NOT_ALIASED.has(key) ||
+      CORE_TOKENS.has(key) ||
+      key.startsWith(GLOBAL_IDENTITY_PREFIX) ||
+      manifests.external(key) !== undefined ||
+      !project.identities.isPublic(key)
+    ) {
       continue
     }
     const candidates = [...drafts.values()]

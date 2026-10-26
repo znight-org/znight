@@ -202,4 +202,19 @@ describe('colors', () => {
     expect(createContext({ env: { ZNIGHT_DEBUG: '0' }, interactive: false }).debug).toBe(false)
     expect(createContext({ env: {}, interactive: false }).debug).toBe(false)
   })
+
+  it('copies the environment: tools running in the CLI process (Vite sets NODE_ENV) do not change it', () => {
+    const before = process.env['NODE_ENV']
+    try {
+      delete process.env['NODE_ENV']
+      const context = createContext({ interactive: false })
+      expect(context.env).not.toBe(process.env)
+      expect(context.env['PATH']).toBe(process.env['PATH'])
+      process.env['NODE_ENV'] = 'production'
+      expect(context.env['NODE_ENV']).toBeUndefined()
+    } finally {
+      if (before === undefined) delete process.env['NODE_ENV']
+      else process.env['NODE_ENV'] = before
+    }
+  })
 })

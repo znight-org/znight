@@ -7,6 +7,7 @@ import type {
   ProviderKey,
   ProviderValues,
   ShutdownOptions,
+  Token,
   TypedToken,
   ZnightMetadata,
 } from '@znight/core'
@@ -65,6 +66,20 @@ export interface HttpInjector {
   inject(request: InjectRequest & { readonly method: string }): Promise<HttpInjectResult>
 }
 
+/**
+ * Optional plugin member read by `TestApp.create()`: the providers the plugin resolves while it
+ * bootstraps although the metadata does not reference them, i.e. classes or tokens given in its
+ * options (`HttpPlugin.configure({ guards, interceptors, exceptionMappers })`). `TestApp` adds them
+ * to the providers instantiated at boot (see {@link TestAppOptions.only}), so that their async
+ * dependencies exist when the plugin resolves them: an async factory cannot run on demand.
+ *
+ * Called once, before the application is created. Keys that are not providers of the metadata are
+ * ignored (the plugin reports them itself).
+ */
+export interface PluginInitRoots {
+  initRoots(): readonly ProviderKey[]
+}
+
 /** Options of {@link TestApp.create}. */
 export interface TestAppOptions {
   /** The generated metadata (`__ZNIGHT_METADATA__`). */
@@ -78,13 +93,16 @@ export interface TestAppOptions {
    */
   readonly overrides?: ProviderValues
   /**
-   * Which providers are instantiated at boot (with their dependency closure, plus the overrides):
+   * Which providers are instantiated at boot (with their dependency closure, plus the overrides and
+   * the providers the plugins resolve at bootstrap, see {@link PluginInitRoots}: global guards,
+   * interceptors and exception mappers of `HttpPlugin`):
    * - default: the HTTP controllers (with their guards and interceptors) and the message consumers
    *   of the metadata, or every provider when there is none;
    * - `'all'`: every provider;
    * - a list of classes or tokens.
    *
-   * Other providers are created on first use (synchronous factories only).
+   * Other providers are created on first use (synchronous factories only: list a provider here
+   * when it, or one of its dependencies, has an async factory).
    */
   readonly only?: readonly ProviderKey[] | 'all'
   /** Application logger. Default: a console logger writing warnings and errors. */
@@ -131,17 +149,23 @@ export class TestApp implements AsyncDisposable {
     const index = new MetadataIndex(options.metadata)
     const providers = resolveKeys(options.providers, index)
     const overrides = resolveKeys(options.overrides, index)
-    const app = await Application.create({
-      metadata: options.metadata,
-      plugins: options.plugins ?? [],
-      ...(providers === undefined ? {} : { providers }),
-      ...(overrides === undefined ? {} : { overrides }),
-      logger: options.logger ?? createConsoleLogger({ level: 'warn' }),
-      shutdown: { ...options.shutdown, signals: false },
-      init: initOptions(options, index, overrides),
-    })
-    if (options.start !== false) await app.start()
-    return new TestApp(app)
+    const init = initOptions(options, index, overrides)
+    try {
+      const app = await Application.create({
+        metadata: options.metadata,
+        plugins: options.plugins ?? [],
+        ...(providers === undefined ? {} : { providers }),
+        ...(overrides === undefined ? {} : { overrides }),
+        logger: options.logger ?? createConsoleLogger({ level: 'warn' }),
+        shutdown: { ...options.shutdown, signals: false },
+        init,
+      })
+      if (options.start !== false) await app.start()
+      return new TestApp(app)
+    } catch (error) {
+      if (init.only !== undefined) addOnlyHint(error)
+      throw error
+    }
   }
 
   /** The application container. */
@@ -236,16 +260,76 @@ function initOptions(
 ): { readonly only?: readonly ProviderKey[] } {
   const only = options.only
   if (only === 'all') return {}
-  const extra = (overrides ?? []).map(([key]) => key)
-  if (only !== undefined) {
+  let roots: readonly ProviderKey[]
+  if (only === undefined) {
+    roots = [...readHttpRoots(options.metadata), ...readMessagingRoots(options.metadata)].filter(token =>
+      index.isProvider(token),
+    )
+    if (roots.length === 0) return {}
+  } else {
     if (!Array.isArray(only)) throw new TypeError("[znight] TestApp.create(): only must be 'all' or an array of keys")
-    return { only: unique([...only, ...extra]) }
+    roots = only
   }
-  const roots = [...readHttpRoots(options.metadata), ...readMessagingRoots(options.metadata)].filter(token =>
-    index.isProvider(token),
-  )
-  if (roots.length === 0) return {}
-  return { only: unique([...roots, ...extra]) }
+  const extra = (overrides ?? []).map(([key]) => key)
+  return { only: unique([...roots, ...pluginRoots(options.plugins ?? [], index), ...extra]) }
+}
+
+/**
+ * Providers the plugins resolve at bootstrap ({@link PluginInitRoots}), as provider tokens of the
+ * metadata. Other keys (classes without provider, unknown or ambiguous names) are left to the
+ * plugin, which reports them with its own message.
+ */
+function pluginRoots(plugins: readonly Plugin[], index: MetadataIndex): Token[] {
+  const providers = new Set(index.providerTokens())
+  const roots: Token[] = []
+  for (const plugin of plugins) {
+    const initRoots = (plugin as Partial<PluginInitRoots> | null | undefined)?.initRoots
+    if (typeof initRoots !== 'function') continue
+    const keys: unknown = initRoots.call(plugin)
+    if (!Array.isArray(keys)) {
+      throw new TypeError(
+        `[znight] TestApp.create(): initRoots() of the plugin "${String(plugin.name)}" must return an array of classes or tokens`,
+      )
+    }
+    for (const key of keys) {
+      const token = findProvider(key, providers, index)
+      if (token !== undefined) roots.push(token)
+    }
+  }
+  return roots
+}
+
+function findProvider(key: unknown, providers: ReadonlySet<Token>, index: MetadataIndex): Token | undefined {
+  try {
+    return index.find(key, providers)
+  } catch {
+    return undefined // ambiguous display name
+  }
+}
+
+const ONLY_HINT = "With TestApp: list it in TestApp.create({ only: [...] }) (or pass only: 'all') to create it at boot"
+
+/**
+ * Adds the TestApp form of the container hint to "cannot create on demand: its factory is async"
+ * errors (ZNIGHT015, hint `init({ only })`), which `TestApp` exposes as its `only` option.
+ */
+function addOnlyHint(error: unknown): void {
+  const seen = new Set<object>()
+  let current = error
+  while (current !== null && typeof current === 'object' && !seen.has(current)) {
+    seen.add(current)
+    const { code, hints, cause } = current as { code?: unknown; hints?: unknown; cause?: unknown }
+    if (
+      code === ErrorCode.InstantiationFailed &&
+      Array.isArray(hints) &&
+      hints.some(hint => typeof hint === 'string' && hint.includes('init({ only })')) &&
+      !hints.includes(ONLY_HINT)
+    ) {
+      // `hints` is a plain own property of ZnightError; a frozen error is left as is
+      Reflect.set(current, 'hints', [...hints, ONLY_HINT])
+    }
+    current = cause
+  }
 }
 
 function unique<T>(values: readonly T[]): T[] {

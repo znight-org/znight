@@ -66,6 +66,9 @@ export function fastifyAdapter(options: FastifyAdapterOptions = {}): FastifyAdap
 
 const MAX_PARAM_LENGTH = 8192
 
+/** `content-type` headers hidden from Fastify (see `#register`), by request. */
+const HIDDEN_CONTENT_TYPES = new WeakMap<object, string>()
+
 class FastifyHttpAdapter implements FastifyAdapter {
   readonly name = 'fastify' as const
   readonly instance: FastifyInstance
@@ -112,6 +115,16 @@ class FastifyHttpAdapter implements FastifyAdapter {
       // Znight reads and parses bodies itself: accept every content type without consuming it
       child.removeAllContentTypeParsers()
       child.addContentTypeParser('*', (_request, _payload, done) => done(null, undefined))
+      // Fastify answers 415 to a content type it cannot parse (`foo`, an empty one) before the route
+      // runs: hide such a header from Fastify (Znight reads it, and parses the body as bytes)
+      child.addHook('onRequest', (request, _reply, done) => {
+        const contentType = request.headers['content-type']
+        if (contentType !== undefined && request.mediaType === undefined) {
+          HIDDEN_CONTENT_TYPES.set(request.raw, contentType)
+          delete request.raw.headers['content-type']
+        }
+        done()
+      })
       for (const route of routes) {
         const handler = route.handler
         child.route({
@@ -193,6 +206,12 @@ class FastifyHttpAdapter implements FastifyAdapter {
 }
 
 function adapterRequest(request: FastifyRequest, reply: FastifyReply | undefined): AdapterRequest {
+  const hidden = HIDDEN_CONTENT_TYPES.get(request.raw)
+  if (hidden !== undefined) {
+    // Fastify is done with the content type: restore it (for Znight and `@Req()`)
+    HIDDEN_CONTENT_TYPES.delete(request.raw)
+    request.raw.headers['content-type'] = hidden
+  }
   let body: Promise<Uint8Array> | undefined
   return {
     method: request.raw.method ?? request.method,

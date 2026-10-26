@@ -2,11 +2,11 @@ import type { AddressInfo } from 'node:net'
 
 import { createServer, type IncomingHttpHeaders, type Server } from 'node:http'
 import { gunzipSync } from 'node:zlib'
-import { ErrorCode, ZnightError } from '@znight/core'
+import { ErrorCode, Hooks, silentLogger, ZnightError } from '@znight/core'
 
-import { type DatadogTransportOptions, datadogTransport, Logger } from '../src/index.ts'
+import { type DatadogTransportOptions, datadogTransport, Logger, logHttpRequests } from '../src/index.ts'
 import { toDatadogEntry } from '../src/logging/datadog.ts'
-import { sleep } from './helpers.ts'
+import { httpEvent, sleep } from './helpers.ts'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test'
 
 interface Received {
@@ -142,6 +142,38 @@ describe('datadogTransport', () => {
     expect(warn).toMatchObject({
       status: 'warning',
       dd: { trace_id: BigInt('0xa3ce929d0e0e4736').toString(), span_id: BigInt('0x00f067aa0ba902b7').toString() },
+    })
+  })
+
+  it('keeps record fields that clash with the reserved attributes (status, message, timestamp)', async () => {
+    const dd = transport({ compress: false })
+    const logger = new Logger({ transport: dd })
+    const hooks = new Hooks({ logger: silentLogger })
+    hooks.wrap('http:request', logHttpRequests(logger))
+    await hooks.run('http:request', httpEvent({ status: 404 }), async () => undefined)
+    logger.error('Payment failed', { message: 'card_declined' })
+    logger.info('evt', { timestamp: '2020-01-01T00:00:00Z', status: 'pending', attributes: { kept: true } })
+    await logger.flush()
+    const [request, payment, event] = intake.entries
+    // the HTTP status code of the request log survives the Datadog level
+    expect(request).toMatchObject({
+      message: 'request completed',
+      status: 'warning',
+      http: { status_code: 404 },
+      route: '/users/:id',
+    })
+    // pino's message wins over a `message` context field, which is kept
+    expect(payment).toMatchObject({
+      message: 'Payment failed',
+      status: 'error',
+      attributes: { message: 'card_declined' },
+    })
+    // the log time wins over a `timestamp` context field, which is kept
+    expect(typeof event?.['timestamp']).toBe('number')
+    expect(event).toMatchObject({
+      message: 'evt',
+      status: 'info',
+      attributes: { kept: true, timestamp: '2020-01-01T00:00:00Z', status: 'pending' },
     })
   })
 
@@ -319,6 +351,14 @@ describe('datadogTransport', () => {
       err: 'plain',
     })
     expect(toDatadogEntry({ level: 'weird' }, settings)).toMatchObject({ status: 'info', message: '' })
+    expect(
+      toDatadogEntry({ level: 30, msg: 'm', status: 503, http: { status_code: 502 }, attributes: 'x' }, settings),
+    ).toMatchObject({
+      message: 'm',
+      status: 'info',
+      http: { status_code: 502 },
+      attributes: { attributes: 'x', status: 503 },
+    })
     expect(
       toDatadogEntry(
         { traceId: '4bf92f3577b34da6a3ce929d0e0e4736', spanId: 'nothex' },

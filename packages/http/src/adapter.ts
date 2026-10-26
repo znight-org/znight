@@ -36,9 +36,10 @@ export interface AdapterRequest {
    */
   streamBody?(limit: number): ReadableStream<Uint8Array>
   /**
-   * Whether the request has a body, for requests whose headers do not say it (Web `Request`s built
-   * in memory have neither `content-length` nor `transfer-encoding`). Optional: the headers are
-   * used otherwise.
+   * Whether the request has a body, asked only when its headers declare none (neither
+   * `content-length` nor `transfer-encoding`: Web `Request`s built in memory). Return `false` for
+   * requests read from an HTTP/1.1 connection (without those headers they have no body). Optional:
+   * no body is assumed otherwise.
    */
   hasBody?(): boolean
   /** Status written by a handler that took over the response with `@Res()`, when known. */
@@ -46,19 +47,27 @@ export interface AdapterRequest {
 }
 
 /**
- * Body of a reply: bytes, a stream, a `Blob` (files: send it with its size, e.g. `new Response(blob)`
- * or `blob.stream()`), or nothing. Adapters MUST either read a stream to its end or cancel it
- * (client disconnected, response not sent...): the request scope stays open until then.
+ * Body of a reply: bytes, a stream or nothing. Adapters MUST either read a stream to its end or
+ * cancel it (client disconnected, response not sent...): the request scope and the in-flight count
+ * are released then. A `Blob` is sent with its size; the plugin itself never passes one: it sends
+ * files as a stream reading the `Blob`, given in {@link AdapterReply.blob}.
  */
 export type ReplyBody = Uint8Array | ReadableStream<Uint8Array> | Blob | null
 
 /** A response computed by the plugin, written by the adapter. */
 export interface AdapterReply {
   readonly status: number
-  /** Response headers, lower-case names. */
+  /** Response headers, lower-case names (validated: every name and value can be sent). */
   readonly headers: Readonly<Record<string, HeaderValue>>
   /** `null` for HEAD requests and bodyless statuses (headers such as `content-length` are kept). */
   readonly body: ReplyBody
+  /**
+   * The `Blob` (file) that `body` streams, for adapters able to send it natively (`sendfile`, exact
+   * length: `new Response(blob)` on `Bun.serve()`). An adapter sending it instead of reading `body`
+   * MUST cancel `body` once the server holds the blob (file opened): that releases the request
+   * scope, which may delete the file. Headers (`content-length`...) are the same either way.
+   */
+  readonly blob?: Blob
   /** The handler wrote the response itself through `@Res()`: write nothing. */
   readonly raw?: boolean
 }
@@ -111,8 +120,11 @@ export interface InjectRequest {
 /** The response of {@link HttpAdapter.inject}. */
 export interface InjectResponse {
   readonly status: number
-  /** Lower-case header names; repeated headers are joined with `, `. */
-  readonly headers: Record<string, string>
+  /**
+   * Lower-case header names; repeated headers are joined with `, `, except `set-cookie`: an array
+   * with one entry per cookie (cookie values may contain `, `).
+   */
+  readonly headers: Record<string, string | string[]>
   /** Body decoded as UTF-8. */
   readonly body: string
   /** Raw body bytes (binary downloads). */

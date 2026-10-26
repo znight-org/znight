@@ -118,6 +118,8 @@ with a `[znight]` message) and fills defaults. Notable resolved fields:
 
 ```ts
 const file = project.getFile('src/users/user.service.ts') // relative to root, or absolute
+project.loadedFiles() // every file read through getFile() since the last refresh (watch inputs)
+project.isMissingImport('/abs/shared/names.ts') // true when a relative import of this compile did not resolve to it
 file.path
 file.text
 file.hash
@@ -234,7 +236,10 @@ formatType(type) // for messages: 'Repository<User, string>'
 Builders normalize: `Array<T>`/`ReadonlyArray<T>`/`readonly T[]` → `T[]`; unions/intersections
 flattened, de-duplicated, sorted, `true | false` → `boolean`, literals absorbed by their primitive,
 `never` dropped, `any`/`unknown` absorbing; default type arguments filled; aliases expanded with
-substitution; recursive aliases opaque as a whole. Opaque reasons tell ZNIGHT010 messages why
+substitution (also the aliases supplied at runtime, declared in a manifest `provides` or in
+`options.externals`, unless `resolveType(..., { externalAliases: 'keep' })` keeps them as references
+to their identity, e.g. `@znight/http#RequestId`: what injection points bind to;
+`onExternalAlias` reports their expansion); recursive aliases opaque as a whole. Opaque reasons tell ZNIGHT010 messages why
 (`function`, `object-literal`, `typeof`, `import-type`, `mapped`, `conditional`, `unresolved`,
 `missing-annotation`, ...). Unresolvable imports give `opaque` with reason `unresolved`; unknown
 names give a `globalThis#Name` reference.

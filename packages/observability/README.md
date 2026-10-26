@@ -95,7 +95,9 @@ logger.pino // the underlying pino logger (escape hatch)
 ```
 
 Methods: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `log(level, ...)`, `child`, `bindings`,
-`isLevelEnabled`, `level`, `flush`, `close`. A `Logger` is also a valid `CoreLogger`.
+`isLevelEnabled`, `level`, `flush`, `close`. A `Logger` is also a valid `CoreLogger`. After `close()`
+the logger stays usable: entries written afterwards are flushed right away (no batching), so they are
+delivered before the process exits.
 
 Every entry is enriched automatically:
 
@@ -194,7 +196,10 @@ Bit ship stdout. To follow Lambda's configured level: `level: process.env.AWS_LA
 - maps entries to Datadog reserved attributes: `message`, `status` (`warn` → `warning`, `fatal` →
   `critical`), `timestamp`, `service`, `hostname`, `ddsource`, `ddtags`, `error.kind` / `error.message`
   / `error.stack` (Error Tracking) and `dd.trace_id` / `dd.span_id` (trace correlation, from the
-  OpenTelemetry ids);
+  OpenTelemetry ids). Entry fields that clash with these attributes are kept, never overwritten: an
+  HTTP status code in `status` (the request logs) becomes `http.status_code`; another `status`, a
+  `message` field next to the log message and a `timestamp` field next to the log time go under
+  `attributes` (`attributes.status`, `attributes.message`, `attributes.timestamp`);
 - reads `DD_API_KEY` (required, otherwise `ZNIGHT006`), `DD_SITE`, `DD_SERVICE`, `DD_ENV` and
   `DD_VERSION` (added to `ddtags`).
 
@@ -210,8 +215,10 @@ Bit ship stdout. To follow Lambda's configured level: `level: process.env.AWS_LA
 | `traceCorrelation` | `true`                      | `compress`         | `true`                 |
 | `level`            | every entry                 | `fetch`, `onError` | global `fetch`, stderr |
 
-The plugin flushes the logger in `onDispose`. Standalone, call `await transport.close()` (or
-`logger.close()`) before exiting.
+The plugin flushes the logger in `onDispose`, and every entry logged afterwards (the framework's
+final `Application stopped` or `The application stopped with errors`) is flushed as soon as it is
+written: the pending request keeps the process alive until it is delivered. Standalone, call
+`await logger.close()` (or `transport.close()`) before exiting.
 
 ### Request and message logs
 
@@ -283,7 +290,11 @@ unknown methods become `_OTHER`: label cardinality stays bounded. Durations star
 | `messaging_process_duration_seconds` | histogram | `queue`, `consumer`, `type`, `outcome` |
 | `messaging_active_messages`          | gauge     | `queue`                                |
 
-`outcome` is `ack`, `retry`, `dead-letter`, or `error` when the pipeline itself threw.
+`outcome` is `ack`, `retry`, `dead-letter`, or `error` when the pipeline itself threw. `type` is the
+message type when a handler matched, `unmatched` otherwise (never the raw type of an unhandled
+delivery: producers choose it); a handler records at most `maxTypesPerHandler` (50) distinct types,
+later ones are labelled `_OTHER` (a pattern or default `@OnMessage()` handler receives whatever types
+producers send). Label cardinality stays bounded.
 
 ### Metrics options
 
@@ -294,15 +305,21 @@ unknown methods become `_OTHER`: label cardinality stays bounded. Durations star
 | `defaultMetrics` | `true`         | Process metrics (CPU, memory, event loop lag, GC...), or `{ prefix?, gcDurationBuckets?, eventLoopMonitoringPrecision? }` |
 | `server`         | `true`         | `false`, or `{ port: 9464, host?, path: '/metrics' }` (`port: 0` picks a free port)                                       |
 | `http`           | `true`         | `false`, or `{ buckets?, ignore?(event) }`                                                                                |
-| `messaging`      | `true`         | `false`, or `{ buckets?, ignore?(event) }`                                                                                |
+| `messaging`      | `true`         | `false`, or `{ buckets?, ignore?(event), maxTypesPerHandler? }`                                                           |
 | `registry`       | a new registry | An existing `prom-client` registry (e.g. `client.register`, the global one)                                               |
 | `client`         | loaded lazily  | The `prom-client` module, for exotic bundling setups                                                                      |
+
+The default metrics are process-wide: `prom-client` never releases their collectors (GC observer,
+event loop delay monitor), so they are collected once per configuration (prefix, buckets, precision)
+and shared by every registry of the process (each with its own `defaultLabels`). A disposed
+application's registry is garbage collected, and `reset()` also resets those shared values.
 
 ## Tracing
 
 Znight only uses the OpenTelemetry **API**: register any SDK and spans are exported; without SDK,
-spans are no-ops (incoming trace ids still reach the logs and the `traceresponse` header). For
-example, with the Node SDK loaded before the application (`node --import ./src/instrumentation.ts`):
+spans are no-ops, but incoming trace ids still reach the logs, the `traceresponse` header and the
+messages published while handling the request. For example, with the Node SDK loaded before the
+application (`node --import ./src/instrumentation.ts`):
 
 ```ts
 // src/instrumentation.ts
@@ -312,9 +329,12 @@ import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http'
 new NodeSDK({ serviceName: 'users-api', traceExporter: new OTLPTraceExporter() }).start()
 ```
 
-> Spans are only nested and correlated with logs when a context manager is registered (the SDKs do
-> it; with a bare `BasicTracerProvider`, register `AsyncLocalStorageContextManager` from
-> `@opentelemetry/context-async-hooks`).
+> Nesting spans and correlating logs and published messages need a context manager. The SDKs register
+> one; when nothing did by the time a context is first activated (first request, delivery, publish
+> or `withSpan()`), Znight registers a minimal `AsyncLocalStorage` one. Register your SDK (or
+> `AsyncLocalStorageContextManager` from `@opentelemetry/context-async-hooks`, with a bare
+> `BasicTracerProvider`) before the application handles its first request: a context manager
+> registered later is refused by the OpenTelemetry API.
 
 ### HTTP server spans
 
@@ -445,7 +465,7 @@ conflicting metric definition is reported once through the logger and the method
 | `onBootstrap` | Evaluates function options if nothing did yet                                                                                                                                                                                                           |
 | `onStart`     | Starts the `/metrics` server                                                                                                                                                                                                                            |
 | `onStop`      | Closes the `/metrics` server                                                                                                                                                                                                                            |
-| `onDispose`   | Removes the hook wrappers, flushes the tracer provider (`forceFlush`) and the logger transports                                                                                                                                                         |
+| `onDispose`   | Removes the hook wrappers, flushes the tracer provider (`forceFlush`) and the logger transports; entries logged afterwards are flushed as soon as they are written                                                                                      |
 
 Options may be computed from the container, e.g. from a config class:
 

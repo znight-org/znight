@@ -101,7 +101,7 @@ function observe(request: InjectRequest, response: InjectResponse): Observed {
   for (const name of HEADERS) {
     const value = response.headers[name]
     // Bun adds `;charset=utf-8` to the type of `application/json` File objects
-    if (value !== undefined) headers[name] = value.replace(/;charset=utf-8$/, '')
+    if (typeof value === 'string') headers[name] = value.replace(/;charset=utf-8$/, '')
   }
   // streams have no declared length: servers send them chunked, or with the length when they could
   // buffer the whole (short) stream at once. Compare the bytes received instead.

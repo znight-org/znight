@@ -5,7 +5,10 @@
 import type { ZnightOptions } from '@znight/compiler'
 import type { AppAnalysis } from './helpers.ts'
 
-import { analyzeFiles, cleanupApps, render } from './helpers.ts'
+import fs from 'node:fs'
+import { fileURLToPath } from 'node:url'
+
+import { analyzeDiscovered, analyzeFiles, analyzeWithExtension, cleanupApps, render, tempApp } from './helpers.ts'
 import { afterAll, describe, expect, it } from 'bun:test'
 
 afterAll(cleanupApps)
@@ -511,5 +514,44 @@ export class OrderConsumer {
   @OnMessage() a(@Message(Order) order: z.output<typeof Order>) { return order }
 }`),
     ).toEqual([])
+  })
+})
+
+describe('decorators imported from another package', () => {
+  /** An application where `@znight/http` (which has `Headers` and `Ctx` too) is installed. */
+  function withHttp(source: string): string {
+    const app = tempApp({ 'src/a.ts': source })
+    const http = fs.realpathSync.native(fileURLToPath(new URL('../../../http', import.meta.url)))
+    fs.symlinkSync(http, `${app.root}/node_modules/@znight/http`, 'dir')
+    return app.root
+  }
+
+  it('names the package of a handler parameter decorator imported from @znight/http', () => {
+    const root = withHttp(`import { Consumer, OnMessage } from '@znight/messaging'
+import { Headers } from '@znight/http'
+
+@Consumer('orders')
+export class MixedConsumer {
+  @OnMessage() handle(@Headers('x-a') a: string | undefined) { return a }
+}
+`)
+    expect(render(analyzeWithExtension(root))).toEqual([
+      "error ZNIGHT005 src/a.ts:6:23: @Headers on parameter 'a' of MixedConsumer.handle() is imported from '@znight/http': @OnMessage handler parameters use Headers from '@znight/messaging'\n  = hint: Import it from '@znight/messaging': import { Headers } from '@znight/messaging'",
+    ])
+  })
+
+  it('points a messaging parameter decorator of an HTTP route to @znight/http', async () => {
+    const root = withHttp(`import { Ctx } from '@znight/messaging'
+import { Controller, Get } from '@znight/http'
+
+@Controller('/users')
+export class UserController {
+  @Get('/') list(@Ctx() context: unknown) { return context }
+}
+`)
+    const result = await analyzeDiscovered(root)
+    expect(render(result).filter(line => line.includes("'@znight/messaging'"))).toEqual([
+      "error ZNIGHT005 src/a.ts:6:18: @Ctx (from '@znight/messaging') has no effect on parameter 'context' of UserController.list(): it is not an @OnMessage handler\n  = hint: UserController.list() is a @Get handler: use the parameter decorators of '@znight/http'",
+    ])
   })
 })

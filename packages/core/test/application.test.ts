@@ -163,6 +163,10 @@ describe('Application.create', () => {
       Application.create(options([], { shutdown: { signals: false, timeoutMs: -1 } })),
     )) as ZnightError
     expect(error.message).toContain('shutdown.timeoutMs')
+    const nan = (await caught(() =>
+      Application.create(options([], { shutdown: { signals: false, hookTimeoutMs: Number.NaN } })),
+    )) as ZnightError
+    expect(nan.message).toContain('shutdown.hookTimeoutMs')
   })
 
   it('rejects metadata with an unsupported version', async () => {
@@ -653,5 +657,260 @@ describe('hot module replacement', () => {
     dispose?.()
     await sleep(5)
     expect(app.state).toBe('stopped')
+  })
+
+  it('lets the HMR runtime wait for the stop before it loads the new module', async () => {
+    const log: string[] = []
+    let disposer: ((data: unknown) => unknown) | undefined
+    const app = await Application.create(
+      options(log, {
+        plugins: [
+          plugin('http', log, {
+            register: ctx => ctx.container.registerValue(LOGGER, 'l'),
+            onStop: async () => {
+              await sleep(20)
+              log.push('port released')
+            },
+          }),
+        ],
+        hot: {
+          dispose(callback) {
+            disposer = callback
+          },
+        },
+      }),
+    )
+    await app.start()
+    // what Vite's module runner does: `disposer && await disposer(data)`, then imports the new module
+    await disposer?.(undefined)
+    expect(app.state).toBe('stopped')
+    expect(log).toContain('port released')
+  })
+
+  it('reports a failed stop through the logger without rejecting the HMR runtime', async () => {
+    const logger = memoryLogger()
+    let disposer: ((data: unknown) => unknown) | undefined
+    const app = await Application.create(
+      options([], {
+        logger,
+        plugins: [
+          plugin('broken', [], {
+            register: ctx => ctx.container.registerValue(LOGGER, 'l'),
+            onStop: () => {
+              throw new Error('cannot drain')
+            },
+          }),
+        ],
+        hot: {
+          dispose(callback) {
+            disposer = callback
+          },
+        },
+      }),
+    )
+    await app.start()
+    await disposer?.(undefined)
+    expect(app.state).toBe('stopped')
+    expect(logger.entries.some(entry => entry.message === 'Failed to stop the application')).toBe(true)
+  })
+})
+
+/** Settles with the outcome of `promise`, or with `'hang'` when it is still pending after `ms`. */
+function settleWithin(promise: Promise<unknown>, ms = 500): Promise<unknown> {
+  return Promise.race([
+    promise.then(
+      () => 'resolved',
+      (error: unknown) => error,
+    ),
+    sleep(ms).then(() => 'hang'),
+  ])
+}
+
+describe('stop() requested from a start hook', () => {
+  it('stops right away when a provider onReady awaits it, and start() resolves', async () => {
+    const log: string[] = []
+    class Job {
+      readonly app: Application
+      constructor(app: Application) {
+        this.app = app
+      }
+      async onReady(): Promise<void> {
+        log.push('Job.onReady')
+        await this.app.stop()
+        log.push(`Job: app ${this.app.state}`)
+      }
+      onStop(): void {
+        log.push('Job.onStop')
+      }
+    }
+    const app = await Application.create({
+      metadata: meta({ [t('Job')]: classDef(Job, [CoreTokens.Application]) }),
+      plugins: [plugin('late', log)],
+      logger: silentLogger,
+      shutdown: { signals: false },
+    })
+    log.length = 0
+    expect(await settleWithin(app.start())).toBe('resolved')
+    expect(app.state).toBe('stopped')
+    // the remaining start hooks (late.onReady) are skipped
+    expect(log).toEqual([
+      'late.onStart',
+      'Job.onReady',
+      'late.onStop',
+      'Job.onStop',
+      'late.onDispose',
+      'Job: app stopped',
+    ])
+  })
+
+  it('stops right away when a plugin onStart awaits it, skipping the remaining start phases', async () => {
+    const log: string[] = []
+    const app = await Application.create(
+      options(log, {
+        plugins: [
+          plugin('a', log, { register: ctx => ctx.container.registerValue(LOGGER, 'l') }),
+          plugin('job', log, { onStart: ctx => ctx.app.stop() }),
+          plugin('c', log),
+        ],
+      }),
+    )
+    log.length = 0
+    expect(await settleWithin(app.start())).toBe('resolved')
+    expect(app.state).toBe('stopped')
+    // job's onStart did not complete: like a failed onStart, it receives no onStop
+    expect(log).toEqual([
+      'Db.onStart',
+      'Repo.onStart',
+      'a.onStart',
+      'job.onStart',
+      'a.onStop',
+      'Repo.onStop',
+      'Repo.dispose',
+      'Db.onStop',
+      'Db.dispose',
+      'c.onDispose',
+      'job.onDispose',
+      'a.onDispose',
+    ])
+  })
+
+  it('does not deadlock when a stop() is already waiting for the start', async () => {
+    const log: string[] = []
+    let release = (): void => undefined
+    const gate = new Promise<void>(resolve => {
+      release = resolve
+    })
+    const app = await Application.create(
+      options(log, {
+        plugins: [
+          plugin('job', log, {
+            register: ctx => ctx.container.registerValue(LOGGER, 'l'),
+            onStart: () => gate,
+            onReady: ctx => ctx.app.stop(),
+          }),
+        ],
+      }),
+    )
+    log.length = 0
+    const start = app.start()
+    const external = app.stop() // e.g. SIGTERM during a slow boot: waits for the start
+    release()
+    expect(await settleWithin(start)).toBe('resolved')
+    expect(await settleWithin(external)).toBe('resolved')
+    expect(app.state).toBe('stopped')
+    expect(log.indexOf('job.onReady')).toBeLessThan(log.indexOf('job.onStop'))
+  })
+
+  it('settles start() once stopped when the hook does not await stop()', async () => {
+    const log: string[] = []
+    const app = await Application.create(
+      options(log, {
+        plugins: [
+          plugin('job', log, {
+            register: ctx => ctx.container.registerValue(LOGGER, 'l'),
+            onReady: ctx => {
+              ctx.app.stop().catch(() => undefined)
+            },
+          }),
+          plugin('late', log),
+        ],
+      }),
+    )
+    await app.start()
+    expect(app.state).toBe('stopped')
+    expect(log).not.toContain('late.onReady')
+  })
+
+  it('still waits for the start when the stop comes from work an earlier hook left running', async () => {
+    const log: string[] = []
+    const app = await Application.create(
+      options(log, {
+        plugins: [
+          plugin('a', log, {
+            register: ctx => ctx.container.registerValue(LOGGER, 'l'),
+            onStart: ctx => {
+              setTimeout(() => {
+                ctx.app.stop().catch(() => undefined)
+              }, 1)
+            },
+          }),
+          plugin('b', log, { onStart: () => sleep(20) }),
+        ],
+      }),
+    )
+    log.length = 0
+    await app.start()
+    expect(app.state).toBe('ready')
+    await app.stop()
+    expect(log.indexOf('b.onReady')).toBeLessThan(log.indexOf('b.onStop'))
+  })
+
+  it('rejects start() with the error of a hook that fails after stopping', async () => {
+    const log: string[] = []
+    const app = await Application.create(
+      options(log, {
+        plugins: [
+          plugin('job', log, {
+            register: ctx => ctx.container.registerValue(LOGGER, 'l'),
+            onReady: async ctx => {
+              await ctx.app.stop()
+              throw new Error('job failed')
+            },
+          }),
+        ],
+      }),
+    )
+    log.length = 0
+    const error = (await settleWithin(app.start())) as ZnightError
+    expect(error).toBeInstanceOf(ZnightError)
+    expect(error.message).toContain('job failed')
+    expect(app.state).toBe('stopped')
+    // the shutdown ran once
+    expect(log.filter(entry => entry === 'job.onDispose')).toHaveLength(1)
+  })
+})
+
+describe('shutdown budgets', () => {
+  it('treats budgets beyond the timer range (or Infinity) as unlimited', async () => {
+    for (const ms of [2 ** 31, Number.MAX_SAFE_INTEGER, Number.POSITIVE_INFINITY]) {
+      const log: string[] = []
+      const app = await Application.create(
+        options(log, {
+          shutdown: { signals: false, hookTimeoutMs: ms, timeoutMs: ms },
+          plugins: [
+            plugin('a', log, {
+              register: ctx => ctx.container.registerValue(LOGGER, 'l'),
+              onStop: async () => {
+                await sleep(10)
+                log.push('drained')
+              },
+            }),
+          ],
+        }),
+      )
+      await app.start()
+      expect(await settleWithin(app.stop())).toBe('resolved')
+      expect(log).toContain('drained')
+    }
   })
 })

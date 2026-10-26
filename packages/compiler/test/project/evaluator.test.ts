@@ -205,6 +205,30 @@ describe('static evaluation: errors', () => {
     expect(errorOf('call')).toMatchObject({ line: 34, column: 21 })
     expect(errorOf('unknownName')).toMatchObject({ line: 36, column: 28 })
   })
+
+  it('bigint operations that throw in JavaScript are errors, never exceptions', () => {
+    const dir = tempDir({
+      'package.json': '{ "name": "bigint-app" }',
+      'src/big.ts':
+        'const N = 2n ** -1n\nexport const name = `svc-${N}`\nexport const negative = 2n ** -1n\nexport const huge = 1n << 10n ** 12n\n',
+    })
+    try {
+      const temp = new Project(normalizeOptions({ root: dir.root }))
+      temp.refresh()
+      const file = fileOf(temp, 'src/big.ts')
+      expect(temp.evaluate(file, initializerOf(file, 'name')).kind).toBe('error')
+      expect(temp.evaluate(file, initializerOf(file, 'negative'))).toMatchObject({
+        kind: 'error',
+        error: { location: { line: 3, column: 25 } },
+      })
+      expect(temp.evaluate(file, initializerOf(file, 'huge'))).toMatchObject({
+        kind: 'error',
+        error: { message: "The result of '<<' is too large to be evaluated statically (more than 1000000 bits)" },
+      })
+    } finally {
+      dir.cleanup()
+    }
+  })
 })
 
 describe('static evaluation of declaration files', () => {

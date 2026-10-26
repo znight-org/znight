@@ -66,6 +66,13 @@ export interface CompileResult {
    * importing it throws a `ZnightError` with the formatted diagnostics.
    */
   readonly code: string
+  /**
+   * The disk copy of the generated module: what {@link generate} and the Vite plugin write to
+   * `outFile` (for `tsc`, editors and `znight generate --check`). It is the `serve` rendering in
+   * every mode, so that every tool agrees on one file: it differs from {@link code} only in `build`
+   * mode (whose provider `source` locations are omitted from the bundle, option `sourceLocations`).
+   */
+  readonly diskCode: string
   /** Absolute path of the generated module. */
   readonly outFile: string
   /** Every diagnostic: syntax errors (ZNIGHT022) first, then the others sorted by location. */
@@ -77,7 +84,11 @@ export interface CompileResult {
   readonly stats: CompileStats
   /** Library mode: the `znight.providers.json` fragment (`undefined` otherwise, or on errors). */
   readonly library: LibraryOutput | undefined
-  /** Files the result depends on (scanned sources, package manifests, compiled libraries). */
+  /**
+   * Files the result depends on: scanned sources, the other files read by the analysis outside
+   * `node_modules` (constants and types imported from outside the `include` globs, workspace
+   * packages), package manifests, compiled libraries. Sorted; never the outFile.
+   */
   readonly watchFiles: readonly string[]
   /**
    * Znight decorators of each analysed file (absolute path → content hash + ranges), for
@@ -97,7 +108,7 @@ export interface GenerateOptions {
 
 /** Result of {@link generate}. */
 export interface GenerateResult extends CompileResult {
-  /** Files written by this call (only when their content changed and there is no error). */
+  /** Files written by this call (only when their content changed and there is no error): `diskCode` to `outFile`. */
   readonly written: readonly string[]
   /** Check mode: the generated files on disk are missing or out of date. */
   readonly stale: boolean
@@ -200,13 +211,7 @@ class IncrementalCompiler implements ZnightCompiler {
 
   async generate(changes?: ProjectChanges, options: GenerateOptions = {}): Promise<GenerateResult> {
     const result = await this.compile(changes)
-    const outputs: { readonly file: string; readonly content: string }[] = []
-    if (result.ok) {
-      outputs.push({ file: result.outFile, content: result.code })
-      if (result.library) {
-        outputs.push({ file: result.library.file, content: result.library.content })
-      }
-    }
+    const outputs = generatedFiles(result)
     if (options.check) {
       const stale = result.ok && outputs.some(output => readText(output.file) !== output.content)
       return { ...result, written: [], stale }
@@ -278,17 +283,16 @@ class IncrementalCompiler implements ZnightCompiler {
     const graph = this.options.prune ? pruneGraph(analysis.graph) : analysis.graph
     let hasErrors = syntax.size > 0 || bag.toArray().some(diagnostic => diagnostic.severity === 'error')
     let code = ''
+    let diskCode = ''
     let library: LibraryOutput | undefined
     if (!hasErrors) {
-      const container = generateContainer({
-        project,
-        graph,
-        extensions: analysis.extensions,
-        mode: this.mode,
-        version: COMPILER_VERSION,
-      })
+      const render = (mode: CompileMode): ReturnType<typeof generateContainer> =>
+        generateContainer({ project, graph, extensions: analysis.extensions, mode, version: COMPILER_VERSION })
+      const container = render(this.mode)
       bag.addAll(container.diagnostics)
       code = container.code
+      // The disk copy is the `serve` rendering whatever the mode (only `source` locations differ).
+      diskCode = this.mode === 'build' && project.options.sourceLocations === 'dev' ? render('serve').code : code
       if (this.options.library) {
         const emitted = emitLibrary({ project, analysis, version: COMPILER_VERSION })
         bag.addAll(emitted.diagnostics)
@@ -302,10 +306,12 @@ class IncrementalCompiler implements ZnightCompiler {
         cwd: this.options.root,
         readFile: file => project.getFile(file)?.text ?? readText(file),
       })
+      diskCode = code
       library = undefined
     }
     return {
       code,
+      diskCode,
       outFile: this.options.outFile,
       diagnostics,
       ok: !hasErrors,
@@ -332,8 +338,18 @@ class IncrementalCompiler implements ZnightCompiler {
     return this.#extensions.result
   }
 
+  /**
+   * Files the result depends on: the scanned files, every other file the compile read outside
+   * `node_modules` (a constant imported from `shared/`, a type of `src/types.d.ts`, a workspace
+   * package...), the package manifests and the compiled libraries. Never the outFile.
+   */
   #watchFiles(): string[] {
     const files = new Set(this.project.scannedFiles())
+    for (const file of this.project.loadedFiles()) {
+      if (!file.includes('/node_modules/') && !this.isOutFile(file)) {
+        files.add(file)
+      }
+    }
     const root = this.project.rootPackage
     if (root) {
       files.add(root.packageJsonPath)
@@ -384,6 +400,21 @@ function readText(file: string): string | undefined {
   } catch {
     return undefined
   }
+}
+
+/**
+ * The files written for a result: `diskCode` to `outFile` and, in library mode,
+ * `znight.providers.json`. None when the result has errors. Internal (shared with the Bun preload).
+ */
+export function generatedFiles(result: CompileResult): { readonly file: string; readonly content: string }[] {
+  if (!result.ok) {
+    return []
+  }
+  const outputs = [{ file: result.outFile, content: result.diskCode }]
+  if (result.library) {
+    outputs.push({ file: result.library.file, content: result.library.content })
+  }
+  return outputs
 }
 
 let temporaryCounter = 0

@@ -7,6 +7,7 @@ import type { ObservabilityOptions } from './options.ts'
 
 import { ErrorCode, resolveOptions, ZnightError } from '@znight/core'
 
+import { flushEachEntry } from '../logging/logger.ts'
 import { ObservabilityTokens } from '../tokens.ts'
 import { buildKit, type ObservabilityKit } from './kit.ts'
 import { validateInterceptorOptions } from './validate.ts'
@@ -44,7 +45,8 @@ export interface ObservabilityPluginInstance extends Plugin {
  *   `@Metric` interceptors, wraps the `http:request` and `messaging:message` hooks (spans → RED
  *   metrics → request logs) and routes the framework logs through the logger;
  * - `onStart`: starts the `/metrics` server; `onStop`: closes it;
- * - `onDispose`: flushes the tracer provider and the logger transports.
+ * - `onDispose`: flushes the tracer provider and the logger transports; entries logged afterwards
+ *   (the application's final `Application stopped`) are flushed as soon as they are written.
  *
  * Options may be a function of the container (`ObservabilityPlugin.configure(c => ({ logging: {
  * level: c.get(AppConfig).logLevel } }))`): it is evaluated when the first observability provider is
@@ -160,6 +162,9 @@ class ObservabilityPluginImpl implements ObservabilityPluginInstance {
     this.#unhook = []
     this.#context = undefined
     if (kit === undefined) return
+    // the application still logs once its plugins are disposed ("Application stopped", "The
+    // application stopped with errors"): deliver those entries too, not only what is buffered now
+    flushEachEntry(kit.logger)
     await kit.server?.close()
     await kit.tracer.forceFlush()
     await kit.logger.flush()

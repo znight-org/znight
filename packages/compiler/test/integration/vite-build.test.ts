@@ -9,6 +9,7 @@ import fs from 'node:fs'
 import { SourceMap } from 'node:module'
 import { build, createBuilder, resolveConfig } from 'vite'
 
+import { generate } from '../../src/compiler.ts'
 import { DEFAULT_OUT_FILE } from '../../src/options.ts'
 import { znight } from '../../src/vite.ts'
 import { integrationApp, recordingLogger, report, run, SOURCE_CONDITION, stripAnsi, viteConfig } from './helpers.ts'
@@ -55,11 +56,46 @@ describe('vite build', () => {
       bundle = fs.readFileSync(`${app.root}/dist/main.js`, 'utf8')
       const api = plugin.api as ZnightPluginApi
       expect(api.result?.ok).toBe(true)
-      // the disk copy (for tsc and editors) is the served module; build mode omits source locations
-      expect(fs.readFileSync(`${app.root}/${DEFAULT_OUT_FILE}`, 'utf8')).toBe(api.result?.code ?? '')
+      // build mode omits source locations from the bundle; the disk copy (for tsc, editors and
+      // `znight generate --check`) is the same in every mode
       expect(api.result?.code).not.toContain('source:')
+      expect(fs.readFileSync(`${app.root}/${DEFAULT_OUT_FILE}`, 'utf8')).toBe(api.result?.diskCode ?? '')
+      expect(api.result?.diskCode).toContain("source: { file: 'src/clock.ts', line: 4, column: 14 }")
       expect(logger.text('info')).toMatch(/\[znight\] 4 providers compiled in \d+ ms/)
       expect(logger.text('warn')).toBe('')
+    },
+    TIMEOUT,
+  )
+
+  it(
+    'leaves a disk copy that `znight generate --check` (serve mode) accepts',
+    async () => {
+      const check = await generate({ root: app.root, check: true })
+      expect(check.ok).toBe(true)
+      expect(check.stale).toBe(false)
+    },
+    TIMEOUT,
+  )
+
+  it(
+    'builds a read-only tree: the disk copy is best-effort (a warning)',
+    async () => {
+      const other = integrationApp('app')
+      const directory = `${other.root}/src/.znight`
+      fs.mkdirSync(directory, { recursive: true })
+      fs.chmodSync(directory, 0o555)
+      try {
+        const otherLogger = recordingLogger()
+        await build(viteConfig(other.root, otherLogger, { plugins: [znight()] }))
+        expect(fs.readdirSync(`${other.root}/dist`).sort()).toEqual(['main.js', 'main.js.map'])
+        expect(fs.existsSync(`${directory}/container.generated.ts`)).toBe(false)
+        expect(otherLogger.text('warn')).toContain('[znight] cannot write src/.znight/container.generated.ts')
+        const result = await run(['node', 'dist/main.js'], other.root)
+        expect(report(result.stdout).greeting).toBe('Hello Ada @42')
+      } finally {
+        fs.chmodSync(directory, 0o755)
+        other.cleanup()
+      }
     },
     TIMEOUT,
   )

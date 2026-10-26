@@ -23,6 +23,7 @@ import {
   parseRange,
 } from '../src/index.ts'
 import { isMediaTypePattern, mediaTypeEssence } from '../src/mime.ts'
+import { serializeResult } from '../src/serialize.ts'
 import { captureContext, discardStream, failedStream, toByteStream, trackStream } from '../src/stream.ts'
 import { createFilesDir } from './files-app.ts'
 import { caught } from './helpers.ts'
@@ -33,6 +34,10 @@ const DECODER = new TextDecoder()
 describe('media types', () => {
   it('looks up types from extensions (case-insensitive, text with charset)', () => {
     expect(contentTypeFor('report.PDF')).toBe('application/pdf')
+    // extensions named like Object.prototype members are unknown, not `Object` / `Object.prototype`
+    for (const name of ['a.constructor', 'data.__proto__', 'x.toString', 'x.hasownproperty', 'x.valueOf']) {
+      expect({ name, type: contentTypeFor(name) }).toEqual({ name, type: undefined })
+    }
     expect(contentTypeFor('notes.txt')).toBe('text/plain; charset=utf-8')
     expect(contentTypeFor('/a/b/data.json')).toBe('application/json; charset=utf-8')
     expect(contentTypeFor('C:\\dir\\photo.jpeg')).toBe('image/jpeg')
@@ -474,6 +479,35 @@ describe('HttpResponse.stream', () => {
     await reader.cancel()
     expect(finalized).toBe(true)
   })
+
+  it('destroys a Node.js readable cancelled before being read (HEAD, invalid headers)', async () => {
+    const readable = Readable.from(['never read'])
+    await toByteStream(readable).cancel()
+    expect(readable.destroyed).toBe(true)
+  })
+
+  it('converts string and ArrayBuffer chunks of returned Web streams to bytes', async () => {
+    const chunks: unknown[] = ['a', new TextEncoder().encode('b').buffer, new DataView(new Uint8Array([99]).buffer)]
+    const reply = serializeResult(
+      new ReadableStream({
+        start(controller) {
+          for (const chunk of chunks) controller.enqueue(chunk)
+          controller.close()
+        },
+      }),
+      { method: 'GET', routeMethod: 'GET', status: undefined, headers: undefined },
+    )
+    const reader = (reply.body as ReadableStream<unknown>).getReader()
+    const received: unknown[] = []
+    for (let result = await reader.read(); !result.done; result = await reader.read()) received.push(result.value)
+    expect(received.every(chunk => chunk instanceof Uint8Array)).toBe(true)
+    expect(new TextDecoder().decode(new Uint8Array(received.flatMap(chunk => [...(chunk as Uint8Array)])))).toBe('abc')
+    // a stream of HttpResponse.stream() is not wrapped again
+    const stream = HttpResponse.stream(Readable.from(['x'])).body
+    expect(
+      serializeResult(stream, { method: 'GET', routeMethod: 'GET', status: undefined, headers: undefined }).body,
+    ).toBe(stream)
+  })
 })
 
 describe('stream helpers', () => {
@@ -506,6 +540,25 @@ describe('stream helpers', () => {
     const failed = trackStream(failedStream(failure), captureContext())
     expect(await caught(() => new Response(failed.stream).arrayBuffer())).toBe(failure)
     expect(await failed.done).toBe(failure)
+  })
+
+  it('tracks a Blob, opened on the first read only', async () => {
+    let opened = 0
+    class CountingBlob extends Blob {
+      override stream(): ReadableStream<Uint8Array<ArrayBuffer>> {
+        opened++
+        return super.stream()
+      }
+    }
+    const sent = trackStream(new CountingBlob(['file']), captureContext())
+    expect(opened).toBe(0)
+    expect(await new Response(sent.stream).text()).toBe('file')
+    expect(opened).toBe(1)
+    expect(await sent.done).toBeUndefined()
+    const abandoned = trackStream(new CountingBlob(['file']), captureContext())
+    await abandoned.stream.cancel()
+    expect(await abandoned.done).toBeUndefined()
+    expect(opened).toBe(1)
   })
 
   it('discards unconsumed streams and ignores locked ones', async () => {

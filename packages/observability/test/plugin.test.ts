@@ -2,7 +2,9 @@ import type { BasicTracerProvider } from '@opentelemetry/sdk-trace-base'
 import type {
   ExternalDefinition,
   MethodInvocation,
+  Plugin,
   PluginOptions,
+  ProcessLike,
   ProviderDefinition,
   ZnightMetadata,
 } from '@znight/core'
@@ -13,10 +15,12 @@ import type {
   ObservabilityPluginInstance,
 } from '../src/index.ts'
 
+import { EventEmitter } from 'node:events'
 import { SpanKind } from '@opentelemetry/api'
 import { Application, ErrorCode, InstantiationError, ZnightError } from '@znight/core'
 
 import {
+  datadogTransport,
   Logger,
   MetricsRegistry,
   OBSERVABILITY_PLUGIN_NAME,
@@ -34,6 +38,7 @@ import {
   memoryTracing,
   messageEvent,
   meta,
+  sleep,
   TRACE_ID,
   TRACEPARENT,
   t,
@@ -96,6 +101,15 @@ function appMetadata(extra: Readonly<Record<string, ProviderDefinition>> = {}): 
     },
     EXTERNALS,
   )
+}
+
+/** A `process` receiving the signals the test emits. */
+class FakeProcess extends EventEmitter implements ProcessLike {
+  exitCode: number | string | null | undefined = undefined
+
+  exit(): void {
+    throw new Error('unexpected forced exit')
+  }
 }
 
 function recordingTransport(): LogTransport & { readonly calls: string[] } {
@@ -439,6 +453,38 @@ describe('ObservabilityPlugin', () => {
     expect(second.get(UserService).find(1)).toEqual({ id: 1 })
     expect(plugin.logger).toBeInstanceOf(Logger)
     await second.stop()
+  })
+
+  it('ships the logs written after onDispose (shutdown logs) without waiting for a flush', async () => {
+    for (const failing of [false, true]) {
+      const sent: string[] = []
+      const fakeFetch = (_url: unknown, init?: RequestInit): Promise<Response> => {
+        for (const entry of JSON.parse(String(init?.body)) as { message: string }[]) sent.push(entry.message)
+        return Promise.resolve(new Response(null, { status: 202 }))
+      }
+      // the batch timer would only fire in a minute (and is unref'd: the process would exit first)
+      const datadog = datadogTransport({
+        apiKey: 'k',
+        url: 'http://127.0.0.1:1/api/v2/logs',
+        compress: false,
+        flushIntervalMs: 60_000,
+        fetch: fakeFetch as typeof fetch,
+      })
+      const proc = new FakeProcess()
+      const plugins: Plugin[] = [
+        ObservabilityPlugin.configure({ logging: { transport: datadog }, metrics: false, tracing: false }),
+      ]
+      if (failing) plugins.push({ name: 'failing', onStop: () => Promise.reject(new Error('boom')) })
+      const app = await Application.create({ metadata: appMetadata(), plugins, shutdown: { process: proc } })
+      await app.start()
+      proc.emit('SIGTERM', 'SIGTERM')
+      for (let attempt = 0; attempt < 100 && app.state !== 'stopped'; attempt++) await sleep(2)
+      await sleep(10)
+      // core logs these once the plugins are disposed (after the plugin's own flush)
+      expect(sent).toContain(failing ? 'The application stopped with errors' : 'Application stopped')
+      expect(datadog.pending).toBe(0)
+      expect(proc.exitCode).toBe(failing ? 1 : undefined)
+    }
   })
 
   it('accepts typed options', () => {

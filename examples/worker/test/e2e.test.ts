@@ -187,7 +187,11 @@ describe.skipIf(!enabled)('worker, end to end', () => {
 
       // only the expected failure was logged as an error (the dead-lettered invalid payload)
       const errors = worker.entries.filter(entry => entry.level >= 50)
-      expect(errors.every(entry => JSON.stringify(entry).includes('MessageValidationError'))).toBe(true)
+      expect(errors.length).toBeGreaterThan(0)
+      // the consumer's own error log and the framework's single dead-letter entry (reason: validation)
+      const isInvalidPayload = (entry: LogEntry): boolean =>
+        entry['reason'] === 'validation' || JSON.stringify(entry).includes('MessageValidationError')
+      expect(errors.every(isInvalidPayload)).toBe(true)
     },
     60_000,
   )

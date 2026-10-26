@@ -22,13 +22,34 @@ describe('znight build', () => {
     const run = await runCli(['build'], { cwd: project.path, services: { loadVite: () => Promise.resolve(vite) } })
     expect(run.code).toBe(0)
     const config = vite.lastBuild()
-    expect(config.root).toBe(project.path)
+    // the root is not inline (it would override the config file's): a config hook sets it
+    expect(config.root).toBeUndefined()
+    expect(vite.resolvedRoot(config)).toBe(project.path)
     expect(config.mode).toBe('production')
     expect(config.logLevel).toBe('info')
     expect(config.build?.watch).toBeUndefined()
-    expect(config.configFile).toBeUndefined()
+    // no vite.config.* in the project root: none is searched in the working directory
+    expect(config.configFile).toBe(false)
     expect(run.stdout).toMatch(/✓ Built dist\/main\.js 2\.05 kB in \d+ms/)
     expect(run.stdout).toContain('run it with znight start')
+  })
+
+  it('resolves the root of the Vite config against the project root', async () => {
+    writeFileSync(join(project.path, 'vite.config.ts'), "export default { root: 'app' }")
+    const vite = new FakeVite({ configRoot: 'app' })
+    const run = await runCli(['build'], { cwd: project.path, services: { loadVite: () => Promise.resolve(vite) } })
+    expect(run.code).toBe(0)
+    const config = vite.lastBuild()
+    expect(config.configFile).toBe(join(project.path, 'vite.config.ts'))
+    expect(vite.resolvedRoot(config)).toBe(join(project.path, 'app'))
+    expect(run.stdout).toContain('✓ Built app/dist/main.js')
+    // from another directory
+    const other = await runCli(['build', '--root', project.path], {
+      cwd: join(project.path, '..'),
+      services: { loadVite: () => Promise.resolve(vite) },
+    })
+    expect(other.code).toBe(0)
+    expect(vite.resolvedRoot(vite.lastBuild())).toBe(join(project.path, 'app'))
   })
 
   it('passes --config, --mode and --log-level to Vite', async () => {

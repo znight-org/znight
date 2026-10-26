@@ -60,6 +60,8 @@ export class ClassAnalyzer {
   readonly #bases = new Map<string, Declaration | null>()
   readonly #heritage = new Map<string, readonly ReferenceType[]>()
   readonly #inProgress = new Set<string>()
+  /** Parameters whose annotation names an alias supplied at runtime: their injection type. */
+  readonly #injectionTypes = new WeakMap<ParameterInfo, TypeInfo>()
 
   constructor(project: Project, reader: DecoratorReader) {
     this.#project = project
@@ -128,6 +130,16 @@ export class ClassAnalyzer {
   /** Heritage closure of a class or interface declaration (own type parameters unbound). */
   heritageOf(declaration: Declaration): readonly ReferenceType[] {
     return this.#closure(declaration, EMPTY_BINDINGS)
+  }
+
+  /**
+   * Type a parameter is injected as: its type, except that the aliases supplied at runtime (manifest
+   * `provides`, `options.externals`) stay references to their identity (`@znight/http#RequestId`
+   * rather than `string & {...}`), so that the parameter binds to the external. Extensions keep
+   * seeing the expanded type (`ParameterInfo.type`: what the value is).
+   */
+  injectionTypeOf(param: ParameterInfo): TypeInfo {
+    return this.#injectionTypes.get(param) ?? param.type
   }
 
   /** Lifecycle hooks of the class named by an identity (for `@Provides` values). */
@@ -306,9 +318,14 @@ export class ClassAnalyzer {
       }
       const name = pattern.type === 'Identifier' ? pattern.name : `arg${index}`
       const optional = pattern.type === 'Identifier' && (pattern as { optional?: boolean }).optional === true
-      const resolved = this.#project.resolveType(scope, annotation, typeScope)
+      let external = false
+      const resolved = this.#project.resolveType(scope, annotation, typeScope, {
+        onExternalAlias: () => {
+          external = true
+        },
+      })
       const location = file.location(param)
-      return {
+      const info: ParameterInfo = {
         name,
         index,
         type: bindings.size === 0 ? resolved : substituteType(resolved, bindings),
@@ -320,6 +337,11 @@ export class ClassAnalyzer {
         typeLocation: annotation ? file.location(annotation.typeAnnotation) : location,
         property,
       }
+      if (external) {
+        const nominal = this.#project.resolveType(scope, annotation, typeScope, { externalAliases: 'keep' })
+        this.#injectionTypes.set(info, bindings.size === 0 ? nominal : substituteType(nominal, bindings))
+      }
+      return info
     })
   }
 
@@ -432,12 +454,7 @@ export class ClassAnalyzer {
             continue
           }
           found.set(key, type)
-          if (clause.symbol.kind !== 'declaration') {
-            continue
-          }
-          const target = clause.symbol.declarations.find(
-            candidate => candidate.kind === 'class' || candidate.kind === 'interface',
-          )
+          const target = this.#heritageTarget(clause.symbol, type)
           if (target) {
             visit(target, this.#project.bindTypeArguments(target, type.typeArgs), depth + 1)
           }
@@ -448,6 +465,22 @@ export class ClassAnalyzer {
     const result = [...found.entries()].sort(([a], [b]) => compareStrings(a, b)).map(([, type]) => type)
     this.#heritage.set(memoKey, result)
     return result
+  }
+
+  /**
+   * Class or interface a heritage clause continues with. The clause symbol is usually that
+   * declaration; through a type alias (`implements UserRepository` with `type UserRepository =
+   * Repository<User>`) it is the alias, so the expanded reference's identity is followed instead.
+   */
+  #heritageTarget(symbol: SymbolResolution, type: ReferenceType): Declaration | undefined {
+    const isClassLike = (candidate: Declaration): boolean =>
+      candidate.kind === 'class' || candidate.kind === 'interface'
+    const direct = symbol.kind === 'declaration' ? symbol.declarations.find(isClassLike) : undefined
+    if (direct) {
+      return direct
+    }
+    const resolved = this.#project.lookupIdentity(type.identity)
+    return resolved.kind === 'declaration' ? resolved.declarations.find(isClassLike) : undefined
   }
 
   // ------------------------------------------------------------- lifecycle

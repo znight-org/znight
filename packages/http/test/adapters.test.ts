@@ -154,7 +154,8 @@ for (const adapter of ADAPTERS) {
           it('answers 405 with an allow header', async () => {
             const res = await send({ method: 'PATCH', url: '/users/1' })
             expect(res.status).toBe(405)
-            expect(res.headers.allow).toBe('DELETE, GET, HEAD, PUT')
+            // the same list as the automatic OPTIONS answer (OPTIONS is supported)
+            expect(res.headers.allow).toBe('DELETE, GET, HEAD, PUT, OPTIONS')
             expect(res.json<{ error: string }>().error).toBe('Method Not Allowed')
           })
 
@@ -387,7 +388,7 @@ for (const adapter of ADAPTERS) {
 
           it('sends repeated headers', async () => {
             const res = await send({ method: 'GET', url: '/status/cookies' })
-            expect(res.headers['set-cookie']).toBe('a=1, b=2')
+            expect(res.headers['set-cookie']).toEqual(['a=1', 'b=2'])
           })
 
           it('answers 500 when the result cannot be serialised', async () => {

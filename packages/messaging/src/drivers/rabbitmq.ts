@@ -8,18 +8,27 @@
  * - Retries are republished copies carrying `x-znight-attempt`: immediately to the queue, or through a
  *   delay queue (`<queue>.delay.<ms>`, queue-level TTL dead-lettering back into the queue: no
  *   head-of-line blocking between delays). The original is acknowledged once the copy is confirmed.
+ * - Delayed publications go through a fixed set of 32 delay levels shared by every queue
+ *   (`znight.delays.<n>`: a topic exchange and a queue with a TTL of 2^n ms each). The delay is
+ *   written in binary in the routing key: the message waits in the level of each set bit, then the last
+ *   level dead-letters it to the default exchange, which routes it to its queue (`CC` header).
  * - Attempts = `x-znight-attempt` + broker redeliveries (`x-delivery-count` of quorum queues, or the
  *   `redelivered` flag of classic queues).
  * - Dead letters are published (confirmed) to `<queue>.dlq`, then the original is acknowledged; without
  *   dead-letter queue the message is rejected (`nack` without requeue), so a queue DLX policy applies.
- * - Declares the queues it uses (`assertTopology`, default) or verifies they exist.
- * - Reconnects after a connection loss (exponential backoff) and resumes the subscriptions.
+ * - Declares the queues it uses (`assertTopology`, default) or verifies they exist. On RabbitMQ >= 4,
+ *   quorum queues are declared with `x-delivery-limit: -1`: Znight counts the attempts itself, the
+ *   broker's default limit (20 deliveries) would drop messages released repeatedly.
+ * - Recovers from connection losses (reconnection with exponential backoff), closed consumer channels
+ *   and consumers cancelled by the broker: every subscription is resumed, with backoff, until it
+ *   consumes again.
  */
 import type {
   Channel,
   ChannelModel,
   ConfirmChannel,
   ConsumeMessage,
+  Message,
   MessageProperties,
   Options,
   SocketOptions,
@@ -66,12 +75,20 @@ export interface RabbitMQDriverOptions {
   readonly assertTopology?: boolean
   /** Type of the declared queues. Default: `quorum` (replicated, native `x-delivery-count`). */
   readonly queueType?: 'quorum' | 'classic'
-  /** Extra arguments of declared consumed and dead-letter queues (`x-max-length`...). */
+  /**
+   * Extra arguments of declared consumed and dead-letter queues (`x-max-length`...). Quorum queues get
+   * `x-delivery-limit: -1` on RabbitMQ >= 4 unless this sets `x-delivery-limit`.
+   */
   readonly queueArguments?: Readonly<Record<string, unknown>>
   /** Longest retry delay waited in-process (holding the message). Default: 5000 ms. */
   readonly maxInProcessDelayMs?: number
-  /** Name of the delay queue of `queue` for `delayMs`. Default: `${queue}.delay.${delayMs}`. */
+  /** Name of the retry delay queue of `queue` for `delayMs`. Default: `${queue}.delay.${delayMs}`. */
   readonly delayQueueName?: (queue: string, delayMs: number) => string
+  /**
+   * Prefix of the delay levels of delayed publications: `<prefix>.0` to `<prefix>.31` (one topic
+   * exchange and one queue each, shared by every queue of the virtual host). Default: `znight.delays`.
+   */
+  readonly delayLevelPrefix?: string
   /** Default dead-letter queue name. Default: `${queue}.dlq`. */
   readonly deadLetterName?: (queue: string) => string
   /** Publish with `mandatory`: unroutable messages make `publish()` fail. Default: `true`. */
@@ -89,8 +106,16 @@ export interface RabbitMQDriverOptions {
 /** Largest TTL RabbitMQ accepts (2^32 - 1 ms). */
 const MAX_TTL_MS = 4_294_967_295
 const DEFAULT_IN_PROCESS_DELAY_MS = 5000
-/** Headers managed by the broker, removed from republished copies. */
-const BROKER_HEADERS = new Set([
+const DEFAULT_DELAY_LEVEL_PREFIX = 'znight.delays'
+/** Delay levels of delayed publications: level n waits 2^n ms, all of them together `MAX_TTL_MS`. */
+const DELAY_LEVELS = 32
+/** First word of the routing key of a delayed publication, followed by one bit per level (highest first). */
+const DELAY_ROUTING_WORD = 'znight-delay'
+/**
+ * Headers never copied to republished messages (retries, dead letters): the ones managed by the broker,
+ * and the sender-selected destinations (`CC`, `BCC`), which would route the copy to other queues.
+ */
+const UNCOPIED_HEADERS = new Set([
   'x-delivery-count',
   'x-death',
   'x-first-death-exchange',
@@ -99,6 +124,8 @@ const BROKER_HEADERS = new Set([
   'x-last-death-exchange',
   'x-last-death-queue',
   'x-last-death-reason',
+  'CC',
+  'BCC',
 ])
 
 /** Creates a {@link RabbitMQDriver}. */
@@ -119,6 +146,8 @@ interface ConsumerSubscription {
   active: boolean
   /** In-progress (re)subscription. */
   consuming: Promise<void> | undefined
+  /** The broker cancelled the consumer (queue deleted...): declare the queues again before consuming. */
+  redeclare: boolean
 }
 
 /** RabbitMQ {@link MessagingDriver}. See the module documentation. */
@@ -129,20 +158,29 @@ export class RabbitMQDriver implements MessagingDriver {
   readonly #queueType: 'quorum' | 'classic'
   readonly #assertTopology: boolean
   readonly #subscriptions = new Set<ConsumerSubscription>()
-  /** Delay queues already declared, by name. */
+  /** Retry delay queues already declared, by name. */
   readonly #delayQueues = new Map<string, Promise<void>>()
-  /** Publications awaiting their confirmation, by message id (to detect returned messages). */
+  /** Publications awaiting their confirmation, by destination and message id (to detect returned messages). */
   readonly #pending = new Map<string, PendingConfirm[]>()
   readonly #abort = new AbortController()
   #logger: DriverContext['logger'] = { debug() {}, info() {}, warn() {}, error() {} }
   #model: ChannelModel | undefined
   #publisher: Promise<ConfirmChannel> | undefined
+  /** Declaration of the delay levels on the current connection. */
+  #delayLevels: Promise<void> | undefined
   #closing = false
-  #reconnecting: Promise<void> | undefined
+  /** Running recovery loop (reconnection and resubscriptions). */
+  #recovering: Promise<void> | undefined
 
   constructor(options: RabbitMQDriverOptions) {
     if (options === null || typeof options !== 'object' || options.url === undefined) {
       throw new TypeError('[znight] rabbitmq(): the "url" option is required')
+    }
+    if (
+      options.delayLevelPrefix !== undefined &&
+      (typeof options.delayLevelPrefix !== 'string' || options.delayLevelPrefix === '')
+    ) {
+      throw new TypeError('[znight] rabbitmq(): "delayLevelPrefix" must be a non-empty string')
     }
     this.#options = options
     this.#queueType = options.queueType ?? 'quorum'
@@ -228,6 +266,7 @@ export class RabbitMQDriver implements MessagingDriver {
     this.#model = model
     this.#publisher = undefined
     this.#delayQueues.clear()
+    this.#delayLevels = undefined
   }
 
   #onConnectionClosed(model: ChannelModel, error: Error | undefined): void {
@@ -244,12 +283,26 @@ export class RabbitMQDriver implements MessagingDriver {
       reconnect === false ? 'RabbitMQ connection lost' : 'RabbitMQ connection lost, reconnecting',
       error === undefined ? {} : { err: error },
     )
-    if (reconnect !== false) this.#reconnecting ??= this.#reconnect(reconnect ?? {})
+    if (reconnect !== false) this.#recover()
   }
 
-  async #reconnect(options: RabbitMQReconnectOptions): Promise<void> {
-    let delay = options.initialDelayMs ?? 100
-    const maxDelay = options.maxDelayMs ?? 30_000
+  /**
+   * Starts the recovery loop unless it is running. The loop re-reads the whole state (connection,
+   * subscriptions without channel) before it ends, so a failure happening while it runs is never lost.
+   */
+  #recover(): void {
+    if (this.#closing) return
+    this.#recovering ??= this.#recoverLoop()
+  }
+
+  /** Reconnects if needed, then resumes every subscription, with backoff, until everything consumes. */
+  async #recoverLoop(): Promise<void> {
+    const reconnect = this.#options.reconnect
+    const settings = reconnect === false ? {} : (reconnect ?? {})
+    const initialDelay = settings.initialDelayMs ?? 100
+    const maxDelay = settings.maxDelayMs ?? 30_000
+    let delay = initialDelay
+    let reconnected = false
     try {
       while (!this.#closing) {
         try {
@@ -257,25 +310,49 @@ export class RabbitMQDriver implements MessagingDriver {
         } catch {
           return
         }
-        try {
-          await this.#open()
-        } catch (error) {
-          delay = Math.min(delay * 2, maxDelay)
-          this.#logger.warn(`RabbitMQ reconnection failed, next attempt in ${delay} ms`, { err: error })
-          continue
-        }
-        for (const subscription of this.#subscriptions) {
+        if (this.#model === undefined) {
+          if (reconnect === false) return
           try {
-            await this.#ensureConsuming(subscription)
+            await this.#open()
+            reconnected = true
           } catch (error) {
-            this.#logger.error(`RabbitMQ: cannot consume "${subscription.queue}" after reconnecting`, { err: error })
+            delay = Math.min(delay * 2, maxDelay)
+            this.#logger.warn(`RabbitMQ reconnection failed, next attempt in ${delay} ms`, { err: error })
+            continue
           }
         }
-        this.#logger.info('RabbitMQ connection restored')
+        const model = this.#model
+        for (const subscription of this.#subscriptions) {
+          if (!subscription.active || subscription.channel !== undefined) continue
+          try {
+            if (subscription.redeclare) await this.#redeclare(subscription)
+            await this.#ensureConsuming(subscription)
+            if (!reconnected) this.#logger.info(`RabbitMQ: consuming "${subscription.queue}" again`)
+          } catch (error) {
+            this.#logger.error(`RabbitMQ: cannot consume "${subscription.queue}" again`, { err: error })
+          }
+        }
+        if (this.#closing) return
+        if (this.#model !== model) {
+          // the connection was lost again while the consumers were resuming
+          delay = Math.min(delay * 2, maxDelay)
+          continue
+        }
+        const waiting = [...this.#subscriptions].filter(
+          subscription => subscription.active && subscription.channel === undefined,
+        )
+        if (waiting.length > 0) {
+          delay = Math.min(delay * 2, maxDelay)
+          this.#logger.warn(
+            `RabbitMQ: ${waiting.map(subscription => `"${subscription.queue}"`).join(', ')} not consumed yet, next attempt in ${delay} ms`,
+          )
+          continue
+        }
+        if (reconnected) this.#logger.info('RabbitMQ connection restored')
         return
       }
     } finally {
-      this.#reconnecting = undefined
+      this.#recovering = undefined
     }
   }
 
@@ -320,11 +397,10 @@ export class RabbitMQDriver implements MessagingDriver {
     }
     const content = Buffer.from(message.body)
     if (message.delayMs > 0) {
-      const delayQueue = await this.#delayQueue(queue, Math.round(message.delayMs))
-      await this.#confirmPublish(delayQueue, content, properties)
+      await this.#publishDelayed(queue, content, properties, message.delayMs)
       return
     }
-    await this.#confirmPublish(queue, content, properties)
+    await this.#confirmPublish('', queue, content, properties, queue)
   }
 
   #publisherChannel(): Promise<ConfirmChannel> {
@@ -338,10 +414,12 @@ export class RabbitMQDriver implements MessagingDriver {
       channel.on('close', () => {
         if (this.#publisher === opening) this.#publisher = undefined
       })
-      channel.on('return', (returned: { properties: MessageProperties }) => {
-        const id = returned.properties.messageId as string | undefined
-        const waiting = id === undefined ? undefined : this.#pending.get(id)
-        if (waiting !== undefined && waiting.length > 0) (waiting[0] as PendingConfirm).returned = true
+      // a return precedes the confirmation of its publication: mark the oldest pending publication
+      // of the same exchange, routing key and message id (never one already returned)
+      channel.on('return', (returned: Message) => {
+        const key = pendingKey(returned.fields.exchange, returned.fields.routingKey, returned.properties.messageId)
+        const pending = this.#pending.get(key)?.find(entry => !entry.returned)
+        if (pending !== undefined) pending.returned = true
       })
       return channel
     })
@@ -352,22 +430,32 @@ export class RabbitMQDriver implements MessagingDriver {
     return opening
   }
 
-  /** Publishes to `queue` through the default exchange and waits for the broker confirmation. */
-  async #confirmPublish(queue: string, content: Buffer, properties: Options.Publish): Promise<void> {
+  /**
+   * Publishes to `exchange` with `routingKey` and waits for the broker confirmation. `destination`
+   * names the target queue in errors.
+   */
+  async #confirmPublish(
+    exchange: string,
+    routingKey: string,
+    content: Buffer,
+    properties: Options.Publish,
+    destination: string,
+  ): Promise<void> {
     const channel = await this.#publisherChannel()
     const mandatory = this.#options.mandatory ?? true
     const id = properties.messageId as string
+    const key = pendingKey(exchange, routingKey, id)
     const pending: PendingConfirm = { returned: false }
-    let waiting = this.#pending.get(id)
+    let waiting = this.#pending.get(key)
     if (waiting === undefined) {
       waiting = []
-      this.#pending.set(id, waiting)
+      this.#pending.set(key, waiting)
     }
     waiting.push(pending)
     try {
       await new Promise<void>((resolve, reject) => {
         try {
-          channel.sendToQueue(queue, content, { ...properties, mandatory }, (error: unknown) => {
+          channel.publish(exchange, routingKey, content, { ...properties, mandatory }, (error: unknown) => {
             if (error !== null && error !== undefined) reject(error instanceof Error ? error : new Error(String(error)))
             else resolve()
           })
@@ -377,35 +465,114 @@ export class RabbitMQDriver implements MessagingDriver {
       })
     } catch (error) {
       throw brokerUnavailableError(
-        `RabbitMQ: publishing to "${queue}" was not confirmed: ${errorMessage(error)}`,
+        `RabbitMQ: publishing to "${destination}" was not confirmed: ${errorMessage(error)}`,
         error,
       )
     } finally {
       const index = waiting.indexOf(pending)
       if (index !== -1) waiting.splice(index, 1)
-      if (waiting.length === 0) this.#pending.delete(id)
+      if (waiting.length === 0 && this.#pending.get(key) === waiting) this.#pending.delete(key)
     }
     if (pending.returned) {
-      throw brokerUnavailableError(`RabbitMQ: message ${id} is unroutable, queue "${queue}" does not exist`)
+      throw brokerUnavailableError(
+        exchange === ''
+          ? `RabbitMQ: message ${id} is unroutable, queue "${destination}" does not exist`
+          : `RabbitMQ: message ${id} to "${destination}" is unroutable through the exchange "${exchange}"`,
+      )
     }
   }
 
-  /** Declares (once per connection) the delay queue of `queue` for `delayMs` and returns its name. */
+  /**
+   * Publishes through the delay levels: the delay, rounded up to an odd number of milliseconds (so
+   * that every route ends with level 0, whose queue dead-letters to the default exchange), is written
+   * in binary in the routing key; the `CC` header routes the message to `queue` at the end.
+   */
+  async #publishDelayed(queue: string, content: Buffer, properties: Options.Publish, delayMs: number): Promise<void> {
+    const rounded = Math.min(MAX_TTL_MS, Math.ceil(delayMs))
+    const delay = rounded % 2 === 0 ? rounded + 1 : rounded
+    await this.#declareDelayLevels()
+    let top = 0
+    while (top < DELAY_LEVELS - 1 && 2 ** (top + 1) <= delay) top++
+    try {
+      await this.#confirmPublish(
+        this.#delayLevelName(top),
+        delayRoutingKey(delay),
+        content,
+        { ...properties, headers: { ...properties.headers, CC: [queue] } },
+        queue,
+      )
+    } catch (error) {
+      // the levels may have been deleted: declare them again on the next delayed publication
+      this.#delayLevels = undefined
+      throw error
+    }
+  }
+
+  #delayLevelName(level: number): string {
+    return `${this.#options.delayLevelPrefix ?? DEFAULT_DELAY_LEVEL_PREFIX}.${level}`
+  }
+
+  /**
+   * Declares (once per connection) the delay levels: for each level n, a topic exchange routing the
+   * messages whose bit n is set to the queue of the level (TTL 2^n ms, dead-lettering to the level
+   * below), and the others straight to the level below.
+   */
+  async #declareDelayLevels(): Promise<void> {
+    let declared = this.#delayLevels
+    if (declared === undefined) {
+      const levels: Promise<void> = this.#withChannel('declare the delay levels', async channel => {
+        for (let level = 0; level < DELAY_LEVELS; level++) {
+          const name = this.#delayLevelName(level)
+          const below = level === 0 ? '' : this.#delayLevelName(level - 1)
+          await channel.assertExchange(name, 'topic', { durable: true })
+          await channel.assertQueue(name, { durable: true, arguments: this.#delayQueueArguments(2 ** level, below) })
+          await channel.bindQueue(name, name, delayBindingKey(level, '1'))
+          if (level > 0) await channel.bindExchange(below, name, delayBindingKey(level, '0'))
+        }
+      })
+      declared = levels
+      this.#delayLevels = levels
+      levels.catch(() => {
+        if (this.#delayLevels === levels) this.#delayLevels = undefined
+      })
+    }
+    try {
+      await declared
+    } catch (error) {
+      const message = errorMessage(error)
+      throw consumerError(
+        `RabbitMQ: cannot declare the delay levels "${this.#delayLevelName(0)}" to "${this.#delayLevelName(DELAY_LEVELS - 1)}": ${message}`,
+        message.includes('PRECONDITION_FAILED')
+          ? [
+              'They exist with other arguments (another queueType?): set rabbitmq({ delayLevelPrefix }) to use other names',
+            ]
+          : [],
+      )
+    }
+  }
+
+  /** Arguments of a delay queue: TTL, then dead-lettering (at-least-once on quorum queues). */
+  #delayQueueArguments(ttl: number, exchange: string, routingKey?: string): Record<string, unknown> {
+    const args: Record<string, unknown> = {
+      'x-queue-type': this.#queueType,
+      'x-message-ttl': ttl,
+      'x-dead-letter-exchange': exchange,
+    }
+    if (routingKey !== undefined) args['x-dead-letter-routing-key'] = routingKey
+    if (this.#queueType === 'quorum') {
+      // never lose a message while moving it on
+      args['x-dead-letter-strategy'] = 'at-least-once'
+      args['x-overflow'] = 'reject-publish'
+    }
+    return args
+  }
+
+  /** Declares (once per connection) the retry delay queue of `queue` for `delayMs` and returns its name. */
   async #delayQueue(queue: string, delayMs: number): Promise<string> {
     const name = this.#options.delayQueueName?.(queue, delayMs) ?? `${queue}.delay.${delayMs}`
     let declared = this.#delayQueues.get(name)
     if (declared === undefined) {
-      const args: Record<string, unknown> = {
-        'x-queue-type': this.#queueType,
-        'x-message-ttl': delayMs,
-        'x-dead-letter-exchange': '',
-        'x-dead-letter-routing-key': queue,
-      }
-      if (this.#queueType === 'quorum') {
-        // never lose a message while moving it back to its queue
-        args['x-dead-letter-strategy'] = 'at-least-once'
-        args['x-overflow'] = 'reject-publish'
-      }
+      const args = this.#delayQueueArguments(delayMs, '', queue)
       declared = this.#withChannel(`declare the delay queue "${name}"`, async channel => {
         await channel.assertQueue(name, { durable: true, arguments: args })
       })
@@ -434,9 +601,17 @@ export class RabbitMQDriver implements MessagingDriver {
       consumerTag: undefined,
       active: true,
       consuming: undefined,
+      redeclare: false,
     }
-    await this.#ensureConsuming(subscription)
+    // registered first: a channel closing right after the subscription is resumed by the recovery
     this.#subscriptions.add(subscription)
+    try {
+      await this.#ensureConsuming(subscription)
+    } catch (error) {
+      subscription.active = false
+      this.#subscriptions.delete(subscription)
+      throw error
+    }
     return {
       cancel: async (): Promise<void> => {
         subscription.active = false
@@ -462,22 +637,17 @@ export class RabbitMQDriver implements MessagingDriver {
 
   async #prepareTopology(queue: string, options: SubscribeOptions): Promise<void> {
     const dlq = options.deadLetterQueue
+    const names = dlq === undefined ? [queue] : [queue, dlq]
     if (this.#assertTopology) {
-      const queueOptions: Options.AssertQueue = {
-        durable: true,
-        arguments: { 'x-queue-type': this.#queueType, ...this.#options.queueArguments },
-      }
-      for (const name of dlq === undefined ? [queue] : [queue, dlq]) {
+      for (const name of names) {
         try {
-          await this.#withChannel(`declare the queue "${name}"`, async channel => {
-            await channel.assertQueue(name, queueOptions)
-          })
+          await this.#declareQueue(name)
         } catch (error) {
           throw topologyError(name, error)
         }
       }
     } else {
-      for (const name of dlq === undefined ? [queue] : [queue, dlq]) {
+      for (const name of names) {
         try {
           await this.#withChannel(`check the queue "${name}"`, channel => channel.checkQueue(name))
         } catch (error) {
@@ -489,6 +659,53 @@ export class RabbitMQDriver implements MessagingDriver {
       }
     }
     for (const delay of options.retryDelays) await this.#delayQueue(queue, Math.round(delay))
+  }
+
+  /**
+   * Declares a consumed or dead-letter queue. Quorum queues get `x-delivery-limit: -1` on RabbitMQ >= 4
+   * (whose default limit of 20 deliveries counts the releases); an existing queue declared without it
+   * cannot be changed by a declaration: it is declared as it is, with a warning.
+   */
+  async #declareQueue(name: string): Promise<void> {
+    const args: Record<string, unknown> = { 'x-queue-type': this.#queueType, ...this.#options.queueArguments }
+    const declare = (queueArgs: Record<string, unknown>): Promise<void> =>
+      this.#withChannel(`declare the queue "${name}"`, async channel => {
+        await channel.assertQueue(name, { durable: true, arguments: queueArgs })
+      })
+    if (args['x-queue-type'] === 'quorum' && !Object.hasOwn(args, 'x-delivery-limit') && this.#serverMajor() >= 4) {
+      try {
+        await declare({ ...args, 'x-delivery-limit': -1 })
+        return
+      } catch (error) {
+        if (!errorMessage(error).includes("'x-delivery-limit'")) throw error
+        this.#logger.warn(
+          `RabbitMQ: queue "${name}" exists without "x-delivery-limit": unless a policy sets "delivery-limit" to -1, RabbitMQ drops (or dead-letters through a queue DLX) a message delivered 20 times, releases included (shutdowns, failed dead-lettering). Apply such a policy, or re-create the queue`,
+        )
+      }
+    }
+    await declare(args)
+  }
+
+  /** Major version of the connected RabbitMQ (0 when unknown). */
+  #serverMajor(): number {
+    const version = this.#model?.connection?.serverProperties?.version
+    const major = typeof version === 'string' ? Number.parseInt(version, 10) : Number.NaN
+    return Number.isNaN(major) ? 0 : major
+  }
+
+  /** After a consumer cancellation, declares its queues again (`assertTopology`) before consuming. */
+  async #redeclare(subscription: ConsumerSubscription): Promise<void> {
+    if (this.#assertTopology) {
+      const dlq = subscription.options.deadLetterQueue
+      for (const name of dlq === undefined ? [subscription.queue] : [subscription.queue, dlq]) {
+        try {
+          await this.#declareQueue(name)
+        } catch (error) {
+          throw topologyError(name, error)
+        }
+      }
+    }
+    subscription.redeclare = false
   }
 
   /** Opens the consumer channel of `subscription` unless it is open or opening. */
@@ -509,7 +726,8 @@ export class RabbitMQDriver implements MessagingDriver {
       if (subscription.channel !== channel) return
       subscription.channel = undefined
       subscription.consumerTag = undefined
-      if (subscription.active && !this.#closing) this.#resubscribeLater(subscription)
+      // a channel error (or the loss of the connection, handled by the same loop): consume again
+      if (subscription.active) this.#recover()
     })
     try {
       await channel.prefetch(subscription.options.concurrency)
@@ -518,8 +736,7 @@ export class RabbitMQDriver implements MessagingDriver {
         subscription.queue,
         message => {
           if (message === null) {
-            this.#logger.error(`RabbitMQ cancelled the consumer of "${subscription.queue}" (queue deleted?)`)
-            subscription.consumerTag = undefined
+            this.#onConsumerCancelled(subscription, channel)
             return
           }
           this.#deliver(subscription, channel, message)
@@ -534,21 +751,22 @@ export class RabbitMQDriver implements MessagingDriver {
     }
   }
 
-  /** A consumer channel closed while its connection may still be up (channel error): consume again. */
-  #resubscribeLater(subscription: ConsumerSubscription): void {
-    sleep(250, this.#abort.signal).then(
-      async () => {
-        // after a connection loss, the reconnection loop resubscribes
-        if (this.#model === undefined || this.#reconnecting !== undefined) return
-        this.#logger.warn(`RabbitMQ: consumer channel of "${subscription.queue}" closed, consuming again`)
-        try {
-          await this.#ensureConsuming(subscription)
-        } catch (error) {
-          this.#logger.error(`RabbitMQ: cannot consume "${subscription.queue}" again`, { err: error })
-        }
-      },
+  /**
+   * The broker cancelled the consumer (`basic.cancel`: queue deleted, node down...). The channel stays
+   * open, so nothing else would notice: close it (its unsettled messages go back to the queue, when it
+   * still exists) and resume the subscription.
+   */
+  #onConsumerCancelled(subscription: ConsumerSubscription, channel: Channel): void {
+    if (subscription.channel !== channel || !subscription.active) return
+    this.#logger.error(`RabbitMQ cancelled the consumer of "${subscription.queue}" (queue deleted?), consuming again`)
+    subscription.channel = undefined
+    subscription.consumerTag = undefined
+    subscription.redeclare = true
+    closeQuietly(channel).then(
+      () => undefined,
       () => undefined,
     )
+    this.#recover()
   }
 
   #deliver(subscription: ConsumerSubscription, channel: Channel, message: ConsumeMessage): void {
@@ -577,14 +795,17 @@ export class RabbitMQDriver implements MessagingDriver {
         )
       }
     }
+    /** Properties of a republished copy: the original ones, with the type that selected the handler. */
     const copyProperties = (extraHeaders: Record<string, unknown>, removeAttempt: boolean): Options.Publish => {
       const copied: Record<string, unknown> = {}
       for (const [name, value] of Object.entries(rawHeaders)) {
-        if (BROKER_HEADERS.has(name) || (removeAttempt && name === MessagingHeaders.Attempt)) continue
+        if (UNCOPIED_HEADERS.has(name) || (removeAttempt && name === MessagingHeaders.Attempt)) continue
         copied[name] = value
       }
       return {
         ...definedProperties(properties),
+        // a type read from the routing key would be lost: copies go through the default exchange
+        ...(type === undefined ? {} : { type }),
         messageId: id,
         headers: { ...copied, ...extraHeaders },
         persistent: this.#options.persistent ?? true,
@@ -616,11 +837,19 @@ export class RabbitMQDriver implements MessagingDriver {
       retry: async (request: RetryRequest): Promise<void> => {
         settle('retry')
         const target = request.delayMs > 0 ? await this.#delayQueue(queue, Math.round(request.delayMs)) : queue
-        await this.#confirmPublish(
-          target,
-          message.content,
-          copyProperties({ [MessagingHeaders.Attempt]: String(request.attempt) }, false),
-        )
+        try {
+          await this.#confirmPublish(
+            '',
+            target,
+            message.content,
+            copyProperties({ [MessagingHeaders.Attempt]: String(request.attempt) }, false),
+            target,
+          )
+        } catch (error) {
+          // the delay queue may have been deleted: declare it again on the next retry
+          if (target !== queue) this.#delayQueues.delete(target)
+          throw error
+        }
         settle('retry')
         channel.ack(message)
         settled = true
@@ -633,6 +862,7 @@ export class RabbitMQDriver implements MessagingDriver {
           return
         }
         await this.#confirmPublish(
+          '',
           request.queue,
           message.content,
           copyProperties(
@@ -644,6 +874,7 @@ export class RabbitMQDriver implements MessagingDriver {
             },
             true,
           ),
+          request.queue,
         )
         settle('dead-letter')
         channel.ack(message)
@@ -658,6 +889,27 @@ export class RabbitMQDriver implements MessagingDriver {
 
 function stringProperty(value: unknown): string | undefined {
   return typeof value === 'string' && value !== '' ? value : undefined
+}
+
+/** Key of the publications awaiting their confirmation (a returned message carries the same fields). */
+function pendingKey(exchange: string, routingKey: string, messageId: unknown): string {
+  return `${exchange}\u0000${routingKey}\u0000${String(messageId)}`
+}
+
+/** Routing key of a delayed publication: `znight-delay.<bit 31>.<bit 30>...<bit 0>`. */
+function delayRoutingKey(delayMs: number): string {
+  const words = [DELAY_ROUTING_WORD]
+  for (let level = DELAY_LEVELS - 1; level >= 0; level--) {
+    words.push(Math.floor(delayMs / 2 ** level) % 2 === 1 ? '1' : '0')
+  }
+  return words.join('.')
+}
+
+/** Binding key matching the delayed publications whose bit `level` is `bit` (exact word count). */
+function delayBindingKey(level: number, bit: '0' | '1'): string {
+  const words = [DELAY_ROUTING_WORD]
+  for (let index = DELAY_LEVELS - 1; index >= 0; index--) words.push(index === level ? bit : '*')
+  return words.join('.')
 }
 
 /** AMQP properties of a received message, reusable for a republication. */

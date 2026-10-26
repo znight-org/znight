@@ -192,10 +192,10 @@ export function viaFetch(http: HttpPlugin): Send {
     const init: RequestInit = { method: normalized.method, headers: normalized.headers, redirect: 'manual' }
     if (normalized.payload !== undefined) init.body = normalized.payload
     const response = await fetch(`${String(http.address)}${normalized.url}`, init)
-    const headers: Record<string, string> = {}
+    const headers: Record<string, string | string[]> = {}
     for (const [name, value] of response.headers) if (name !== 'set-cookie') headers[name] = value
     const cookies = response.headers.getSetCookie()
-    if (cookies.length > 0) headers['set-cookie'] = cookies.join(', ')
+    if (cookies.length > 0) headers['set-cookie'] = cookies
     const bytes = new Uint8Array(await response.arrayBuffer())
     const body = new TextDecoder().decode(bytes)
     return { status: response.status, headers, body, bytes, json: <T>() => JSON.parse(body) as T }

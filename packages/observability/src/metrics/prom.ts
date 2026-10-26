@@ -51,6 +51,10 @@ export interface PromRegistry {
   metrics(): Promise<string>
   readonly contentType: string
   getSingleMetric(name: string): unknown
+  /** The metric objects (typed `unknown`: only passed back to `registerMetric`). */
+  getMetricsAsArray(): readonly unknown[]
+  /** Adds a metric object (created for another registry) to this one. */
+  registerMetric(metric: never): void
   removeSingleMetric(name: string): void
   setDefaultLabels(labels: object): void
   resetMetrics(): void

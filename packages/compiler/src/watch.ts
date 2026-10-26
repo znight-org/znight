@@ -65,8 +65,9 @@ export function isOutFile(compiler: ZnightCompiler, file: string): boolean {
 /**
  * Whether a file system event can change the compile result: a change of a file the last result
  * depends on (`watchFiles`) or of a resolution config file (package.json, tsconfig, lockfile), a
- * source created or deleted under an include root. The generated module and `node_modules` (except
- * the watched files) are ignored.
+ * source created or deleted under an include root, a file created where a relative import of the
+ * last compile did not resolve. The generated module and `node_modules` (except the watched files)
+ * are ignored.
  */
 export function isRelevantChange(
   compiler: ZnightCompiler,
@@ -87,6 +88,9 @@ export function isRelevantChange(
     return false
   }
   if (isResolutionConfigPath(real)) {
+    return true
+  }
+  if (kind === 'added' && isParseablePath(real) && compiler.project.isMissingImport(real)) {
     return true
   }
   return (

@@ -4,7 +4,9 @@
  *
  * 1. a class or interface with the same name but another identity (two declarations, wrong import,
  *    missing import resolving to a global);
- * 2. an undecorated class of the requested type, or undecorated classes implementing it;
+ * 2. an undecorated class of the requested type (unless it is already provided: the qualifier or the
+ *    type arguments are the problem; abstract and generic classes get a "concrete subclass" hint), or
+ *    undecorated classes implementing it;
  * 3. the declaration of the type is excluded by `include`/`exclude` (or lives in a package that is
  *    not analysed from source);
  * 4. a provider whose name matches but without `implements`, or implementing the type with other
@@ -106,13 +108,20 @@ export class NearMissAnalyzer {
     }
 
     // 2. undecorated class of the type, undecorated implementations
-    if (declaration?.kind === 'class' && project.isScanned(declaration.file)) {
-      const location = declarationLocation(project, type.identity)
-      hints.push(
-        `${type.name}${location ? ` (${position(project, location)})` : ''} is not a provider: add @Injectable()`,
-      )
-    }
     const key = serializeType(type)
+    if (declaration?.kind === 'class' && project.isScanned(declaration.file) && !this.#isProvided(type, key)) {
+      const location = declarationLocation(project, type.identity)
+      const where = `${type.name}${location ? ` (${position(project, location)})` : ''}`
+      const info = this.#analyzer.infoOf(declaration)
+      if (info.abstract || info.typeParameters.length > 0) {
+        // `@Injectable()` on an abstract or generic class is itself an error (ZNIGHT005)
+        hints.push(
+          `${where} is ${info.abstract ? 'abstract' : 'generic'}: it cannot be a provider itself; decorate a concrete subclass of ${formatType(type)} with @Injectable(), or provide ${formatType(type)} with a @Provides method`,
+        )
+      } else {
+        hints.push(`${where} is not a provider: add @Injectable()`)
+      }
+    }
     const implementations: IndexedDeclaration[] = []
     for (const entries of this.#index().values()) {
       for (const entry of entries) {
@@ -165,6 +174,14 @@ export class NearMissAnalyzer {
       hints.push(...this.#fallback(type, declaration))
     }
     return { hints: hints.slice(0, MAX_LISTED * 2), related: related.slice(0, MAX_LISTED) }
+  }
+
+  /**
+   * `true` when the class itself is a provider, or a provider supplies exactly this type (`@Provides`):
+   * the miss comes from the qualifier or the type arguments, not from a missing decorator.
+   */
+  #isProvided(type: ReferenceType, key: string): boolean {
+    return this.#registry.has(type.identity) || this.#registry.all().some(draft => draft.exactKey === key)
   }
 
   #fallback(type: ReferenceType, declaration: Declaration | undefined): string[] {

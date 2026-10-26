@@ -276,9 +276,13 @@ export class RouteResolver {
   }
 }
 
+/** Value exports first (`export type { X }` cannot be value-imported), then by {@link rank} and name. */
 function bestCandidate(candidates: readonly ExportCandidate[], localName: string): ExportCandidate | undefined {
   const sorted = [...candidates].sort(
-    (a, b) => rank(a, localName) - rank(b, localName) || compareStrings(a.exportName, b.exportName),
+    (a, b) =>
+      Number(a.typeOnly) - Number(b.typeOnly) ||
+      rank(a, localName) - rank(b, localName) ||
+      compareStrings(a.exportName, b.exportName),
   )
   return sorted[0]
 }

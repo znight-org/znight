@@ -132,7 +132,11 @@ Paths are made of static segments, `:name` parameters and an optional trailing `
 
 Static segments accept letters, digits and `- . _ ~ ! $ & ' + , ; = @`. Anything else (`//`, `.`,
 `..`, `:a-b`, `*` in the middle, regular expressions, `?`) is a ZNIGHT007 error at build time (and
-at boot for hand-written metadata). Matching is case-sensitive.
+at boot for hand-written metadata). Matching is case-sensitive, on the raw (percent-encoded)
+request path: dot segments are not resolved (`GET /files/a/../b` gives `ctx.params['*']` = `a/../b`,
+`/files/%2e%2e/x` gives `../x`), so never build file paths from parameters without `root` (see
+[Downloads](#downloads)). The Hono adapter on Bun is the exception: `Bun.serve()` only gives it the
+WHATWG-normalised URL (`/files/a/../b` arrives as `/files/b`).
 
 When several routes match a path, the most specific one wins on every adapter: static segments
 beat parameters, which beat the wildcard (`/users/me` before `/users/:id`).
@@ -142,15 +146,18 @@ beat parameters, which beat the wildcard (`/users/me` before `/users/:id`).
 - Every `GET` route answers `HEAD` (same status and headers, no body) unless a `@Head` route
   exists for the same path.
 - A path that exists with other methods answers `405 Method Not Allowed` with an `allow` header,
-  and `OPTIONS` with `204` and `allow` (unless an `@Options` route exists).
+  and `OPTIONS` with `204` and `allow` (unless an `@Options` route exists). Both list the same
+  methods, `OPTIONS` included (`allow: GET, HEAD, POST, OPTIONS`).
 - Unknown paths answer `404 Not Found`. Both go through [exception mappers](#exception-mappers) and
   [hooks](#hooks-and-observability).
 
 ### Trailing slashes and prefix
 
 `trailingSlash` applies to every adapter: `'strict'` (default: `/users/` does not match `/users`),
-`'ignore'` (it does) or `'redirect'` (`308` to `/users`, query string kept). `prefix: '/api'` is
-prepended to every route.
+`'ignore'` (it does) or `'redirect'` (`308` to `/users`, query string kept; the `location` always
+stays on the same origin: a backslash, a control character or a leading `//` of the raw path is
+percent-encoded or collapsed, so `GET /\evil.com/` redirects to `/%5Cevil.com`). `prefix: '/api'`
+is prepended to every route.
 
 ## Parameters
 
@@ -179,12 +186,15 @@ Without a schema, typed parameters are coerced:
 | `number`                           | finite decimal number (no hex, `NaN`, `Infinity`) | `-1.5`, `1e3`      |
 | `boolean`                          | `true`/`false`/`1`/`0` (case-insensitive)         | `true`             |
 | `bigint`                           | integer                                           | `9007199254740993` |
-| `Date`                             | ISO 8601 date or millisecond timestamp            | `2024-01-02`       |
+| `Date`                             | ISO 8601 date, date-time with offset, timestamp   | `2024-01-02`       |
 | literal unions (`'asc' \| 'desc'`) | one of the literals                               | `asc`              |
 | `T[]`                              | repeated or single values, each coerced as `T`    | `?id=1&id=2`       |
 
 Invalid values answer `400` naming the input (`Invalid query "page": expected a number, received
-"x"`). A missing required value answers `400 Missing query "page"`. Optional parameters (`?`,
+"x"`). Dates accept `YYYY-MM-DD` (UTC midnight), `YYYY-MM-DDTHH:mm[:ss[.fraction]]` with an offset
+(`Z`, `+02:00`, `+0200`) and integer millisecond timestamps; anything else (`March 7`,
+`01/02/2024`), impossible dates (`2024-02-30`) and date-times without offset (they would depend on
+the server's time zone) answer `400`. A missing required value answers `400 Missing query "page"`. Optional parameters (`?`,
 `| undefined`, default value) receive `undefined` when absent, so default values apply:
 `@Query('page') page = 1`. A repeated query key for a scalar parameter is a `400`.
 
@@ -239,6 +249,9 @@ interceptors, for routes declaring `@Body()` or [upload parameters](#uploads):
   route or controller, or the computed limit of upload routes (see [Limits](#limits)). It is
   checked on `content-length` first, then while reading; the connection is closed.
 - A `content-encoding` other than `identity` answers `415` (decompress upstream).
+- Whether a request has a body is decided by its `content-length` / `transfer-encoding` headers
+  (an HTTP/1.1 request without them has none), so `content-length: 0` or no framing header is an
+  empty body on every adapter.
 - Other routes do not read the body: call `await ctx.parseBody()` (memoised),
   `await ctx.rawBody()` (bytes, e.g. to verify a webhook signature) or `ctx.bodyStream()` (a Web
   stream, nothing buffered: see [Large files](#large-files)).
@@ -250,7 +263,7 @@ interceptors, for routes declaring `@Body()` or [upload parameters](#uploads):
 | object, array, number, boolean, `null`          | JSON (`application/json; charset=utf-8`), `toJSON()` honoured |
 | `string`                                        | `text/plain; charset=utf-8`                                   |
 | `Uint8Array`, `Buffer`, `ArrayBuffer`, views    | `application/octet-stream`                                    |
-| `ReadableStream`, Node.js `Readable`            | streamed `application/octet-stream`                           |
+| `ReadableStream`, Node.js `Readable`            | streamed `application/octet-stream` (string chunks as UTF-8)  |
 | `Blob` / `File`                                 | its bytes, with the blob type and its size                    |
 | `HttpResponse.file()` / `HttpResponse.stream()` | a file or a stream, see [Files](#downloads)                   |
 | `undefined`                                     | empty body, `204` (`201` for `@Post`)                         |
@@ -484,7 +497,10 @@ strong `ETag` (`"<mtime>-<size>"`, from the modification time and the size; `Fil
 `Range` header and `matchesMediaType(type, patterns)` applies `mimeTypes`-like filters.
 
 Files on disk are sent as file-backed blobs (`fs.openAsBlob()`): read lazily as the client receives
-them, no descriptor kept open, `sendfile` on Bun. Headers set with `.withHeader()`
+them, no descriptor kept open, `sendfile` with the Hono adapter on Bun. The request stays in flight
+and its scope open until the file has been sent (or the client went away), so a request-scoped
+provider may own the file (a temporary export deleted in `[Symbol.dispose]()`); on `Bun.serve()`
+the file is handed to Bun, which opens it at once, and the scope closes then. Headers set with `.withHeader()`
 (`cache-control`...), `@Header` and `ctx.setHeader()` are added; a `200` follows the usual status
 precedence, `206` / `304` keep theirs.
 
@@ -528,7 +544,8 @@ logs() {
   `drainTimeoutMs`, then closes their connections (cancelling their sources).
 
 Streams have no `Content-Length` (chunked transfer encoding). Returning a `ReadableStream` or a
-`Readable` directly also works (`application/octet-stream`).
+`Readable` directly also works (`application/octet-stream`); string, `ArrayBuffer` and typed array
+chunks of a returned `ReadableStream` are converted to bytes.
 
 ### Large files
 
@@ -570,7 +587,9 @@ Uploaded files are buffered in memory. For files of hundreds of megabytes or mor
    ```
 
    `ctx.bodyStream()` reads the body once and is exclusive with `@Body()`, upload parameters,
-   `ctx.parseBody()` and `ctx.rawBody()`. A `multipart/form-data` body read this way is raw: parse
+   `ctx.parseBody()` and `ctx.rawBody()`. A body stream neither read to its end nor cancelled when
+   the request is over (a handler that checked the first bytes, then threw) is cancelled: the rest
+   of the body is discarded and the keep-alive connection serves the next request. A `multipart/form-data` body read this way is raw: parse
    it with a streaming parser of your choice (e.g. `busboy`) if you must accept huge browser form
    uploads.
 
@@ -630,7 +649,9 @@ the status first). Override `toBody()` in a subclass to change the shape.
 
 Any other error answers `{ "statusCode": 500, "error": "Internal Server Error" }` — the message is
 hidden unless `exposeErrors: true` (development) — and is logged with the request id, route and
-handler. `5xx` exceptions are logged too. Every error is also recorded on the
+handler. So does a response header that cannot be sent (a CR/LF or a character above `\xff` in a
+value, set with `ctx.setHeader()` or a redirect to a client-provided URL), identically on every
+adapter: the body is discarded and the error logged. `5xx` exceptions are logged too. Every error is also recorded on the
 [`http:request` event](#hooks-and-observability).
 
 ### Exception mappers
@@ -753,9 +774,10 @@ export class AuditService {
 }
 ```
 
-Request-scoped instances are disposed when the response has been sent: for a streamed body, once
-the stream has been fully sent or cancelled (client disconnected), so stream producers can use
-them.
+Request-scoped instances are disposed when the response has been sent: for a streamed or file
+body, once it has been fully sent or cancelled (client disconnected), so stream producers can use
+them and files they own are still there (on `Bun.serve()`, a file is handed to Bun, which opens it,
+first).
 
 ## Hooks and observability
 
@@ -788,22 +810,22 @@ app.hooks.wrap('http:request', async (event, next) => {
 `HttpPlugin.configure(options)` — `options` may also be a function of the container, evaluated
 once at bootstrap: `HttpPlugin.configure(c => ({ port: c.get(AppConfig).port }))`.
 
-| Option              | Default               | Description                                                                                    |
-| ------------------- | --------------------- | ---------------------------------------------------------------------------------------------- |
-| `adapter`           | `nodeAdapter()`       | Server implementation                                                                          |
-| `port`              | `3000`                | Port (`0`: a free port, see `plugin.address`)                                                  |
-| `host`              | `0.0.0.0`             | Interface to bind                                                                              |
-| `prefix`            | —                     | Static path prefixed to every route (`/api`)                                                   |
-| `guards`            | `[]`                  | Global guards: provider classes or instances                                                   |
-| `interceptors`      | `[]`                  | Global interceptors (outermost first)                                                          |
-| `exceptionMappers`  | `[]`                  | Exception mappers, tried in order                                                              |
-| `trailingSlash`     | `'strict'`            | `'strict'`, `'ignore'` or `'redirect'`                                                         |
-| `exposeErrors`      | `false`               | Send the message of unexpected errors in 500 responses                                         |
-| `bodyLimit`         | `1048576`             | Maximum body size: bytes or `'10mb'` (see [Limits](#limits); routes: `@BodyLimit`)             |
-| `uploads`           | see [Limits](#limits) | `{ maxFileSize, maxFiles, maxParts, maxFieldSize }` of multipart bodies                        |
-| `requestIdHeader`   | `x-request-id`        | Header read (when ≤ 128 chars of `[A-Za-z0-9_-.:@/+=]`) and echoed; `false` to always generate |
-| `generateRequestId` | `randomUUID`          | Request id generator                                                                           |
-| `drainTimeoutMs`    | `4000`                | Maximum wait for in-flight requests on shutdown (keep it below `shutdown.hookTimeoutMs`)       |
+| Option              | Default               | Description                                                                                                        |
+| ------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `adapter`           | `nodeAdapter()`       | Server implementation                                                                                              |
+| `port`              | `3000`                | Port (`0`: a free port, see `plugin.address`)                                                                      |
+| `host`              | `0.0.0.0`             | Interface to bind                                                                                                  |
+| `prefix`            | —                     | Static path prefixed to every route (`/api`)                                                                       |
+| `guards`            | `[]`                  | Global guards: provider classes or instances                                                                       |
+| `interceptors`      | `[]`                  | Global interceptors (outermost first)                                                                              |
+| `exceptionMappers`  | `[]`                  | Exception mappers, tried in order                                                                                  |
+| `trailingSlash`     | `'strict'`            | `'strict'`, `'ignore'` or `'redirect'`                                                                             |
+| `exposeErrors`      | `false`               | Send the message of unexpected errors in 500 responses                                                             |
+| `bodyLimit`         | `1048576`             | Maximum body size: bytes or `'10mb'` (see [Limits](#limits); routes: `@BodyLimit`)                                 |
+| `uploads`           | see [Limits](#limits) | `{ maxFileSize, maxFiles, maxParts, maxFieldSize }` of multipart bodies                                            |
+| `requestIdHeader`   | `x-request-id`        | Header read (when ≤ 128 chars of `[A-Za-z0-9_-.:@/+=]`) and echoed; `false` to always generate                     |
+| `generateRequestId` | `randomUUID`          | Request id generator                                                                                               |
+| `drainTimeoutMs`    | `4000`                | Maximum wait for in-flight requests on shutdown (keep it below `shutdown.hookTimeoutMs`; `Infinity`: no own limit) |
 
 The plugin instance (`app.getPlugin<HttpPlugin>('http')`, or injected as `HttpPlugin`) exposes
 `address` (`{ host, port, family, url }`, `String(address)` is the URL; `undefined` when not
@@ -850,7 +872,9 @@ HttpPlugin.configure({ adapter: fastifyAdapter({ instance }) })
 | `options`  | Options of the instance created otherwise (`trustProxy`, `https`, timeouts...) |
 
 Znight routes are registered in an encapsulated context with their own body handling and 404
-handler, so your other routes keep Fastify's parsers. Created instances use
+handler, so your other routes keep Fastify's parsers. A `content-type` Fastify cannot parse (`foo`,
+an empty one) is hidden from Fastify for Znight routes, which then answer like on the other adapters
+instead of Fastify's `415`. Created instances use
 `exposeHeadRoutes: false` (Znight serves HEAD), a `maxParamLength` of 8 KiB and a
 `frameworkErrors` handler rendering Znight errors (with your own instance, malformed URLs are
 answered by Fastify). `inject()` uses `fastify.inject()`.
@@ -875,7 +899,8 @@ HttpPlugin.configure({ adapter: expressAdapter({ app }) })
 | `server` | The server to listen with (e.g. `https.createServer({ key, cert })`)  |
 
 Routes live on a dedicated router (`adapter.router`) mounted after your middleware. Do not add
-body parsers for Znight routes (Znight reads the body itself).
+body parsers for Znight routes (Znight reads the body itself): a body already read by a parser
+(`app.use(express.json())`) answers `500` with an explicit log entry instead of an empty body.
 
 ### `honoAdapter()` — `@znight/http/hono`
 
@@ -895,9 +920,25 @@ On Bun the server is `Bun.serve()`; on Node.js, `@hono/node-server`. Pass `app` 
 `adapter.fetch` is the Fetch handler of the application. `inject()` uses
 `app.request()`.
 
+| Option         | Description                                                                                                                   |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `app`          | An existing `Hono` application                                                                                                |
+| `serveOptions` | Options of `Bun.serve()` (`tls`, `idleTimeout`, `development`, `error`...; Znight sets `port`, `hostname`, `fetch`). Bun only |
+
+On Bun, the body limits are Znight's (`bodyLimit`, `@BodyLimit`): `maxRequestBodySize` defaults to
+unlimited instead of Bun's 128 MiB. Bun's `idleTimeout` (10 s by default) still closes idle
+connections and stalled requests, but is lifted while a streamed response is sent (SSE, slow
+producers), then restored.
+
 `Bun.serve()` sends streamed bodies with chunked transfer encoding even when a `Content-Length`
 header is set (unless the whole stream is available at once): files sent with
-`HttpResponse.file()` and `Blob` / `File` results are sent as blobs, with their length.
+`HttpResponse.file()` and `Blob` / `File` results are handed to Bun as blobs, with their length
+(`sendfile`), when the `Response` reaches Bun with its body (a Hono middleware replacing the body
+gets the stream). With `adapter.fetch` (your own server), they are streams.
+
+`Bun.serve()` gives the adapter the WHATWG-normalised URL only: dot segments are resolved before
+routing (`/files/%2e%2e/x` is `/x`), unlike the other adapters. On Node.js the raw request target is
+used.
 
 ### Optional peer dependencies
 
@@ -926,7 +967,8 @@ expect(response.json()).toEqual({ id: 1, name: 'Ada', email: 'ada@example.com' }
 `InjectRequest`: `{ method, url, headers?, body?, query? }` — strings and bytes are sent as is, a
 `FormData` as `multipart/form-data` (files included), a `Blob` / `File` with its type, other bodies
 as JSON. `InjectResponse`: `{ status, headers, body, bytes, json() }` (lower-case header names,
-repeated headers joined with `, `; `bytes` holds the raw body, for downloads). For end-to-end tests
+repeated headers joined with `, ` except `set-cookie`, an array with one entry per cookie; `bytes`
+holds the raw body, for downloads). For end-to-end tests
 over the network, start the application with `port: 0` and use `String(http.address)` as the base
 URL.
 
@@ -943,18 +985,25 @@ expect(partial.bytes.byteLength).toBe(100)
 
 ## Lifecycle and graceful shutdown
 
-| Plugin hook   | What happens                                                                                                                                                 |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `register`    | Declares the request-scoped externals `HttpContext` and `RequestId`, registers the plugin                                                                    |
-| `onBootstrap` | Resolves options, controllers, guards, interceptors and mappers; validates and registers routes                                                              |
-| `onStart`     | Listens (logs the address)                                                                                                                                   |
-| `onStop`      | Stops accepting connections, closes idle ones, waits for in-flight requests and streamed responses (`drainTimeoutMs`), then closes the remaining connections |
-| `onDispose`   | Closes the server and the adapter                                                                                                                            |
+| Plugin hook   | What happens                                                                                                                                                         |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `register`    | Declares the request-scoped externals `HttpContext` and `RequestId`, registers the plugin                                                                            |
+| `onBootstrap` | Resolves options, controllers, guards, interceptors and mappers; validates and registers routes                                                                      |
+| `onStart`     | Listens (logs the address)                                                                                                                                           |
+| `onStop`      | Stops accepting connections, closes idle ones, waits for in-flight requests and streamed or file responses (`drainTimeoutMs`), then closes the remaining connections |
+| `onDispose`   | Closes the server and the adapter                                                                                                                                    |
 
 While draining, responses carry `connection: close`. Singletons (controllers, singleton guards,
 interceptors and mappers) are resolved at bootstrap; request-scoped and transient ones on every
 request. Bootstrap fails with `ZNIGHT007` for invalid or duplicate routes and `ZNIGHT001` for
 controllers, guards or interceptors that are not providers.
+
+A plugin instance serves one application at a time and can serve another one once the previous
+application is stopped (a `HttpPlugin.configure()` shared by the tests of a file); using it in two
+running applications fails with `ZNIGHT004` (`Call HttpPlugin.configure() once per application`).
+An adapter instance serves a single application: pass a function to create one per application
+(`HttpPlugin.configure(() => ({ adapter: fastifyAdapter() }))`), otherwise the second bootstrap
+fails with `ZNIGHT021`.
 
 ## Compiler
 
@@ -1268,18 +1317,26 @@ interface HttpAdapter {
   or match it with `matchRoutePath` / the segment trie. Routes arrive sorted (HEAD first, most
   specific first), ready for first-match routers.
 - Build an `AdapterRequest` (`method`, raw `url`, lower-case `headers`, `readBody(limit)`, native
-  `raw`/`rawResponse`) and write the `AdapterReply` (`status`, `headers`, `body`: bytes, a stream, a
-  `Blob` or `null`; write nothing when `raw`).
+  `raw`/`rawResponse`) and write the `AdapterReply` (`status`, `headers` — already validated, every
+  name and value can be sent —, `body`: bytes, a stream or `null`; write nothing when `raw`).
+  Never rethrow a failure to write a reply into the framework's error handler (the request would be
+  served twice): release the body and answer a plain 500.
+- When the native router misses a request (it normalises paths...), call the fallback handler: the
+  plugin routes the raw path itself.
 - Optionally implement `streamBody(limit)`: the body as a pull-based Web stream (pause the source
   while the consumer does not read), erroring with `PayloadTooLargeException` past `limit` bytes
   (check `content-length` first) and with `BadRequestException` when the client aborts; cancelling
   it must **discard** the rest of the body without closing the connection (the error response is
   still written). Without it, multipart bodies are buffered with `readBody` before being parsed and
   `ctx.bodyStream()` streams the buffered bytes. `hasBody()` tells whether a request without
-  `content-length` / `transfer-encoding` has a body (Web `Request`s built in memory).
+  `content-length` / `transfer-encoding` has a body (Web `Request`s built in memory; `false` for a
+  request read from an HTTP/1.1 connection). A body stream the request did not finish is cancelled
+  by the plugin once the request is over.
 - A stream `body` MUST be read to its end or cancelled (client gone, response not sent): the request
-  scope and the in-flight count are released then. Send `Blob` bodies with their length
-  (`new Response(blob)`, or `blob.stream()` with the `content-length` header the plugin sets).
+  scope and the in-flight count are released then. Files are such streams, reading the `Blob` given
+  in `reply.blob` (with its `content-length`): an adapter may send that `Blob` natively instead
+  (`new Response(blob)` on `Bun.serve()`: `sendfile`), and then MUST cancel `body` once the server
+  holds the blob (its file opened), which releases the request scope.
 - `inject()` accepts `FormData` and `Blob` bodies (encode them with `new Response(body)`) and returns
   the raw body in `InjectResponse.bytes`.
 - Parameters, query, body parsing, HEAD bodies and errors are handled by the plugin: do not parse

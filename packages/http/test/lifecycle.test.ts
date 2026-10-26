@@ -83,6 +83,26 @@ for (const adapter of ADAPTERS) {
       release()
     })
 
+    it('waits for in-flight requests with a drainTimeoutMs beyond the setTimeout range', async () => {
+      for (const drainTimeoutMs of [Number.POSITIVE_INFINITY, 3e9]) {
+        const { meta, started, release } = gate()
+        const app = await createApp(meta, { adapter: adapter.create(), drainTimeoutMs })
+        const pending = fetch(`${String(app.http.address)}/slow`).then(
+          response => response.text(),
+          () => 'aborted',
+        )
+        await started
+        const stopping = app.stop()
+        // setTimeout(fn, Infinity) used to fire after 1 ms and close the connection at once
+        await sleep(200)
+        expect({ drainTimeoutMs, state: app.app.state }).toEqual({ drainTimeoutMs, state: 'stopping' })
+        release()
+        expect(await pending).toBe('done')
+        await stopping
+        expect(app.logger.entries.some(entry => entry.message.includes('in-flight request(s) after'))).toBe(false)
+      }
+    })
+
     it('can stop an application that never listened', async () => {
       const { meta } = gate()
       const app = await createApp(meta, { adapter: adapter.create() }, { start: false })

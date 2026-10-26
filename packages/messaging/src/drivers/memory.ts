@@ -31,6 +31,7 @@ import { randomUUID } from 'node:crypto'
 import { jsonCodec } from '../codec.ts'
 import { brokerUnavailableError } from '../errors.ts'
 import { headerRecord } from '../headers.ts'
+import { MAX_TIMER_DELAY_MS } from '../internal/async.ts'
 import { deadLetterHeaders, durationOption } from './shared.ts'
 
 /** Options of {@link memory}. */
@@ -421,12 +422,15 @@ export class MemoryDriver implements MessagingDriver {
     this.#pump(message.queue)
   }
 
+  /** Runs `fn` after `delayMs` (any duration: a timer waits at most 2^31 - 1 ms, longer delays re-arm). */
   #schedule(fn: () => void, delayMs: number): void {
+    const wait = Math.min(delayMs, MAX_TIMER_DELAY_MS)
     const timer = setTimeout(() => {
       this.#timers.delete(timer)
+      if (delayMs > wait) return this.#schedule(fn, delayMs - wait)
       fn()
       this.#checkIdle()
-    }, delayMs)
+    }, wait)
     this.#timers.add(timer)
   }
 

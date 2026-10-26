@@ -32,6 +32,27 @@ export interface HonoAdapterOptions {
    * sets its `notFound` and `onError` handlers.
    */
   readonly app?: Hono
+  /**
+   * Options of `Bun.serve()` on Bun (`tls`, `idleTimeout`, `development`, `error`...); Znight sets
+   * `port`, `hostname` and `fetch`. Ignored on Node.js.
+   */
+  readonly serveOptions?: HonoServeOptions
+}
+
+/**
+ * Options of `Bun.serve()` (see the Bun documentation; Bun types are not required). Defaults set by
+ * the adapter: `maxRequestBodySize` unlimited (Znight enforces `bodyLimit` / `@BodyLimit` itself)
+ * and Bun's `idleTimeout` (10 s), lifted while a streamed response is sent.
+ */
+export interface HonoServeOptions {
+  /** Seconds a connection may stay idle (`0`: never closed). Default: 10. */
+  readonly idleTimeout?: number
+  /** Request bodies above this size are refused by Bun (413). Default: unlimited. */
+  readonly maxRequestBodySize?: number
+  /** TLS options (`{ key, cert }`). */
+  readonly tls?: unknown
+  /** Any other `Bun.serve()` option. */
+  readonly [option: string]: unknown
 }
 
 /** The Hono adapter. */
@@ -62,14 +83,39 @@ interface BunServer {
   readonly hostname: string
   stop(closeActiveConnections?: boolean): Promise<void> | void
   requestIP?(request: Request): { readonly address: string } | null
+  /** Idle timeout of one request, in seconds (`0`: none). */
+  timeout?(request: Request, seconds: number): void
 }
 
 interface BunRuntime {
-  serve(options: {
-    port: number
-    hostname: string
-    fetch: (request: Request, server: BunServer) => Response | Promise<Response>
-  }): BunServer
+  serve(
+    options: HonoServeOptions & {
+      port: number
+      hostname: string
+      fetch: (request: Request, server: BunServer) => Response | Promise<Response>
+    },
+  ): BunServer
+}
+
+/** Default `idleTimeout` of `Bun.serve()`, in seconds. */
+const BUN_IDLE_TIMEOUT = 10
+
+/** A response body built while serving with `Bun.serve()` (see `#bunFetch`). */
+interface BunBody {
+  /** The `Blob` (file) the body reads. */
+  readonly blob: Blob | undefined
+  /** Sets the function called when the body ends (read to its end, failed or cancelled). */
+  onEnd(callback: () => void): void
+}
+
+/** Response bodies built while serving with `Bun.serve()`, by body (Hono may copy a `Response`, not its body). */
+const BUN_BODIES = new WeakMap<ReadableStream<Uint8Array>, BunBody>()
+
+/** The Node.js request behind a request of `@hono/node-server`. */
+interface NodeIncoming {
+  readonly url?: string
+  readonly httpVersionMajor: number
+  readonly stream?: { readonly endAfterHeaders?: boolean }
 }
 
 /** Bindings of injected requests (the remote address the other adapters report for `inject()`). */
@@ -80,6 +126,7 @@ type HonoMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'OPTIONS'
 class HonoHttpAdapter implements HonoAdapter {
   readonly name = 'hono' as const
   readonly app: Hono
+  readonly #serveOptions: HonoServeOptions
   #fallback: FallbackHandler | undefined
   #prepared = false
   #bun: BunServer | undefined
@@ -89,6 +136,7 @@ class HonoHttpAdapter implements HonoAdapter {
 
   constructor(options: HonoAdapterOptions) {
     this.app = options.app ?? new Hono()
+    this.#serveOptions = options.serveOptions ?? {}
   }
 
   readonly fetch = (request: Request, env?: unknown): Response | Promise<Response> => {
@@ -121,12 +169,97 @@ class HonoHttpAdapter implements HonoAdapter {
   }
 
   async #serve(c: Context, handler: AdapterHandler): Promise<Response> {
-    return toResponse(c, await handler(adapterRequest(c)))
+    const request = adapterRequest(c)
+    // Hono routes the WHATWG-normalised URL (`/a/../b` → `/b`, `%2e%2e` resolved): when the raw
+    // target differs (Node.js), let the plugin route the raw path, like on the other adapters
+    const reply =
+      this.#fallback !== undefined && pathOf(request.url) !== pathOf(pathAndQuery(c.req.raw.url))
+        ? await this.#fallback(request)
+        : await handler(request)
+    return this.#toResponse(c, reply)
   }
 
   async #serveFallback(c: Context, error: unknown): Promise<Response> {
     if (this.#fallback === undefined) throw error ?? new Error('No fallback handler')
-    return toResponse(c, await this.#fallback(adapterRequest(c), error))
+    return this.#toResponse(c, await this.#fallback(adapterRequest(c), error))
+  }
+
+  #toResponse(c: Context, reply: AdapterReply): Response {
+    if (this.#bun === undefined || !(reply.body instanceof ReadableStream)) return toResponse(c, reply)
+    // served by Bun.serve(): observe the end of the body (idle timeout, native blob: see #bunFetch)
+    const reader = reply.body.getReader()
+    let ended = false
+    let onEnd = (): void => undefined
+    const end = (): void => {
+      if (ended) return
+      ended = true
+      onEnd()
+    }
+    const body = new ReadableStream<Uint8Array>(
+      {
+        async pull(controller) {
+          let result: Awaited<ReturnType<typeof reader.read>>
+          try {
+            result = await reader.read()
+          } catch (error) {
+            end()
+            throw error
+          }
+          if (result.done) {
+            end() // before closing: Bun ignores timeout() once the response is complete
+            controller.close()
+            return
+          }
+          controller.enqueue(result.value)
+        },
+        cancel(reason) {
+          end()
+          return reader.cancel(reason)
+        },
+      },
+      { highWaterMark: 0 },
+    )
+    BUN_BODIES.set(body, {
+      blob: reply.blob,
+      onEnd: callback => {
+        onEnd = callback
+      },
+    })
+    return toResponse(c, { ...reply, body })
+  }
+
+  /** The fetch handler given to `Bun.serve()`. */
+  async #bunFetch(request: Request, server: BunServer, idleTimeout: number): Promise<Response> {
+    const response = await this.app.fetch(request, server)
+    const body = response.body
+    const served = body === null ? undefined : BUN_BODIES.get(body)
+    if (body === null || served === undefined) return response
+    BUN_BODIES.delete(body)
+    if (served.blob !== undefined && !body.locked) {
+      // a Blob is sent by Bun itself (sendfile, exact Content-Length; a stream would be chunked). Bun
+      // opens its file as soon as it takes the response: release the stream (and with it the request
+      // scope, which may delete the file) right after
+      const native = new Response(served.blob, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+      })
+      setImmediate(() => discardStream(body))
+      return native
+    }
+    if (idleTimeout > 0 && typeof server.timeout === 'function') {
+      // the idle timeout of Bun.serve() also cuts a response whose stream pauses (SSE, slow producers):
+      // lift it while the stream is sent, then restore it for the keep-alive connection
+      server.timeout(request, 0)
+      served.onEnd(() => {
+        try {
+          server.timeout?.(request, idleTimeout)
+        } catch {
+          // the connection is gone
+        }
+      })
+    }
+    return response
   }
 
   async listen(port: number, host: string): Promise<HttpServerAddress> {
@@ -134,7 +267,16 @@ class HonoHttpAdapter implements HonoAdapter {
     this.#closing = undefined
     const bun = (globalThis as { Bun?: BunRuntime }).Bun
     if (isBun() && bun !== undefined) {
-      const server = bun.serve({ port, hostname: host, fetch: (request, server) => this.app.fetch(request, server) })
+      const options = this.#serveOptions
+      const idleTimeout = typeof options.idleTimeout === 'number' ? options.idleTimeout : BUN_IDLE_TIMEOUT
+      const server = bun.serve({
+        // Znight enforces the body limits (route @BodyLimit, plugin bodyLimit): not Bun's 128 MiB default
+        maxRequestBodySize: Number.MAX_SAFE_INTEGER,
+        ...options,
+        port,
+        hostname: host,
+        fetch: (request, server) => this.#bunFetch(request, server, idleTimeout),
+      })
       this.#bun = server
       return serverAddress(server.hostname, server.port)
     }
@@ -190,10 +332,12 @@ function adapterRequest(c: Context): AdapterRequest {
   const request = c.req.raw
   const headers: Record<string, string> = {}
   for (const [name, value] of request.headers) headers[name] = value
+  const incoming = nodeIncoming(c)
   let body: Promise<Uint8Array> | undefined
   return {
     method: request.method,
-    url: pathAndQuery(request.url),
+    // the raw target on Node.js; on Bun only the normalised URL is known
+    url: pathAndQuery(typeof incoming?.url === 'string' && incoming.url !== '' ? incoming.url : request.url),
     headers,
     ip: remoteAddress(c),
     raw: request,
@@ -204,14 +348,32 @@ function adapterRequest(c: Context): AdapterRequest {
     },
     streamBody: (limit: number): ReadableStream<Uint8Array> =>
       webBodyStream(() => request.body, limit, headers['content-length']),
-    hasBody: (): boolean => request.body !== null,
+    // asked only without content-length / transfer-encoding: a request read from an HTTP/1.1
+    // connection then has no body (`@hono/node-server` still gives every POST a body stream), an
+    // HTTP/2 one unless its HEADERS frame ended the stream; a Web `Request` (Bun, inject) says it
+    hasBody: (): boolean =>
+      incoming === undefined
+        ? request.body !== null
+        : incoming.httpVersionMajor >= 2 && incoming.stream?.endAfterHeaders === false,
   }
 }
 
+/** The Node.js request of `@hono/node-server` (`c.env.incoming`), absent on Bun and for `inject()`. */
+function nodeIncoming(c: Context): NodeIncoming | undefined {
+  const incoming = (c.env as { incoming?: Partial<NodeIncoming> } | undefined)?.incoming
+  return typeof incoming?.httpVersionMajor === 'number' ? (incoming as NodeIncoming) : undefined
+}
+
 function pathAndQuery(url: string): string {
+  if (url.startsWith('/')) return url
   const scheme = url.indexOf('://')
   const start = url.indexOf('/', scheme === -1 ? 0 : scheme + 3)
   return start === -1 ? '/' : url.slice(start)
+}
+
+function pathOf(url: string): string {
+  const query = url.indexOf('?')
+  return query === -1 ? url : url.slice(0, query)
 }
 
 function remoteAddress(c: Context): string | undefined {
@@ -229,10 +391,20 @@ function toResponse(c: Context, reply: AdapterReply): Response {
     return c.res
   }
   const headers = new Headers()
-  for (const name of Object.keys(reply.headers)) {
-    const value = reply.headers[name]
-    if (typeof value === 'string') headers.set(name, value)
-    else if (value !== undefined) for (const item of value) headers.append(name, item)
+  try {
+    for (const name of Object.keys(reply.headers)) {
+      const value = reply.headers[name]
+      if (typeof value === 'string') headers.set(name, value)
+      else if (value !== undefined) for (const item of value) headers.append(name, item)
+    }
+  } catch {
+    // a header Headers refuses (the plugin validates them): never rethrow into Hono's onError, which
+    // would run the pipeline again; release the body and answer a plain 500, like writeNodeReply
+    discardStream(reply.body instanceof ReadableStream ? reply.body : null)
+    return new Response('{"statusCode":500,"error":"Internal Server Error"}', {
+      status: 500,
+      headers: { 'content-type': 'application/json; charset=utf-8' },
+    })
   }
   return new Response(reply.body, { status: reply.status, headers })
 }

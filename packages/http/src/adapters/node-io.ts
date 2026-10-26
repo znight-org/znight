@@ -30,12 +30,32 @@ function copyHeaders(headers: IncomingHttpHeaders): Record<string, string | unde
   return result
 }
 
+/**
+ * Whether the body was already read by someone else: an Express body parser (`express.json()`...)
+ * marks the request with `_body`; otherwise a declared body that already ended.
+ */
+function consumedElsewhere(request: IncomingMessage): boolean {
+  if ((request as { _body?: unknown })._body === true) return true
+  if (!request.readableEnded) return false
+  const length = request.headers['content-length']
+  return request.headers['transfer-encoding'] !== undefined || (length !== undefined && length.trim() !== '0')
+}
+
+/** The error of a body consumed before Znight read it (an empty body would be silently wrong). */
+function consumedError(): Error {
+  return new Error(
+    'The request body was already read by a middleware (an Express body parser such as express.json()?): ' +
+      'Znight reads the bodies of its routes itself, do not register body parsers for them',
+  )
+}
+
 /** Reads a Node.js request body, enforcing `limit` (on `content-length`, then while streaming). */
 export function readNodeBody(request: IncomingMessage, limit: number): Promise<Uint8Array> {
   if (exceedsDeclaredLength(request.headers['content-length'], limit)) {
     request.resume()
     return Promise.reject(payloadTooLarge(limit))
   }
+  if (consumedElsewhere(request)) return Promise.reject(consumedError())
   if (request.readableEnded) return Promise.resolve(new Uint8Array(0))
   if (request.destroyed) return Promise.reject(new BadRequestException('The request was aborted'))
   return new Promise((resolve, reject) => {
@@ -89,6 +109,7 @@ export function nodeBodyStream(request: IncomingMessage, limit: number): Readabl
     request.resume()
     return failedStream(payloadTooLarge(limit))
   }
+  if (consumedElsewhere(request)) return failedStream(consumedError())
   if (request.readableEnded) return new ReadableStream<Uint8Array>({ start: controller => controller.close() })
   if (request.destroyed) return failedStream(new BadRequestException('The request was aborted'))
   let size = 0
