@@ -31,6 +31,20 @@ export const ErrorCode = {
   NoActiveScope: 'ZNIGHT013',
   /** Async factory on a non-singleton provider. */
   AsyncNonSingleton: 'ZNIGHT014',
+  /** A provider factory threw or rejected. */
+  InstantiationFailed: 'ZNIGHT015',
+  /** The container was modified after `init()`. */
+  ContainerSealed: 'ZNIGHT016',
+  /** Non-primitive input injected without a validation schema. */
+  UnvalidatedInput: 'ZNIGHT017',
+  /** Incompatible versions (metadata format, packages, compiler extension API). */
+  VersionMismatch: 'ZNIGHT018',
+  /** Provider unreachable from any root. */
+  UnusedProvider: 'ZNIGHT019',
+  /** The generated module is imported by a provider module (ESM cycle). */
+  GeneratedModuleCycle: 'ZNIGHT020',
+  /** A lifecycle hook or shutdown step failed or timed out. */
+  LifecycleFailed: 'ZNIGHT021',
 } as const
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode]
@@ -51,6 +65,13 @@ export const ERROR_DESCRIPTIONS: Readonly<Record<ErrorCode, string>> = {
   ZNIGHT012: 'Invalid config property',
   ZNIGHT013: 'Request-scoped provider resolved outside of a request scope',
   ZNIGHT014: 'Async factory on a non-singleton provider',
+  ZNIGHT015: 'Provider instantiation failed',
+  ZNIGHT016: 'Container sealed: providers cannot be registered or overridden after init()',
+  ZNIGHT017: 'Unvalidated input: non-primitive input injected without a schema',
+  ZNIGHT018: 'Version mismatch',
+  ZNIGHT019: 'Unused provider: unreachable from any root',
+  ZNIGHT020: 'The generated module is imported by a provider module (ESM cycle)',
+  ZNIGHT021: 'Lifecycle hook or shutdown step failed or timed out',
 }
 
 export interface ZnightErrorOptions extends ErrorOptions {

@@ -1,33 +1,39 @@
 # Znight architecture
 
 This document is the technical specification of Znight. It is the contract between the packages:
-the compiler generates code that the runtime packages consume, so both sides MUST follow it.
-When an implementation needs to deviate, update this document in the same change.
+the compiler generates code that the runtime packages consume, so both sides MUST follow it. When
+an implementation needs to deviate, update this document in the same change.
+
+Normative words (MUST, SHOULD, MAY) are used in their RFC 2119 sense.
 
 ## 1. Principles
 
-1. **Compile-time DI.** The compiler (`@znight/compiler`, a Vite plugin) parses the application
-   with [oxc](https://oxc.rs), resolves every injection point to a concrete provider, validates the
-   graph and generates a plain TypeScript module (`__ZNIGHT_METADATA__`). There is no
-   `reflect-metadata`, no `emitDecoratorMetadata`, no runtime type lookup.
+1. **Compile-time DI.** The compiler (`@znight/compiler`, a Vite plugin + a programmatic API)
+   parses the application with [oxc](https://oxc.rs), resolves every injection point to a concrete
+   provider, validates the graph and generates a plain TypeScript module (`__ZNIGHT_METADATA__`).
+   No `reflect-metadata`, no `emitDecoratorMetadata`, no runtime type lookup.
 2. **Decorators are markers.** Every Znight decorator is a no-op function at runtime. The compiler
-   reads them from the AST. By default the Vite plugin also strips them from the bundle.
-3. **Flat DI.** One global container, no modules. Providers are discovered by scanning sources.
+   reads them from the AST; the Vite plugin strips them from the bundle by default.
+3. **Flat DI.** One global container, no modules. Providers are discovered by scanning sources
+   (application and provider libraries).
 4. **Composable.** Each feature (HTTP, messaging, config, observability) is a separate package made
-   of: marker decorators + an optional compiler extension (`@znight/<pkg>/compiler`) + a runtime
+   of marker decorators + an optional compiler extension (`@znight/<pkg>/compiler`) + a runtime
    plugin (`XxxPlugin.configure()`).
-5. **Runtime agnostic.** Runtime packages run on Node.js >= 24 and Bun >= 1.3 (ESM only).
-   They only rely on standard APIs (`node:async_hooks`, `fetch`, `node:util`...).
-6. **Fast.** The compiler uses native parsers/resolvers (oxc-parser, oxc-resolver) with per-file
-   caching so a full analysis of a medium app takes milliseconds. The runtime does no work besides
-   calling generated factories in a precomputed order.
+5. **Runtime agnostic.** Runtime packages run on Node.js >= 24 and Bun >= 1.3 (ESM only) and only
+   rely on standard APIs (`node:async_hooks`, `fetch`, `node:util`, `Symbol.asyncDispose`...).
+6. **Fast.** Native parser/resolver, per-file caches keyed by content hash, global recomputation of
+   the (cheap) binding phase. At runtime: generated factories called in a precomputed order,
+   independent async singletons initialised concurrently.
+7. **Fail loudly, early, precisely.** Every misconfiguration that can be detected at build time is a
+   `ZNIGHTxxx` diagnostic with a source location and hints. Runtime errors carry a code, the
+   dependency path and the original `cause`.
 
-## 2. Repository layout
+## 2. Repository layout & conventions
 
 ```
 packages/
-  core/           runtime: container, application, plugins, hooks, AOP, marker decorators, errors
-  compiler/       Vite plugin + programmatic API: analysis, binding, validation, code generation
+  core/           runtime: container, application, plugins, hooks, AOP, scope, decorators, errors
+  compiler/       Vite plugin + programmatic API (+ Bun preload): analysis, binding, validation, codegen
   http/           decorators, compiler extension, HttpPlugin, adapters (fastify, express, hono)
   messaging/      decorators, compiler extension, MessagingPlugin, drivers (memory, rabbitmq, sqs, kafka)
   config/         decorators, compiler extension, ConfigPlugin, loaders (env, dotenv, json, yaml, vault, aws)
@@ -39,60 +45,106 @@ docs/             VitePress documentation site
 ```
 
 Tooling: bun workspaces (+ catalogs), TypeScript 7 (`tsc --noEmit`), tsdown (build), Biome (lint +
-format), `bun test` (tests). Each package exposes a `@znight/source` export condition pointing to
-its sources: the repo scripts pass `--conditions=@znight/source` so packages are used from source
-without building. Published packages resolve to `dist/`.
+format), `bun test` (tests). All `@znight/*` packages are versioned in lockstep.
+
+### Source condition
+
+Each package exposes a `@znight/source` export condition pointing to its TypeScript sources, before
+`types`/`default` (dist). Repository scripts pass `--conditions=@znight/source` so packages are used
+from source without building. Framework sources MUST be directly executable by Node 24 (type
+stripping) and Bun:
+
+- relative imports use the `.ts` suffix (`import { Container } from './container.ts'`);
+- `erasableSyntaxOnly`: no parameter properties, enums, namespaces or decorators in package `src/`
+  (tests and examples may use them);
+- `isolatedDeclarations`: every exported function / class member has an explicit type.
+
+Each package has `tsconfig.json` (sources, strict library settings) and `test/tsconfig.json` (tests,
+Bun types, decorators allowed). `typecheck` runs both.
 
 ### Package conventions
 
-- `src/index.ts` is the public entry; additional entries (e.g. `src/compiler/index.ts`,
-  `src/adapters/fastify.ts`) are declared in `tsdown.config.ts` **and** in `package.json#exports`
-  (with the same `@znight/source` / `types` / `default` triple).
-- Tests live in `packages/<pkg>/test/**/*.test.ts` and use `bun:test`. Fixtures in `test/fixtures/`.
-- `isolatedDeclarations` is on: every exported function/class member needs an explicit type.
-- No enums, no namespaces: use `as const` objects and union types.
-- Relative imports are extensionless (`./container`).
-- Third-party integrations (fastify, amqplib, pino...) are **optional peer dependencies** unless the
-  package cannot work without them. Adapters/drivers live in subpath exports so users only install
-  what they use.
+- `src/index.ts` is the public runtime entry. Additional entries (`src/compiler/index.ts`,
+  `src/adapters/fastify.ts`...) are declared in `tsdown.config.ts` **and** `package.json#exports`
+  with the same `@znight/source` / `types` / `default` triple.
+- Tests: `packages/<pkg>/test/**/*.test.ts` with `bun:test`; fixtures in `test/fixtures/`.
+- Third-party integrations (fastify, amqplib, pino...) are **optional peer dependencies** (plus exact
+  devDependencies for tests) unless the package cannot work without them. Adapters and drivers live
+  in subpath exports. Runtime `dependencies`/`peerDependencies` use caret ranges.
+- Boundaries (enforced by a repository test):
+  - `<pkg>/compiler` entries only `import type` from `@znight/compiler` and never import the
+    package's runtime entry (so building never loads fastify, amqplib...);
+  - runtime entries never import `./compiler`;
+  - `@znight/compiler` is at most an optional peer of feature packages.
 
 ## 3. Runtime metadata
 
-The exact types live in [`packages/core/src/metadata.ts`](../../packages/core/src/metadata.ts).
-Summary:
+Exact types: [`packages/core/src/metadata.ts`](../../packages/core/src/metadata.ts).
+
+### 3.1 Tokens
+
+A **token** is the canonical identity (§4.1) of the declaration that defines the provider:
+
+| Provider                    | Token                            | Example                                     |
+| --------------------------- | -------------------------------- | ------------------------------------------- |
+| Class in the application    | `<path>#<ClassName>`             | `src/users/user.service.ts#UserService`     |
+| Class exported by a package | `<package>#<ExportName>`         | `@acme/auth#JwtService`                     |
+| `@Provides` method          | `<factory class token>.<method>` | `src/db/db.factory.ts#DbFactory.createPool` |
+| External (plugin-provided)  | `<package>#<ExportName>`         | `@znight/observability#Logger`              |
+
+Tokens never change when unrelated code is added, cannot collide across files or packages, and
+are namespaced for externals. The **display name** of a token is the part after the last `#`
+(`UserService`, `DbFactory.createPool`); it is used in messages. `container.get('UserService')`
+accepts a display name when it is unique, and throws listing the candidates otherwise. The public
+API is class-first: `container.get(UserService)`.
+
+### 3.2 Shape
 
 ```ts
 interface ZnightMetadata {
-  version: 1
+  version: 1 // metadata format, checked by Container.create
+  compiler?: string // @znight/compiler version that produced it
   providers: Record<Token, ProviderDefinition>
-  resolutionOrder: Token[]            // topological order (dependencies first)
-  aliases?: Record<Token, Token>      // interface / base-class token -> provider token
-  externals?: ExternalDefinition[]    // tokens supplied at runtime by plugins
-  extensions?: { http?: HttpMetadata; messaging?: MessagingMetadata; config?: ConfigMetadata; ... }
+  resolutionOrder: Token[] // topological (dependencies first), deterministic
+  aliases?: Record<Token, Token> // provided-type identity / interface / base class -> provider token
+  externals?: ExternalDefinition[] // tokens supplied at runtime by plugins
+  extensions?: { http?: HttpMetadata; messaging?: MessagingMetadata; config?: ConfigMetadata }
 }
 
 interface ProviderDefinition {
   scope: 'singleton' | 'request' | 'transient'
-  class?: Constructor
-  deps: DependencyRef[]               // 'Token' | { token, optional: true } | { multi: Token[] }
+  class?: Constructor // enables container.get(Class)
+  deps: DependencyRef[] // Token | { token, optional: true } | { multi: Token[] } | { lazy: Token }
   factory: (deps: any[]) => T | Promise<T>
-  async?: boolean
-  lifecycle?: ('onStart' | 'onReady' | 'onStop')[]
-  name?: string
+  async?: boolean // factory returns a promise (singletons only)
+  interceptors?: Record<method, { async: boolean; chain: { dep: number; options?: unknown }[] }>
+  dispose?: string // method to call on shutdown (@Provides({ dispose }))
+  name?: string // @Named qualifier
   primary?: boolean
-  source?: { file, line, column }
+  source?: { file; line; column } // omitted in production builds by default
+}
+
+interface ExternalDefinition {
+  token
+  scope?: Scope
+  providedBy?: string
+  optional?: boolean
 }
 ```
 
-### Generated module
+`Lazy<T>` (`{ lazy: Token }`) injects `{ get(): T }`, resolved at call time in the current scope.
+It is the escape hatch for ZNIGHT002 (cycles) and ZNIGHT003 (a singleton needing a request-scoped
+value).
 
-The compiler writes `src/.znight/container.generated.ts` (configurable). It is deterministic (no
-timestamps, sorted output) so it is only rewritten when the application changes.
+### 3.3 Generated module
+
+`src/.znight/container.generated.ts` (option `outFile`). Example:
 
 ```ts
-// AUTO-GENERATED by @znight/compiler. Do not edit.
+// AUTO-GENERATED by @znight/compiler 0.1.0. Do not edit.
+// biome-ignore-all lint: generated file
+/* eslint-disable */
 import type { ZnightMetadata } from '@znight/core'
-import { applyInterceptors } from '@znight/core'
 import type { HttpContext } from '@znight/http'
 import { coerce } from '@znight/http'
 import { UserController } from '../users/user.controller.js'
@@ -101,55 +153,62 @@ import { PgUserRepository } from '../users/pg-user.repository.js'
 
 export const __ZNIGHT_METADATA__: ZnightMetadata = {
   version: 1,
+  compiler: '0.1.0',
   providers: {
-    PgUserRepository: {
+    ['src/users/pg-user.repository.ts#PgUserRepository']: {
       scope: 'singleton',
       class: PgUserRepository,
-      deps: ['DatabaseClient'],
+      deps: ['src/db/db.factory.ts#DbFactory.createPool'],
       factory: d => new PgUserRepository(d[0]),
-      source: { file: 'src/users/pg-user.repository.ts', line: 5, column: 1 },
     },
-    UserService: {
+    ['src/users/user.service.ts#UserService']: {
       scope: 'singleton',
       class: UserService,
-      deps: ['PgUserRepository', 'Logger', 'LoggedInterceptor'],
-      factory: d =>
-        applyInterceptors(new UserService(d[0], d[1]), 'UserService', {
-          findById: [[d[2], { level: 'debug' }]],
-        }),
-      lifecycle: ['onStart'],
+      deps: [
+        'src/users/pg-user.repository.ts#PgUserRepository',
+        '@znight/observability#Logger',
+        '@znight/observability#LoggedInterceptor',
+      ],
+      factory: d => new UserService(d[0], d[1]),
+      interceptors: { findById: { async: true, chain: [{ dep: 2, options: { level: 'debug' } }] } },
     },
-    UserController: {
+    ['src/users/user.controller.ts#UserController']: {
       scope: 'singleton',
       class: UserController,
-      deps: ['UserService'],
+      deps: ['src/users/user.service.ts#UserService'],
       factory: d => new UserController(d[0]),
     },
   },
-  resolutionOrder: ['PgUserRepository', 'UserService', 'UserController'],
-  aliases: { UserRepository: 'PgUserRepository' },
+  resolutionOrder: [
+    'src/users/pg-user.repository.ts#PgUserRepository',
+    'src/users/user.service.ts#UserService',
+    'src/users/user.controller.ts#UserController',
+  ],
+  aliases: { ['src/users/user.repository.ts#UserRepository']: 'src/users/pg-user.repository.ts#PgUserRepository' },
   externals: [
-    { token: 'Logger', providedBy: 'ObservabilityPlugin' },
-    { token: 'LoggedInterceptor', providedBy: 'ObservabilityPlugin' },
+    { token: '@znight/observability#Logger', providedBy: 'ObservabilityPlugin' },
+    { token: '@znight/observability#LoggedInterceptor', providedBy: 'ObservabilityPlugin' },
   ],
   extensions: {
     http: {
       controllers: [
         {
-          token: 'UserController',
+          token: 'src/users/user.controller.ts#UserController',
           basePath: '/users',
           guards: [],
           interceptors: [],
+          meta: {},
           routes: [
             {
               method: 'GET',
               path: '/:id',
               fullPath: '/users/:id',
               handler: 'getUser',
-              guards: ['AuthGuard'],
+              meta: { roles: ['admin'] },
+              guards: ['src/auth/auth.guard.ts#AuthGuard'],
               interceptors: [],
               params: [{ index: 0, source: 'param', name: 'id', type: 'number' }],
-              invoke: (c: UserController, ctx: HttpContext) => c.getUser(coerce.number(ctx.params.id, 'param "id"')),
+              invoke: (c: UserController, ctx: HttpContext) => c.getUser(coerce.number(ctx.params['id'], 'param "id"')),
             },
           ],
         },
@@ -161,176 +220,279 @@ export default __ZNIGHT_METADATA__
 ```
 
 Rules for generated code:
-- Relative imports use the `.js` suffix by default (option `importExtension`), computed from the
-  generated file location. Imports from packages keep the bare specifier used by the user.
-- Identifiers are de-duplicated (`UserService`, `UserService$1`) when two imported symbols share a name.
-- Strings are emitted with `JSON.stringify`. Output is stable regardless of file scan order.
-- The file starts with `// biome-ignore-all lint: generated file` and `/* eslint-disable */`.
+- Deterministic: no timestamps; output order derived from canonical identities only. A full
+  compile and any sequence of incremental compiles produce byte-identical output, and output is
+  identical with or without the `@znight/source` condition and on every OS.
+- Object keys are always computed string keys (`["..."]`); values are produced by a single literal
+  emitter (handles `undefined`, `NaN`, `±Infinity`, `-0`, bigint, nested objects/arrays; rejects
+  functions, symbols and cycles). Extensions never splice raw strings (§6.5).
+- Imports use **import routes** (§4.2). Identifiers are validated and de-duplicated by identity order
+  (`UserService`, `UserService$1`).
+- The code MUST type-check under strict user settings (`strict`, `noUnusedLocals`,
+  `noUnusedParameters`, `noPropertyAccessFromIndexSignature`, `exactOptionalPropertyTypes`,
+  `verbatimModuleSyntax`): zero-dependency factories are `() => new X()`, index access uses
+  brackets, etc. `invoke` keeps typed parameters so handler signatures are type-checked.
+- After assembly the compiler re-parses the module with oxc; a syntax error is a compiler bug
+  reported with the name of the extension that produced the faulty section.
+- `source` locations are emitted in `serve`/`test`, omitted in `build` (option `sourceLocations:
+  'dev' | 'always' | false`).
+- Git policy: the generated file is ignored; `znight generate` (or the Vite plugin / Bun preload)
+  creates it before `tsc` and tests. `znight generate --check` exits 1 when the file is stale.
 
-## 4. Tokens and type resolution (compiler)
+## 4. Compiler: identities, resolution, binding
 
-### Type identity
+### 4.1 Canonical identity
 
-Every type referenced by an injection point is resolved **syntactically** to its declaration:
+Every declaration the compiler reasons about (classes, interfaces, type aliases, consts, decorator
+functions) has a canonical identity string:
 
-1. Identifier in a type annotation (`users: UserService`, `repo: Repo<User>`, `ns.Foo`).
-2. Look up the binding in the file: local declaration (class / interface / type alias / abstract
-   class) or import (named, default, namespace, `import type`).
-3. Resolve the module specifier with oxc-resolver (honours tsconfig `paths`, package `exports`,
-   extensions, `index` files, the configured `conditions`).
-4. In the target module follow exports (`export class`, `export { a as b }`, `export { x } from`,
-   `export * from`, `export default`) until the declaration is found.
-5. Simple type aliases (`type Repo = UserRepository`) are followed. Other aliases are treated as
-   opaque declarations.
+- **Application declarations** (file owned by the application root package): `<path>#<Name>`,
+  where `<path>` is the realpath relative to the project root with POSIX separators and the exact
+  on-disk casing, and `<Name>` the local declaration name. An import whose casing differs from the
+  file on disk is a warning (ZNIGHT010 hint).
+- **Package declarations** (nearest `package.json` of the resolved realpath has a `name` different
+  from the root package): `<package name>#<ExportName>`, where `ExportName` is the name under which
+  the package's **public entry** (root entry, or the subpath entry when the root does not export it)
+  exports the declaration. It is computed by parsing the package entry (`.ts`, `.d.ts`, `.d.mts`)
+  and following re-exports _inside_ the package; re-exports into another package continue with that
+  package's rules. The result is independent of symlinks, `node_modules` layout and conditions.
+- Member access on a default/namespace import (`import pg from 'pg'; pg.Pool`) maps to `pg#Pool`.
+- Compiler options that name types (`externals`) take identities, never bare names.
 
-Identity strings:
-- Source declarations: `<path relative to root>#<LocalName>` e.g. `src/users/user.service.ts#UserService`.
-- Package declarations (resolved inside `node_modules` or to a `.d.ts`): `<bare specifier>#<ExportName>`
-  e.g. `@znight/observability#Logger`, `pg#Pool`. The compiler does not parse `.d.ts` files.
-- Generic arguments are part of the identity: `src/repo.ts#Repository<src/user.ts#User>`.
-- Primitives (`string`, `number`, `boolean`, literal types...) have no identity: injecting them
-  requires `@Inject('name')`.
+Golden test: compiling `examples/*` with and without `@znight/source` yields identical identities
+and byte-identical generated output.
 
-### Tokens
+### 4.2 Import routes
 
-A provider's runtime token is derived from the provided type's short name (`UserService`,
-`Repository<User>`). Collisions are resolved deterministically: named providers become
-`Name:qualifier`; otherwise the relative path is appended (`Logger@src/a/logger.ts`).
-Tokens appear in error messages and can be used with `container.get('Token')`.
+Every value the generated module needs (provider classes, schemas, guards, helpers) has an import
+route `(specifier, exportName | 'default')`:
+- application file: relative path from `outFile`, extension mapped (`.ts`/`.tsx` → `.js`, `.mts` →
+  `.mjs`, `.cts` → `.cjs`; option `importExtension: 'js' | 'ts' | 'none'`), exported name actually
+  exported by that module (alias-aware; re-exporting module when it is only re-exported there);
+- package declaration: bare specifier of the public entry + public export name. Never a path into
+  another package.
+- A provider or referenced value that is not exported (or an anonymous default export) is
+  ZNIGHT005 with the fix-it "export it".
 
-### Binding algorithm (per injection point)
+### 4.3 Resolution
 
-Input: resolved type identity `T`, optional qualifier (`@Inject('name')`), optional flag, multi flag.
+oxc-resolver configured with: the nearest tsconfig of each importing file (`paths`), the Vite
+`resolve.alias` (string aliases) and `resolve.conditions` when running inside Vite,
+`extensionAlias` (`.js` → `.ts/.tsx/.js`, `.mjs` → `.mts/.mjs`, `.cjs` → `.cts/.cjs`), and two
+condition sets: **scan conditions** (may include `@znight/source`, used to find sources to analyse)
+and **runtime conditions** (used for import routes and loading extensions). The resolver cache is
+cleared on file create/unlink/rename and on any `package.json`/`tsconfig*.json`/lockfile change.
 
-1. **Exact**: providers whose provided type identity is `T`.
-2. **Assignable** (only if 1 is empty): providers whose class `extends`/`implements` `T`
-   (transitively, through classes and interfaces, generic arguments compared by identity).
-3. Filter by qualifier when `@Inject(name)` is present (matches `@Named(name)` or `@Provides({ name })`).
-4. Multi-injection (`T[]`, `readonly T[]`, `Array<T>`, `ReadonlyArray<T>`): all candidates, in
-   deterministic order (by token). Never fails; may be empty.
-5. Single: 1 candidate → bound. Several → the unique `@Primary()` one, otherwise **ZNIGHT008**
-   (ambiguous) — or **ZNIGHT004** if they all provide the _exact same_ type. 0 candidates → if the
-   type belongs to a package manifest (`provides`, see §7) it becomes an external; else if optional
-   (`?`, `| undefined`, `@Optional()`) → `{ token, optional: true }` / `undefined`; else **ZNIGHT001**.
+### 4.4 Types
 
-Bindings are fully resolved at compile time: generated `deps` reference provider tokens, never
-interface types. Aliases are emitted for every interface / base type that has exactly one
-candidate (or one primary), so `container.get('UserRepository')` works.
+`TypeInfo` = `primitive` (`string|number|boolean|bigint|symbol|null|undefined|void|any|unknown|never|object`)
+| `literal` | `reference { identity, name, typeArgs }` | `array { element }` | `tuple` | `union` |
+`intersection` | `promise { inner }` | `opaque { text }`.
+
+Normative serialization (used inside identities and to compare types):
+- primitives by keyword, literals as JSON; `Array<T>`, `ReadonlyArray<T>`, `readonly T[]` → `T[]`;
+- unions/intersections flattened, de-duplicated and sorted by serialization;
+- default type arguments filled from the declaration; generic aliases expanded with substitution
+  (`type UserRepo = Repository<User>`);
+- object literal types, function types, mapped/conditional types, `typeof`, `import()` types are
+  opaque. Opaque in an injection type → ZNIGHT010.
+
+### 4.5 Class analysis
+
+- **Constructor**: the nearest class in the `extends` chain declaring a constructor (resolved
+  through imports and identities); type parameters substituted with heritage type arguments; that
+  declaration's parameter decorators apply. If the chain hits something unanalysable (call
+  expression `extends Mixin(Base)`, a package class without parseable declaration) → ZNIGHT010
+  "declare an explicit constructor".
+- **Heritage closure**: all `extends`/`implements` identities with substituted type arguments,
+  transitively (classes and interfaces).
+- **Lifecycle**: `onStart`/`onReady`/`onStop` (and `[Symbol.asyncDispose]`/`[Symbol.dispose]`) found on
+  the class or its analysable bases. Used for ZNIGHT009 only; the runtime duck-types instances.
+- `@Injectable` on a class with unbound type parameters → ZNIGHT005 ("subclass with concrete type
+  arguments or use @Provides").
+
+### 4.6 Decorators and static evaluation
+
+A decorator is recognised by the canonical identity of its callee (resolved like types: renamed
+imports, barrels, `export *`, namespace imports `@zn.Get()`). Compiler extensions declare the
+identities they own (e.g. `@znight/http#Get`). A local function whose body returns a call to a
+Znight decorator gets a ZNIGHT005 warning ("composite decorators are not visible to the compiler").
+
+Each decorator parameter is declared **static** (paths, names, scopes, queue names, env names: MUST
+evaluate) or **value** (schemas, guards, defaults, options: evaluated when possible, otherwise MUST
+be a reference to an exported binding, imported by the generated module).
+
+The static evaluator accepts: literals (incl. unary `-`/`+`/`!`), binary arithmetic and string
+concatenation, `??`, `||`, `&&`, template literals with evaluable expressions, property/element
+access on evaluated objects/arrays, `as const`, `satisfies`, parentheses, non-null assertions,
+spreads of evaluated values, and `const` references across files and packages (cycle-guarded).
+Each evaluation records the files it read (for invalidation). Non-evaluable static argument or
+inline non-evaluable value argument → ZNIGHT005 with the fix-it "extract to `export const X = ...`".
+
+### 4.7 Binding algorithm (normative)
+
+For an injection point with type `T` (identity), optional qualifier `q` (`@Inject('q')`), flags
+optional / multi / lazy:
+
+1. `C = exact(T) ∪ assignable(T)` where _exact_ are providers whose **provided type** is `T`, and
+   _assignable_ those whose heritage closure contains `T`.
+2. With a qualifier: `C = C ∩ named(q)` (`@Named(q)` / `@Provides({ name: q })`).
+3. Multi (`T[]`): all of `C`, ordered by token. Never fails.
+4. Single: one exact candidate → bound; else the unique `@Primary` → bound; else if `C` has several
+   candidates all providing the exact same type → ZNIGHT004, several otherwise → ZNIGHT008.
+5. Empty `C`: package type declared in a manifest `provides` (§7) → external; optional (`?`,
+   `| undefined`, `| null`, default value, `@Optional()`) → `{ token, optional: true }` where the
+   token is the identity; else ZNIGHT001.
+6. Primitive/opaque types require a qualifier; providers are matched by `(qualifier, type kind)`.
+   A qualifier match providing a different kind → ZNIGHT010.
+7. `Lazy<T>` binds `T` with the same rules and emits `{ lazy: token }`.
+
+ZNIGHT001 includes a **near-miss analysis**: classes with the same name but a different identity
+(both import paths shown), an undecorated class of type `T`, a matching class excluded by
+`include`/`exclude`, a class with a matching name but no `implements` clause, candidates removed by
+the qualifier. Messages show display names (`Repository<User>`) plus `file:line`, never raw
+identity strings alone.
+
+Aliases are emitted for every provided type / heritage identity that resolves to exactly one
+provider (or one primary), so `container.get(UserRepository as never)` / `get('UserRepository')` work.
+
+### 4.8 Validations
+
+| Code      | Meaning                                                                                                                                                                                                                                                                                            | Severity                                |
+| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
+| ZNIGHT001 | Missing provider for a required dependency                                                                                                                                                                                                                                                         | error                                   |
+| ZNIGHT002 | Circular dependency (over the full edge set, prints the cycle, hints at `Lazy<T>`)                                                                                                                                                                                                                 | error                                   |
+| ZNIGHT003 | Scope mismatch: a singleton depends (directly, through transients, multi, guards, interceptors or externals) on a request-scoped provider                                                                                                                                                          | error                                   |
+| ZNIGHT004 | Duplicate provider for the exact same type without qualifier/`@Primary`                                                                                                                                                                                                                            | error                                   |
+| ZNIGHT005 | Invalid decorator usage (target, arguments, unexported reference, non-public/`#private`/static handler or `@Provides`, abstract or unbound generic provider, class registered by several provider decorators, `@Provides` outside `@Factory` or without concrete return type, composite decorator) | error / warning                         |
+| ZNIGHT006 | Missing required configuration value (runtime)                                                                                                                                                                                                                                                     | error                                   |
+| ZNIGHT007 | Invalid route (path grammar, duplicate method+path, `:param` without `@Param`, non-coercible param type)                                                                                                                                                                                           | error                                   |
+| ZNIGHT008 | Ambiguous injection (several candidates for an interface / base type)                                                                                                                                                                                                                              | error                                   |
+| ZNIGHT009 | Invalid lifecycle hook (required params, static; on a non-singleton → warning)                                                                                                                                                                                                                     | error / warning                         |
+| ZNIGHT010 | Unresolvable injection type (missing/opaque annotation, primitive without qualifier, unresolvable import, unanalysable inherited constructor)                                                                                                                                                      | error                                   |
+| ZNIGHT011 | Invalid message consumer (no handler, overlapping patterns, bad retry options)                                                                                                                                                                                                                     | error                                   |
+| ZNIGHT012 | Invalid config property (unsupported type, `@Env` outside `@Config`)                                                                                                                                                                                                                               | error                                   |
+| ZNIGHT013 | Request-scoped provider resolved outside of a request scope (runtime)                                                                                                                                                                                                                              | error                                   |
+| ZNIGHT014 | Async factory on a non-singleton provider                                                                                                                                                                                                                                                          | error                                   |
+| ZNIGHT015 | Provider instantiation failed (runtime; carries dependency path, source, cause)                                                                                                                                                                                                                    | error                                   |
+| ZNIGHT016 | Container sealed: register/override after `init()` (runtime)                                                                                                                                                                                                                                       | error                                   |
+| ZNIGHT017 | Unvalidated input: non-primitive `@Body`/`@Query`/`@Message` without schema                                                                                                                                                                                                                        | warning (error with `strictValidation`) |
+| ZNIGHT018 | Version mismatch (metadata version, `@znight/*` minor skew, extension `apiVersion`)                                                                                                                                                                                                                | error                                   |
+| ZNIGHT019 | Unused provider (unreachable from roots, see `prune`)                                                                                                                                                                                                                                              | warning (only with `reportUnused`)      |
+| ZNIGHT020 | The generated module is imported (transitively) by a provider module (ESM cycle → TDZ crash)                                                                                                                                                                                                       | error                                   |
+| ZNIGHT021 | Lifecycle hook or shutdown step failed or timed out (runtime)                                                                                                                                                                                                                                      | error                                   |
+
+Singleton → transient is allowed (the singleton owns its instance). Error codes and descriptions
+live in `@znight/core` (`ErrorCode`, `ERROR_DESCRIPTIONS`), shared by compiler and runtime.
 
 ## 5. Decorator catalogue
 
-All decorators are imported from Znight packages; the compiler only recognises a decorator when its
-identifier is imported (possibly renamed) from the owning package. Arguments must be statically
-evaluable: literals, object/array literals, template strings without expressions, `as const`, and
-references to `const` variables with such initializers (same file or imported). Schema / class
-arguments (`@Body(CreateUserSchema)`, `@UseGuard(AuthGuard)`) are _references_: they must resolve to
-an importable (exported) binding. Violations → **ZNIGHT005**.
+`static` = must be statically evaluable, `value` = evaluable or exported reference (§4.6).
 
 ### `@znight/core`
 
-| Decorator                                         | Target                  | Meaning                                                                                                                                          |
-| ------------------------------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `@Injectable(opts?: { scope?, name?, primary? })` | class                   | Registers a provider                                                                                                                             |
-| `@Factory()`                                      | class                   | Singleton whose `@Provides` methods produce providers                                                                                            |
-| `@Provides(opts?: { scope?, name?, primary? })`   | method of a `@Factory`  | Provides the method's declared return type (explicit annotation required; `Promise<T>` → async, singleton only). Method parameters are injected. |
-| `@Inject(name: string)`                           | ctor / provides param   | Select candidate by qualifier (required for primitives)                                                                                          |
-| `@Optional()`                                     | ctor / provides param   | Inject `undefined` when no provider                                                                                                              |
-| `@Named(name: string)`                            | class / provides method | Qualifier                                                                                                                                        |
-| `@Primary()`                                      | class / provides method | Preferred candidate                                                                                                                              |
-| `@Intercept(Interceptor, options?)`               | method                  | Wraps the method with a `MethodInterceptor` provider (AOP)                                                                                       |
+| Decorator                           | Target                              | Arguments                                                                                                                                                             |
+| ----------------------------------- | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@Injectable(opts?)`                | class                               | `opts` static: `{ scope?, name?, primary? }`                                                                                                                          |
+| `@Factory()`                        | class                               | — singleton whose `@Provides` methods produce providers                                                                                                               |
+| `@Provides(opts?)`                  | method of a `@Factory`              | static `{ scope?, name?, primary?, dispose? }`. The explicit return type is the provided type (`Promise<T>` → async, singleton only). Method parameters are injected. |
+| `@Inject(name)`                     | constructor / `@Provides` parameter | static string qualifier                                                                                                                                               |
+| `@Optional()`                       | constructor / `@Provides` parameter | —                                                                                                                                                                     |
+| `@Named(name)`                      | class / `@Provides` method          | static string                                                                                                                                                         |
+| `@Primary()`                        | class / `@Provides` method          | —                                                                                                                                                                     |
+| `@Intercept(Interceptor, options?)` | method                              | `Interceptor` value (provider class implementing `MethodInterceptor`), `options` value                                                                                |
 
-Lifecycle hooks are detected by method name on singleton providers: `onStart()`, `onReady()`,
-`onStop()` (no required parameters, may be async). Interfaces `OnStart`, `OnReady`, `OnStop` are
-exported for documentation/type-safety.
+Type helpers: `Lazy<T>`; lifecycle interfaces `OnStart`, `OnReady`, `OnStop`.
 
 ### `@znight/http`
 
-| Decorator                                                                                                    | Target                                             |
-| ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------- |
-| `@Controller(path?: string \| { path?: string; scope?: Scope })`                                             | class (also a provider, default singleton)         |
-| `@Get/@Post/@Put/@Patch/@Delete/@Head/@Options/@All(path?: string)`                                          | method                                             |
-| `@Param(name?: string, schema?)` `@Query(name?: string, schema?)` `@Body(schema?)` `@Headers(name?: string)` | param                                              |
-| `@Req()` `@Res()` `@Ctx()`                                                                                   | param (raw request, raw response, `HttpContext`)   |
-| `@HttpCode(status: number)` `@Header(name: string, value: string)`                                           | method                                             |
-| `@UseGuard(...guards)` `@UseInterceptor(...interceptors)`                                                    | class or method (references to provider classes)   |
-| `@Validate(schema)`                                                                                          | method (validates the body with a Standard Schema) |
-
-Schemas follow the [Standard Schema](https://standardschema.dev) interface (Zod 4, Valibot,
-ArkType...). Parameters typed `number`/`boolean` (or unions of literals) are coerced and checked by
-generated code (`400 Bad Request` on failure).
+| Decorator                                                                            | Target                                                                                         |
+| ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| `@Controller(path? \| { path?, scope? })`                                            | class (provider, default singleton)                                                            |
+| `@Get/@Post/@Put/@Patch/@Delete/@Head/@Options/@All(path?)`                          | method                                                                                         |
+| `@Param(name?, schema?)` `@Query(name?, schema?)` `@Body(schema?)` `@Headers(name?)` | param                                                                                          |
+| `@Req()` `@Res()` `@Ctx()`                                                           | param (raw request, raw response — adapter-specific escape hatch, warning — and `HttpContext`) |
+| `@HttpCode(status)` `@Header(name, value)`                                           | method                                                                                         |
+| `@UseGuard(...guards)` `@UseInterceptor(...interceptors)`                            | class / method (value refs)                                                                    |
+| `@Validate(schema)`                                                                  | method — sugar for `@Body(schema)`; using both is ZNIGHT005                                    |
+| `createRouteDecorator<T>(key)`                                                       | user-defined metadata decorators (`@Roles('admin')`, `@Public()`) → `route.meta[key]`          |
 
 ### `@znight/messaging`
 
-| Decorator                                                                     | Target                                                     |
-| ----------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| `@Consumer(queue: string \| { queue: string; ...driver options })`            | class (also a provider)                                    |
-| `@OnMessage(pattern?: string)`                                                | method                                                     |
-| `@Retry({ attempts, backoff?: 'fixed' \| 'exponential', delay?, maxDelay? })` | method                                                     |
-| `@OnError()`                                                                  | method`(error, message)` called when retries are exhausted |
-| `@Message(schema?)` `@Headers(name?: string)` `@Ctx()`                        | param                                                      |
+| Decorator                                                                | Target                                    |
+| ------------------------------------------------------------------------ | ----------------------------------------- |
+| `@Consumer(queue \| { queue, scope?, concurrency?, ...driver options })` | class (provider)                          |
+| `@OnMessage(type?)`                                                      | method (matches `message.type`)           |
+| `@Retry({ attempts, backoff?, delay?, maxDelay? })`                      | method                                    |
+| `@OnError()`                                                             | method`(error, message) => void \| 'ack'` |
+| `@Message(schema?)` `@Headers(name?)` `@Ctx()`                           | param                                     |
 
 ### `@znight/config`
 
-| Decorator                  | Target                                                                   |
-| -------------------------- | ------------------------------------------------------------------------ |
-| `@Config(prefix?: string)` | class (singleton provider)                                               |
-| `@Env(name: string)`       | property                                                                 |
-| `@Secret(name: string)`    | property (like `@Env`, value masked when logged/serialized)              |
-| `@Default(value)`          | property (a literal property initializer works too)                      |
-| `@Key(path: string)`       | property (key used in file-based sources, default `<prefix>.<property>`) |
+| Decorator                      | Target                                                     |
+| ------------------------------ | ---------------------------------------------------------- |
+| `@Config(prefix?)`             | class (singleton provider)                                 |
+| `@Env(name)` / `@Secret(name)` | property (`@Secret` masks the value in logs/serialisation) |
+| `@Default(value)`              | property (a literal initializer also works)                |
+| `@Key(path)`                   | property (file sources key, default `<prefix>.<property>`) |
 
-Property types (from annotations): `string`, `number`, `boolean`, `string[]`, `number[]`, unions of
-literals (enum check), `URL`, optional (`?`). Default env name: `UPPER_SNAKE(prefix + property)`.
+### `@znight/observability` (interceptor decorators, declared in the manifest, §7)
 
-### `@znight/observability`
-
-| Decorator                                                           | Target                       |
-| ------------------------------------------------------------------- | ---------------------------- |
-| `@Logged(opts?: { level?, args?, result? })`                        | method → `LoggedInterceptor` |
-| `@Traced(opts?: { name?, attributes? })`                            | method → `TracedInterceptor` |
-| `@Metric(opts?: { name?, type?: 'counter' \| 'histogram', help? })` | method → `MetricInterceptor` |
-
-These are declared as interceptor decorators in the package manifest (§7), no compiler extension needed.
+`@Logged(opts?)` → `LoggedInterceptor`, `@Traced(opts?)` → `TracedInterceptor`,
+`@Metric(opts?)` → `MetricInterceptor`.
 
 ## 6. Compiler
 
-### Pipeline
+### 6.1 Pipeline
 
 ```
-scan (tinyglobby include/exclude) → parse (oxc-parser, cached by content hash)
-→ module graph (imports/exports per file) → analyze classes (core + extensions)
-→ bind injection points (§4) → validate (ZNIGHT00x) → generate code → write if changed
+scan (include/exclude + provider libraries) → parse (oxc, cached by content hash)
+→ per-file facts (imports, exports, declarations; cached) → resolve identities (global)
+→ analyse classes (core + extensions) → bind (§4.7) → validate (§4.8)
+→ emit (literal emitter, import routes) → re-parse check → write if content changed
 ```
 
-### Public API
+Only parsing and per-file facts are cached. Everything from resolution onward is recomputed
+globally on each compile (cheap). Compiles are serialised and debounced (~50 ms).
+
+### 6.2 Public API
 
 ```ts
-// Vite plugin (default export too)
-export function znight(options?: ZnightOptions): Plugin
-// Programmatic API (CLI, tests, Bun preload)
-export function compile(options?: ZnightOptions): Promise<CompileResult> // no I/O besides reading sources
-export function generate(options?: ZnightOptions): Promise<CompileResult> // compile + write the file
-export function formatDiagnostics(diagnostics: Diagnostic[], options?): string
+export function znight(options?: ZnightOptions): Plugin // Vite plugin (also default export)
+export function compile(options?: ZnightOptions): Promise<CompileResult> // pure: reads sources only
+export function generate(options?: ZnightOptions & { check?: boolean }): Promise<CompileResult>
+export function formatDiagnostics(
+  diagnostics: readonly Diagnostic[],
+  options?: { color?: boolean; cwd?: string },
+): string
+// '@znight/compiler/bun': Bun plugin/preload regenerating before tests and `bun --watch`
 
 interface ZnightOptions {
   root?: string // default: Vite root / process.cwd()
-  include?: string[] // default ['src/**/*.ts']
-  exclude?: string[] // default ['**/*.test.ts', '**/*.spec.ts', '**/*.d.ts', '**/.znight/**']
+  include?: string[] // default ['src/**/*.{ts,tsx,mts}']
+  exclude?: string[] // default ['**/*.{test,spec}.*', '**/*.d.ts', '**/.znight/**']
   outFile?: string // default 'src/.znight/container.generated.ts'
-  tsconfig?: string | false // default 'tsconfig.json' (paths aliases)
-  conditions?: string[] // extra resolve conditions
-  importExtension?: '.js' | '.ts' | '' // default '.js'
-  stripDecorators?: boolean // default true (Vite transform)
-  extensions?: CompilerExtension[] // in addition to auto-discovered ones
-  externals?: string[] // type names/identities provided at runtime by custom plugins
-  app?: false | { entry?: string } // Vite build defaults for a server app (default entry 'src/main.ts')
+  tsconfig?: string | false
+  conditions?: string[] // extra scan conditions
+  importExtension?: 'js' | 'ts' | 'none' // default 'js'
+  sourceLocations?: 'dev' | 'always' | false
+  stripDecorators?: boolean // default true
+  extensions?: CompilerExtension[]
+  trustedExtensions?: string[] // third-party packages allowed to provide extensions
+  externals?: string[] // identities provided at runtime by custom plugins
+  libraries?: string[] // packages to analyse from source (provider libraries)
+  library?: boolean // library mode: emit dist/znight.providers.json
+  strictValidation?: boolean
+  reportUnused?: boolean
+  prune?: boolean // drop unreachable providers
+  app?: false | { entry?: string } // Vite build defaults for a server app (entry 'src/main.ts')
 }
 interface CompileResult {
   code: string
   outFile: string
   diagnostics: Diagnostic[]
-  ir: ApplicationGraph
-  stats
+  graph: ApplicationGraph
+  stats: { files: number; providers: number; durationMs: number }
 }
 interface Diagnostic {
   code: ErrorCode
@@ -338,205 +500,224 @@ interface Diagnostic {
   message: string
   location?: { file; line; column }
   hints?: string[]
+  related?: { message; location }[]
 }
 ```
 
-### Vite plugin behaviour
+`formatDiagnostics` prints code frames (picocolors) like:
 
-- `config`: when `app !== false` and the user did not configure `build.ssr`/`build.lib`, set
+```
+✗ ZNIGHT001: Missing provider for 'EmailService' required by NotificationService
+  --> src/notification/notification.service.ts:12:5
+   |
+12 |     private readonly email: EmailService,
+   |                             ^^^^^^^^^^^^
+   = hint: Add @Injectable() to EmailService (src/email/email.service.ts:3)
+```
+
+### 6.3 Vite plugin
+
+- Applies to the server/SSR environment only (`applyToEnvironment`); one compile per process is
+  shared across environments.
+- `config`: when `app !== false` and the user configured neither `build.ssr` nor `build.lib`:
   `build.ssr = entry`, `build.outDir = 'dist'`, `build.target = 'node24'`, `build.sourcemap = true`,
   `ssr.target = 'node'`.
-- `buildStart`: full compile; write the generated file if its content changed. Errors fail the build
-  (`this.error`) in `build` mode, and are printed (without crashing) in dev/watch mode.
-- `transform` (`enforce: 'pre'`): strip recognised Znight decorators from included files with
-  `magic-string` (high-resolution source maps).
-- `watchChange` / `hotUpdate`: re-run the incremental compile (only changed files are re-parsed).
+- `buildStart`: compile. In `build`: errors fail the build and nothing is written. In watch/serve:
+  diagnostics are printed and, if there are errors, the generated module is replaced by one that
+  throws a `ZnightError` with the formatted diagnostics when imported.
+- `resolveId`/`load`: the outFile id is served from memory (latest result); the disk copy exists for
+  `tsc` and editors and is written only when its content changed. The outFile is ignored by watchers.
+- Watching: include roots and every analysed file are watched (`addWatchFile`, server watcher);
+  file create/unlink re-runs the glob; config files clear the resolver cache.
+- `transform` (`enforce: 'pre'`): strips exactly the decorator ranges recorded by the last analysis
+  of that file content (never re-decides); files not analysed are untouched. High-resolution source
+  maps via `magic-string`.
 
-### Validators & error codes
+### 6.4 Provider libraries
 
-| Code      | Meaning                                                                                                             | Severity      |
-| --------- | ------------------------------------------------------------------------------------------------------------------- | ------------- |
-| ZNIGHT001 | Missing provider for a required dependency                                                                          | error         |
-| ZNIGHT002 | Circular dependency (prints the cycle)                                                                              | error         |
-| ZNIGHT003 | Scope mismatch: a singleton depends (directly or through transient providers) on a request-scoped provider          | error         |
-| ZNIGHT004 | Duplicate provider: several providers for the exact same type without qualifier/`@Primary`                          | error         |
-| ZNIGHT005 | Invalid decorator usage (bad target, non-static argument, unexported reference...)                                  | error         |
-| ZNIGHT006 | Missing required configuration value (runtime, `@znight/config`)                                                    | error         |
-| ZNIGHT007 | Invalid route definition (duplicate method+path, `:param` without matching `@Param`, bad path)                      | error         |
-| ZNIGHT008 | Ambiguous injection: several candidates for an interface/base type without `@Primary`                               | error         |
-| ZNIGHT009 | Invalid lifecycle hook (required params, static, on a non-singleton → warning)                                      | error/warning |
-| ZNIGHT010 | Unresolvable injection type (missing annotation, `any`/`unknown`, primitive without `@Inject`, unresolvable import) | error         |
-| ZNIGHT011 | Invalid message consumer definition                                                                                 | error         |
-| ZNIGHT012 | Invalid config property (unsupported type, `@Env` on non-`@Config` class)                                           | error         |
-| ZNIGHT013 | Request-scoped provider resolved outside of a request scope (runtime)                                               | error         |
-| ZNIGHT014 | Async factory on a non-singleton provider                                                                           | error         |
+- **Source libraries**: packages listed in `libraries`, or whose manifest has `"znight": { "library": "source" }`,
+  are scanned from their sources when they resolve to TypeScript with the scan conditions. Their
+  providers get package identities and package import routes, so dev and prod agree.
+- **Compiled libraries** (`library: true`): the compiler emits `dist/znight.providers.json`
+  (`schemaVersion`, providers with identity, import route, scope, name/primary, heritage closure,
+  injection points as type identities + flags, interceptor bindings, extension data with value refs
+  as package exports). Referenced by `"znight": { "providers": "./dist/znight.providers.json" }`;
+  the application compiler merges them before binding and validates their dependencies.
 
-Singleton → transient dependencies are **allowed** (the singleton gets its own instance), unless the
-transient chain reaches a request-scoped provider (ZNIGHT003).
-
-Error codes and their descriptions are defined once in `@znight/core` (`ErrorCode`,
-`ERROR_DESCRIPTIONS`) and reused by the compiler. Runtime errors extend `ZnightError` (`code` field).
-
-### Compiler extensions
-
-Feature packages ship a compiler extension at `@znight/<pkg>/compiler` and reference it from their
-`package.json` manifest (§7). The compiler auto-loads the extensions of every package from which a
-decorator is imported (resolution uses the configured conditions, so `@znight/source` works in this
-repository). Extensions can also be passed explicitly with `options.extensions`.
+### 6.5 Compiler extensions
 
 ```ts
 interface CompilerExtension {
-  name: string // key in metadata.extensions
-  decorators: string[] // decorator names exported by the owning package
-  /** Inspect a class that uses at least one of this extension's decorators (class, member or param level). */
+  apiVersion: 1
+  name: string // key in metadata.extensions (unique)
+  decorators: Record<string, DecoratorSpec> // canonical identity -> { targets, params: ('static' | 'value')[] }
   analyzeClass?(cls: ClassInfo, ctx: AnalyzeContext): void
-  /** After binding: cross-class validation. */
   validate?(ctx: ValidateContext): void
-  /** Return a TS expression (code string) stored at metadata.extensions[name]. */
-  generate?(ctx: GenerateContext): string | undefined
+  generate?(ctx: GenerateContext): GenNode | undefined
 }
 ```
 
-`ClassInfo` is a high-level, parser-independent view of a class: name, identity, file, location,
-`isExported`, `isAbstract`, decorators (`{ name, module, args: ArgInfo[], location }`), constructor
-parameters, methods (name, `isStatic`, `isAsync`, decorators, parameters, return type), properties
-(name, decorators, type, optional, static initializer value). Types are `TypeInfo`:
-`primitive | literal | reference (identity, name, typeArgs) | array | union | promise | unknown`.
-`ArgInfo` gives the static value (if evaluable) and/or a value reference (`{ module | file, exportName }`).
-
-`AnalyzeContext` lets an extension:
-- `registerProvider(cls, { scope?, factory? })` — make the class a provider (controllers, consumers,
-  config classes). `factory` customises generated code (e.g. `loadConfig(...)`).
-- `addDependency(...)` / `resolveReference(arg)` — bind class references (guards...) to provider tokens.
-- `report(diagnostic)`.
-- `store(data)` — keep per-class extension data for `generate`.
-
-`GenerateContext` gives `importValue(ref)`/`importType(ref)`/`importFrom(module, name)` (returns a
-de-duplicated identifier), `tokenOf(identity)`, `stringify(value)` and the stored data.
+- Loading: built-in core analysis + extensions of `@znight/*` packages referenced through
+  `package.json#znight.compiler`, resolved with runtime conditions (with the source condition only
+  when running under Bun). Third-party packages need `trustedExtensions` (otherwise a warning).
+  Duplicate names from different paths/versions → ZNIGHT018.
+- `ClassInfo`: name, identity, file, location, exported/import route, abstract, type parameters,
+  decorators (`{ identity, name, args: ArgInfo[], location }`), constructor params (resolved through
+  inheritance), methods (name, visibility, static, async, decorators, params, return type), properties
+  (name, decorators, type, optional, initializer value), heritage closure.
+- `ArgInfo`: `{ value?: StaticValue; ref?: ValueRef; location; text }`.
+- `AnalyzeContext`: `registerProvider(cls, { scope?, factory? })`, `bindInjection(...)` /
+  `resolveClassRef(arg)` (bind guards etc. to provider tokens, auto-registering injectable helper
+  classes), `report(diagnostic)`, `store(data)`.
+- `GenerateContext`: `importValue(ref)`, `importType(ref)`, `importFrom(module, name)`,
+  `tokenOf(identity)`, and builders for `GenNode` (`obj`, `arr`, `lit`, `ref`, `call`, `arrow`,
+  `code\`` tagged template that escapes every interpolation). Raw strings are never accepted.
 
 ## 7. Package manifest (`package.json#znight`)
 
 ```jsonc
 "znight": {
-  // subpath resolved like an import (honours exports + conditions); default export is a
-  // CompilerExtension or an array of them
-  "compiler": "@znight/http/compiler",
-  // types exported by this package that are provided at runtime by a plugin
-  "provides": [{ "export": "Logger", "token": "Logger", "plugin": "ObservabilityPlugin" }],
-  // method decorators that apply a MethodInterceptor (AOP)
-  "interceptors": [{ "decorator": "Logged", "interceptor": "LoggedInterceptor" }]
+  "apiVersion": 1,
+  "compiler": "@znight/http/compiler",          // module exporting a CompilerExtension (or an array)
+  "provides": [                                  // externals: types provided at runtime by a plugin
+    { "export": "Logger", "plugin": "ObservabilityPlugin", "scope": "singleton" },
+    { "export": "HttpContext", "plugin": "HttpPlugin", "scope": "request" }
+  ],
+  "interceptors": [{ "decorator": "Logged", "interceptor": "LoggedInterceptor" }],
+  "library": "source",                           // optional: provider library analysed from source
+  "providers": "./dist/znight.providers.json"    // optional: compiled provider library
 }
 ```
+
+Export names refer to the package's public entry; tokens are `<package>#<export>`.
 
 ## 8. Core runtime (`@znight/core`)
 
-### Container
+### 8.1 Container
 
 ```ts
 class Container {
-  static create(metadata: ZnightMetadata): Container
-  register(token, definition: ProviderDefinition): void // before init (plugins, tests)
-  registerValue(token, value): void // externals, overrides
-  override(token, valueOrDefinition): void // tests
-  init(): Promise<void> // instantiate singletons in resolutionOrder
-  get<T>(tokenOrClass): T // sync
+  static create(metadata: ZnightMetadata): Container // checks metadata.version (ZNIGHT018)
+  register(token, definition): void // runtime definition (may depend on compiled tokens)
+  registerValue(token, value): void
+  override(tokenOrClass, valueOrDefinition): void // resolves aliases first
+  init(options?: { only?: Token[] }): Promise<void>
+  get<T>(tokenOrClass): T
   getOptional<T>(tokenOrClass): T | undefined
   has(tokenOrClass): boolean
   tokenOf(classRef): Token | undefined
-  runInScope<R>(fn: () => R, values?: Record<string | symbol, unknown>): R // request scope (AsyncLocalStorage)
-  currentScope(): ScopeContext | undefined
-  singletons(): Iterable<[Token, unknown]> // instantiated singletons, in resolution order
+  runInScope<R>(fn: () => R | Promise<R>, values?: Iterable<[Token, unknown]>): Promise<R>
+  currentScope(): ScopeContext | undefined // .get(token) / .set(token, value)
+  dispose(): Promise<void>
 }
 ```
 
-- Singletons are created eagerly by `init()` in `resolutionOrder`, awaiting async factories.
-- Transient providers are created on every resolution; request-scoped providers are cached in the
-  active scope (`ZNIGHT013` when no scope is active).
-- Missing externals are reported together at `init()` (`ZNIGHT001`, mentioning `providedBy`).
-- Aliases are honoured by `get()`/`has()`.
+- **Precedence**: `override` > plugin `register`/`registerValue` > `Application.create({ providers })`
+  > compiled. `registerValue` on a compiled token throws unless overridden; on an overridden token
+  it is ignored. Any registration after `init()` → ZNIGHT016.
+- **Init**: a runtime topological sort merges `resolutionOrder` with runtime definitions. Each
+  singleton factory starts as soon as its dependencies settle (independent async singletons run
+  concurrently). `only` instantiates the dependency closure of the given tokens. Missing externals
+  are reported together (ZNIGHT001 naming `providedBy`). Factory errors are wrapped in ZNIGHT015
+  (token, dependency path, source, `cause`). On failure, already created instances are disposed in
+  reverse creation order, then the error is rethrown (cleanup errors attached).
+- **Interceptors** (`definition.interceptors`) are applied by the container right after the factory,
+  for every scope.
+- **Request scope**: `runInScope` opens a scope (AsyncLocalStorage) seeded with token-keyed values;
+  request-scoped providers and request-scoped externals are resolved from it (ZNIGHT013 when
+  absent); instances created in the scope are disposed in reverse creation order when `fn` settles.
+- **Lifecycle** is duck-typed on instantiated singletons (compiled providers and `@Provides`
+  values): `onStart`, `onReady`, `onStop`, then disposal (`dispose` method name,
+  `Symbol.asyncDispose`, `Symbol.dispose`). Transient instances belong to their consumer.
+- Lookups use `Map`s / `Object.hasOwn`, never plain-object indexing with user tokens.
 
-### Application & plugins
+### 8.2 Application & plugins
 
 ```ts
 const app = await Application.create({ metadata, plugins: [HttpPlugin.configure({ port: 3000 })] })
 await app.start()
 ```
 
-`Application.create(options)`: `{ metadata, plugins?, providers?: Record<Token, unknown>,
-logger?: CoreLogger | false, shutdown?: { signals?: NodeJS.Signals[] | false; timeoutMs?: number } }`.
-
-Sequence:
-1. `create()`: build the container; register `options.providers`; `plugin.register(ctx)` for each
-   plugin (register externals/values); `container.init()`; `plugin.onBootstrap(ctx)`.
-2. `start()`: providers `onStart()` (resolution order) → plugins `onStart(ctx)` → providers
-   `onReady()` → plugins `onReady(ctx)`; install signal handlers (default `SIGINT`, `SIGTERM`).
-3. `stop()` (idempotent, also on signals with a timeout, default 10s): plugins `onStop` (reverse
-   order) → providers `onStop()` (reverse resolution order). Errors are collected and rethrown as
-   an `AggregateError` after every hook ran.
+Options: `{ metadata, plugins?, providers?: Iterable<[Token | Class, unknown]> | Record<Token, unknown>,
+overrides?, logger?, shutdown?: { signals?: NodeJS.Signals[] | false; timeoutMs?: number; hookTimeoutMs?: number } }`.
 
 ```ts
 interface Plugin {
   readonly name: string
-  register?(ctx: PluginContext): void | Promise<void>
-  onBootstrap?(ctx: PluginContext): void | Promise<void>
-  onStart?(ctx: PluginContext): void | Promise<void>
+  register?(ctx: PluginContext): void | Promise<void> // provide externals (values or definitions)
+  onBootstrap?(ctx: PluginContext): void | Promise<void> // after container.init (routes, consumers...)
+  onStart?(ctx: PluginContext): void | Promise<void> // start ingress (listen, subscribe)
   onReady?(ctx: PluginContext): void | Promise<void>
-  onStop?(ctx: PluginContext): void | Promise<void>
+  onStop?(ctx: PluginContext): void | Promise<void> // stop ingress and drain in-flight work
+  onDispose?(ctx: PluginContext): void | Promise<void> // release infrastructure (connections, flush)
 }
 interface PluginContext {
   readonly app: Application
   readonly container: Container
   readonly metadata: ZnightMetadata
   readonly hooks: Hooks
-  readonly logger: CoreLogger // console-based by default; replaced by observability
+  readonly logger: CoreLogger // live delegating reference (replaced by observability)
   getPlugin<P extends Plugin>(name: string): P | undefined
 }
 ```
 
-### Hooks (cross-plugin instrumentation)
+Plugin options MAY be a function of the container (`HttpPlugin.configure(c => ({ port: c.get(AppConfig).port }))`),
+evaluated in `onBootstrap`.
+
+Sequence:
+1. `create()`: container ← metadata; `providers`; plugins `register` (in order); `overrides`;
+   `container.init()`; plugins `onBootstrap`. Failure → transactional rollback.
+2. `start()`: providers `onStart` (resolution order) → plugins `onStart` → providers `onReady` →
+   plugins `onReady`; signal handlers installed (default `SIGINT`, `SIGTERM`). `state = 'ready'`.
+   A failure stops what was started, disposes, and rethrows.
+3. `stop()` (idempotent; waits for an in-progress `start()`): `state = 'stopping'` → plugins
+   `onStop` (reverse) → providers `onStop` + disposal (reverse resolution order) → plugins
+   `onDispose` (reverse) → `state = 'stopped'`. Every step is attempted with a per-hook timeout
+   inside a global deadline (default 10 s); errors are aggregated (`AggregateError`, ZNIGHT021).
+   Signal listeners are removed. Only the signal path sets `process.exitCode` (1 on failure) and a
+   second signal forces exit (130). `import.meta.hot?.dispose(() => app.stop())` when available.
+   `app.state`: `'created' | 'starting' | 'ready' | 'stopping' | 'stopped' | 'failed'`.
+
+### 8.3 Hooks
 
 ```ts
-interface ZnightHooks {} // augmented: 'http:request': HttpRequestHookEvent, 'messaging:message': ...
+interface ZnightHooks {} // augmented: 'http:request', 'messaging:message', ...
 class Hooks {
-  on<K>(name: K, listener: (event) => void): () => void // notifications
+  on<K>(name: K, listener): () => void
   emit<K>(name: K, event): void
   wrap<K>(name: K, wrapper: (event, next: () => Promise<unknown>) => Promise<unknown>): () => void
-  run<K, R>(name: K, event, fn: () => Promise<R>): Promise<R> // onion composition
+  run<K, R>(name: K, event, fn: () => Promise<R>): Promise<R> // first registered = outermost
 }
 ```
 
-The HTTP plugin runs every request through `hooks.run('http:request', event, handler)`; the
-messaging plugin through `hooks.run('messaging:message', ...)`. Observability wraps them to add
-logs/metrics/spans without the feature packages depending on it.
-
-### AOP
+### 8.4 AOP
 
 ```ts
 interface MethodInterceptor<O = unknown> {
   intercept(invocation: MethodInvocation, options: O): unknown
 }
 interface MethodInvocation {
-  target: object
-  className: string
-  methodName: string
-  args: unknown[]
-  proceed(): unknown
+  readonly target: object
+  readonly className: string
+  readonly methodName: string
+  readonly args: readonly unknown[]
+  readonly isAsync: boolean
+  proceed(args?: readonly unknown[]): unknown
 }
-function applyInterceptors<T extends object>(
-  instance: T,
-  className: string,
-  bindings: Record<string, [MethodInterceptor, unknown][]>,
-): T
 ```
 
-### Errors
+Interceptors are applied as own-property wrappers on the instance (no Proxy): `#private` fields
+keep working and self-invocation (`this.method()`) is intercepted. The top-most decorator is the
+outermost interceptor. In development, an interceptor returning a thenable for a sync method throws
+a `ZnightError` naming the interceptor.
 
-`ZnightError extends Error { code: ErrorCode; hints?: string[] }`. Error codes catalogue:
-`ErrorCode` (`as const` object) + `ERROR_DESCRIPTIONS`.
+### 8.5 Errors
+
+`ZnightError extends Error { code; hints }`. Catalogue: `ErrorCode` (`as const`) + `ERROR_DESCRIPTIONS`.
 
 ## 9. Feature runtime contracts
 
-### HTTP (`@znight/http`)
+### 9.1 HTTP (`@znight/http`)
 
 ```ts
 interface HttpMetadata {
@@ -547,6 +728,7 @@ interface HttpControllerDefinition {
   basePath
   guards: Token[]
   interceptors: Token[]
+  meta: Record<string, unknown>
   routes: HttpRouteDefinition[]
 }
 interface HttpRouteDefinition {
@@ -556,6 +738,7 @@ interface HttpRouteDefinition {
   handler: string
   status?: number
   headers?: Record<string, string>
+  meta: Record<string, unknown>
   guards: Token[]
   interceptors: Token[]
   params: {
@@ -564,26 +747,40 @@ interface HttpRouteDefinition {
     name?
     type?
     optional?
+    schema?: boolean
   }[]
-  rawResponse?: boolean // @Res() used: the handler writes the response itself
+  rawResponse?: boolean
   invoke: (controller: any, ctx: HttpContext) => unknown
 }
 ```
 
-`HttpContext` is adapter-neutral: `method`, `url`, `path`, `params`, `query`, `headers`
-(lower-cased), `body`, `request` (raw), `response` (raw), `route`, `state` (Map), `requestId`.
-Adapters implement `HttpAdapter { name; registerRoute(route); listen(port, host); close(); inject(request) }`.
-`inject` performs an in-memory request (used by `@znight/testing`).
+Pipeline (normative), per request:
+`container.runInScope({ HttpContext, RequestId }) → hooks.run('http:request', event, () =>
+global guards → controller guards → route guards → global/controller/route interceptors →
+invoke (extract → coerce → validate → handler) → serialise)`. Exceptions are mapped to a response
+inside `hooks.run` and `event.status` / `event.error` are set before it resolves.
 
-Guards: `interface CanActivate { canActivate(ctx: HttpContext): boolean | Promise<boolean> }`
-(false → 403). Interceptors: `interface HttpInterceptor { intercept(ctx, next: () => Promise<unknown>): Promise<unknown> }`.
-Exceptions: `HttpException(status, message, details?)` + `BadRequestException`, `UnauthorizedException`,
-`ForbiddenException`, `NotFoundException`, `ConflictException`, `UnprocessableEntityException`,
-`InternalServerErrorException`... Errors are rendered as JSON `{ statusCode, error, message, details? }`.
-Return values: objects → JSON, strings → text, `undefined` → 204, `HttpResponse` helper for full
-control. Default status: 201 for POST, 200 otherwise.
+- Path grammar: static segments, `:name` params, trailing `*` wildcard; anything else ZNIGHT007.
+  Translated per adapter. Trailing-slash policy option (default strict) applied on every adapter.
+  The Fastify adapter disables `exposeHeadRoutes`; Znight serves HEAD for GET routes.
+- Query parsing is done by Znight from the URL (`Record<string, string | string[]>`); coercion to
+  `T[]` accepts a single value.
+- Status precedence: `@HttpCode` > `HttpResponse.status` > default (201 for POST, 200 otherwise);
+  `undefined` return → empty body (204 unless POST or `@HttpCode`). Objects → JSON, strings → text,
+  `Uint8Array`/`ReadableStream` → octet-stream, Web `Response` → sent as is.
+- Errors: `HttpException(status, message, details?)` and subclasses render `{ statusCode, error,
+  message, details? }`; schema failures → 400 with `details: [{ path, message }]`; other errors →
+  `{ statusCode: 500, error: 'Internal Server Error' }` (message only with `exposeErrors: true`),
+  sent to hooks and the logger.
+- Handlers receive the schema **output** (defaults, transforms, stripped keys).
+- `HttpPlugin.configure({ adapter, port, host, prefix, guards, interceptors, exceptionMappers,
+  trailingSlash, exposeErrors, bodyLimit })`; class refs are resolved with `container.tokenOf`.
+- `HttpAdapter { name; registerRoute(route); listen(port, host); close(); inject(request) }`;
+  `inject` is in-memory (fastify `inject`, hono `request`, express via `light-my-request`, an
+  optional peer).
+- Request-scoped externals: `HttpContext` (and `RequestId`) are provided per request.
 
-### Messaging (`@znight/messaging`)
+### 9.2 Messaging (`@znight/messaging`)
 
 ```ts
 interface MessagingMetadata {
@@ -598,19 +795,32 @@ interface ConsumerDefinition {
 }
 interface MessageHandlerDefinition {
   method: string
-  pattern?: string
+  type?: string
   retry?: { attempts: number; backoff: 'fixed' | 'exponential'; delay: number; maxDelay?: number }
   invoke: (consumer: any, message: InboundMessage) => unknown
 }
 ```
 
-Drivers implement `MessagingDriver { name; connect(); subscribe(queue, handler, options); publish(queue, message); close() }`.
-`MessageBroker` (provided by the plugin) exposes `publish(queue, payload, { headers, key })`.
-Retries run in-process (driver-agnostic); after the last attempt the `@OnError` handler runs and the
-message goes to the dead-letter queue (`<queue>.dlq` by default, configurable, driver-native when
-available).
+Delivery state machine (at-least-once; handlers must be idempotent):
+- each delivery runs in its own scope (`InboundMessage` request-scoped external) through
+  `hooks.run('messaging:message')`;
+- handler selected by `message.type` (header/routing key, per driver); handler without type is the
+  default; no match → dead-letter with reason;
+- success → ack; `NonRetryableError` or schema failure → dead-letter immediately;
+- retryable failure → retry: attempt count from the broker (SQS `ApproximateReceiveCount`, RabbitMQ
+  `x-delivery-count`) or an `x-znight-attempt` header; delay in-process only within the driver's
+  `maxInProcessDelayMs` budget, otherwise driver-native delayed redelivery (SQS visibility, RabbitMQ
+  TTL + DLX retry queue, Kafka retry topic); boot fails if `@Retry` cannot be honoured;
+- after the last attempt `@OnError` runs: returning `'ack'` swallows the message, otherwise (or on
+  throw) dead-letter. DLQ publish uses confirms; the original is acked only afterwards, else
+  nacked/requeued. Native DLQ configuration is verified at subscribe time;
+- `concurrency` per consumer; on stop, in-flight handlers are awaited and pending retries are
+  nacked/requeued, never dropped.
+  `MessagingDriver { name; capabilities: { nativeDelay; maxInProcessDelayMs; deliveryCount }; connect();
+subscribe(queue, handler, options); publish(queue, message); close() }`. `MessageBroker` (external)
+  exposes `publish(queue, payload, { type, headers, key })`.
 
-### Config (`@znight/config`)
+### 9.3 Config (`@znight/config`)
 
 ```ts
 interface ConfigMetadata {
@@ -620,7 +830,7 @@ interface ConfigFieldDefinition {
   property: string
   env: string
   key: string
-  type: 'string' | 'number' | 'boolean' | 'string[]' | 'number[]' | 'url'
+  type: 'string' | 'number' | 'boolean' | 'string[]' | 'number[]' | 'url' | 'json'
   enum?: (string | number | boolean)[]
   default?: unknown
   required: boolean
@@ -628,19 +838,18 @@ interface ConfigFieldDefinition {
 }
 ```
 
-Config classes are generated as singleton providers whose factory is
-`loadConfig(ConfigClass, source, fields)`. `ConfigPlugin.configure({ loaders })` assembles a
-`ConfigSource` (external token) from loaders (env, `.env` files, JSON/YAML files, Vault, AWS
-Secrets Manager); in `register()` it validates every config class at once and throws `ZNIGHT006`
-listing all missing values.
+Config classes are singleton providers generated with factory `loadConfig(Class, source, fields)`.
+`ConfigPlugin.configure({ loaders })` builds a `ConfigSource` (external) from loaders (env, `.env`
+files via `node:util` `parseEnv`, JSON/YAML files, Vault, AWS Secrets Manager); `register()`
+validates every config class at once and throws ZNIGHT006 listing all missing values.
 
-### Observability (`@znight/observability`)
+### 9.4 Observability (`@znight/observability`)
 
 `ObservabilityPlugin.configure({ logging?, metrics?, tracing? })` registers `Logger`,
-`MetricsRegistry`, `Tracer`, `LoggedInterceptor`, `TracedInterceptor`, `MetricInterceptor`, and hooks
-into `http:request` / `messaging:message` (request logs, RED metrics, spans with W3C trace-context
-propagation). `Logger` is pino-based and automatically adds `requestId` / `traceId` / `spanId`
-from the current scope.
+`MetricsRegistry`, `Tracer`, `LoggedInterceptor`, `TracedInterceptor`, `MetricInterceptor` and
+wraps `http:request` / `messaging:message` (request logs, RED metrics, spans with W3C
+trace-context). `Logger` is pino-based and adds `requestId`/`traceId`/`spanId` from the current
+scope; it is flushed in `onDispose`.
 
 ## 10. Testing (`@znight/testing`)
 
@@ -648,10 +857,37 @@ from the current scope.
 const { instance, mocks } = await TestBed.create(UserService, { metadata })
 mocks.get(DatabaseClient).findOne.mockResolvedValue(null)
 
-const app = await TestApp.create({ metadata, plugins: [HttpPlugin.configure({ adapter: fastify() })] })
+const app = await TestApp.create({
+  metadata,
+  plugins: [HttpPlugin.configure({ adapter: fastify() })],
+  overrides: [[UserRepository, fakeRepo]],
+})
 const res = await app.inject({ method: 'GET', url: '/users/1' })
 ```
 
-TestBed instantiates the target with real code and auto-mocks its direct dependencies (deep
-proxies whose functions are spies). The spy implementation is pluggable (`mockFn` option) and
-auto-detects `vi.fn` (Vitest) / `jest.fn` / `bun:test`'s `mock`, falling back to a built-in spy.
+- Metadata freshness: `@znight/compiler/bun` preload (and the Vite plugin under Vitest) regenerate
+  before tests.
+- TestBed builds the target with real code and mocks its direct dependencies by kind: classes /
+  interfaces / externals → auto-mocks (non-thenable: `then`, `toJSON`, `Symbol.toPrimitive`,
+  `asymmetricMatch` are `undefined`; unconfigured methods return `undefined`), config classes → real
+  instances from defaults + `config` overrides, qualifiers/primitives → must be provided, optional →
+  `undefined`, multi → `[]`, `Lazy<T>` → getter over the mock. Interceptor dependencies are neither
+  mocked nor applied unless `aop: 'real'`. `mocks.get` accepts classes, tokens and display names.
+- The spy implementation is pluggable (`mockFn`) and auto-detects Vitest (`vi.fn`), Jest
+  (`jest.fn`) and `bun:test` (`mock`), falling back to a built-in Jest-compatible spy.
+- `TestApp` disables signal handlers, applies `overrides` last and instantiates only the closure of
+  controllers/consumers by default.
+
+## 11. CLI (`@znight/cli`)
+
+`znight new <name>` (templates: package manager, HTTP adapter), `znight generate [--check] [--watch]`,
+`znight g service|controller|consumer|config|guard|interceptor <name>`, `znight dev` (Vite build in
+watch mode, full process restart on every successful rebuild — no partial HMR of providers, no Vite
+dev server), `znight build`, `znight start`. `vite` and `@znight/compiler` are peers.
+
+## 12. Release
+
+Changesets with a `fixed` group (lockstep versions). CI packs with `bun pm pack` (rewrites
+`workspace:`/`catalog:`) and publishes the tarballs with `npm publish --provenance` (OIDC trusted
+publishing). A smoke test installs the packed tarballs into a clean app and runs it on Node 24 and
+Bun.
