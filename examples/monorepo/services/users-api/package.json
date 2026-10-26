@@ -1,0 +1,34 @@
+{
+  "name": "@znight-examples/users-api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "znight generate",
+    "dev": "znight dev",
+    "build": "znight build",
+    "start": "znight start",
+    "typecheck": "znight generate && tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@znight/core": "workspace:*",
+    "@znight/http": "workspace:*",
+    "@znight/config": "workspace:*",
+    "@znight/observability": "workspace:*",
+    "@znight-examples/shared": "workspace:*",
+    "express": "5.3.0",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@znight/compiler": "workspace:*",
+    "@znight/cli": "workspace:*",
+    "@znight/testing": "workspace:*",
+    "vite": "catalog:",
+    "typescript": "catalog:",
+    "@types/bun": "catalog:",
+    "@types/node": "catalog:",
+    "@types/express": "5.0.6",
+    "light-my-request": "6.8.0"
+  }
+}

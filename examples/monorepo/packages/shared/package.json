@@ -1,0 +1,23 @@
+{
+  "name": "@znight-examples/shared",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@znight/core": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "catalog:",
+    "@types/bun": "catalog:"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "znight": {
+    "apiVersion": 1,
+    "library": "source"
+  }
+}

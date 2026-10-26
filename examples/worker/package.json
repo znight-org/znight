@@ -1,0 +1,31 @@
+{
+  "name": "@znight-examples/worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "znight generate",
+    "dev": "znight dev",
+    "build": "znight build",
+    "start": "znight start",
+    "typecheck": "znight generate && tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@znight/core": "workspace:*",
+    "@znight/messaging": "workspace:*",
+    "@znight/config": "workspace:*",
+    "@znight/observability": "workspace:*",
+    "zod": "catalog:",
+    "amqplib": "2.2.0"
+  },
+  "devDependencies": {
+    "@znight/compiler": "workspace:*",
+    "@znight/cli": "workspace:*",
+    "@znight/testing": "workspace:*",
+    "vite": "catalog:",
+    "typescript": "catalog:",
+    "@types/bun": "catalog:",
+    "@types/node": "catalog:"
+  }
+}

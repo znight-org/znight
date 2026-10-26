@@ -1,0 +1,34 @@
+{
+  "name": "@znight-examples/rest-api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "znight generate",
+    "dev": "znight dev",
+    "build": "znight build",
+    "start": "znight start",
+    "typecheck": "znight generate && tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@znight/core": "workspace:*",
+    "@znight/http": "workspace:*",
+    "@znight/config": "workspace:*",
+    "@znight/observability": "workspace:*",
+    "fastify": "5.12.7",
+    "zod": "catalog:",
+    "drizzle-orm": "0.45.4",
+    "@electric-sql/pglite": "0.5.12",
+    "prom-client": "15.1.3"
+  },
+  "devDependencies": {
+    "@znight/compiler": "workspace:*",
+    "@znight/cli": "workspace:*",
+    "@znight/testing": "workspace:*",
+    "vite": "catalog:",
+    "typescript": "catalog:",
+    "@types/bun": "catalog:",
+    "@types/node": "catalog:"
+  }
+}
