@@ -35,8 +35,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@znight/core": "workspace:*",
-    "light-my-request": "^6.8.0"
+    "@znight/core": "workspace:*"
   },
   "devDependencies": {
     "@hono/node-server": "2.1.5",
@@ -45,6 +44,7 @@
     "fastify": "5.12.7",
     "hono": "4.13.14",
     "valibot": "1.5.0",
-    "zod": "catalog:"
+    "zod": "catalog:",
+    "light-my-request": "6.8.0"
   }
 }
