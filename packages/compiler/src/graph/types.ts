@@ -7,7 +7,7 @@
  */
 import type { DependencyRef, Scope, SourceLocation, Token } from '@znight/core'
 import type { CustomFactory, LifecycleHookInfo } from '../extensions/api.ts'
-import type { Diagnostic, ImportRoute, Location, StaticValue, TypeInfo } from '../project/index.ts'
+import type { Diagnostic, ImportRoute, Location, ReferenceType, StaticValue, TypeInfo } from '../project/index.ts'
 
 /** How the instance of a provider is created. */
 export type FactoryNode =
@@ -27,6 +27,19 @@ export type DependencyRole =
   /** An interceptor instance referenced by `interceptors[method].chain[i].dep`. */
   | 'interceptor'
 
+/**
+ * An injection point as written (before binding): what compiled provider libraries record
+ * (`znight.providers.json`) so that the application can bind it again (§6.4).
+ */
+export interface InjectionRequestNode {
+  /** Annotated type (`Lazy<T>`, `T[]` and `| undefined` included). */
+  readonly type: TypeInfo
+  /** `@Inject(qualifier)`. */
+  readonly qualifier: string | undefined
+  /** `?`, default value, `@Optional()`, or `InjectionRequest.optional`. */
+  readonly optional: boolean
+}
+
 /** One entry of {@link ProviderNode.deps}. */
 export interface DependencyNode {
   /** The runtime dependency reference (§3.2). */
@@ -37,6 +50,16 @@ export interface DependencyNode {
   readonly location: Location | undefined
   /** Requested type (after `Lazy<T>` / `T[]` / optional unwrapping for parameters). */
   readonly type: TypeInfo | undefined
+  /** `role: 'parameter'`: the injection point before binding. */
+  readonly request: InjectionRequestNode | undefined
+}
+
+/** An `AnalyzeContext.bindInjection` request (compiled provider libraries re-bind it, §6.4). */
+export interface BindingRequestNode {
+  readonly request: InjectionRequestNode
+  /** Provider using the binding (validation edges), when given. */
+  readonly from: Token | undefined
+  readonly label: string
 }
 
 /** One interceptor of a method chain (first = outermost). */
@@ -80,6 +103,8 @@ export interface ProviderNode {
   readonly method: string | undefined
   /** The provided type (the class for class providers, the unwrapped return type for `@Provides`). */
   readonly providedType: TypeInfo
+  /** Heritage closure of the provided type (assignable candidates of §4.7, compiled libraries). */
+  readonly heritage: readonly ReferenceType[]
   readonly scope: Scope
   /** The factory returns a promise (`@Provides` returning `Promise<T>`, async custom factories). */
   readonly async: boolean
@@ -159,6 +184,8 @@ export interface ApplicationGraph {
   readonly extensions: readonly ExtensionGraphData[]
   /** Results of `AnalyzeContext.bindInjection`, by handle id (`undefined` when binding failed). */
   readonly bindings: ReadonlyMap<number, DependencyRef | undefined>
+  /** The requests of `AnalyzeContext.bindInjection`, by handle id. */
+  readonly bindingRequests: ReadonlyMap<number, BindingRequestNode>
   readonly reachability: Reachability | undefined
   /** Sorted diagnostics of every phase (project layer included). */
   readonly diagnostics: readonly Diagnostic[]

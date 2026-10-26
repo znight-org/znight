@@ -1,6 +1,6 @@
 /**
- * Analysis entry point: class analysis (core + extensions) → binding (§4.7) → validation (§4.8) →
- * {@link ApplicationGraph}. Code generation consumes the graph (next phase).
+ * Analysis entry point: class analysis (core + extensions) → compiled provider libraries (§6.4) →
+ * binding (§4.7) → validation (§4.8) → {@link ApplicationGraph}, consumed by the code generator.
  *
  * ```ts
  * const project = new Project(normalizeOptions(options))
@@ -31,6 +31,7 @@ import { NearMissAnalyzer } from './binding/near-miss.ts'
 import { ExtensionAnalyzeContext, ExtensionValidateContext, ownedDecorators } from './extensions/contexts.ts'
 import { loadExtensions } from './extensions/loader.ts'
 import { buildGraph } from './graph/build.ts'
+import { mergeCompiledLibraries } from './library/merge.ts'
 import { compareStrings } from './project/compare.ts'
 import { DiagnosticBag } from './project/index.ts'
 import { checkCycles } from './validation/cycles.ts'
@@ -154,6 +155,16 @@ export function analyzeProject(
     }
   }
 
+  // 3b. compiled provider libraries (§6.4): merged before binding, validated with the application
+  mergeCompiledLibraries({
+    project,
+    analyzer,
+    registry,
+    state,
+    extensions: new Set(loaded.map(extension => extension.name)),
+    report,
+  })
+
   // 4. class references (auto-registration), ineffective decorators
   builder.resolveClassRefs()
   builder.checkIneffective(classes)
@@ -200,6 +211,7 @@ export function analyzeProject(
     edges: bound.edges,
     extensions: extensionData,
     bindings: bound.bindings,
+    bindingRequests: bound.bindingRequests,
     reachability,
     diagnostics,
   })

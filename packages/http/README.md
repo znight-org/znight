@@ -33,6 +33,7 @@ Runs on Node.js >= 24 and Bun >= 1.3 (ESM only). Decorators require `"experiment
 - [Adapters](#adapters)
 - [Testing](#testing)
 - [Lifecycle and graceful shutdown](#lifecycle-and-graceful-shutdown)
+- [Compiler](#compiler)
 - [Compiler contract](#compiler-contract)
 - [Writing an adapter](#writing-an-adapter)
 - [Limitations](#limitations)
@@ -614,6 +615,92 @@ While draining, responses carry `connection: close`. Singletons (controllers, si
 interceptors and mappers) are resolved at bootstrap; request-scoped and transient ones on every
 request. Bootstrap fails with `ZNIGHT007` for invalid or duplicate routes and `ZNIGHT001` for
 controllers, guards or interceptors that are not providers.
+
+## Compiler
+
+`@znight/http/compiler` is loaded automatically by `@znight/compiler` (Vite plugin, `znight
+generate`, Bun preload) as soon as your code imports `@znight/http`: there is nothing to configure.
+It never loads the HTTP runtime (nor Fastify, Express or Hono) at build time.
+
+For every `@Controller` class it:
+
+1. registers the controller as a provider (`scope` from `@Controller({ scope })`, singleton by
+   default) and binds `@UseGuard` / `@UseInterceptor` classes to providers — classes without
+   `@Injectable()` are registered as singletons automatically;
+2. turns every method carrying `@Get`, `@Post`... into a route (several route decorators on one
+   method give several routes), reads `@HttpCode`, `@Header`, `@Validate` and your
+   [`createRouteDecorator`](#guards) decorators;
+3. generates, for each route, an `invoke` function that extracts every argument from the request,
+   coerces it to the declared type or validates it with its schema, and calls the handler;
+4. checks the whole application and reports precise diagnostics (below).
+
+### Types of parameters
+
+`@Param('name')`, `@Query('name')` and `@Headers('name')` values without schema are converted to
+the declared type of the parameter (see [Parameters](#parameters)). The compiler reads:
+
+| Declared type                                                     | Conversion                                        |
+| ----------------------------------------------------------------- | ------------------------------------------------- |
+| `string`, `number`, `boolean`, `bigint`, `Date`                   | `coerce.string` / `.number` / ...                 |
+| literal unions (`'asc' \| 'desc'`, `1 \| 2`, `'auto' \| boolean`) | one of the literals                               |
+| TypeScript enums (`enum Level { Low, High }`)                     | one of the member values                          |
+| branded primitives (`string & { readonly __brand: 'Id' }`)        | the primitive                                     |
+| `T[]`, `readonly T[]`, `Array<T>` of the above                    | repeated or single values                         |
+| `unknown`                                                         | the raw value (`string \| string[] \| undefined`) |
+| no annotation, with a default value (`page = 1`)                  | the type of the default value                     |
+
+Type aliases are followed (`type Sort = 'asc' | 'desc'`). A parameter is optional when it has `?`,
+a default value, or `| undefined` / `| null` in its type; route parameters are always present.
+Anything else (objects, other unions, tuples, nested arrays) is an error for `@Param` / `@Headers`
+and a ZNIGHT017 warning for `@Query` (the raw value is passed): use a schema.
+
+### Diagnostics
+
+- **ZNIGHT005** (invalid decorator usage): a decorator on the wrong target, outside a controller or
+  on a method that is not a route; applied twice; invalid or non-static arguments (`@HttpCode(42)`,
+  bad header names, a schema that is not a reference to an exported binding); a handler that is
+  static, `private`/`protected`, `#private`, an accessor or has a computed name; a handler parameter
+  without HTTP decorator; `@Validate(S)` combined with `@Body(S2)`; an invalid
+  `createRouteDecorator` declaration. `@Res()` and `@Body(SomeClass)` (a class is not a schema) are
+  warnings.
+- **ZNIGHT007** (invalid route): path grammar (base path, route path and their combination); a
+  `:param` not consumed by `@Param('param')` (a `@Param()`, `@Ctx()` or `@Req()` parameter consumes
+  them all); a `@Param('x')` without `:x` in the path; a `@Param` / `@Headers` type that cannot be
+  coerced; two routes with the same method and path shape anywhere in the application.
+- **ZNIGHT017** (unvalidated input): a non-primitive `@Body()` / `@Query()` without schema (`string`,
+  `unknown`, `Uint8Array`, `FormData`, `Record<string, string | string[]>` are fine). A warning, an
+  error with the compiler option `strictValidation`.
+- **ZNIGHT003** (scope mismatch): a singleton controller uses a request-scoped guard or interceptor
+  (directly or through transient ones). Make the controller request-scoped, or the guard a
+  singleton (it receives the `HttpContext` as argument).
+
+```
+✗ ZNIGHT007: Route GET /users/:id declares ":id" but UserController.find has no @Param('id') parameter
+ --> src/users/user.controller.ts:5:8
+  |
+5 |   @Get('/:id')
+  |        ^^^^^^
+  = hint: Add a parameter: @Param('id') id: string
+```
+
+### Route decorators
+
+A decorator is a route metadata decorator when it is a `const` initialised with
+`createRouteDecorator(key)` where `key` is statically evaluable. Its argument is evaluated at build
+time: literals, `const` references (across files and packages), simple expressions, and references
+to exported bindings (classes, objects), which the generated module imports. Without argument the
+value is `true`. Route decorators must be declared in analysed sources (your application, or a
+provider library published with its sources): from a declaration file (`.d.ts`) the key cannot be
+read and the compiler reports it.
+
+### Limits of the compiler
+
+- Routes are the methods declared by the controller class itself: methods inherited from a base
+  class are not routes (the base class decorators are reported).
+- The `type` of `params[i]` (informational) is the declared type of coerced values, formatted for
+  humans.
+- TypeScript has no integer type: `coerce.integer` is never inferred, use a schema
+  (`z.coerce.number().int()`) or a check in the handler.
 
 ## Compiler contract
 

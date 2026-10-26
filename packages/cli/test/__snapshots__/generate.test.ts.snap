@@ -1,0 +1,12 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`compiler adapter formats diagnostics without the compiler formatter 1`] = `
+"✗ ZNIGHT001: Missing provider for 'EmailService' required by NotificationService
+  --> src/a.ts:3:5
+  = hint: add @Injectable()
+
+! ZNIGHT019: Unused provider
+  --> src/a.ts:3:5
+  = hint: add @Injectable()
+  = note: declared here (src/a.ts:3:5)"
+`;

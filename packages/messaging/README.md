@@ -416,6 +416,66 @@ only be marked done once the broker confirmed them. The `drivers/shared.ts` help
 (`deadLetterHeaders`...) and the integration conformance suite (`test/integration/conformance.ts`)
 document the expected behaviour.
 
+## Compiler
+
+`@znight/compiler` loads the `@znight/messaging/compiler` extension automatically (it is declared in the
+package manifest) as soon as your code imports `@znight/messaging`. At build time it:
+
+- registers every `@Consumer` class as a provider (singleton unless `scope` says otherwise); consumers
+  are roots of the application, so neither they nor their dependencies are reported as unused;
+- collects the `@OnMessage` handlers and the `@OnError` method of the class **and of its base
+  classes**: an abstract base class can hold shared handlers. The nearest declaration of a method
+  wins; an override without messaging decorators keeps the inherited handler (which calls the
+  override);
+- creates one handler per `@OnMessage` decorator: stack them to handle several types with one method;
+- generates a **typed** invoker per handler, so `tsc` checks the handler signature against what is
+  injected: the schema output for `@Message(schema)`, `string | undefined` for `@Headers('name')`,
+  `Readonly<Record<string, string>>` for `@Headers()`, the `InboundMessage` for `@Ctx()`.
+
+Every parameter of a handler needs `@Message()`, `@Headers()` or `@Ctx()`; optional parameters and
+parameters with a default value may have none (they receive `undefined`).
+
+```ts
+@Consumer('orders')
+export class OrderConsumer extends AuditedConsumer {
+  @OnMessage('order.created')
+  @OnMessage('order.updated') // same method, two types
+  upsert(@Message(Order) order: Order, @Headers('x-tenant') tenant?: string, @Ctx() message?: InboundMessage) {}
+}
+```
+
+Invalid consumers fail the build with a precise location instead of failing at boot:
+
+- **ZNIGHT005** (invalid decorator usage): decorator on the wrong target; `@Consumer` without queue;
+  `@Consumer`, `@Retry` or `@OnError` applied twice; handler the generated code cannot call (static,
+  private, protected, `#private`, accessor, computed name, generator); `@OnMessage` and `@OnError` on
+  one method; `@Retry` or a parameter decorator outside of an `@OnMessage` handler; several decorators
+  on one parameter; rest parameter; `@Message(...)` argument that is not an exported schema (a class,
+  an object, an inline expression); invalid `@Headers` name or `@OnMessage` type; messaging methods on
+  a class that is neither a consumer nor a base class of one (abstract classes are fine). Warning:
+  `@Headers('name')` parameter whose type does not accept `undefined`.
+- **ZNIGHT011** (invalid consumer): no handler; several default handlers; two handlers for the same
+  type or pattern; a pattern that can never be selected because an earlier pattern matches every type
+  it matches (`order.*` declared before `order.created.*`); empty type; invalid `@Retry` options (the
+  runtime rules, plus unknown options); invalid `queue`, `scope`, `concurrency` or `deadLetter`;
+  handler parameter without decorator; `@OnError` method with more than two required parameters or
+  returning something else than `'ack'` or nothing; several `@OnError` methods; several consumers of
+  the same queue. Warning: `maxDelay` with `backoff: 'fixed'` (no effect).
+- **ZNIGHT017** (unvalidated input, a warning, an error with `strictValidation`): `@Message()` without
+  schema on a parameter that is not a primitive (`string`, `number`, literal types...), `unknown` or
+  binary (`Uint8Array`, `Buffer`).
+
+```
+error ZNIGHT011 src/orders/order.consumer.ts:14:3: @Consumer OrderConsumer: the pattern "order.created.*" of OrderConsumer.created() never matches: every type it matches is matched first by "order.*" (OrderConsumer.any())
+  = hint: Patterns are tried in declaration order (after exact types): declare the more specific pattern first
+```
+
+Patterns that only partially overlap (`order.*` and `*.created`) are legal: the first declared wins.
+Checks that depend on the driver (retry delays longer than its `maxInProcessDelayMs` / native delay
+limits, SQS redrive policies) run when the application starts. Scope rules are checked by the core
+compiler: a singleton consumer cannot inject the request-scoped `InboundMessage` (ZNIGHT003), use
+`@Ctx()`, `Lazy<InboundMessage>` or `scope: 'request'`.
+
 ## Compiler contract
 
 The `@znight/messaging/compiler` extension (spec §5, §9.2) generates
@@ -449,7 +509,11 @@ Helpers generated code may call (exported from `@znight/messaging`, stable):
 Parameter extraction in `invoke`: `@Message()` → `m.payload as never` (no schema, ZNIGHT017 when the
 type is not primitive); `@Message(S)` → `await validateMessage(S, m.payload)` (the invoker is then
 `async`); `@Headers()` → `m.headers`; `@Headers('x')` → `messageHeader(m, 'x')`; `@Ctx()` → `m`
-(`m as InboundMessage<never>` when the parameter narrows the payload type). Example:
+(`m as InboundMessage<never>` when the parameter narrows the payload type); an optional parameter
+without decorator → `undefined` (trailing ones are omitted). The invoker is `async` only when it
+awaits a validation, and its `m` parameter is omitted when no argument uses it (`noUnusedParameters`).
+Consumers are sorted by token, handlers keep their declaration order (inherited handlers first), and
+`options` / `errorHandler` / `type` / `retry` are omitted when absent. Example:
 
 ```ts
 import type { InboundMessage } from '@znight/messaging'

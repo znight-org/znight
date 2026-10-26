@@ -41,6 +41,10 @@
         "@znight/compiler": "workspace:^",
         "vite": "^8.0.0",
       },
+      "optionalPeers": [
+        "@znight/compiler",
+        "vite",
+      ],
     },
     "packages/compiler": {
       "name": "@znight/compiler",

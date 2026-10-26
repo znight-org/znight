@@ -1,0 +1,163 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`schematic contents service 1`] = `
+"import { Injectable } from '@znight/core'
+
+@Injectable()
+export class UserProfileService {
+  // Declare dependencies as constructor parameters: the compiler resolves them from their types.
+  // constructor(private readonly repository: UserProfileRepository) {}
+}
+"
+`;
+
+exports[`schematic contents controller 1`] = `
+"import { Controller, Get, Param } from '@znight/http'
+
+@Controller('/user-profile')
+export class UserProfileController {
+  /** GET /user-profile */
+  @Get()
+  list(): unknown[] {
+    return []
+  }
+
+  /** GET /user-profile/:id */
+  @Get('/:id')
+  find(@Param('id') id: string): { id: string } {
+    return { id }
+  }
+}
+"
+`;
+
+exports[`schematic contents consumer 1`] = `
+"import { Consumer, Ctx, type InboundMessage, OnMessage, Retry } from '@znight/messaging'
+
+/**
+ * Consumes the "user-profile" queue.
+ * Delivery is at-least-once: make the handler idempotent. Throw to retry, throw a NonRetryableError
+ * to dead-letter the message right away.
+ */
+@Consumer('user-profile')
+export class UserProfileConsumer {
+  @OnMessage()
+  @Retry({ attempts: 3, backoff: 'exponential', delay: 1000 })
+  handle(@Ctx() message: InboundMessage): void {
+    console.log('received', message.id, message.payload)
+  }
+}
+"
+`;
+
+exports[`schematic contents config 1`] = `
+"import { Config } from '@znight/config'
+
+/**
+ * Settings read from the USER_PROFILE_* environment variables (or .env files).
+ * Validated at boot by ConfigPlugin: the type of a property selects its coercion, an initializer
+ * makes it optional.
+ */
+@Config('userProfile')
+export class UserProfileConfig {
+  /** USER_PROFILE_ENABLED */
+  enabled = true
+}
+"
+`;
+
+exports[`schematic contents guard 1`] = `
+"import type { CanActivate, HttpContext } from '@znight/http'
+
+import { Injectable } from '@znight/core'
+
+@Injectable()
+export class UserProfileGuard implements CanActivate {
+  canActivate(ctx: HttpContext): boolean | Promise<boolean> {
+    // Return false (403 Forbidden) or throw an HttpException (UnauthorizedException...) to reject
+    // the request, e.g. return ctx.header('authorization') !== undefined
+    return true
+  }
+}
+"
+`;
+
+exports[`schematic contents interceptor 1`] = `
+"import type { CallHandler, HttpContext, HttpInterceptor } from '@znight/http'
+
+import { Injectable } from '@znight/core'
+
+@Injectable()
+export class UserProfileInterceptor implements HttpInterceptor {
+  async intercept(ctx: HttpContext, next: CallHandler): Promise<unknown> {
+    const started = performance.now()
+    try {
+      // the handler result (before serialisation): return it, transform it or replace it
+      return await next()
+    } finally {
+      ctx.setHeader('server-timing', \`app;dur=\${(performance.now() - started).toFixed(1)}\`)
+    }
+  }
+}
+"
+`;
+
+exports[`schematic contents factory 1`] = `
+"import { Factory, Provides } from '@znight/core'
+
+/** Replace with the type you provide: a database pool, an SDK client... */
+export class UserProfileClient {
+  close(): void {}
+}
+
+/**
+ * @Provides methods create providers for classes you cannot decorate. Their parameters are injected,
+ * their explicit return type is the provided type (Promise<T> for an async initialisation).
+ */
+@Factory()
+export class UserProfileFactory {
+  @Provides({ dispose: 'close' })
+  createUserProfileClient(): UserProfileClient {
+    return new UserProfileClient()
+  }
+}
+"
+`;
+
+exports[`schematic contents consumer with zod: a message schema 1`] = `
+"import { Consumer, Message, OnMessage, Retry } from '@znight/messaging'
+import { z } from 'zod'
+
+export const OrdersMessage = z.object({
+  id: z.string(),
+})
+export type OrdersMessage = z.output<typeof OrdersMessage>
+
+/**
+ * Consumes the "orders" queue.
+ * Delivery is at-least-once: make the handler idempotent. Throw to retry, throw a NonRetryableError
+ * to dead-letter the message right away.
+ */
+@Consumer('orders')
+export class OrdersConsumer {
+  @OnMessage()
+  @Retry({ attempts: 3, backoff: 'exponential', delay: 1000 })
+  handle(@Message(OrdersMessage) message: OrdersMessage): void {
+    console.log('received', message.id)
+  }
+}
+"
+`;
+
+exports[`schematic contents interceptor with --aop: a method interceptor 1`] = `
+"import { Injectable, type MethodInterceptor, type MethodInvocation } from '@znight/core'
+
+@Injectable()
+export class TimingInterceptor implements MethodInterceptor {
+  intercept(invocation: MethodInvocation): unknown {
+    // Runs around every intercepted call. For a synchronous method, return synchronously.
+    return invocation.proceed()
+  }
+}
+"
+`;

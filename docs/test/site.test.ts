@@ -98,7 +98,8 @@ describe('error reference', () => {
   const codes = Object.values(ErrorCode)
 
   it('codes are contiguous from ZNIGHT001', () => {
-    expect(codes).toEqual(codes.map((_, index) => `ZNIGHT${String(index + 1).padStart(3, '0')}`))
+    const expected = codes.map((_, index) => `ZNIGHT${String(index + 1).padStart(3, '0')}`)
+    expect(codes as readonly string[]).toEqual(expected)
   })
 
   it.each(codes)('%s has a section with a stable anchor', code => {

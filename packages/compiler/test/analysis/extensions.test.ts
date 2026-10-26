@@ -387,7 +387,10 @@ describe('code generation builders', () => {
     const cyclic: Record<string, unknown> = {}
     cyclic.self = cyclic
     expect(() => g.lit(cyclic as never)).toThrow('cyclic')
-    expect(() => g.lit(new Date() as never)).toThrow('plain objects')
+    expect(() => g.lit(new Map() as never)).toThrow('plain objects')
+    expect(g.lit(new Date(0))).toEqual({ kind: 'gen:literal', value: new Date(0) })
+    expect(g.lit(/x/g)).toEqual({ kind: 'gen:literal', value: /x/g })
+    expect(() => g.lit({ [Symbol('k')]: 1 } as never)).toThrow('symbol keys')
     expect(() => g.arrow(['class'], () => 1)).toThrow('invalid parameter name')
     expect(() => g.arrow(['a', 'a'], () => 1)).toThrow('duplicate')
     expect(() =>

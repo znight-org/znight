@@ -11,17 +11,26 @@
  * and are provided by the code generator.
  */
 import type { DependencyRef, Token } from '@znight/core'
-import type { ApplicationGraph } from '../graph/types.ts'
+import type { LiteralValue } from '../codegen/literal.ts'
+import type { ApplicationGraph, ProviderNode } from '../graph/types.ts'
 import type { ResolvedOptions } from '../options.ts'
-import type { Diagnostic, StaticPrimitive, StaticValue, ValueRef } from '../project/index.ts'
+import type { Diagnostic, StaticPrimitive, ValueRef } from '../project/index.ts'
 import type { ArgInfo, BindingHandle, ClassInfo, ClassRef, TypeHelpers } from './api.ts'
 
+import { isSafeIdentifier } from '../codegen/syntax.ts'
 import { ValueRef as ValueRefClass } from '../project/static-value.ts'
 
-/** A literal value. Nested {@link ValueRef}s are imported by the emitter. */
+export type { LiteralValue } from '../codegen/literal.ts'
+
+export { isSafeIdentifier } from '../codegen/syntax.ts'
+
+/**
+ * A literal value (primitives, plain objects and arrays, `RegExp`, `Date`). Nested
+ * {@link ValueRef}s are imported by the emitter.
+ */
 export interface GenLiteral {
   readonly kind: 'gen:literal'
-  readonly value: StaticValue
+  readonly value: LiteralValue
 }
 
 /** `{ ["key"]: value, ... }` (keys are always emitted as computed string keys). */
@@ -90,6 +99,18 @@ export interface GenCode {
   readonly values: readonly GenNode[]
 }
 
+/**
+ * A reference to a module-level `const` declared with {@link GenerateContext.constant} (printed
+ * before `__ZNIGHT_METADATA__`).
+ */
+export interface GenConstant {
+  readonly kind: 'gen:constant'
+  /** Preferred identifier (the printed name may get a `$1` suffix). */
+  readonly name: string
+  /** Unique id in the module being generated. */
+  readonly id: number
+}
+
 /** A node of generated code. */
 export type GenNode =
   | GenLiteral
@@ -101,14 +122,18 @@ export type GenNode =
   | GenCall
   | GenArrow
   | GenCode
+  | GenConstant
 
 /** What builders accept where a node is expected: primitives are wrapped with `lit`. */
 export type GenInput = GenNode | StaticPrimitive
 
 /** Pure node constructors. */
 export interface GenBuilders {
-  /** A literal (objects/arrays allowed). Nested {@link ValueRef}s are imported. Functions, symbols and cycles are rejected. */
-  lit(value: StaticValue): GenNode
+  /**
+   * A literal (objects/arrays, `RegExp` and `Date` allowed). Nested {@link ValueRef}s are imported.
+   * Functions, symbols, cycles and other objects are rejected.
+   */
+  lit(value: LiteralValue): GenNode
   /** Object literal; entries keep their order. */
   obj(entries: Readonly<Record<string, GenInput>> | readonly (readonly [string, GenInput])[]): GenNode
   arr(items: readonly GenInput[]): GenNode
@@ -153,68 +178,29 @@ export interface GenerateContext<TData = unknown> extends GenBuilders {
   /** Data stored by the extension during analysis, in call order. */
   readonly stored: readonly TData[]
   binding(handle: BindingHandle): DependencyRef | undefined
+  /** The provider with this token (`undefined` when there is none, e.g. pruned). */
+  provider(token: Token): ProviderNode | undefined
   importValue(target: ValueRef | ArgInfo | ClassInfo | ClassRef | string): GenNode
   importType(target: ValueRef | ArgInfo | ClassInfo | ClassRef | string): GenNode
   importFrom(module: string, name: string, options?: { readonly type?: boolean }): GenNode
   tokenOf(target: ClassInfo | ClassRef | string): Token | undefined
+  /**
+   * Declares a module-level `const` printed before `__ZNIGHT_METADATA__` and returns a reference to
+   * it: `const <name>: <type> = <value>`. Use it for values referenced several times (a provider
+   * factory and the extension section). `name` must be an identifier; it is de-duplicated against
+   * the other bindings of the module (`DatabaseConfig$fields`, `DatabaseConfig$fields$1`).
+   * Declaring the same `name` again returns the same reference (the first value wins).
+   */
+  constant(name: string, value: GenInput, options?: { readonly type?: GenNode }): GenNode
   report(diagnostic: Diagnostic): void
 }
 
-const IDENTIFIER = /^[A-Za-z_$][\w$]*$/
-const RESERVED = new Set([
-  'arguments',
-  'await',
-  'break',
-  'case',
-  'catch',
-  'class',
-  'const',
-  'continue',
-  'debugger',
-  'default',
-  'delete',
-  'do',
-  'else',
-  'enum',
-  'eval',
-  'export',
-  'extends',
-  'false',
-  'finally',
-  'for',
-  'function',
-  'if',
-  'implements',
-  'import',
-  'in',
-  'instanceof',
-  'interface',
-  'let',
-  'new',
-  'null',
-  'package',
-  'private',
-  'protected',
-  'public',
-  'return',
-  'static',
-  'super',
-  'switch',
-  'this',
-  'throw',
-  'true',
-  'try',
-  'typeof',
-  'var',
-  'void',
-  'while',
-  'with',
-  'yield',
-])
+/** Nodes created by builders (forged objects are rejected by the code generator). */
+const BUILT = new WeakSet<object>()
 
-/** `true` for a valid, non-reserved JavaScript identifier. */
-export function isSafeIdentifier(name: string): boolean {
-  return IDENTIFIER.test(name) && !RESERVED.has(name)
+/** `true` for a node created by the builders (or a generation context), never for a forged object. */
+export function isBuiltNode(value: unknown): value is GenNode {
+  return typeof value === 'object' && value !== null && BUILT.has(value)
 }
 
 /** `true` for any object produced by the builders. */
@@ -238,7 +224,7 @@ export function createGenBuilders(): GenBuilders {
     }
     return lit(value)
   }
-  const lit = (value: StaticValue): GenNode => {
+  const lit = (value: LiteralValue): GenNode => {
     checkLiteral(value, new Set())
     return freeze({ kind: 'gen:literal', value })
   }
@@ -321,7 +307,9 @@ export function createGenBuilders(): GenBuilders {
   }
 }
 
-function freeze<T extends GenNode>(node: T): T {
+/** Freezes a node and records it as built (the code generator only prints built nodes). */
+export function freeze<T extends GenNode>(node: T): T {
+  BUILT.add(node)
   return Object.freeze(node)
 }
 
@@ -333,7 +321,7 @@ function checkLiteral(value: unknown, stack: Set<unknown>): void {
     case 'symbol':
       throw new TypeError('[znight] symbols cannot be emitted as literals')
     case 'object': {
-      if (value === null || value instanceof ValueRefClass) {
+      if (value === null || value instanceof ValueRefClass || value instanceof RegExp || value instanceof Date) {
         return
       }
       if (stack.has(value)) {
@@ -344,7 +332,10 @@ function checkLiteral(value: unknown, stack: Set<unknown>): void {
       }
       const prototype = Object.getPrototypeOf(value)
       if (!Array.isArray(value) && prototype !== Object.prototype && prototype !== null) {
-        throw new TypeError('[znight] only plain objects and arrays can be emitted as literals')
+        throw new TypeError('[znight] only plain objects, arrays, RegExp and Date can be emitted as literals')
+      }
+      if (Object.getOwnPropertySymbols(value).length > 0) {
+        throw new TypeError('[znight] objects with symbol keys cannot be emitted as literals')
       }
       stack.add(value)
       for (const item of Array.isArray(value) ? value : Object.values(value)) {

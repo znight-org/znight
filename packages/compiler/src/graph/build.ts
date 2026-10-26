@@ -9,6 +9,7 @@ import type { Binder, BindSite } from '../binding/binder.ts'
 import type { Location, Project } from '../project/index.ts'
 import type {
   AliasNode,
+  BindingRequestNode,
   DependencyNode,
   EdgeKind,
   ExternalNode,
@@ -46,6 +47,7 @@ export interface BoundGraph {
   readonly aliases: readonly AliasNode[]
   readonly resolutionOrder: readonly Token[]
   readonly bindings: ReadonlyMap<number, DependencyRef | undefined>
+  readonly bindingRequests: ReadonlyMap<number, BindingRequestNode>
 }
 
 /** Binds the registered providers and assembles the graph. */
@@ -70,7 +72,14 @@ export function buildGraph(input: {
     const deps: DependencyNode[] = []
     if (draft.kind === 'provides' && draft.factoryToken !== undefined) {
       const label = `factory ${displayNameOf(draft.factoryToken)} of ${draft.displayName}`
-      deps.push({ ref: draft.factoryToken, role: 'factory', label, location: draft.registration, type: undefined })
+      deps.push({
+        ref: draft.factoryToken,
+        role: 'factory',
+        label,
+        location: draft.registration,
+        type: undefined,
+        request: undefined,
+      })
       addEdge(draft.token, draft.factoryToken, 'factory', label, draft.registration)
     }
     for (const site of draft.params) {
@@ -84,6 +93,7 @@ export function buildGraph(input: {
             spec: site.spec,
             rest: site.rest,
           })
+      const request = { type: site.spec.type, qualifier: site.spec.qualifier, optional: site.spec.optional }
       if (!outcome) {
         deps.push({
           ref: { token: serializeType(site.spec.type), optional: true },
@@ -91,10 +101,18 @@ export function buildGraph(input: {
           label: site.label,
           location: site.location,
           type: site.spec.type,
+          request,
         })
         continue
       }
-      deps.push({ ref: outcome.ref, role: 'parameter', label: site.label, location: site.location, type: outcome.type })
+      deps.push({
+        ref: outcome.ref,
+        role: 'parameter',
+        label: site.label,
+        location: site.location,
+        type: outcome.type,
+        request,
+      })
       for (const target of outcome.targets) {
         if (target.external) {
           externals.set(target.external.token, target.external)
@@ -113,6 +131,7 @@ export function buildGraph(input: {
       importRoute: draft.cls.importRoute,
       method: draft.method?.name,
       providedType: draft.providedType,
+      heritage: draft.heritage,
       scope: draft.scope,
       async: draft.async,
       deps,
@@ -145,9 +164,16 @@ export function buildGraph(input: {
   }
 
   const bindings = new Map<number, DependencyRef | undefined>()
+  const bindingRequests = new Map<number, BindingRequestNode>()
   for (const request of input.extensionBindings) {
     const outcome = binder.bind(request.site)
     bindings.set(request.id, outcome?.ref)
+    const spec = request.site.spec
+    bindingRequests.set(request.id, {
+      request: { type: spec.type, qualifier: spec.qualifier, optional: spec.optional },
+      from: request.from,
+      label: request.site.label,
+    })
     if (!outcome) {
       continue
     }
@@ -201,6 +227,7 @@ export function buildGraph(input: {
     aliases: computeAliases(registry),
     resolutionOrder: topologicalOrder(tokens, token => orderEdges.get(token) ?? []),
     bindings,
+    bindingRequests,
   }
 }
 
@@ -238,7 +265,14 @@ function wireInterceptors(
         dep = deps.length
         indexes.set(link.token, dep)
         const label = `interceptor ${displayNameOf(link.token)} of ${draft.displayName}.${intercepted.method.name}`
-        deps.push({ ref: link.token, role: 'interceptor', label, location: link.decorator.location, type: undefined })
+        deps.push({
+          ref: link.token,
+          role: 'interceptor',
+          label,
+          location: link.decorator.location,
+          type: undefined,
+          request: undefined,
+        })
         const external = registry.has(link.token) ? undefined : manifests.external(link.token)
         if (external) {
           externals.set(external.token, external)

@@ -341,6 +341,106 @@ export function consul(prefix: string): ConfigLoader {
 | `ZNIGHT012` | Invalid config metadata or loader options (stale generated code, wrong option types)          |
 | `ZNIGHT015` | A config class failed to be created without `ConfigPlugin` (`cause`: `ConfigValidationError`) |
 
+## Compiler
+
+The compiler extension `@znight/config/compiler` is declared in the package manifest: `@znight/compiler`
+loads it automatically as soon as your code imports `@znight/config` (no configuration needed). It
+turns every `@Config` class into a singleton provider and checks your config classes at build time.
+
+### What is a config field
+
+Every **instance property** of a `@Config` class is a field, decorated or not, including TypeScript
+`private`/`protected` properties and `declare` fields. Methods, static properties, `#private` fields,
+auto-accessors (`accessor x`) and computed keys are ignored (a config decorator on them is an error).
+
+Properties inherited from base classes are fields too, with the prefix of the config class, so a base
+class can hold shared settings (it needs no `@Config` itself). Base classes must be TypeScript sources
+analysed by the compiler: properties of a base class coming from a declaration file (`.d.ts`) are not
+loaded (warning), because declaration files do not tell which properties have initializers.
+
+```ts
+export abstract class ServiceConfig {
+  @Env('LOG_LEVEL') logLevel: 'debug' | 'info' = 'info'
+  port = 3000
+}
+
+@Config('billing')
+export class BillingConfig extends ServiceConfig {} // LOG_LEVEL, BILLING_PORT
+```
+
+Config classes are created with `new Class()`: their constructor must not have required parameters.
+
+### Type mapping
+
+On top of the [types](#types) above:
+
+| TypeScript                                                                                              | Field                                                                                          |
+| ------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| no annotation                                                                                           | inferred from the initializer or `@Default` (`port = 5432` → `number`, `new URL(...)` → `URL`) |
+| `enum Level { Debug = 'debug', Info = 'info' }`                                                         | `string` restricted to the member values (all strings or all numbers)                          |
+| arrays of literal unions or enums (`Level[]`, `('a' \| 'b')[]`)                                         | `string[]` / `number[]`, every item checked                                                    |
+| branded primitives (`string & { __brand: 'Id' }`), template literal types                               | the primitive                                                                                  |
+| `URL` from `node:url`                                                                                   | `URL`                                                                                          |
+| interfaces, object types, `Record`, `Partial`..., tuples, arrays of objects, `object`, `unknown`, `any` | JSON                                                                                           |
+
+Unsupported, with a hint (`ZNIGHT012`): classes (`Date`, `Map`, your own classes: use an interface for
+JSON values), functions, `symbol`, `bigint`, `Promise`, mixed unions (`string | number`), `boolean[]`,
+`URL[]`, type parameters, and properties whose type can neither be read nor inferred.
+
+Literal union values are sorted (numbers numerically: `enum: [5, 10, 20]`); enum values keep their
+declaration order.
+
+### `@Default`
+
+The value of `@Default` must be **statically evaluable** (literals, `const` references, simple
+expressions): it is checked against the property type at build time, coerced like a source value at
+runtime, and emitted as a literal in the field definitions. References to non-evaluable values
+(`@Default(computeDefault())`, `@Default(someInstance)`) are rejected (`ZNIGHT005`): use an initializer
+instead, which works with any expression and also makes the property optional:
+
+```ts
+@Config()
+export class CacheConfig {
+  @Default('5m') ttl!: string // checked at build time
+  maxEntries: number = computeMaxEntries() // any expression, kept by the instance
+}
+```
+
+`@Default(null)`, `@Default(undefined)` and blank strings for non-string types have no effect and are
+reported. Invalid defaults of `@Secret` properties are reported without showing the value.
+
+### Build-time diagnostics
+
+| Code        | Reported when                                                                                                        |
+| ----------- | -------------------------------------------------------------------------------------------------------------------- |
+| `ZNIGHT012` | unsupported or unknown property type                                                                                 |
+| `ZNIGHT012` | `@Env` / `@Secret` / `@Default` / `@Key` in a class that is neither a `@Config` class nor a base class of one        |
+| `ZNIGHT012` | config decorator on a static, `#private`, accessor or computed member                                                |
+| `ZNIGHT012` | `@Env('A')` and `@Secret('B')` on the same property (`@Secret() @Env('A')` is fine)                                  |
+| `ZNIGHT012` | two properties of a class reading the same environment variable or key path                                          |
+| `ZNIGHT012` | invalid environment name (letters, digits and `_`, not starting with a digit), key path or prefix (`@Config('2fa')`) |
+| `ZNIGHT012` | `@Default` value invalid for the property type (or without effect)                                                   |
+| `ZNIGHT012` | constructor with required parameters, or not public                                                                  |
+| `ZNIGHT012` | (warning) properties inherited from a base class declared in a `.d.ts` file                                          |
+| `ZNIGHT005` | decorator on a wrong target (`@Env` on a method...), applied twice, missing, non-string or non-evaluable argument    |
+| `ZNIGHT005` | `@Config` with another provider decorator (`@Injectable`), abstract, generic or non-exported config class            |
+
+### Generated code
+
+Each class gets its field definitions as a module constant (`DatabaseConfig$fields`) shared by its
+provider factory (`d => loadConfig(DatabaseConfig, d[0], DatabaseConfig$fields)`) and the
+`extensions.config` section, see [Compiler contract](#compiler-contract). The extension can also be
+passed explicitly, e.g. to a custom compiler setup:
+
+```ts
+// vite.config.ts
+import configExtension from '@znight/config/compiler'
+import { znight } from '@znight/compiler'
+import { defineConfig } from 'vite'
+
+export default defineConfig({ plugins: [znight({ extensions: [configExtension] })] })
+```
+
 ## Compiler contract
 
 What `@znight/config/compiler` generates and the runtime relies on (spec §9.3). These exports are

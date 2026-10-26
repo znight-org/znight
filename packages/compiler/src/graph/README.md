@@ -1,10 +1,12 @@
 # Application graph (`src/graph/`)
 
 Internal documentation of the intermediate representation produced by the analysis phases and
-consumed by the code generator (next phase) and by extension `validate` hooks.
+consumed by the code generator (`src/codegen/`), library mode (`src/library/`) and by extension
+`validate` hooks.
 
 ```
 Project (src/project) ─ analyze() ─┬─ class analysis (src/analysis): ClassInfo, decorators, core + extensions
+                                   ├─ compiled provider libraries (src/library/merge.ts, §6.4)
                                    ├─ binding (src/binding): §4.7, near-miss analysis
                                    ├─ graph assembly (src/graph/build.ts): deps, edges, aliases, order
                                    └─ validation (src/validation): ZNIGHT002/003/009/019/020 + extension validate
@@ -55,6 +57,7 @@ scan order gives a byte-identical graph (`test/analysis/determinism.test.ts`).
 | `edges`           | every dependency edge (validation, prune), typed by `EdgeKind`                          |
 | `extensions`      | `{ name, stored }[]`: data each extension stored with `ctx.store()`, in extension order |
 | `bindings`        | results of `AnalyzeContext.bindInjection` by handle id (`undefined` when it failed)     |
+| `bindingRequests` | the requests of `AnalyzeContext.bindInjection` by handle id (library mode)              |
 | `reachability`    | `{ roots, unreachable }` when `reportUnused` or `prune` is set, else `undefined`        |
 | `diagnostics`     | sorted diagnostics of every phase                                                       |
 
@@ -74,8 +77,10 @@ scan order gives a byte-identical graph (`test/analysis/determinism.test.ts`).
 | `primary`      | `primary: true` when set                                                                                                                   |
 | `source`       | `source` (already relative to the root), per `sourceLocations`                                                                             |
 
-`displayName`, `kind`, `registeredBy`, `classIdentity`, `method`, `providedType`, `lifecycle` and
-`location` are for messages, validation and tooling.
+`displayName`, `kind`, `registeredBy`, `classIdentity`, `method`, `providedType`, `heritage`,
+`lifecycle` and `location` are for messages, validation, library mode and tooling.
+`DependencyNode.request` (parameters only) is the injection point before binding (type, qualifier,
+optional): library mode records it so that applications bind it again.
 
 #### Factories
 
@@ -129,7 +134,18 @@ provider tokens, `globalThis#*` and the core marker types (`Lazy`, `OnStart`, `O
 Edges to externals are kept (`to` is the external token); `resolutionOrder` and ZNIGHT002 only
 follow edges between providers.
 
-### `prune`
+### Compiled provider libraries (§6.4)
+
+`analyzeProject()` merges the `znight.providers.json` fragments of the root dependencies (manifest
+`"providers"`, source libraries excluded) after the extensions' `analyzeClass` and before binding
+(`src/library/merge.ts`): each fragment provider becomes a `ProviderDraft` whose `cls` is the
+`ClassInfo` of the package's declaration (`dist/*.d.mts`: import route, heritage), whose params,
+qualifiers, scope, interceptors and lifecycle come from the fragment. Interceptor drafts only need
+`method: { name, async }` and `decorator: { identity, name, location }` (the registry types were
+narrowed to these fields for that purpose). Extension data is appended to the extension's stored data
+(after the application's, by package name) and `bindInjection` requests are re-bound with new ids.
+
+## `prune`
 
 With `prune`, drop `graph.reachability.unreachable` providers from `metadata.providers` and
 `resolutionOrder` (their edges, aliases pointing to them and externals only they use).
@@ -142,11 +158,11 @@ With `prune`, drop `graph.reachability.unreachable` providers from `metadata.pro
 - Identities: `project.importRoute(identity)`.
 - Identifiers are de-duplicated by identity order (`UserService`, `UserService$1`) — §3.3.
 
-## Implementing `GenerateContext`
+## `GenerateContext`
 
 `src/extensions/generate.ts` defines `GenNode`, `GenerateContext` and implements the pure builders
 (`createGenBuilders()`: `lit`, `obj`, `arr`, `ref`, `member`, `call`, `construct`, `arrow`, `code`).
-The code generator adds:
+The code generator (`src/codegen/context.ts`, `module.ts`, `container.ts`) adds:
 
 - `importValue(target)` / `importType(target)`: a `GenImport` node (`target.kind: 'ref' |
   'identity' | 'module'`) registered in the module's import table; a route failure is a ZNIGHT005
@@ -155,6 +171,8 @@ The code generator adds:
   `@znight/http`...);
 - `tokenOf(target)`: provider token of a class / identity, resolving `aliases`;
 - `binding(handle)`: `graph.bindings.get(handle.id)`;
+- `constant(name, value, { type })`: a module-level `const` (`gen:constant` node);
 - the printer: `gen:literal` → literal emitter (ValueRefs imported), `gen:object` → computed string
   keys, `gen:code` → `parts` verbatim with each value printed, `gen:arrow` params typed when a type
-  node is given. The section returned by `generate()` becomes `metadata.extensions[name]`.
+  node is given. Only nodes created by the builders are printed (forged objects are reported). The
+  section returned by `generate()` becomes `metadata.extensions[name]`.

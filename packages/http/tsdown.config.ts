@@ -8,6 +8,7 @@ export default defineConfig({
     fastify: 'src/adapters/fastify.ts',
     express: 'src/adapters/express.ts',
     hono: 'src/adapters/hono.ts',
+    compiler: 'src/compiler/index.ts',
   },
   format: 'esm',
   platform: 'node',

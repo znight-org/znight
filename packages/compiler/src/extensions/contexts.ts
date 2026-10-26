@@ -40,6 +40,21 @@ export const TYPE_HELPERS: TypeHelpers = Object.freeze({
 
 const SCOPES: readonly Scope[] = ['singleton', 'request', 'transient']
 
+/** Handles returned by `bindInjection` (compiled provider libraries encode them in stored data). */
+const BINDING_HANDLES = new WeakSet<object>()
+
+/** `true` for a handle returned by {@link AnalyzeContext.bindInjection}. */
+export function isBindingHandle(value: unknown): value is BindingHandle {
+  return typeof value === 'object' && value !== null && BINDING_HANDLES.has(value)
+}
+
+/** A binding handle with a given id (compiled provider libraries re-create their handles). */
+export function createBindingHandle(id: number): BindingHandle {
+  const handle = Object.freeze({ id })
+  BINDING_HANDLES.add(handle)
+  return handle
+}
+
 /** State shared by the analysis contexts of every extension. */
 export interface AnalysisState {
   readonly project: Project
@@ -123,7 +138,9 @@ export class ExtensionAnalyzeContext implements AnalyzeContext<unknown> {
         rest: false,
       },
     })
-    return Object.freeze({ id })
+    const handle = Object.freeze({ id })
+    BINDING_HANDLES.add(handle)
+    return handle
   }
 
   addDependency(from: ClassInfo | Token, to: Token | ClassRef, details: DependencyDetails = {}): void {

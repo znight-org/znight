@@ -131,6 +131,7 @@ describe('public entries', () => {
       './fastify',
       './express',
       './hono',
+      './compiler',
       './package.json',
     ])
   })

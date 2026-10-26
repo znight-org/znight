@@ -7,6 +7,7 @@ export default defineConfig({
     rabbitmq: 'src/drivers/rabbitmq.ts',
     sqs: 'src/drivers/sqs.ts',
     kafka: 'src/drivers/kafka.ts',
+    compiler: 'src/compiler/index.ts',
   },
   format: 'esm',
   platform: 'node',

@@ -11,7 +11,7 @@
     "directory": "packages/cli"
   },
   "bugs": "https://github.com/ugho49/Znight/issues",
-  "keywords": ["znight", "cli", "scaffolding", "generator"],
+  "keywords": ["znight", "cli", "scaffolding", "generator", "dependency-injection", "vite"],
   "type": "module",
   "sideEffects": false,
   "engines": {
@@ -29,7 +29,8 @@
   "files": ["dist", "src"],
   "scripts": {
     "build": "tsdown",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p test"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p test",
+    "test:e2e": "ZNIGHT_CLI_E2E=1 bun test --conditions=@znight/source test/e2e.test.ts"
   },
   "publishConfig": {
     "access": "public"
@@ -50,5 +51,13 @@
   "peerDependencies": {
     "@znight/compiler": "workspace:^",
     "vite": "^8.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@znight/compiler": {
+      "optional": true
+    },
+    "vite": {
+      "optional": true
+    }
   }
 }

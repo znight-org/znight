@@ -79,6 +79,7 @@ export class UserController {
 
   it('exports the runtime API', () => {
     expect(Object.keys(compiler).sort()).toEqual([
+      'COMPILER_VERSION',
       'DEFAULT_APP_ENTRY',
       'DEFAULT_EXCLUDE',
       'DEFAULT_INCLUDE',
@@ -86,16 +87,23 @@ export class UserController {
       'DEFAULT_RUNTIME_CONDITIONS',
       'DEFAULT_SCAN_CONDITIONS',
       'EXTENSION_API_VERSION',
+      'PROVIDERS_FILE',
+      'PROVIDERS_SCHEMA_VERSION',
       'Project',
       'SOURCE_CONDITION',
       'ValueRef',
       'analyze',
       'analyzeProject',
+      'compile',
+      'createCompiler',
       'createGenBuilders',
       'discoverExtensionModules',
+      'formatDiagnostics',
+      'generate',
       'isGenNode',
       'loadExtensions',
       'normalizeOptions',
+      'renderErrorModule',
       'validateExtension',
     ])
     expect(compiler.EXTENSION_API_VERSION).toBe(1)

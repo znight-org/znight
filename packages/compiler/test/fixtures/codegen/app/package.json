@@ -1,0 +1,9 @@
+{
+  "name": "codegen-app",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@fixture/logging": "1.0.0",
+    "@znight/core": "0.1.0"
+  }
+}

@@ -1,0 +1,382 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`section of the fixture application prints the whole section 1`] = `
+"{
+  controllers: [
+    {
+      token: 'src/health.controller.ts#HealthController',
+      basePath: '/health',
+      guards: [],
+      interceptors: [],
+      meta: {},
+      routes: [
+        {
+          method: 'GET',
+          path: '/',
+          fullPath: '/health',
+          handler: 'check',
+          meta: {},
+          guards: [],
+          interceptors: [],
+          params: [
+            {
+              index: 0,
+              source: 'headers',
+              name: 'x-request-id',
+              type: '{ readonly [requestIdBrand]: true } & string',
+              optional: true,
+            },
+          ],
+          invoke: (c: HealthController, ctx: HttpContext) => c.check(coerce.optional(ctx.headers['x-request-id'], 'header "x-request-id"', coerce.string) as never),
+        },
+      ],
+    },
+    {
+      token: 'src/root.controller.ts#RootController',
+      basePath: '/',
+      guards: [],
+      interceptors: [],
+      meta: {},
+      routes: [
+        {
+          method: 'GET',
+          path: '/',
+          fullPath: '/',
+          handler: 'index',
+          meta: {},
+          guards: [],
+          interceptors: [],
+          params: [],
+          invoke: (c: RootController) => c.index(),
+        },
+        {
+          method: 'GET',
+          path: '/raw',
+          fullPath: '/raw',
+          handler: 'raw',
+          meta: {},
+          guards: [],
+          interceptors: [],
+          params: [
+            {
+              index: 0,
+              source: 'request',
+            },
+            {
+              index: 1,
+              source: 'response',
+            },
+          ],
+          rawResponse: true,
+          invoke: (c: RootController, ctx: HttpContext) => c.raw(ctx.request as never, ctx.response as never),
+        },
+      ],
+    },
+    {
+      token: 'src/users/user.controller.ts#UserController',
+      basePath: '/users',
+      guards: [
+        'src/auth/auth.guard.ts#AuthGuard',
+      ],
+      interceptors: [],
+      meta: {
+        roles: ['admin'],
+      },
+      routes: [
+        {
+          method: 'GET',
+          path: '/',
+          fullPath: '/users',
+          handler: 'list',
+          meta: {
+            public: true,
+          },
+          guards: [],
+          interceptors: [],
+          params: [
+            {
+              index: 0,
+              source: 'query',
+              name: 'page',
+              type: 'number',
+              optional: true,
+            },
+            {
+              index: 1,
+              source: 'query',
+              name: 'tag',
+              type: 'string[]',
+              optional: true,
+            },
+            {
+              index: 2,
+              source: 'query',
+              name: 'sort',
+              type: '"asc" | "desc"',
+              optional: true,
+            },
+          ],
+          invoke: (c: UserController, ctx: HttpContext) => c.list(coerce.optional(ctx.query['page'], 'query "page"', coerce.number), coerce.optional(ctx.query['tag'], 'query "tag"', (v, l) => coerce.array(v, l, coerce.string)), coerce.optional(ctx.query['sort'], 'query "sort"', (v, l) => coerce.enum(v, l, ['asc', 'desc']))),
+        },
+        {
+          method: 'GET',
+          path: '/search',
+          fullPath: '/users/search',
+          handler: 'search',
+          meta: {
+            public: true,
+          },
+          guards: [],
+          interceptors: [],
+          params: [
+            {
+              index: 0,
+              source: 'query',
+              schema: true,
+            },
+          ],
+          invoke: async (c: UserController, ctx: HttpContext) => c.search(await validate(SearchQuery, ctx.query, 'query')),
+        },
+        {
+          method: 'GET',
+          path: '/:id',
+          fullPath: '/users/:id',
+          handler: 'find',
+          meta: {
+            roles: ['admin', 'reader'],
+          },
+          guards: [],
+          interceptors: [
+            'src/common/timing.interceptor.ts#TimingInterceptor',
+          ],
+          params: [
+            {
+              index: 0,
+              source: 'param',
+              name: 'id',
+              type: 'number',
+            },
+          ],
+          invoke: (c: UserController, ctx: HttpContext) => c.find(coerce.number(ctx.params['id'], 'param "id"')),
+        },
+        {
+          method: 'POST',
+          path: '/',
+          fullPath: '/users',
+          handler: 'create',
+          meta: {},
+          guards: [],
+          interceptors: [],
+          params: [
+            {
+              index: 0,
+              source: 'body',
+              schema: true,
+            },
+          ],
+          invoke: async (c: UserController, ctx: HttpContext) => c.create(await validate(CreateUser, ctx.body, 'body')),
+        },
+        {
+          method: 'PUT',
+          path: '/:id',
+          fullPath: '/users/:id',
+          handler: 'update',
+          meta: {},
+          guards: [],
+          interceptors: [],
+          params: [
+            {
+              index: 0,
+              source: 'param',
+              name: 'id',
+              schema: true,
+            },
+            {
+              index: 1,
+              source: 'body',
+              schema: true,
+            },
+          ],
+          invoke: async (c: UserController, ctx: HttpContext) => c.update(await validate(IdParam, ctx.params['id'], 'param "id"'), await validate(UpdateUser, ctx.body, 'body')),
+        },
+        {
+          method: 'DELETE',
+          path: '/:id',
+          fullPath: '/users/:id',
+          handler: 'remove',
+          status: 202,
+          headers: {
+            'x-deleted': 'yes',
+          },
+          meta: {},
+          guards: [],
+          interceptors: [],
+          params: [
+            {
+              index: 0,
+              source: 'param',
+              name: 'id',
+              type: 'number',
+            },
+          ],
+          invoke: (c: UserController, ctx: HttpContext) => c.remove(coerce.number(ctx.params['id'], 'param "id"')),
+        },
+        {
+          method: 'PATCH',
+          path: '/:id/flags',
+          fullPath: '/users/:id/flags',
+          handler: 'flags',
+          meta: {},
+          guards: [],
+          interceptors: [],
+          params: [
+            {
+              index: 0,
+              source: 'param',
+            },
+            {
+              index: 1,
+              source: 'headers',
+              name: 'x-flag',
+              type: 'boolean',
+            },
+            {
+              index: 2,
+              source: 'headers',
+            },
+          ],
+          invoke: (c: UserController, ctx: HttpContext) => c.flags(ctx.params as never, coerce.boolean(ctx.headers['x-flag'], 'header "x-flag"'), ctx.headers as never),
+        },
+        {
+          method: 'HEAD',
+          path: '/:id',
+          fullPath: '/users/:id',
+          handler: 'exists',
+          meta: {},
+          guards: [],
+          interceptors: [],
+          params: [
+            {
+              index: 0,
+              source: 'param',
+              name: 'id',
+              type: 'number',
+            },
+          ],
+          invoke: (c: UserController, ctx: HttpContext) => c.exists(coerce.number(ctx.params['id'], 'param "id"')),
+        },
+        {
+          method: 'OPTIONS',
+          path: '/',
+          fullPath: '/users',
+          handler: 'options',
+          meta: {
+            public: true,
+          },
+          guards: [],
+          interceptors: [],
+          params: [
+            {
+              index: 0,
+              source: 'context',
+            },
+          ],
+          invoke: (c: UserController, ctx: HttpContext) => c.options(ctx),
+        },
+        {
+          method: 'ALL',
+          path: '/legacy/*',
+          fullPath: '/users/legacy/*',
+          handler: 'legacy',
+          meta: {
+            public: true,
+          },
+          guards: [],
+          interceptors: [],
+          params: [
+            {
+              index: 0,
+              source: 'param',
+              name: '*',
+              type: 'string',
+            },
+            {
+              index: 1,
+              source: 'context',
+            },
+          ],
+          invoke: (c: UserController, ctx: HttpContext) => c.legacy(coerce.string(ctx.params['*'], 'param "*"'), ctx),
+        },
+        {
+          method: 'POST',
+          path: '/ping',
+          fullPath: '/users/ping',
+          handler: 'ping',
+          meta: {
+            public: true,
+          },
+          guards: [],
+          interceptors: [],
+          params: [],
+          invoke: async (c: UserController, ctx: HttpContext) => { await validate(Ping, await ctx.parseBody(), 'body'); return c.ping() },
+        },
+        {
+          method: 'GET',
+          path: '/typed/:day',
+          fullPath: '/users/typed/:day',
+          handler: 'typed',
+          meta: {
+            public: true,
+          },
+          guards: [],
+          interceptors: [],
+          params: [
+            {
+              index: 0,
+              source: 'param',
+              name: 'day',
+              type: 'Date',
+            },
+            {
+              index: 1,
+              source: 'query',
+              name: 'flag',
+              type: 'boolean | undefined',
+              optional: true,
+            },
+            {
+              index: 2,
+              source: 'query',
+              name: 'big',
+              type: 'bigint',
+              optional: true,
+            },
+            {
+              index: 3,
+              source: 'query',
+              name: 'ids',
+              type: '({ readonly __brand: \\'UserId\\' } & string)[]',
+              optional: true,
+            },
+            {
+              index: 4,
+              source: 'query',
+              name: 'color',
+              type: 'Color',
+              optional: true,
+            },
+            {
+              index: 5,
+              source: 'headers',
+              name: 'x-id',
+              type: '{ readonly __brand: \\'UserId\\' } & string',
+              optional: true,
+            },
+          ],
+          invoke: (c: UserController, ctx: HttpContext) => c.typed(coerce.date(ctx.params['day'], 'param "day"'), coerce.optional(ctx.query['flag'], 'query "flag"', coerce.boolean), coerce.optional(ctx.query['big'], 'query "big"', coerce.bigint), coerce.optional(ctx.query['ids'], 'query "ids"', (v, l) => coerce.array(v, l, coerce.string)) as never, coerce.optional(ctx.query['color'], 'query "color"', (v, l) => coerce.enum(v, l, ['red', 'blue'])) as never, coerce.optional(ctx.headers['x-id'], 'header "x-id"', coerce.string) as never),
+        },
+      ],
+    },
+  ],
+}"
+`;

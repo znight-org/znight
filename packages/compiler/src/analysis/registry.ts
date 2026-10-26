@@ -27,12 +27,14 @@ export interface InterceptorLinkDraft {
   readonly token: Token
   readonly hasOptions: boolean
   readonly options: StaticValue
-  readonly decorator: DecoratorInfo
+  /** The decorator (only identity, name and location are used: compiled libraries have no AST). */
+  readonly decorator: Pick<DecoratorInfo, 'identity' | 'name' | 'location'>
 }
 
 /** Interceptor chain of one method, before binding. */
 export interface InterceptedMethodDraft {
-  readonly method: MethodInfo
+  /** The method (only name and async are used: compiled libraries have no AST). */
+  readonly method: Pick<MethodInfo, 'name' | 'async'>
   readonly chain: readonly InterceptorLinkDraft[]
 }
 
@@ -45,7 +47,8 @@ export interface ProviderDraft {
   readonly registeredBy: string
   /** Provider class (`class`/`custom`) or `@Factory` class (`provides`). */
   readonly cls: ClassInfo
-  readonly method: MethodInfo | undefined
+  /** `provides` providers: the method (only its name is used after the analysis). */
+  readonly method: Pick<MethodInfo, 'name'> | undefined
   readonly providedType: TypeInfo
   /** Serialization of {@link providedType} (exact candidates of §4.7). */
   readonly exactKey: string

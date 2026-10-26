@@ -1,0 +1,31 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`argument parsing renders a help with aligned options and examples 1`] = `
+"znight new — Create a new Znight project
+
+Usage
+  znight new [name] [options]
+
+Aliases
+  create, init
+
+Arguments
+  name  Project name (npm package name), or "." for the current directory
+
+Options
+  -y, --yes                              Do not ask questions: use the flags and the defaults
+  --pm <bun|npm|pnpm|yarn>               Package manager (default: the one running the CLI, bun under Bun, else npm)
+  --adapter <node|fastify|express|hono>  HTTP adapter (default: node, the built-in node:http server)
+  --features <list>                      Comma-separated features: config, observability, messaging, or "all" / "none" (default: config,observability)
+  --no-install                           Do not install the dependencies
+  --no-git                               Do not initialise a git repository
+  --dir <path>                           Target directory (default: ./<name>)
+  --force                                Write into a non-empty directory (existing files are overwritten)
+  -h, --help                             Show this help
+
+Examples
+  $ znight new my-service
+  $ znight new my-service --yes --pm pnpm --adapter fastify --features config,observability,messaging
+  $ znight new . --yes --no-install
+"
+`;

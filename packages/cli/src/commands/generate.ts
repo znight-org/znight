@@ -1,0 +1,242 @@
+/**
+ * `znight generate`: writes the DI container module (`src/.znight/container.generated.ts`) with the
+ * compiler, checks that it is up to date (`--check`, for CI) or keeps it up to date (`--watch`, for
+ * `tsc --watch` and editors).
+ */
+import type { Command } from '../command.ts'
+import type { CliContext } from '../context.ts'
+import type {
+  CompileResultLike,
+  CompilerApi,
+  CompilerChanges,
+  GenerateResultLike,
+  IncrementalCompiler,
+  ZnightOptions,
+} from '../integrations/compiler.ts'
+
+import { existsSync } from 'node:fs'
+import { resolve } from 'node:path'
+
+import { defineCommand } from '../command.ts'
+import { CliError, errorMessage } from '../errors.ts'
+import { DEFAULT_INCLUDE, hasErrors } from '../integrations/compiler.ts'
+import { findViteConfig, readZnightPluginOptions, type ViteConfigLoader } from '../integrations/vite.ts'
+import { watchTargets } from '../integrations/watch.ts'
+import { formatDuration, plural } from '../output.ts'
+import { displayPath, onTermination, resolveRoot } from './shared.ts'
+
+/** `znight generate` */
+export const generateCommand: Command = defineCommand({
+  meta: {
+    name: 'generate',
+    description: 'Generate the dependency injection container (src/.znight/container.generated.ts)',
+    usage: '[options]',
+    examples: ['znight generate', 'znight generate --check   # in CI, before tsc', 'znight generate --watch'],
+    details: [
+      'The compiler options are read from the znight() plugin of vite.config.ts when it exposes them,',
+      'so that the generated file is the same as the one of the Vite build.',
+      '"znight generate <schematic> <name>" is an alias of "znight g <schematic> <name>".',
+    ].join('\n'),
+  },
+  args: {
+    check: {
+      type: 'boolean',
+      description: 'Do not write: exit with code 1 when the generated file is missing or out of date',
+    },
+    watch: { type: 'boolean', alias: 'w', description: 'Regenerate on every change' },
+    root: { type: 'string', valueHint: 'dir', description: 'Project root (default: the current directory)' },
+    config: { type: 'string', valueHint: 'file', description: 'Vite config file to read the znight() options from' },
+    'config-loader': {
+      type: 'enum',
+      options: ['bundle', 'runner', 'native'],
+      description: 'How Vite loads the config file (default: bundle)',
+    },
+  },
+  async run({ args, cli }) {
+    const root = resolveRoot(cli, args.root)
+    const options = await compilerOptions(cli, root, args.config, args['config-loader'] as ViteConfigLoader | undefined)
+    const compiler = await cli.services.loadCompiler(root)
+    if (args.check === true) return check(cli, compiler, options)
+    if (args.watch === true) return watch(cli, compiler, options)
+    const result = await generateOnce(cli, compiler, options)
+    return hasErrors(result.diagnostics) ? 1 : 0
+  },
+})
+
+/** Options of `znight()` in the Vite config (when exposed), with `root`. */
+async function compilerOptions(
+  cli: CliContext,
+  root: string,
+  configFile: string | undefined,
+  configLoader: ViteConfigLoader | undefined,
+): Promise<ZnightOptions> {
+  let options: ZnightOptions | undefined
+  // no Vite config: nothing to read, do not even load Vite
+  if (findViteConfig(root, configFile) === undefined) return { root }
+  try {
+    const vite = await cli.services.loadVite(root)
+    const lookup = await readZnightPluginOptions(vite, root, configFile, configLoader)
+    if (lookup !== undefined && !lookup.found) {
+      cli.reporter.warn(`${displayPath(lookup.configFile, cli.cwd)} does not register the znight() plugin`)
+    }
+    options = lookup?.options
+  } catch (error) {
+    if (configFile !== undefined) {
+      throw new CliError(`Cannot load the Vite config ${configFile}`, { cause: error, hints: [errorMessage(error)] })
+    }
+    cli.reporter.warn(
+      `Cannot read the znight() options from the Vite config, using the defaults: ${errorMessage(error)}`,
+    )
+  }
+  return { ...options, root: resolve(root, options?.root ?? '.') }
+}
+
+function printDiagnostics(cli: CliContext, compiler: CompilerApi, result: CompileResultLike, root: string): void {
+  if (result.diagnostics.length === 0) return
+  const text = compiler.formatDiagnostics(result.diagnostics, {
+    color: cli.colors.isColorSupported,
+    cwd: root,
+    summary: false,
+  })
+  cli.reporter.logError(text.trimEnd())
+  cli.reporter.logError()
+}
+
+function statsOf(result: CompileResultLike, elapsedMs: number): string {
+  const parts: string[] = []
+  if (result.stats?.providers !== undefined) parts.push(plural(result.stats.providers, 'provider'))
+  if (result.stats?.files !== undefined) parts.push(plural(result.stats.files, 'file'))
+  parts.push(formatDuration(result.stats?.durationMs ?? elapsedMs))
+  return parts.join(', ')
+}
+
+function failure(cli: CliContext, result: CompileResultLike): void {
+  const errors = result.diagnostics.filter(diagnostic => diagnostic.severity === 'error').length
+  cli.reporter.error(`Generation failed with ${plural(errors, 'error')}`)
+}
+
+/** Prints the outcome of a generation. */
+function report(
+  cli: CliContext,
+  compiler: CompilerApi,
+  result: GenerateResultLike,
+  root: string,
+  elapsed: number,
+): void {
+  printDiagnostics(cli, compiler, result, root)
+  if (hasErrors(result.diagnostics)) {
+    failure(cli, result)
+    return
+  }
+  const file = displayPath(result.outFile, cli.cwd)
+  cli.reporter.success(
+    `${result.written ? 'Generated' : 'Up to date:'} ${cli.colors.bold(file)} ${cli.colors.dim(`(${statsOf(result, elapsed)})`)}`,
+  )
+}
+
+async function generateOnce(
+  cli: CliContext,
+  compiler: CompilerApi,
+  options: ZnightOptions,
+): Promise<GenerateResultLike> {
+  const started = performance.now()
+  const result = await compiler.generate(options)
+  report(cli, compiler, result, options.root ?? cli.cwd, performance.now() - started)
+  return result
+}
+
+async function check(cli: CliContext, compiler: CompilerApi, options: ZnightOptions): Promise<number> {
+  const root = options.root ?? cli.cwd
+  const started = performance.now()
+  const result = await compiler.check(options)
+  printDiagnostics(cli, compiler, result, root)
+  if (hasErrors(result.diagnostics)) {
+    failure(cli, result)
+    return 1
+  }
+  const file = displayPath(result.outFile, cli.cwd)
+  if (!existsSync(result.outFile)) {
+    cli.reporter.error(`${file} is missing`, [
+      'run "znight generate" (it is git-ignored: generate it before tsc and tests)',
+    ])
+    return 1
+  }
+  if (result.stale) {
+    cli.reporter.error(`${file} is out of date`, ['run "znight generate"'])
+    return 1
+  }
+  cli.reporter.success(
+    `${cli.colors.bold(file)} is up to date ${cli.colors.dim(`(${statsOf(result, performance.now() - started)})`)}`,
+  )
+  return 0
+}
+
+/** Classifies changed paths for the incremental compiler. */
+function changesOf(files: ReadonlySet<string>, known: ReadonlySet<string>): CompilerChanges {
+  const changed: string[] = []
+  const added: string[] = []
+  const removed: string[] = []
+  for (const file of files) {
+    if (!existsSync(file)) removed.push(file)
+    else if (known.has(file)) changed.push(file)
+    else added.push(file)
+  }
+  return { changed, added, removed }
+}
+
+async function watch(cli: CliContext, compiler: CompilerApi, options: ZnightOptions): Promise<number> {
+  const root = options.root ?? cli.cwd
+  const incremental: IncrementalCompiler = compiler.createIncremental(options)
+  let known = new Set<string>()
+  let pending = new Set<string>()
+  let running = false
+  let timer: ReturnType<typeof setTimeout> | undefined
+
+  const run = async (initial: boolean): Promise<void> => {
+    if (running) return
+    running = true
+    let first = initial
+    try {
+      do {
+        const files = pending
+        pending = new Set()
+        const started = performance.now()
+        try {
+          const result = await incremental.generate(first ? undefined : changesOf(files, known))
+          if (result.watchFiles !== undefined) known = new Set(result.watchFiles.map(file => resolve(file)))
+          report(cli, compiler, result, root, performance.now() - started)
+        } catch (error) {
+          cli.reporter.error(`Generation failed: ${errorMessage(error)}`)
+        }
+        first = false
+      } while (pending.size > 0)
+    } finally {
+      running = false
+    }
+  }
+
+  await run(true)
+  const watcher = cli.services.watch(watchTargets(root, options.include ?? DEFAULT_INCLUDE), file => {
+    if (incremental.isOutFile(file)) return
+    pending.add(resolve(file))
+    if (timer !== undefined) clearTimeout(timer)
+    timer = setTimeout(() => {
+      timer = undefined
+      void run(false)
+    }, 50)
+  })
+  cli.reporter.info(cli.colors.dim('Watching for changes... (Ctrl+C to stop)'))
+
+  return new Promise<number>(resolveExit => {
+    const dispose = onTermination(
+      cli,
+      () => {
+        if (timer !== undefined) clearTimeout(timer)
+        watcher.close()
+        dispose()
+        resolveExit(0)
+      },
+      () => undefined,
+    )
+  })
+}

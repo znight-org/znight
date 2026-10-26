@@ -62,6 +62,11 @@
       "types": "./dist/hono.d.mts",
       "default": "./dist/hono.mjs"
     },
+    "./compiler": {
+      "@znight/source": "./src/compiler/index.ts",
+      "types": "./dist/compiler.d.mts",
+      "default": "./dist/compiler.mjs"
+    },
     "./package.json": "./package.json"
   },
   "types": "./dist/index.d.mts",
