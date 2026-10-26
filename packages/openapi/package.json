@@ -1,0 +1,86 @@
+{
+  "name": "@znight/openapi",
+  "version": "0.1.0",
+  "description": "Znight OpenAPI: OpenAPI 3.1 documents generated at build time from your controllers, served with Scalar or Swagger UI",
+  "license": "MIT",
+  "author": "Ugho STEPHAN",
+  "homepage": "https://github.com/znight-org/znight/tree/main/packages/openapi#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/znight-org/znight.git",
+    "directory": "packages/openapi"
+  },
+  "bugs": "https://github.com/znight-org/znight/issues",
+  "keywords": ["znight", "openapi", "swagger", "scalar", "api-docs", "json-schema"],
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=24"
+  },
+  "exports": {
+    ".": {
+      "@znight/source": "./src/index.ts",
+      "types": "./dist/index.d.mts",
+      "default": "./dist/index.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "types": "./dist/index.d.mts",
+  "files": ["dist", "src"],
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p test"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@znight/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "@znight/http": "workspace:^",
+    "@znight/compiler": "workspace:^",
+    "vite": "^8.0.0",
+    "@valibot/to-json-schema": "^1.5.0",
+    "yaml": "^2.0.0",
+    "@scalar/api-reference": "^1.0.0",
+    "swagger-ui-dist": "^5.0.0",
+    "@cfworker/json-schema": "^4.1.0"
+  },
+  "peerDependenciesMeta": {
+    "@znight/compiler": {
+      "optional": true
+    },
+    "vite": {
+      "optional": true
+    },
+    "@valibot/to-json-schema": {
+      "optional": true
+    },
+    "yaml": {
+      "optional": true
+    },
+    "@scalar/api-reference": {
+      "optional": true
+    },
+    "swagger-ui-dist": {
+      "optional": true
+    },
+    "@cfworker/json-schema": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@znight/http": "workspace:*",
+    "@znight/compiler": "workspace:*",
+    "@znight/testing": "workspace:*",
+    "zod": "catalog:",
+    "valibot": "1.5.0",
+    "@valibot/to-json-schema": "1.8.0",
+    "arktype": "2.2.9",
+    "yaml": "2.9.1",
+    "@seriousme/openapi-schema-validator": "2.11.0",
+    "@cfworker/json-schema": "4.1.1",
+    "vite": "catalog:"
+  }
+}

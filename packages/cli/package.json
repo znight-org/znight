@@ -50,17 +50,23 @@
   },
   "devDependencies": {
     "vite": "catalog:",
-    "@znight/compiler": "workspace:*"
+    "@znight/compiler": "workspace:*",
+    "@znight/openapi": "workspace:*",
+    "@znight/schedule": "workspace:*"
   },
   "peerDependencies": {
     "@znight/compiler": "workspace:^",
-    "vite": "^8.0.0"
+    "vite": "^8.0.0",
+    "@znight/openapi": "workspace:^"
   },
   "peerDependenciesMeta": {
     "@znight/compiler": {
       "optional": true
     },
     "vite": {
+      "optional": true
+    },
+    "@znight/openapi": {
       "optional": true
     }
   }

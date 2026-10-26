@@ -2,7 +2,7 @@
 
 |          |                                                                                                                                                                                                                                              |
 | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Status   | Proposed                                                                                                                                                                                                                                     |
+| Status   | Accepted (v0.1)                                                                                                                                                                                                                              |
 | Date     | 2026-10-26                                                                                                                                                                                                                                   |
 | Affects  | `@znight/http` (runtime and compiler extension), `@znight/core` (one error code), docs, examples                                                                                                                                             |
 | Decision | **No `@znight/security` package in v0.1.** `@znight/http` gets route decision groups, a build-time and boot-time access check, CORS, security headers and trusted proxies. A tested Security guide and a `secure-api` example cover the rest |
