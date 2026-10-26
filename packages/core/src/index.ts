@@ -44,6 +44,8 @@ export {
   Hooks,
   type HooksOptions,
   type HookWrapper,
+  type HttpRequestEvent,
+  type MessageDeliveryEvent,
   type ZnightHooks,
 } from './hooks.ts'
 export {

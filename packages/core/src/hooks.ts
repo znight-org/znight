@@ -3,7 +3,7 @@ import type { CoreLogger } from './logger.ts'
 import { isThenable } from './utils.ts'
 
 /**
- * Typed registry of hook names and their event types. Feature packages augment it:
+ * Typed registry of hook names and their event types. Third-party packages may augment it:
  *
  * ```ts
  * declare module '@znight/core' {
@@ -13,8 +13,58 @@ import { isThenable } from './utils.ts'
  * }
  * ```
  */
-// biome-ignore lint/suspicious/noEmptyInterface: augmentation point for feature packages
-export interface ZnightHooks {}
+export interface ZnightHooks {
+  /** One HTTP request handled by `@znight/http` (wrapped with `hooks.run`). */
+  'http:request': HttpRequestEvent
+  /** One message delivery handled by `@znight/messaging` (wrapped with `hooks.run`). */
+  'messaging:message': MessageDeliveryEvent
+}
+
+/**
+ * Instrumentation event of the `http:request` hook. Defined in core so that producers
+ * (`@znight/http`) and observers (`@znight/observability`, user plugins) share one type.
+ * Mutable fields are filled in by the producer while the request is processed.
+ */
+export interface HttpRequestEvent {
+  readonly method: string
+  /** Request path, without query string. */
+  readonly path: string
+  /** Matched route pattern (e.g. `/users/:id`), `undefined` when no route matched. */
+  readonly route: string | undefined
+  readonly requestId: string
+  /** Lower-cased request headers. */
+  readonly headers: Readonly<Record<string, string | undefined>>
+  /** Adapter-neutral context (`HttpContext` from `@znight/http`). */
+  readonly context: unknown
+  /** `performance.now()` when the request started. */
+  readonly startTime: number
+  /** Final response status, set before `hooks.run` resolves. */
+  status?: number
+  /** Error thrown by the pipeline, if any (already mapped to `status`). */
+  error?: unknown
+  /** Response headers to add (e.g. trace context). */
+  readonly responseHeaders: Record<string, string>
+}
+
+/** Instrumentation event of the `messaging:message` hook. */
+export interface MessageDeliveryEvent {
+  readonly queue: string
+  readonly type: string | undefined
+  readonly messageId: string
+  /** 1-based delivery attempt. */
+  readonly attempt: number
+  readonly headers: Readonly<Record<string, string>>
+  /** Display name of the consumer class. */
+  readonly consumer: string
+  /** Handler method, `undefined` when no handler matched. */
+  readonly handler: string | undefined
+  /** `InboundMessage` from `@znight/messaging`. */
+  readonly message: unknown
+  readonly startTime: number
+  /** Outcome set before `hooks.run` resolves. */
+  outcome?: 'ack' | 'retry' | 'dead-letter'
+  error?: unknown
+}
 
 /** Name of a declared hook. */
 export type HookName = keyof ZnightHooks
