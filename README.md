@@ -92,8 +92,8 @@ export class UserService {
 
 ```typescript
 // src/controllers/user.controller.ts
-import { Controller, Get, Param } from '@znight/http';
-import { UserService } from '../services/user.service';
+import { Controller, Get, Param } from '@znight/http'
+import { UserService } from '../services/user.service'
 
 @Controller('/users')
 export class UserController {
@@ -101,7 +101,7 @@ export class UserController {
 
   @Get('/:id')
   async getUser(@Param('id') id: string) {
-    return this.users.findById(id);
+    return this.users.findById(id)
   }
 }
 ```

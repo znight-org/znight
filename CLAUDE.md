@@ -375,13 +375,13 @@ export class UserController {
   @Get('/:id')
   @UseGuard(AuthGuard)
   async getUser(@Param('id') id: string): Promise<User> {
-    return this.users.findById(id);
+    return this.users.findById(id)
   }
 
   @Post('/')
   @Validate(CreateUserDto)
   async createUser(@Body() dto: CreateUserDto): Promise<User> {
-    return this.users.create(dto);
+    return this.users.create(dto)
   }
 }
 ```
@@ -396,7 +396,7 @@ export class OrderConsumer {
   @OnMessage()
   @Retry({ attempts: 3, backoff: 'exponential' })
   async handleOrder(@Message() msg: OrderCreatedEvent) {
-    await this.orders.process(msg);
+    await this.orders.process(msg)
   }
 }
 ```
