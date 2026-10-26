@@ -60,7 +60,9 @@ preload = ["@znight/compiler/bun"]
 - **Deterministic output**: byte-identical for full and incremental builds, on every OS.
 - **Decorator stripping** with high-resolution source maps.
 - **Provider libraries**, from source or precompiled (`dist/znight.providers.json`).
-- **Extensible**: feature packages contribute compiler extensions through their manifest.
+- **Extensible**: feature packages contribute compiler extensions through their manifest, loaded
+  for the packages you import and for those declaring the decorators you apply (also through a
+  preset package re-exporting them).
 
 ## Options
 
@@ -80,13 +82,14 @@ const { stale } = await generate({ check: true }) // CI: never writes, `stale` w
 ```ts
 interface CompileResult {
   code: string // the generated module, or the error module when !ok
+  diskCode: string // the copy written to outFile: the `serve` rendering in every mode
   outFile: string // absolute
   diagnostics: Diagnostic[] // syntax errors (ZNIGHT022) first, then by file and offset
   ok: boolean // no error diagnostic
   graph: ApplicationGraph
   stats: { files: number; providers: number; durationMs: number; parsed: number }
   library: LibraryOutput | undefined // library mode: dist/znight.providers.json
-  watchFiles: string[] // sources, manifests and libraries the result depends on
+  watchFiles: string[] // sources, other files read outside node_modules, manifests, libraries
   decorators: ReadonlyMap<string, DecoratorRanges> // decorator ranges stripped by the Vite plugin / Bun preload
 }
 
@@ -108,9 +111,13 @@ interface Diagnostic {
 }
 ```
 
-`generate()` returns the same plus `written` (the files whose content changed) and `stale` (check
-mode). `createCompiler(options)` keeps the parse cache between compiles for watchers
-(`compile(changes)` / `generate(changes)` with `{ changed, added, removed }`).
+`generate()` writes `diskCode` (never with errors) and returns the same plus `written` (the files
+whose content changed), `stale` and `staleFiles` (check mode: which files are missing or out of
+date). The disk copy is the same in every mode, so a `vite build`, the Bun preload and `znight
+generate --check` agree on it; the Vite plugin and the Bun preload serve the module from memory and
+only warn when they cannot write it (read-only image). `createCompiler(options)` keeps the parse
+cache between compiles for watchers (`compile(changes)` / `generate(changes)` with `{ changed,
+added, removed }`).
 
 ## Learn more
 

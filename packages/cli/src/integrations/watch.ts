@@ -4,11 +4,14 @@
  * directories of the project and of its source libraries (recursively), the project root
  * (`package.json`, `tsconfig.json`, lockfiles) and the directories of the files the last compile
  * depends on (`watchFiles`: library manifests, compiled libraries...), refreshed after every compile.
+ * Which events matter is the compiler's call (`includeRoots()`, `isRelevantChange()`); this module
+ * only turns `fs.watch` events, which carry no kind and report a moved directory without its files,
+ * into compiler changes.
  *
  * Paths handed to the compiler are absolute, real (symbolic links resolved) and POSIX-style, like the
  * paths of the compiler itself (`watchFiles`, `includeRoots()`).
  */
-import type { CompilerChanges } from './compiler.ts'
+import type { ChangeKind, CompilerChanges } from './compiler.ts'
 
 import { existsSync, type FSWatcher, realpathSync, statSync, watch } from 'node:fs'
 import { join, posix, resolve } from 'node:path'
@@ -32,15 +35,6 @@ export interface FileWatcher {
 export type WatchFactory = (targets: readonly WatchTarget[], onChange: (file: string) => void) => FileWatcher
 
 const IGNORED_SEGMENTS = new Set(['node_modules', 'dist', 'coverage'])
-
-/** Extensions of the files the compiler parses (`isParseablePath()` of the compiler). */
-const PARSEABLE_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'])
-
-/** Files changing module resolution (`isResolutionConfigPath()` of the compiler). */
-const RESOLUTION_CONFIG_FILE =
-  /^(?:package\.json|tsconfig.*\.json|jsconfig.*\.json|package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb?)$/
-
-const GLOB_MAGIC = /[*?[\]{}()]/
 
 /** Native separators to forward slashes (the compiler's path style, also on Windows). */
 export function toPosixPath(path: string): string {
@@ -77,22 +71,6 @@ export function isWithin(directory: string, file: string): boolean {
   return file === directory || file.startsWith(directory.endsWith('/') ? directory : `${directory}/`)
 }
 
-/**
- * The static directory prefix of a glob (`globBase()` of the compiler): `src/**\/*.ts` → `src`,
- * `**\/*.ts` → `.`, `src/main.ts` → `src`.
- */
-export function globBase(glob: string): string {
-  const segments = glob.replace(/^!/, '').replaceAll('\\', '/').split('/')
-  const base: string[] = []
-  for (const segment of segments) {
-    if (GLOB_MAGIC.test(segment)) return base.join('/') || '.'
-    base.push(segment)
-  }
-  // a glob without magic is a file: its directory
-  base.pop()
-  return base.join('/') || '.'
-}
-
 /** Drops the directories nested in another one; sorted, de-duplicated. */
 function outermost(directories: Iterable<string>): string[] {
   const sorted = [...new Set(directories)].sort()
@@ -100,17 +78,9 @@ function outermost(directories: Iterable<string>): string[] {
 }
 
 /**
- * Directories where a created or deleted file may change the scan (`includeRoots()` of the
- * compiler): the bases of the `include` globs in each of `bases` (the project root, then the
- * directories of the source libraries). Absolute, POSIX-style, sorted, nested ones dropped.
- */
-export function includeRoots(bases: readonly string[], include: readonly string[]): string[] {
-  return outermost(bases.flatMap(base => include.map(glob => toPosixPath(resolve(base, globBase(glob))))))
-}
-
-/**
- * Directories to watch: the include `roots` recursively; the project `root` and the directories of
- * `files` (the `watchFiles` of the last compile) that are outside them, non-recursively.
+ * Directories to watch: the include `roots` (`includeRoots()` of the compiler) recursively; the
+ * project `root` and the directories of `files` (the `watchFiles` of the last compile) that are
+ * outside them, non-recursively.
  */
 export function watchTargets(root: string, roots: readonly string[], files: Iterable<string> = []): WatchTarget[] {
   const recursive = outermost(roots.map(toPosixPath))
@@ -123,14 +93,6 @@ export function watchTargets(root: string, roots: readonly string[], files: Iter
     ...recursive.map(path => ({ path, recursive: true })),
     ...[...flat].sort().map(path => ({ path, recursive: false })),
   ]
-}
-
-/** What {@link isRelevantChange} knows about the last compile. */
-export interface WatchState {
-  /** Files the last compile depends on (`watchFiles`): absolute, real, POSIX-style. */
-  readonly known: ReadonlySet<string>
-  /** Directories where a created or deleted source changes the scan ({@link includeRoots}). */
-  readonly roots: readonly string[]
 }
 
 type PathKind = 'file' | 'directory' | 'missing'
@@ -150,34 +112,27 @@ function knownWithin(known: ReadonlySet<string>, directory: string): string[] {
 }
 
 /**
- * Whether a file system event on `file` (absolute, real, POSIX-style) can change the compile result,
- * like `isRelevantChange()` of the compiler: a file the last compile depends on, a resolution config
- * file (package.json, tsconfig, lockfile), a source under an include root — and, as `fs.watch`
- * reports a moved directory as one event on the directory alone, a directory created under an
- * include root or a deleted one that contained compiled files.
+ * The kind of an `fs.watch` event on `file` (absolute, real, POSIX-style), which `fs.watch` does not
+ * tell, from the disk and the files of the last compile (`known`): `removed` when it is gone,
+ * `changed` for a known file, `added` otherwise (a new file, a directory created or moved there).
  */
-export function isRelevantChange(file: string, state: WatchState): boolean {
-  if (state.known.has(file)) return true
-  if (file.split('/').includes('node_modules')) return false
-  if (RESOLUTION_CONFIG_FILE.test(posix.basename(file))) return true
-  const inRoots = state.roots.some(root => isWithin(root, file))
-  if (inRoots && PARSEABLE_EXTENSIONS.has(posix.extname(file))) return true
+export function changeKind(file: string, known: ReadonlySet<string>): ChangeKind {
   switch (kindOf(file)) {
-    case 'directory':
-      return inRoots
     case 'missing':
-      return knownWithin(state.known, file).length > 0
+      return 'removed'
+    case 'directory':
+      return 'added'
     default:
-      return false
+      return known.has(file) ? 'changed' : 'added'
   }
 }
 
 /**
- * Classifies relevant paths ({@link isRelevantChange}) for the incremental compiler, given the files
- * of the last compile: a deleted path is removed with the known files it contained (a directory moved
- * away), an existing directory is added (the compiler re-runs the scan) and the known files it
- * contains are re-read (or removed when gone), an existing file is changed when known, added
- * otherwise.
+ * Classifies relevant paths (`isRelevantChange()` of the compiler) for the incremental compiler,
+ * given the files of the last compile: a deleted path is removed with the known files it contained
+ * (a directory moved away), an existing directory is added (the compiler re-runs the scan) and the
+ * known files it contains are re-read (or removed when gone), an existing file is changed when
+ * known, added otherwise.
  */
 export function classifyChanges(files: Iterable<string>, known: ReadonlySet<string>): CompilerChanges {
   const changed = new Set<string>()

@@ -203,6 +203,12 @@ SchedulerPlugin.configure(container => ({ tickMs: container.get(SchedulerConfig)
 This replaces NestJS's `forRootAsync({ useFactory, inject })`: the function receives the container,
 fully initialised, and can `get()` any provider.
 
+When your options name provider classes that the plugin resolves in `onBootstrap` (like the global
+`guards` of `HttpPlugin`), list them in an optional `initRoots()` method returning those classes
+(`[]` when the options are a function of the container). [`TestApp`](/guide/testing) creates them at
+boot with their dependencies, even when a test restricts the boot to the controllers; it must not
+throw (report invalid options in `onBootstrap`).
+
 ## Hooks
 
 `app.hooks` (also `ctx.hooks`) is a small, typed event bus that lets plugins observe and wrap what

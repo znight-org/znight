@@ -226,7 +226,9 @@ Properties of the output:
   parameters, so a handler signature that does not match its decorators fails `tsc`.
 - **Deterministic**: no timestamps, stable ordering, identical on every OS and for incremental and
   full builds. Diffs are meaningful.
-- **Lean**: source locations are omitted in production builds (`sourceLocations: 'dev'`).
+- **Lean**: source locations are omitted from production bundles (`sourceLocations: 'dev'`). The
+  file on disk is the same whatever the mode (the `serve` rendering, with locations), so
+  `znight generate`, `vite build`, the Bun preload and `znight generate --check` agree on it.
 
 ## The Vite plugin
 
@@ -263,7 +265,11 @@ Node.js environment); client environments are left alone.
   content are removed; files that were not analysed, and your other decorators, are untouched.
 - The generated module is **served from memory** (also before it exists on disk, on a fresh
   checkout); the copy on disk exists for `tsc` and your editor, is only rewritten when its content
-  changes and never while there are errors. Import it by path (relative), not through an alias.
+  changes and never while there are errors. A read-only file system (a container image) only gives a
+  warning. Import it by path (relative), not through an alias.
+- **Watching**: besides the `include` globs, every file the analysis read is watched (a constant
+  imported from `shared/`, a type of `src/types.d.ts`), and creating a file where a relative import
+  did not resolve recompiles.
 - Tools read the plugin state through `plugin.api`: `options`, `compiler`, `result` (the latest
   compile result) and `ready()` (compiles the pending changes).
 
@@ -348,14 +354,17 @@ preload = ["@znight/compiler/bun"]
 :::
 
 ```sh
-bun test                                             # regenerated before the tests run
-bun --preload @znight/compiler/bun --watch src/main.ts  # before the app starts, on every restart
+bun test                                                           # regenerated before the tests run
+bun --preload @znight/compiler/bun --no-env-file --watch src/main.ts  # before the app starts, on every restart
 ```
 
 The preload reads [`znight.config.ts`](#options), generates the container (`test` mode under
-`bun test`, `build` with `NODE_ENV=production`, `serve` otherwise; the disk copy is written when it
-changed), prints the diagnostics on stderr and, on errors, throws a `ZnightError`: `bun test` exits
-with code 1 and `bun --watch` waits for a fix. The Znight decorators of the analysed files are
+`bun test`, `build` with `NODE_ENV=production`, `serve` otherwise; the disk copy, the same in every
+mode, is written when it changed — a read-only file system only gives a warning, but the import
+resolves only when the file exists: generate it when you build an image), prints the diagnostics
+on stderr and, on errors, throws a `ZnightError`: `bun test` exits with code 1 and `bun --watch`
+waits for a fix. `--no-env-file` keeps Bun from loading `.env` files into `process.env` itself
+([why](/packages/config#bun-env-loading)). The Znight decorators of the analysed files are
 blanked out (replaced by spaces: line and column numbers are unchanged, no source map needed).
 
 Bun restarts `--watch` processes only for files it loaded: the preload makes Bun watch every file
@@ -390,17 +399,17 @@ console.log(result.stats) // { files, providers, durationMs, parsed }
 await generate({ check: process.env.CI === 'true' })
 ```
 
-| Export                     | Description                                                                                            |
-| -------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `znight(options)`          | The Vite plugin (also the default export)                                                              |
-| `compile(options)`         | Pure compile: `{ ok, code, outFile, diagnostics, graph, stats, watchFiles, decorators }`               |
-| `generate(options)`        | Compile and write `outFile` when it changed (`written`); `check: true` only compares (`stale`)         |
-| `createCompiler(options)`  | Incremental compiler for watchers: `compile(changes)` / `generate(changes)` re-read only changed files |
-| `formatDiagnostics`        | Pretty-prints diagnostics with code frames (`{ color?, cwd?, summary? }`)                              |
-| `renderErrorModule`        | The module served instead of the container when the compilation fails                                  |
-| `createPreload(options)`   | The Bun preload with these options (Bun only)                                                          |
-| `znightBunPlugin(options)` | The Bun plugin alone: serves the container from memory, blanks the decorators                          |
-| `loadZnightConfig(cwd?)`   | `{ file, options }` of `znight.config.*` / `ZNIGHT_CONFIG`                                             |
+| Export                     | Description                                                                                                                                       |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `znight(options)`          | The Vite plugin (also the default export)                                                                                                         |
+| `compile(options)`         | Pure compile: `{ ok, code, diskCode, outFile, diagnostics, graph, stats, watchFiles, decorators }`                                                |
+| `generate(options)`        | Compile and write `outFile` (`diskCode`, the same in every mode) when it changed (`written`); `check: true` only compares (`stale`, `staleFiles`) |
+| `createCompiler(options)`  | Incremental compiler for watchers: `compile(changes)` / `generate(changes)` re-read only changed files                                            |
+| `formatDiagnostics`        | Pretty-prints diagnostics with code frames (`{ color?, cwd?, summary? }`)                                                                         |
+| `renderErrorModule`        | The module served instead of the container when the compilation fails                                                                             |
+| `createPreload(options)`   | The Bun preload with these options (Bun only)                                                                                                     |
+| `znightBunPlugin(options)` | The Bun plugin alone: serves the container from memory, blanks the decorators                                                                     |
+| `loadZnightConfig(cwd?)`   | `{ file, options }` of `znight.config.*` / `ZNIGHT_CONFIG`                                                                                        |
 
 ## Provider libraries
 

@@ -101,7 +101,7 @@ export interface CompileResult {
 export interface GenerateOptions {
   /**
    * Check mode: never write; `stale` tells whether the files on disk differ from what would be
-   * generated (`znight generate --check`).
+   * generated, `staleFiles` which ones (`znight generate --check`).
    */
   readonly check?: boolean
 }
@@ -112,6 +112,11 @@ export interface GenerateResult extends CompileResult {
   readonly written: readonly string[]
   /** Check mode: the generated files on disk are missing or out of date. */
   readonly stale: boolean
+  /**
+   * Check mode: the generated files that are missing or out of date, the module first (then
+   * `znight.providers.json` in library mode). Empty when `stale` is `false`, and outside check mode.
+   */
+  readonly staleFiles: readonly string[]
 }
 
 /** An incremental compiler: a persistent project (parse cache) and loaded extensions. */
@@ -213,8 +218,9 @@ class IncrementalCompiler implements ZnightCompiler {
     const result = await this.compile(changes)
     const outputs = generatedFiles(result)
     if (options.check) {
-      const stale = result.ok && outputs.some(output => readText(output.file) !== output.content)
-      return { ...result, written: [], stale }
+      // `outputs` is empty with errors: nothing would be written, nothing is stale
+      const staleFiles = outputs.filter(output => readText(output.file) !== output.content).map(output => output.file)
+      return { ...result, written: [], stale: staleFiles.length > 0, staleFiles }
     }
     const written: string[] = []
     for (const output of outputs) {
@@ -222,7 +228,7 @@ class IncrementalCompiler implements ZnightCompiler {
         written.push(output.file)
       }
     }
-    return { ...result, written, stale: false }
+    return { ...result, written, stale: false, staleFiles: [] }
   }
 
   isOutFile(file: string): boolean {

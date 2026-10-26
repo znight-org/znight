@@ -60,26 +60,26 @@ await app.start()
 await app.stop()
 ```
 
-| Option      | Type                                | Description                                                                                    |
-| ----------- | ----------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `metadata`  | `ZnightMetadata`                    | The generated `__ZNIGHT_METADATA__` (required).                                                |
-| `plugins`   | `Plugin[]`                          | Runtime features, in order.                                                                    |
-| `providers` | `Map` / `[key, value][]` / `Record` | Values for externals or replacements of compiled providers. Keys: classes or tokens.           |
-| `overrides` | same as `providers`                 | Applied last, highest precedence (tests). Definitions (`{ scope, deps, factory }`) accepted.   |
-| `logger`    | `CoreLogger`                        | Initial logger (console, level `info`). Replace later with `app.setLogger()`.                  |
-| `shutdown`  | `ShutdownOptions`                   | `{ signals?: ShutdownSignal[] \| false, timeoutMs?: 10_000, hookTimeoutMs?: 5_000, process? }` |
-| `init`      | `InitOptions`                       | Forwarded to `container.init()`, e.g. `{ only: [UserController] }`.                            |
-| `hot`       | `import.meta.hot`                   | Stops the application when the module is replaced.                                             |
+| Option      | Type                                | Description                                                                                                                  |
+| ----------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `metadata`  | `ZnightMetadata`                    | The generated `__ZNIGHT_METADATA__` (required).                                                                              |
+| `plugins`   | `Plugin[]`                          | Runtime features, in order.                                                                                                  |
+| `providers` | `Map` / `[key, value][]` / `Record` | Values for externals or replacements of compiled providers. Keys: classes or tokens.                                         |
+| `overrides` | same as `providers`                 | Applied last, highest precedence (tests). Definitions (`{ scope, deps, factory }`) accepted.                                 |
+| `logger`    | `CoreLogger`                        | Initial logger (console, level `info`). Replace later with `app.setLogger()`.                                                |
+| `shutdown`  | `ShutdownOptions`                   | `{ signals?: ShutdownSignal[] \| false, timeoutMs?: 10_000, hookTimeoutMs?: 5_000, process? }`; `Infinity` disables a budget |
+| `init`      | `InitOptions`                       | Forwarded to `container.init()`, e.g. `{ only: [UserController] }`.                                                          |
+| `hot`       | `import.meta.hot`                   | Stops the application when the module is replaced; the HMR runtime waits for the stop.                                       |
 
-| Member                                      | Description                                                                           |
-| ------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `start()`                                   | Providers' `onStart` → plugins' `onStart` → `onReady` hooks; installs signal handlers |
-| `stop()`                                    | Idempotent graceful shutdown in three phases (see [Lifecycle](/guide/lifecycle))      |
-| `get(key)`                                  | Shortcut for `app.container.get(key)`                                                 |
-| `state`                                     | `'created' \| 'starting' \| 'ready' \| 'stopping' \| 'stopped' \| 'failed'`           |
-| `container`, `hooks`, `metadata`, `plugins` | The application's parts                                                               |
-| `logger`, `setLogger()`                     | The live application logger and its replacement                                       |
-| `getPlugin(name)`                           | A plugin by name                                                                      |
+| Member                                      | Description                                                                                                  |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `start()`                                   | Providers' `onStart` → plugins' `onStart` → `onReady` hooks; installs signal handlers                        |
+| `stop()`                                    | Idempotent graceful shutdown in three phases (see [Lifecycle](/guide/lifecycle)); callable from a start hook |
+| `get(key)`                                  | Shortcut for `app.container.get(key)`                                                                        |
+| `state`                                     | `'created' \| 'starting' \| 'ready' \| 'stopping' \| 'stopped' \| 'failed'`                                  |
+| `container`, `hooks`, `metadata`, `plugins` | The application's parts                                                                                      |
+| `logger`, `setLogger()`                     | The live application logger and its replacement                                                              |
+| `getPlugin(name)`                           | A plugin by name                                                                                             |
 
 ## `Container`
 
@@ -94,7 +94,7 @@ Created by the application (`app.container`), or directly with `Container.create
 | `provide(key, value)`              | Value with application precedence (`Application.create({ providers })`)              |
 | `override(key, valueOrDefinition)` | Replacement with the highest precedence                                              |
 | `init({ only? })`                  | Seals, validates and creates singletons (concurrently when independent)              |
-| `get(key)` / `getOptional(key)`    | Resolve by class, token, alias or unique display name                                |
+| `get(key)` / `getOptional(key)`    | Resolve by class, token, alias or unique display name (below)                        |
 | `has(key)` / `tokenOf(key)`        | Lookups                                                                              |
 | `runInScope(fn, values?)`          | Runs `fn` in a new request scope seeded with `[key, value]` pairs                    |
 | `currentScope()`                   | The active `ScopeContext` (`get`, `set`, `has`) or `undefined`                       |
@@ -106,6 +106,14 @@ registration after `init()` throws [`ZNIGHT016`](/reference/error-codes#znight01
 
 Built-in tokens (`CoreTokens`): `Container`, `Application`, `Hooks` and `Logger` (`CoreLogger`) are
 injectable by any provider.
+
+A class that is not a registered key (an abstract base behind an alias, a class supplied by a
+plugin) is looked up by its name, among the candidates of its own class hierarchy: a candidate of
+another class with the same name is ignored (a class of yours named `Container` never resolves the
+Znight `Container`), and candidates whose class is unknown (an external value, an `implements` fake
+given to `override()`) count only when nothing of the hierarchy matches. Singletons created on first
+use (`init({ only })`) are created outside of any request scope, even when a request uses them
+first.
 
 ## Tokens
 

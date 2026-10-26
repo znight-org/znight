@@ -137,7 +137,25 @@ A driver implements
 `MessagingPlugin.configure({ driver, defaults?, codec?, consume? })`: `defaults.retry` (3 attempts,
 exponential from 1 s, capped at 30 s; `false` = a single attempt), `defaults.concurrency` (1),
 `defaults.deadLetter` (`(queue) => name` or `false`), `defaults.requeueDelay` (1 s); `consume: false`
-for publish-only processes. Options may be a function of the container.
+for publish-only processes. Options may be a function of the container; invalid options fail
+`Application.create()` with [`ZNIGHT011`](/reference/error-codes#znight011).
+
+While consumers are subscribed (from `onStart` to the end of `onStop`), the plugin keeps the process
+alive: a worker whose only ingress is a consumer does not exit after `app.start()`, whatever the
+driver (the in-memory one holds no socket), and stops through `app.stop()` or a signal.
+
+Driver highlights (details in the
+[package README](https://github.com/ugho49/Znight/tree/main/packages/messaging#drivers)):
+
+- **RabbitMQ**: delayed publications go through 32 delay levels shared by every queue of the
+  virtual host (`znight.delays.0` to `.31`, option `delayLevelPrefix`), never a queue per delay;
+  retries use per-delay queues bounded by your `@Retry` policies. On RabbitMQ 4+, declared quorum
+  queues get `x-delivery-limit: -1` (Znight counts the attempts; an existing queue without it gets a
+  warning recommending a `delivery-limit` policy). Lost connections, closed channels and consumers
+  cancelled by the broker are recovered, with backoff, until every consumer consumes again.
+- **Kafka**: records fetched again after a rebalance are skipped (commits never move back), and the
+  retry stream has its own back-pressure, so waiting retries never pause the main topic.
+- **SQS**: the lease extension stops before each settlement, so it never overrides a retry delay.
 
 ## Concurrency
 

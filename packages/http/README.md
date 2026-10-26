@@ -829,7 +829,24 @@ once at bootstrap: `HttpPlugin.configure(c => ({ port: c.get(AppConfig).port }))
 
 The plugin instance (`app.getPlugin<HttpPlugin>('http')`, or injected as `HttpPlugin`) exposes
 `address` (`{ host, port, family, url }`, `String(address)` is the URL; `undefined` when not
-listening), `inject(request)`, `routes`, `adapter` and `inflight`.
+listening), `inject(request)`, `routes`, `adapter`, `inflight` and `initRoots()`.
+
+`initRoots()` lists the provider classes the plugin resolves at bootstrap although no compiled
+metadata references them: the classes of `guards`, `interceptors` and `exceptionMappers` (instances
+are left out), in that order. It returns `[]` when the options are a function of the container (they
+are only evaluated at bootstrap) and never throws (invalid options are reported by `onBootstrap`).
+A boot restricted with `init: { only }` must include them when they, or their dependencies, have an
+async factory (an async factory cannot run on demand); `TestApp` from `@znight/testing` adds them
+by itself:
+
+```ts
+const http = HttpPlugin.configure({ port: 0, guards: [AuthGuard] }) // AuthGuard needs the async JwksStore
+const app = await Application.create({
+  metadata,
+  plugins: [http],
+  init: { only: [UserController, ...http.initRoots()] },
+})
+```
 
 ## Adapters
 
@@ -953,7 +970,9 @@ used.
 ## Testing
 
 `plugin.inject()` sends a request in memory through the adapter's routing and the whole pipeline,
-without listening (`@znight/testing`'s `TestApp.inject()` delegates to it):
+without listening (`@znight/testing`'s `TestApp.inject()` delegates to it, and `TestApp.create()`
+creates the global guards, interceptors and mappers listed by
+[`initRoots()`](#plugin-options) at boot):
 
 ```ts
 const http = HttpPlugin.configure({ port: 0 })
@@ -1053,13 +1072,18 @@ accepted too. `file?: File` / `File | undefined` makes an upload optional (`requ
   on a method that is not a route; applied twice; invalid or non-static arguments (`@HttpCode(42)`,
   bad header names, a schema that is not a reference to an exported binding); a handler that is
   static, `private`/`protected`, `#private`, an accessor or has a computed name; a handler parameter
-  without HTTP decorator; `@Validate(S)` combined with `@Body(S2)`; an invalid
-  `createRouteDecorator` declaration; upload parameters: a type other than `File` / `File[]`, an
-  invalid field or option (unknown key, `maxSize` that is not a size, `maxFiles` on
-  `@UploadedFile`, invalid media type patterns), `{ required: false }` on a parameter typed `File`,
-  two parameters reading the same field, a parameter without field combined with others; an
-  invalid `@BodyLimit`. `@Res()`, `@Body(SomeClass)` (a class is not a schema) and upload
-  parameters on `GET` / `HEAD` / `DELETE` / `OPTIONS` routes are warnings.
+  without HTTP decorator, or with a look-alike imported from another package (`Headers` / `Ctx` of
+  `@znight/messaging`: the error names the import to use); `@Validate(S)` combined with
+  `@Body(S2)`; an invalid `createRouteDecorator` declaration; upload parameters: a type other than
+  `File` / `File[]`, an invalid field or option (unknown key, `maxSize` that is not a size,
+  `maxFiles` on `@UploadedFile`, invalid media type patterns), `{ required: false }` on a parameter
+  typed `File`, two parameters reading the same field, a parameter without field combined with
+  others; an invalid `@BodyLimit`. `@Res()`, `@Body(SomeClass)` (a class is not a schema) and upload
+  parameters on `GET` / `HEAD` / `DELETE` / `OPTIONS` routes are warnings. On a class owned by
+  another extension (a `@Consumer`), HTTP decorators are reported without suggesting
+  `@Controller()`, and those on the parameters of its handlers (`@OnMessage`) are left to that
+  extension (`@znight/messaging` reports a `Headers` imported from `@znight/http`), unless the
+  parameter is also read through its decorators or is optional.
 - **ZNIGHT007** (invalid route): path grammar (base path, route path and their combination); a
   `:param` not consumed by `@Param('param')` (a `@Param()`, `@Ctx()` or `@Req()` parameter consumes
   them all); a `@Param('x')` without `:x` in the path; a `@Param` / `@Headers` type that cannot be

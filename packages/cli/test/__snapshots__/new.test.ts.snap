@@ -442,6 +442,9 @@ bunx znight g controller users/user     # src/users/user.controller.ts
 \`.env\` / \`.env.local\` files. Missing or invalid values stop the application at boot with every
 problem listed.
 
+\`bunfig.toml\` turns Bun's own \`.env\` loading off (\`env = false\`): the files are read by
+\`@znight/config\`, the same way on Node.js and Bun.
+
 ## Tests
 
 \`bun test\` regenerates the container first (\`bunfig.toml\` preloads \`@znight/compiler/bun\`).
@@ -452,7 +455,11 @@ problem listed.
 "
 ,
   "bunfig.toml": 
-"[test]
+"# @znight/config loads the .env files (dotenv()), the same way on Node.js and Bun: Bun's own
+# loading would put them in process.env first, with its own precedence
+env = false
+
+[test]
 # Regenerates the DI container (src/.znight/container.generated.ts) before the tests run
 preload = ["@znight/compiler/bun"]
 "

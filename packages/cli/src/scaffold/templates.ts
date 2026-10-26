@@ -56,7 +56,7 @@ export function renderProject(options: ProjectOptions): ProjectFile[] {
   ]
   if (flags.config) files.push({ path: 'src/app/app.config.ts', content: appConfig() })
   if (flags.messaging) files.push({ path: 'src/app/greeting.consumer.ts', content: greetingConsumer(flags) })
-  if (flags.bun) files.push({ path: 'bunfig.toml', content: bunfig() })
+  if (flags.bun) files.push({ path: 'bunfig.toml', content: bunfig(flags) })
   if (flags.pm === 'yarn') files.push({ path: '.yarnrc.yml', content: 'nodeLinker: node-modules\n' })
   return files.sort((a, b) => (a.path < b.path ? -1 : 1))
 }
@@ -177,8 +177,16 @@ export default {
 `
 }
 
-function bunfig(): string {
-  return `[test]
+function bunfig(flags: Flags): string {
+  // Bun loads .env files into process.env with its own precedence, which then wins over dotenv()
+  const env = flags.config
+    ? `# @znight/config loads the .env files (dotenv()), the same way on Node.js and Bun: Bun's own
+# loading would put them in process.env first, with its own precedence
+env = false
+
+`
+    : ''
+  return `${env}[test]
 # Regenerates the DI container (src/.znight/container.generated.ts) before the tests run
 preload = ["@znight/compiler/bun"]
 `
@@ -584,7 +592,14 @@ function readme(options: ProjectOptions, flags: Flags): string {
 
 \`AppConfig\` (\`src/app/app.config.ts\`) reads \`PORT\` and \`APP_GREETING\` from the environment or from
 \`.env\` / \`.env.local\` files. Missing or invalid values stop the application at boot with every
-problem listed.
+problem listed.${
+        flags.bun
+          ? `
+
+\`bunfig.toml\` turns Bun's own \`.env\` loading off (\`env = false\`): the files are read by
+\`@znight/config\`, the same way on Node.js and Bun.`
+          : ''
+      }
 `
     : ''
   const testNote = flags.bun

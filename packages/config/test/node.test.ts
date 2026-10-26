@@ -31,6 +31,11 @@ it.skipIf(node === null)(
         inspect: "DbConfig { host: 'yaml-host', port: 6000, password: '[REDACTED]' }",
         json: '{"host":"yaml-host","port":6000,"password":"[REDACTED]"}',
         validation: 'ZNIGHT006',
+        invalidVaultResponse: {
+          message:
+            'ZNIGHT006: Config loader "vault" failed: cannot read secret secret/invalid after 1 attempt(s): the response body is not valid JSON (50 characters, application/json)',
+          leaked: false,
+        },
       })
     } finally {
       cleanup()

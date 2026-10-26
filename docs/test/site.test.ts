@@ -116,4 +116,25 @@ describe('error reference', () => {
     const documented = [...text.matchAll(/^## (ZNIGHT\d{3}):/gm)].map(match => match[1])
     expect(documented).toEqual(codes)
   })
+
+  it('names the whole range of codes in its description', () => {
+    const description = /^description: (.+)$/m.exec(text)?.[1] ?? ''
+    expect(description).toContain(`${codes[0]} to ${codes.at(-1)}`)
+  })
+
+  it('tells when each code is reported, with the phases of the summary table only', () => {
+    const phases = new Set(['build', 'startup', 'runtime', 'shutdown'])
+    for (const code of codes) {
+      const row = text.split('\n').find(line => line.startsWith(`| [${code}](`)) ?? ''
+      const reported = row.split('|').at(-2)?.trim() ?? ''
+      const listed = reported.split(', ')
+      expect({ code, unknown: listed.filter(phase => !phases.has(phase)) }).toEqual({ code, unknown: [] })
+    }
+  })
+
+  it('the specification lists every code in its validation table', () => {
+    const spec = readFileSync(join(docsDir, 'internals/architecture.md'), 'utf8')
+    const listed = [...spec.matchAll(/^\| (ZNIGHT\d{3}) \|/gm)].map(match => match[1])
+    expect(listed).toEqual(codes)
+  })
 })

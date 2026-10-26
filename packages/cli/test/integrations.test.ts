@@ -12,10 +12,8 @@ import {
   readZnightPluginOptions,
 } from '../src/integrations/vite.ts'
 import {
+  changeKind,
   classifyChanges,
-  globBase,
-  includeRoots,
-  isRelevantChange,
   realPath,
   TargetWatchers,
   toPosixPath,
@@ -299,19 +297,8 @@ describe('vite helpers', () => {
 })
 
 describe('watching', () => {
-  it('computes glob bases, include roots and watch targets', () => {
-    expect(globBase('src/**/*.{ts,tsx,mts}')).toBe('src')
-    expect(globBase('apps/api/src/**/*.ts')).toBe('apps/api/src')
-    expect(globBase('**/*.ts')).toBe('.')
-    expect(globBase('src/main.ts')).toBe('src')
-    expect(globBase('!src/**/*.test.ts')).toBe('src')
-    // the project root, then the source libraries: nested roots dropped
-    expect(includeRoots(['/app', '/libs/shared'], ['src/**/*.ts', 'src/users/**/*.ts', 'lib/*.ts'])).toEqual([
-      '/app/lib',
-      '/app/src',
-      '/libs/shared/lib',
-      '/libs/shared/src',
-    ])
+  it('computes the watch targets from the include roots and the files of the last compile', () => {
+    // the include roots recursively (nested ones dropped), the project root flat
     expect(watchTargets('/app', ['/app/src', '/app/lib', '/app/src/users'])).toEqual([
       { path: '/app/lib', recursive: true },
       { path: '/app/src', recursive: true },
@@ -353,30 +340,20 @@ describe('watching', () => {
     expect(toPosixPath('C:\\repo\\src')).toBe('C:/repo/src')
   })
 
-  it('tells which changes are relevant', () => {
+  it('tells the kind of an fs.watch event from the disk and the files of the last compile', () => {
     const root = realpathSync(directory.path)
     const src = `${root}/src`
     mkdirSync(join(src, 'users'), { recursive: true })
-    mkdirSync(join(root, 'docs'))
-    for (const file of ['users/user.service.ts', 'notes.md', 'legacy.js']) writeFileSync(join(src, file), '')
-    const state = { known: new Set([`${src}/users/user.service.ts`, `${root}/package.json`]), roots: [src] }
-    expect(isRelevantChange(`${src}/users/user.service.ts`, state)).toBe(true)
-    expect(isRelevantChange(`${root}/package.json`, state)).toBe(true)
-    expect(isRelevantChange(`${root}/tsconfig.json`, state)).toBe(true)
-    expect(isRelevantChange(`${src}/a.mts`, state)).toBe(true)
-    // every source the compiler parses, `.js` included
-    expect(isRelevantChange(`${src}/legacy.js`, state)).toBe(true)
-    expect(isRelevantChange(`${src}/notes.md`, state)).toBe(false)
-    expect(isRelevantChange(`${root}/other.ts`, state)).toBe(false)
-    expect(isRelevantChange(`${root}/node_modules/x/index.ts`, state)).toBe(false)
-    expect(isRelevantChange(`${root}/node_modules/x/package.json`, state)).toBe(false)
-    // a directory created or moved into an include root (fs.watch reports the directory only)
-    expect(isRelevantChange(`${src}/users`, state)).toBe(true)
-    expect(isRelevantChange(`${root}/docs`, state)).toBe(false)
-    // a directory deleted or moved away, with compiled files
+    for (const file of ['users/user.service.ts', 'new.ts']) writeFileSync(join(src, file), '')
+    const known = new Set([`${src}/users/user.service.ts`, `${src}/gone.ts`])
+    expect(changeKind(`${src}/users/user.service.ts`, known)).toBe('changed')
+    expect(changeKind(`${src}/new.ts`, known)).toBe('added')
+    expect(changeKind(`${src}/gone.ts`, known)).toBe('removed')
+    // a directory created or moved there (fs.watch reports the directory only), one deleted or moved away
+    expect(changeKind(`${src}/users`, known)).toBe('added')
     rmSync(join(src, 'users'), { recursive: true })
-    expect(isRelevantChange(`${src}/users`, state)).toBe(true)
-    expect(isRelevantChange(`${src}/other`, state)).toBe(false)
+    expect(changeKind(`${src}/users`, known)).toBe('removed')
+    expect(changeKind(`${src}/users/user.service.ts`, known)).toBe('removed')
   })
 
   it('classifies changes, directories included', () => {

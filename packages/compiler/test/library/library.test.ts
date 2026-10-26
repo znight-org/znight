@@ -307,13 +307,14 @@ describe('compiled provider libraries', () => {
   })
 
   it('emits znight.providers.json in library mode', async () => {
-    const result = await generate({
+    const options = {
       root: library.root,
       library: true,
       conditions: ['acme-source'],
       extensions: [marks],
       mode: 'build',
-    })
+    } as const
+    const result = await generate(options)
     expect(
       render(
         library.root,
@@ -326,6 +327,19 @@ describe('compiled provider libraries', () => {
     const file = `${library.root}/dist/znight.providers.json`
     expect(result.written).toContain(file)
     expect(result.library?.file).toBe(file)
+    // check mode names the stale generated files: here only the manifest (a build cleaned dist/)
+    const content = fs.readFileSync(file, 'utf8')
+    const checkOptions = { ...options, check: true }
+    expect(await generate(checkOptions)).toMatchObject({ stale: false, staleFiles: [] })
+    fs.rmSync(file)
+    try {
+      expect(await generate(checkOptions)).toMatchObject({ stale: true, staleFiles: [file] })
+      fs.rmSync(result.outFile)
+      expect(await generate(checkOptions)).toMatchObject({ stale: true, staleFiles: [result.outFile, file] })
+    } finally {
+      fs.writeFileSync(file, content)
+      fs.writeFileSync(result.outFile, result.diskCode)
+    }
     fragment = JSON.parse(fs.readFileSync(file, 'utf8')) as ProvidersFile
     expect(fragment.schemaVersion).toBe(1)
     expect(fragment.package).toBe('@acme/auth')

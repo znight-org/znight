@@ -49,13 +49,17 @@ NODE_ENV=production node --enable-source-maps dist/main.js
 ```
 
 ```sh [Bun]
-NODE_ENV=production bun dist/main.js
+NODE_ENV=production bun --no-env-file dist/main.js
 ```
 
 :::
 
 - `NODE_ENV=production` disables development-only checks (such as the interceptor sync/async check).
 - `--enable-source-maps` makes Node.js stack traces point to your TypeScript sources.
+- `--no-env-file` stops Bun from loading `.env`, `.env.production` and `.env.local` into
+  `process.env` by itself (with its own precedence and `${VAR}` expansion): with
+  [`@znight/config`](/packages/config#bun-env-loading), `dotenv()` loads them, the same way
+  as on Node.js. `env = false` in `bunfig.toml` does the same for every `bun` command of the project.
 - Bun can also run the sources directly (`bun src/main.ts`) if you generate the container first
   (`znight generate` or the [Bun preload](./compiler#bun-preload)); the build output is still the most
   predictable artifact.

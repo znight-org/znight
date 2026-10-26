@@ -131,6 +131,15 @@ describe('project templates', () => {
     expect(tsconfig(project).compilerOptions['types']).toEqual(['bun'])
   })
 
+  it('bun projects leave the .env files to @znight/config (Bun would load them first, with its own precedence)', () => {
+    const bunfig = file(files({ packageManager: 'bun' }), 'bunfig.toml')
+    // a top-level key: before the [test] table
+    expect(bunfig.indexOf('env = false\n')).toBeGreaterThanOrEqual(0)
+    expect(bunfig.indexOf('env = false\n')).toBeLessThan(bunfig.indexOf('[test]'))
+    // without @znight/config, nothing loads them but Bun
+    expect(file(files({ packageManager: 'bun', features: [] }), 'bunfig.toml')).not.toContain('env = false')
+  })
+
   it('the TestApp test starts no metrics server (it would collide on :9464 with dev or other test files)', () => {
     const test = file(files(), 'test/greeting.controller.test.ts')
     expect(test).toContain(

@@ -1,10 +1,14 @@
 import type { HostRuntime } from '../src/runtime.ts'
 
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import { FakeVite, type FakeZnightApi } from './fake-vite.ts'
 import { type CliRun, FakeProcesses, FakeSignals, runCli, temporaryDirectory, waitFor } from './helpers.ts'
 import { afterEach, beforeEach, describe, expect, test as it } from 'bun:test'
+
+/** The orphan guard preloaded into the application (`orphan-guard.ts`, from sources in the tests). */
+const GUARD_URL = import.meta.resolve('@znight/cli/orphan-guard')
 
 describe('znight dev', () => {
   let project: { path: string; cleanup: () => void }
@@ -46,10 +50,12 @@ describe('znight dev', () => {
     await waitFor(() => processes.children.length === 1)
     const child = processes.children[0]
     expect(child?.command).toBe('/usr/bin/node')
-    expect(child?.args).toEqual(['--enable-source-maps', join(project.path, 'dist/main.js')])
+    expect(child?.args).toEqual(['--enable-source-maps', '--import', GUARD_URL, join(project.path, 'dist/main.js')])
     expect(child?.options.cwd).toBe(project.path)
     expect(child?.options.detached).toBe(true)
     expect(child?.options.env['NODE_ENV']).toBe('development')
+    // detached: it stops by itself if the CLI dies without stopping it (poll 500 ms, --kill-timeout)
+    expect(child?.options.env['ZNIGHT_DEV_PARENT']).toBe(`${process.pid}:500:5000`)
 
     signals.emit('SIGINT')
     const run = await running
@@ -285,6 +291,8 @@ describe('znight dev', () => {
     await waitFor(() => processes.children.length === 1)
     expect(processes.children[0]?.args).toEqual([
       '--enable-source-maps',
+      '--import',
+      GUARD_URL,
       '--inspect',
       join(project.path, 'dist/main.js'),
       '--verbose',
@@ -341,7 +349,12 @@ describe('znight dev', () => {
     vite.succeed()
     await waitFor(() => processes.children.length === 1)
     expect(processes.children[0]?.command).toBe('/opt/bun')
-    expect(processes.children[0]?.args).toEqual([join(project.path, 'dist/main.js')])
+    // Bun preloads paths (it ignores data: URLs)
+    expect(processes.children[0]?.args).toEqual([
+      '--preload',
+      fileURLToPath(GUARD_URL),
+      join(project.path, 'dist/main.js'),
+    ])
     signals.emit('SIGINT')
     await running
   })

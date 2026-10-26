@@ -1,5 +1,5 @@
 ---
-description: Every Znight error code (ZNIGHT001 to ZNIGHT021) with its meaning, an example that triggers it and how to fix it.
+description: Every Znight error code (ZNIGHT001 to ZNIGHT022) with its meaning, an example that triggers it and how to fix it.
 outline: [ 2, 2 ]
 ---
 
@@ -9,30 +9,30 @@ Every problem Znight can detect has a stable code, shared by the compiler (build
 and the runtime (`ZnightError`). Messages link here: each code has its own anchor
 (`/reference/error-codes#znight001`).
 
-| Code                    | Meaning                                             | Severity                                | Reported          |
-| ----------------------- | --------------------------------------------------- | --------------------------------------- | ----------------- |
-| [ZNIGHT001](#znight001) | Missing provider                                    | error                                   | build, startup    |
-| [ZNIGHT002](#znight002) | Circular dependency                                 | error                                   | build, startup    |
-| [ZNIGHT003](#znight003) | Scope mismatch (singleton → request)                | error                                   | build, startup    |
-| [ZNIGHT004](#znight004) | Duplicate provider                                  | error                                   | build, startup    |
-| [ZNIGHT005](#znight005) | Invalid decorator usage                             | error / warning                         | build, runtime    |
-| [ZNIGHT006](#znight006) | Missing required configuration value                | error                                   | startup           |
-| [ZNIGHT007](#znight007) | Invalid route                                       | error                                   | build             |
-| [ZNIGHT008](#znight008) | Ambiguous injection                                 | error                                   | build, runtime    |
-| [ZNIGHT009](#znight009) | Invalid lifecycle hook                              | error / warning                         | build             |
-| [ZNIGHT010](#znight010) | Unresolvable injection type                         | error / warning                         | build             |
-| [ZNIGHT011](#znight011) | Invalid message consumer                            | error                                   | build             |
-| [ZNIGHT012](#znight012) | Invalid config property                             | error                                   | build             |
-| [ZNIGHT013](#znight013) | Request-scoped provider outside of a request scope  | error                                   | runtime           |
-| [ZNIGHT014](#znight014) | Async factory on a non-singleton provider           | error                                   | build, startup    |
-| [ZNIGHT015](#znight015) | Provider instantiation failed                       | error                                   | startup, runtime  |
-| [ZNIGHT016](#znight016) | Container sealed                                    | error                                   | runtime           |
-| [ZNIGHT017](#znight017) | Unvalidated input                                   | warning (error with `strictValidation`) | build             |
-| [ZNIGHT018](#znight018) | Version mismatch                                    | error                                   | build, startup    |
-| [ZNIGHT019](#znight019) | Unused provider                                     | warning (with `reportUnused`)           | build             |
-| [ZNIGHT020](#znight020) | Generated module imported by a provider module      | error                                   | build             |
-| [ZNIGHT021](#znight021) | Lifecycle hook or shutdown step failed or timed out | error                                   | startup, shutdown |
-| [ZNIGHT022](#znight022) | Syntax error in a source file                       | error                                   | build             |
+| Code                    | Meaning                                             | Severity                                | Reported                   |
+| ----------------------- | --------------------------------------------------- | --------------------------------------- | -------------------------- |
+| [ZNIGHT001](#znight001) | Missing provider                                    | error                                   | build, startup             |
+| [ZNIGHT002](#znight002) | Circular dependency                                 | error                                   | build, startup             |
+| [ZNIGHT003](#znight003) | Scope mismatch (singleton → request)                | error                                   | build, startup             |
+| [ZNIGHT004](#znight004) | Duplicate provider                                  | error                                   | build, startup             |
+| [ZNIGHT005](#znight005) | Invalid decorator usage                             | error / warning                         | build, runtime             |
+| [ZNIGHT006](#znight006) | Missing required configuration value                | error                                   | startup                    |
+| [ZNIGHT007](#znight007) | Invalid route                                       | error                                   | build                      |
+| [ZNIGHT008](#znight008) | Ambiguous injection                                 | error                                   | build, runtime             |
+| [ZNIGHT009](#znight009) | Invalid lifecycle hook                              | error / warning                         | build                      |
+| [ZNIGHT010](#znight010) | Unresolvable injection type                         | error / warning                         | build                      |
+| [ZNIGHT011](#znight011) | Invalid message consumer                            | error                                   | build, startup, runtime    |
+| [ZNIGHT012](#znight012) | Invalid config property                             | error                                   | build, startup             |
+| [ZNIGHT013](#znight013) | Request-scoped provider outside of a request scope  | error                                   | runtime                    |
+| [ZNIGHT014](#znight014) | Async factory on a non-singleton provider           | error                                   | build, startup             |
+| [ZNIGHT015](#znight015) | Provider instantiation failed                       | error                                   | startup, runtime           |
+| [ZNIGHT016](#znight016) | Container sealed                                    | error                                   | runtime                    |
+| [ZNIGHT017](#znight017) | Unvalidated input                                   | warning (error with `strictValidation`) | build                      |
+| [ZNIGHT018](#znight018) | Version mismatch                                    | error / warning                         | build, startup             |
+| [ZNIGHT019](#znight019) | Unused provider                                     | warning (with `reportUnused`)           | build                      |
+| [ZNIGHT020](#znight020) | Generated module imported by a provider module      | error                                   | build                      |
+| [ZNIGHT021](#znight021) | Lifecycle hook or shutdown step failed or timed out | error                                   | startup, runtime, shutdown |
+| [ZNIGHT022](#znight022) | Syntax error in a source file                       | error                                   | build                      |
 
 ## Reading an error
 
@@ -206,26 +206,30 @@ export class ReportRepository {
 - Or mark the default one `@Primary()` (`@Provides({ primary: true })`).
 
 **At runtime**, the same code reports conflicting registrations: two plugins registering the same
-token, `registerValue()` on a compiled provider (use `override()`), or the same plugin added twice to
-`Application.create()`.
+token, `registerValue()` on a compiled provider (use `override()`), the same plugin added twice to
+`Application.create()`, or one `HttpPlugin.configure()` instance used by a second application while
+the first one still runs (call `HttpPlugin.configure()` once per application; an instance can serve
+another application once the previous one stopped).
 
 ## ZNIGHT005: Invalid decorator usage {#znight005}
 
 A decorator is used where it is not allowed, or with arguments the compiler cannot use. Common cases:
 
-| Situation                                                     | Fix                                                                       |
-| ------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| Provider class not exported (or anonymous default export)     | `export class X`                                                          |
-| Static argument not evaluable: `@Controller(process.env.X)`   | Use a literal or `export const X = '...'`                                 |
-| Inline value argument not evaluable: `@Body(z.object({...}))` | Extract it: `export const Schema = z.object({...})`, then `@Body(Schema)` |
-| `@Provides()` outside a `@Factory()` class                    | Move it to a `@Factory()` class                                           |
-| `@Provides()` without an explicit return type                 | Annotate the return type: it is what the method provides                  |
-| Private, `#private` or static handler / `@Provides` method    | Make it a public instance method                                          |
-| `@Injectable()` on an abstract class                          | Decorate the concrete subclasses                                          |
-| `@Injectable()` on a class with unbound type parameters       | Subclass with concrete type arguments, or use `@Provides`                 |
-| Class registered by several provider decorators               | Keep one (`@Injectable()` **or** `@Controller()`...)                      |
-| `@Validate()` and `@Body()` on the same route                 | Use one of them                                                           |
-| Composite decorator (warning)                                 | See below                                                                 |
+| Situation                                                                                            | Fix                                                                       |
+| ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Provider class not exported (or anonymous default export)                                            | `export class X`                                                          |
+| Static argument not evaluable: `@Controller(process.env.X)`                                          | Use a literal or `export const X = '...'`                                 |
+| Inline value argument not evaluable: `@Body(z.object({...}))`                                        | Extract it: `export const Schema = z.object({...})`, then `@Body(Schema)` |
+| `@Provides()` outside a `@Factory()` class                                                           | Move it to a `@Factory()` class                                           |
+| `@Provides()` without an explicit return type                                                        | Annotate the return type: it is what the method provides                  |
+| Private, `#private` or static handler / `@Provides` method                                           | Make it a public instance method                                          |
+| `@Injectable()` on an abstract class                                                                 | Decorate the concrete subclasses                                          |
+| `@Injectable()` on a class with unbound type parameters                                              | Subclass with concrete type arguments, or use `@Provides`                 |
+| Class registered by several provider decorators                                                      | Keep one (`@Injectable()` **or** `@Controller()`...)                      |
+| Provider exported as a type only (`export type { X }`)                                               | Export it as a value: `export { X }` or `export class X`                  |
+| Parameter decorator imported from another package (`Headers` of `@znight/http` on a message handler) | Import it from the package of the handler (`@znight/messaging` here)      |
+| `@Validate()` and `@Body()` on the same route                                                        | Use one of them                                                           |
+| Composite decorator or `const` alias of a decorator (warning)                                        | See below                                                                 |
 
 A **composite decorator** is a function of yours returning a Znight decorator:
 
@@ -237,9 +241,22 @@ The compiler reads decorators from the source and never runs your code, so it ca
 this function. Use `@Intercept(TimingInterceptor)` directly, or declare a shorthand in a package
 manifest ([AOP](/guide/aop#shorthand-decorators-in-your-own-packages)).
 
+A `const` alias is not followed either (`export const Service = Injectable`: classes decorated with
+`@Service()` are **not** providers). Re-export the decorator under another name instead, which the
+compiler follows:
+
+```ts
+export const Service = Injectable // ⚠ ZNIGHT005 (warning): @Service() is ignored
+
+// instead: a re-export, followed by the compiler
+export { Injectable as Service } from '@znight/core'
+```
+
 **At runtime**, the same code reports invalid runtime inputs: a plugin without a `name`, an invalid
-provider definition passed to `register()`, an interceptor without an `intercept()` method, or an
-interceptor returning a promise for a synchronous method (in development).
+provider definition passed to `register()`, an interceptor without an `intercept()` method, an
+interceptor returning a promise for a synchronous method (in development), a negative or `NaN`
+shutdown budget (`shutdown.timeoutMs` / `hookTimeoutMs`; `Infinity` means no limit), or invalid
+options of the observability interceptors and metrics.
 
 ## ZNIGHT006: Missing required configuration value {#znight006}
 
@@ -320,7 +337,11 @@ export class CheckoutService {
 - Or inject the concrete class, or all of them with `PaymentGateway[]`.
 
 **At runtime**, `container.get('UserService')` with a display name shared by several providers
-reports the same code: use the class or the full token.
+reports the same code: use the class or the full token. A class that is not a registered key
+(`container.get(PaymentGateway)` for an abstract class without alias) is looked up by its name too,
+but only among the candidates of its class hierarchy (candidates whose class is unknown, such as a
+plugin value, count only when none matches): ZNIGHT008 then means several providers of that
+hierarchy share the name.
 
 ## ZNIGHT009: Invalid lifecycle hook {#znight009}
 
@@ -393,6 +414,21 @@ export class PaymentConsumer {
 **How to fix**: give each consumer at least one handler, make handler types unique (one default
 handler without type at most), and use positive `attempts`, `delay` and `maxDelay` values.
 
+**At startup**, `MessagingPlugin` reports with the same code what only the runtime knows, and
+`Application.create()` (or `app.start()` for the subscriptions) fails:
+
+- invalid plugin options: a `driver` that is not a messaging driver, a `defaults.concurrency` that
+  is not a positive integer, a `defaults.deadLetter` that is neither a function nor `false`...;
+- a `@Retry` policy the driver cannot honour (a delay longer than its native delayed redelivery,
+  such as Kafka's `maxRetryDelayMs`);
+- a topology the driver cannot use when it subscribes: a queue that does not exist (SQS, RabbitMQ
+  with `assertTopology: false`), a queue RabbitMQ refuses to declare, a Kafka consumer group shared
+  by two topics.
+
+**At runtime**, the first delayed publication of a RabbitMQ connection rejects with ZNIGHT011 when
+the shared delay levels (`znight.delays.*`) cannot be declared, e.g. because they exist with other
+arguments (another `queueType`): set `rabbitmq({ delayLevelPrefix })`.
+
 ## ZNIGHT012: Invalid config property {#znight012}
 
 A configuration property cannot be loaded.
@@ -414,6 +450,11 @@ export class Mailer {
 **How to fix**: use a supported type (`string`, `number`, `boolean`, `string[]`, `number[]`, `URL`,
 literal unions, JSON) and parse richer values in your code, and keep `@Env` / `@Secret` / `@Key` /
 `@Default` inside `@Config()` classes.
+
+**At startup**, the same code reports invalid runtime inputs of `@znight/config`: invalid
+`ConfigPlugin.configure()` options, invalid loader options (`vault({ kvVersion: 3 })`...) and config
+metadata that is not what the compiler generates (hand-written or corrupted). Missing or invalid
+**values** are [`ZNIGHT006`](#znight006).
 
 ## ZNIGHT013: Request-scoped provider outside of a request scope {#znight013}
 
@@ -522,13 +563,23 @@ Incompatible versions were combined:
 - a compiler extension or a package manifest with an unsupported `apiVersion`, or two extensions with
   the same name.
 
+The same code reports broken contracts between packages, which usually come from a version skew
+too:
+
+- a malformed `package.json#znight` manifest entry, or a malformed entry of a compiled provider
+  library (`dist/znight.providers.json` of another version): the entry is skipped and the compile
+  goes on;
+- a compiler extension that fails to load, throws or produces invalid code (the message names it);
+- a third-party compiler extension that is not listed in `trustedExtensions` (a warning: the
+  extension is not loaded).
+
 ```txt
 ZNIGHT018: Unsupported metadata version 2 (generated by @znight/compiler 0.2.0): @znight/core expects version 1
   hint: Regenerate the metadata (znight generate) with a @znight/compiler version matching @znight/core
 ```
 
-**How to fix**: align every `@znight/*` package on the same version, reinstall, and regenerate the
-container.
+**How to fix**: align every `@znight/*` package on the same version, reinstall, rebuild provider
+libraries with the same compiler, and regenerate the container.
 
 ## ZNIGHT019: Unused provider {#znight019}
 
@@ -572,6 +623,11 @@ import { __ZNIGHT_METADATA__ } from '../.znight/container.generated.js' // ✗
 **How to fix**: import the generated module only from entry points (`main.ts`, tests, scripts). A
 provider that needs the container injects `Container` from `@znight/core`.
 
+The check does not depend on the generated file being on disk (fresh checkout): relative imports
+and imports through an alias of a directory (`@/.znight/container.generated.js` with tsconfig
+`paths: { "@/*": ["./src/*"] }`, package `imports`, Vite aliases) are recognised before the file
+exists. An alias pointing at the generated file itself is only recognised once the file exists.
+
 ## ZNIGHT021: Lifecycle hook or shutdown step failed or timed out {#znight021}
 
 A provider hook (`onStart`, `onReady`, `onStop`), a plugin hook or a disposal threw or exceeded its
@@ -590,7 +646,15 @@ ZNIGHT021: The application stopped with 2 error(s)
 
 **How to fix**: inspect `error.errors` (and each `cause`). For timeouts, make hooks finish faster or
 raise `shutdown.hookTimeoutMs` / `shutdown.timeoutMs`, keeping them below your platform's grace period
-([Deployment](/guide/deployment#graceful-shutdown-in-orchestrators)).
+([Deployment](/guide/deployment#graceful-shutdown-in-orchestrators)); `Infinity` disables a budget.
+
+The same code reports lifecycle misuse:
+
+- an HTTP adapter instance bootstrapped by a second application: create one per application, e.g.
+  `HttpPlugin.configure(() => ({ adapter: fastifyAdapter() }))`;
+- **at runtime**, an operation on something already stopped (`MessageBroker.publish()` once the
+  messaging plugin is disposed, `inject()` on a stopped `HttpPlugin`) and a failing disposal of a
+  request-scoped instance.
 
 ## ZNIGHT022: Syntax error in a source file {#znight022}
 

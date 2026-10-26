@@ -31,8 +31,8 @@ function fixture(name: string): string {
   return target
 }
 
-async function cli(argv: readonly string[], cwd: string, signals = new FakeSignals()) {
-  const stdout = new CaptureStream()
+/** Runs the CLI; pass `stdout` to follow its output while it runs (`--watch`). */
+async function cli(argv: readonly string[], cwd: string, signals = new FakeSignals(), stdout = new CaptureStream()) {
   const stderr = new CaptureStream()
   const code = await main(argv, { cwd, env: {}, stdout, stderr, interactive: false, signals })
   return { code, stdout: stdout.text(), stderr: stderr.text() }
@@ -124,7 +124,8 @@ describe('znight generate with @znight/compiler', () => {
   it('regenerates on changes with --watch', async () => {
     const root = fixture('compile')
     const signals = new FakeSignals()
-    const running = cli(['generate', '--watch'], root, signals)
+    const stdout = new CaptureStream()
+    const running = cli(['generate', '--watch'], root, signals, stdout)
     await waitFor(() => existsSync(join(root, OUT_FILE)), 5000)
     // give the watcher time to start
     await new Promise(resolve => setTimeout(resolve, 100))
@@ -132,7 +133,9 @@ describe('znight generate with @znight/compiler', () => {
       join(root, 'src/audit.service.ts'),
       "import { Injectable } from '@znight/core'\n\n@Injectable()\nexport class AuditService {}\n",
     )
-    await waitFor(() => readFileSync(join(root, OUT_FILE), 'utf8').includes('AuditService'), 5000)
+    // the report, not the file: the file is on disk before the write is reported to the CLI
+    await waitFor(() => stdout.text().includes('3 providers'), 5000)
+    expect(readFileSync(join(root, OUT_FILE), 'utf8')).toContain('AuditService')
     signals.emit('SIGINT')
     const run = await running
     expect(run.code).toBe(0)
@@ -181,13 +184,16 @@ describe('znight generate with @znight/compiler', () => {
     symlinkSync(library, join(root, 'node_modules/@acme/shared'), 'dir')
 
     const signals = new FakeSignals()
-    const running = cli(['generate', '--watch'], root, signals)
+    const stdout = new CaptureStream()
+    const running = cli(['generate', '--watch'], root, signals, stdout)
     await waitFor(() => existsSync(join(root, OUT_FILE)), 5000)
     expect(readFileSync(join(root, OUT_FILE), 'utf8')).toContain('Calendar')
     await new Promise(resolve => setTimeout(resolve, 100))
     writeFileSync(join(library, 'src/timer.ts'), INJECTABLE('Timer'))
     writeFileSync(join(library, 'src/index.ts'), "export * from './calendar.ts'\nexport * from './timer.ts'\n")
-    await waitFor(() => readFileSync(join(root, OUT_FILE), 'utf8').includes('Timer'), 5000)
+    // the report, not the file: the file is on disk before the write is reported to the CLI
+    await waitFor(() => stdout.text().includes('4 providers'), 5000)
+    expect(readFileSync(join(root, OUT_FILE), 'utf8')).toContain('Timer')
     signals.emit('SIGINT')
     const run = await running
     expect(run.code).toBe(0)

@@ -1,4 +1,5 @@
 import type {
+  ChangeKind,
   CheckResultLike,
   CompileResultLike,
   CompilerApi,
@@ -52,8 +53,12 @@ class FakeCompiler implements CompilerApi {
   watchFiles: string[] | undefined
   /** `staleFiles` of `check()` (`undefined`: not reported). */
   staleFiles: string[] | undefined
-  /** `includeRoots()` of the incremental compiler (`undefined`: a compiler without it). */
+  /** `includeRoots()` of the incremental compiler (`undefined`: `<root>/src`, like the default `include`). */
   includeRoots: string[] | undefined
+  /** `isRelevantChange()` of the incremental compiler (default: everything but the outFile and `.md` files). */
+  relevant: ((kind: ChangeKind, file: string) => boolean) | undefined
+  /** The events `isRelevantChange()` was asked about, with the state it was given. */
+  readonly events: { kind: ChangeKind; file: string; watched: string[]; roots: readonly string[] }[] = []
   /** `loadConfig` result (`znight.config.*`); `undefined`: a compiler without `loadZnightConfig()`. */
   config: ((root: string) => Promise<ZnightConfigLike>) | undefined
   readonly configRoots: string[] = []
@@ -98,14 +103,18 @@ class FakeCompiler implements CompilerApi {
   }
 
   createIncremental(options: ZnightOptions): IncrementalCompiler {
-    const roots = this.includeRoots
+    const isOutFile = (file: string): boolean => resolve(file) === resolve(options.root ?? '.', OUT_FILE)
     return {
       generate: changes => {
         this.calls.push({ method: 'incremental', ...(changes === undefined ? {} : { changes }) })
         return Promise.resolve(this.#write(options))
       },
-      isOutFile: file => resolve(file) === resolve(options.root ?? '.', OUT_FILE),
-      ...(roots === undefined ? {} : { includeRoots: () => roots }),
+      isOutFile,
+      includeRoots: () => this.includeRoots ?? [resolve(options.root ?? '.', 'src')],
+      isRelevantChange: (kind, file, watched, roots) => {
+        this.events.push({ kind, file, watched: [...watched], roots })
+        return this.relevant === undefined ? !isOutFile(file) && !file.endsWith('.md') : this.relevant(kind, file)
+      },
     }
   }
 
@@ -441,6 +450,14 @@ describe('znight generate', () => {
       method: 'incremental',
       changes: { changed: [join(src, 'known.ts')], added: [join(src, 'new.ts')], removed: [join(src, 'gone.ts')] },
     })
+    // the compiler tells which events matter, given their kind (from the disk), its files and its roots
+    expect(compiler.events.map(({ kind, file }) => [kind, file])).toEqual([
+      ['changed', join(src, 'known.ts')],
+      ['added', join(src, 'new.ts')],
+      ['removed', join(src, 'gone.ts')],
+      ['changed', join(src, 'known.ts')],
+    ])
+    expect(compiler.events[0]).toMatchObject({ watched: compiler.watchFiles, roots: [src] })
     // writing the generated file, or a file the compiler does not read, does not trigger a new generation
     watcher.onChange?.(join(root, OUT_FILE))
     writeFileSync(join(src, 'notes.md'), '')
@@ -495,9 +512,14 @@ describe('znight generate', () => {
 
     // `mv src/users src/accounts`: fs.watch reports both directories, not their files
     renameSync(join(src, 'users'), join(src, 'accounts'))
+    compiler.events.length = 0
     watcher.onChange?.(join(src, 'users'))
     watcher.onChange?.(join(src, 'accounts'))
     await waitFor(() => compiler.calls.length === 3)
+    expect(compiler.events.map(({ kind, file }) => [kind, file])).toEqual([
+      ['removed', join(src, 'users')],
+      ['added', join(src, 'accounts')],
+    ])
     expect(compiler.calls[2]?.changes).toEqual({
       changed: [],
       added: [join(src, 'accounts')],
@@ -560,6 +582,58 @@ describe('compiler adapter', () => {
       { root: directory.path, check: true },
       { incremental: { root: directory.path }, changes: { changed: ['a.ts'] } },
     ])
+  })
+
+  it('watches with includeRoots() and isRelevantChange() of the compiler', () => {
+    const instance = { generate: () => Promise.resolve({ ...result(), written: [] }), isOutFile: () => false }
+    const seen: unknown[][] = []
+    const api = adaptCompilerModule({
+      generate: () => Promise.resolve(result()),
+      createCompiler: () => instance,
+      includeRoots: compiler => {
+        seen.push(['includeRoots', compiler])
+        return ['/app/src', '/libs/shared/src']
+      },
+      isRelevantChange: (compiler, kind, file, watched, roots) => {
+        seen.push(['isRelevantChange', compiler, kind, file, [...watched], roots])
+        return file.endsWith('.ts')
+      },
+    })
+    const incremental = api.createIncremental({ root: directory.path })
+    expect(incremental.includeRoots()).toEqual(['/app/src', '/libs/shared/src'])
+    const watched = new Set(['/app/src/a.ts'])
+    expect(incremental.isRelevantChange('added', '/app/src/b.ts', watched, ['/app/src'])).toBe(true)
+    expect(incremental.isRelevantChange('changed', '/app/notes.md', watched, ['/app/src'])).toBe(false)
+    expect(seen).toEqual([
+      ['includeRoots', instance],
+      ['isRelevantChange', instance, 'added', '/app/src/b.ts', ['/app/src/a.ts'], ['/app/src']],
+      ['isRelevantChange', instance, 'changed', '/app/notes.md', ['/app/src/a.ts'], ['/app/src']],
+    ])
+  })
+
+  it('watches the whole project, every event but the generated module, with a compiler that does not tell', () => {
+    for (const module of [
+      { generate: () => Promise.resolve(result()) },
+      {
+        generate: () => Promise.resolve(result()),
+        createCompiler: () => ({ generate: () => Promise.resolve({ ...result(), written: [] }) }),
+      },
+    ]) {
+      const incremental = adaptCompilerModule(module).createIncremental({ root: directory.path })
+      expect(incremental.includeRoots()).toEqual([directory.path])
+      expect(incremental.isRelevantChange('changed', join(directory.path, 'notes.md'), new Set(), [])).toBe(true)
+      expect(incremental.isRelevantChange('changed', outFile, new Set(), [])).toBe(false)
+    }
+  })
+
+  it('writes and compares the disk copy of the module (diskCode) when it emulates generate()', async () => {
+    const api = adaptCompilerModule({
+      compile: () => Promise.resolve({ ...result('bundle code'), diskCode: 'disk code' }),
+    })
+    expect((await api.check({ root: directory.path })).staleFiles).toEqual([outFile])
+    expect((await api.generate({ root: directory.path })).written).toBe(true)
+    expect(readFileSync(outFile, 'utf8')).toBe('disk code')
+    expect(await api.check({ root: directory.path })).toMatchObject({ stale: false, staleFiles: [] })
   })
 
   it('exposes loadZnightConfig() as loadConfig', async () => {

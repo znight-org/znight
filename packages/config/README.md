@@ -286,12 +286,14 @@ ConfigPlugin.configure({
 | `key`          | root                            | Mount the secret data under a key path                                           |
 | `optional`     | `false`                         | Skip secrets that do not exist (404)                                             |
 | `timeoutMs`    | `5000`                          | Timeout of each request                                                          |
-| `retries`      | `2`                             | Retries on network errors, timeouts, 429 and 5xx (exponential backoff)           |
-| `retryDelayMs` | `200`                           | Base delay between retries                                                       |
+| `retries`      | `2`                             | Retries on network errors, timeouts, 429, 5xx and bodies that are not JSON       |
+| `retryDelayMs` | `200`                           | Base delay between retries (doubled each time)                                   |
 | `fetch`        | global `fetch`                  | Custom `fetch` (proxies, tests)                                                  |
 
 `VAULT_*` settings are read from the values loaded by the previous loaders first (a `.env` file
-works), then from the environment. The token never appears in error messages.
+works), then from the environment. The token never appears in error messages, and neither does
+the content of a response that is not valid JSON (a truncated body may hold a secret): only its
+length and content type are reported.
 
 ### `awsSecretsManager(options)`
 

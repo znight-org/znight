@@ -1,10 +1,13 @@
 /**
- * Watch helpers shared by the Vite plugin and the Bun preload (§6.3): which paths to watch, how a
- * file event becomes a compiler change, and the set of changes accumulated between two compiles.
+ * Watch helpers shared by the Vite plugin, the Bun preload and `znight generate --watch` (§6.3):
+ * which paths to watch, how a file event becomes a compiler change, and the set of changes
+ * accumulated between two compiles. `includeRoots()` and `isRelevantChange()` are public (the CLI
+ * watches with them).
  */
 import type { ZnightCompiler } from './compiler.ts'
 import type { ProjectChanges } from './project/index.ts'
 
+import fs from 'node:fs'
 import path from 'node:path'
 
 import { isParseablePath, isResolutionConfigPath, isWithin, realPath, resolvePath } from './project/paths.ts'
@@ -64,10 +67,14 @@ export function isOutFile(compiler: ZnightCompiler, file: string): boolean {
 
 /**
  * Whether a file system event can change the compile result: a change of a file the last result
- * depends on (`watchFiles`) or of a resolution config file (package.json, tsconfig, lockfile), a
- * source created or deleted under an include root, a file created where a relative import of the
- * last compile did not resolve. The generated module and `node_modules` (except the watched files)
- * are ignored.
+ * depends on (`watched`: its `watchFiles`) or of a resolution config file (package.json, tsconfig,
+ * lockfile), a source created or deleted under an include root (`roots`: {@link includeRoots}), a
+ * file created where a relative import of the last compile did not resolve. The generated module
+ * and `node_modules` (except the watched files) are ignored.
+ *
+ * Watchers that report a moved or deleted directory as one event on the directory alone (`fs.watch`)
+ * also get: a directory created under an include root (`added`), and a removed path that contained
+ * watched files (`removed`).
  */
 export function isRelevantChange(
   compiler: ZnightCompiler,
@@ -90,12 +97,36 @@ export function isRelevantChange(
   if (isResolutionConfigPath(real)) {
     return true
   }
-  if (kind === 'added' && isParseablePath(real) && compiler.project.isMissingImport(real)) {
-    return true
+  const inRoots = roots.some(dir => isWithin(dir, real) || isWithin(dir, resolved))
+  if (isParseablePath(real)) {
+    if (kind === 'added' && compiler.project.isMissingImport(real)) {
+      return true
+    }
+    return kind !== 'changed' && inRoots
   }
-  return (
-    kind !== 'changed' && isParseablePath(real) && roots.some(dir => isWithin(dir, real) || isWithin(dir, resolved))
-  )
+  if (kind === 'removed') {
+    return containsWatched(watched, resolved)
+  }
+  return kind === 'added' && inRoots && isDirectory(real)
+}
+
+/** `true` when a watched file is inside `directory`. */
+function containsWatched(watched: ReadonlySet<string>, directory: string): boolean {
+  const prefix = directory.endsWith('/') ? directory : `${directory}/`
+  for (const file of watched) {
+    if (file.startsWith(prefix)) {
+      return true
+    }
+  }
+  return false
+}
+
+function isDirectory(file: string): boolean {
+  try {
+    return fs.statSync(file).isDirectory()
+  } catch {
+    return false
+  }
 }
 
 /** Changes accumulated between two compiles. */

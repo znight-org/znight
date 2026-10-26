@@ -97,6 +97,7 @@ describe('generate()', () => {
   it('writes the module only when its content changed', async () => {
     const check = await generate({ ...options, check: true })
     expect(check.stale).toBe(true)
+    expect(check.staleFiles).toEqual([outFile])
     expect(check.written).toEqual([])
     expect(fs.existsSync(outFile)).toBe(false)
 
@@ -105,10 +106,12 @@ describe('generate()', () => {
     expect(fs.readFileSync(outFile, 'utf8')).toBe(first.code)
     const stat = fs.statSync(outFile)
 
+    expect(first.staleFiles).toEqual([])
+
     const second = await generate(options)
     expect(second.written).toEqual([])
     expect(fs.statSync(outFile).mtimeMs).toBe(stat.mtimeMs)
-    expect((await generate({ ...options, check: true })).stale).toBe(false)
+    expect(await generate({ ...options, check: true })).toMatchObject({ stale: false, staleFiles: [] })
     expect(fs.readdirSync(`${app.root}/src/.znight`)).toEqual(['container.generated.ts'])
   })
 
@@ -123,12 +126,15 @@ describe('generate()', () => {
     expect(failed.written).toEqual([])
     expect(failed.code).toContain('throw new ZnightError(')
     expect(fs.readFileSync(outFile, 'utf8')).toBe(before)
+    // with errors nothing would be written: nothing is stale
+    expect(await generate({ ...options, check: true })).toMatchObject({ ok: false, stale: false, staleFiles: [] })
     app.remove('src/broken.ts')
 
     app.write('src/other.ts', SERVICE.replace('Service', 'Other'))
     const stale = await generate({ ...options, check: true })
     expect(stale.ok).toBe(true)
     expect(stale.stale).toBe(true)
+    expect(stale.staleFiles).toEqual([outFile])
     expect(fs.readFileSync(outFile, 'utf8')).toBe(before)
     app.remove('src/other.ts')
   })

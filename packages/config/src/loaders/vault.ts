@@ -31,7 +31,7 @@ export interface VaultLoaderOptions {
   readonly optional?: boolean
   /** Timeout of each HTTP request, in milliseconds. Default: `5000`. */
   readonly timeoutMs?: number
-  /** Retries on network errors, timeouts, HTTP 429 and 5xx. Default: `2`. */
+  /** Retries on network errors, timeouts, HTTP 429 and 5xx, and bodies that are not JSON. Default: `2`. */
   readonly retries?: number
   /** Base delay between retries (doubled each time), in milliseconds. Default: `200`. */
   readonly retryDelayMs?: number
@@ -82,6 +82,22 @@ async function vaultErrors(response: Response): Promise<string> {
     // not JSON: the status is enough
   }
   return ''
+}
+
+/**
+ * The JSON body of a secret response. A body that does not parse (truncated, a proxy page...) is a
+ * retryable failure reported without the parser message, which quotes the payload: the secret.
+ */
+async function secretBody(response: Response): Promise<unknown> {
+  const text = await response.text()
+  try {
+    return JSON.parse(text) as unknown
+  } catch {
+    const type = response.headers.get('content-type')
+    throw new RetryableError(
+      `the response body is not valid JSON (${text.length} characters${type === null ? '' : `, ${type}`})`,
+    )
+  }
 }
 
 async function resolveToken(context: ConfigLoaderContext, options: VaultLoaderOptions): Promise<string> {
@@ -172,8 +188,8 @@ export function vault(options: VaultLoaderOptions): ConfigLoader {
                 { hints: response.status === 403 ? ['Check the token and its policies'] : [] },
               )
             }
-            const body = (await response.json()) as { data?: { data?: unknown } }
-            const data = kv2 ? body.data?.data : body.data
+            const body = (await secretBody(response)) as { data?: { data?: unknown } } | null
+            const data = kv2 ? body?.data?.data : body?.data
             if (!isRecord(data)) {
               throw new ConfigLoaderError(
                 'vault',

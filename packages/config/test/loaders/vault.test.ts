@@ -286,6 +286,67 @@ describe('vault()', () => {
     )
   })
 
+  it('reports a response that is not JSON without its content (it may hold the secret)', async () => {
+    const secret = 'hunter2-SuperSecret'
+    const bodies = [
+      // truncated response
+      `{"data":{"data":{"DB_PASSWORD":"${secret}`,
+      `{"data":{"data":{"DB_PASSWORD":"${secret}"`,
+      // trailing content, invalid tokens, a proxy page
+      `{"data":{"data":{"DB_PASSWORD":"${secret}"}}}${secret}`,
+      `{"data":{"data":{"DB_PASSWORD":${secret}}}}`,
+      `<html><body>${secret}</body></html>`,
+    ]
+    for (const body of bodies) {
+      let calls = 0
+      const fakeFetch = (() => {
+        calls++
+        return Promise.resolve(new Response(body, { status: 200, headers: { 'content-type': 'application/json' } }))
+      }) as unknown as typeof fetch
+      const error = await caught(() =>
+        loadConfigSource(
+          [
+            vault({
+              address: 'https://vault.example.com',
+              token: TOKEN,
+              path: 'secret/app',
+              fetch: fakeFetch,
+              ...fast,
+            }),
+          ],
+          { env: {} },
+        ),
+      )
+      expect(error).toBeInstanceOf(ConfigLoaderError)
+      expect(error.message).toBe(
+        `ZNIGHT006: Config loader "vault" failed: cannot read secret secret/app after 3 attempt(s): the response body is not valid JSON (${body.length} characters, application/json)`,
+      )
+      // retried like any transient failure
+      expect(calls).toBe(3)
+      // nothing of the payload in the message, the causes or the printed error
+      expect(Bun.inspect(error)).not.toContain(secret)
+      const seen: unknown[] = []
+      for (let cause: unknown = error; cause instanceof Error && !seen.includes(cause); cause = cause.cause) {
+        seen.push(cause)
+        expect(cause.message).not.toContain(secret)
+        expect(cause.stack ?? '').not.toContain(secret)
+      }
+    }
+  })
+
+  it('reads a JSON null or primitive body as a response without secret data', async () => {
+    for (const body of ['null', '"text"', '42']) {
+      const fakeFetch = (() => Promise.resolve(new Response(body, { status: 200 }))) as unknown as typeof fetch
+      const error = await caught(() =>
+        loadConfigSource(
+          [vault({ address: 'https://vault.example.com', token: TOKEN, path: 'secret/app', fetch: fakeFetch })],
+          { env: {} },
+        ),
+      )
+      expect(error.message).toContain('unexpected response for secret/app: no secret data (is kvVersion 2 correct?)')
+    }
+  })
+
   it('accepts a custom fetch', async () => {
     const calls: string[] = []
     const fakeFetch = ((input: string | URL | Request) => {

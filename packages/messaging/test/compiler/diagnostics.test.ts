@@ -550,8 +550,10 @@ export class UserController {
 }
 `)
     const result = await analyzeDiscovered(root)
+    // the messaging extension reports the stray decorator, the http extension reports the route it cannot generate
     expect(render(result).filter(line => line.includes("'@znight/messaging'"))).toEqual([
       "error ZNIGHT005 src/a.ts:6:18: @Ctx (from '@znight/messaging') has no effect on parameter 'context' of UserController.list(): it is not an @OnMessage handler\n  = hint: UserController.list() is a @Get handler: use the parameter decorators of '@znight/http'",
+      "error ZNIGHT005 src/a.ts:6:18: @Ctx on parameter 'context' of UserController.list is imported from '@znight/messaging': route parameters use Ctx from '@znight/http'\n  = hint: Import it from '@znight/http': import { Ctx } from '@znight/http'",
     ])
   })
 })

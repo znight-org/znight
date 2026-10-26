@@ -20,16 +20,14 @@ import { resolve } from 'node:path'
 
 import { defineCommand } from '../command.ts'
 import { CliError, errorMessage } from '../errors.ts'
-import { DEFAULT_INCLUDE, hasErrors } from '../integrations/compiler.ts'
+import { hasErrors } from '../integrations/compiler.ts'
 import { findViteConfig, readZnightPluginOptions, type ViteConfigLoader } from '../integrations/vite.ts'
 import {
+  changeKind,
   classifyChanges,
-  includeRoots,
-  isRelevantChange,
   realPath,
   TargetWatchers,
   toPosixPath,
-  type WatchState,
   watchTargets,
 } from '../integrations/watch.ts'
 import { formatDuration, plural } from '../output.ts'
@@ -230,21 +228,27 @@ async function check(cli: CliContext, compiler: CompilerApi, options: ZnightOpti
   return 0
 }
 
+/** What the watcher knows about the last compile. */
+interface WatchState {
+  /** Files the last compile depends on (`watchFiles`): absolute, real, POSIX-style. */
+  readonly known: ReadonlySet<string>
+  /** Directories where a created or deleted source changes the scan (`includeRoots()`). */
+  readonly roots: readonly string[]
+}
+
 async function watch(cli: CliContext, compiler: CompilerApi, options: ZnightOptions): Promise<number> {
   const root = options.root ?? cli.cwd
   const realRoot = realPath(root)
   const incremental: IncrementalCompiler = compiler.createIncremental(options)
-  // before the first compile, and with compilers that do not tell: the project's include directories
-  const projectRoots = includeRoots([realRoot], options.include ?? DEFAULT_INCLUDE)
-  let state: WatchState = { known: new Set(), roots: projectRoots }
+  let state: WatchState = { known: new Set(), roots: [] }
   let pending = new Set<string>()
   let running = false
   let timer: ReturnType<typeof setTimeout> | undefined
 
+  // which events matter is the compiler's call: the CLI only tells their kind, which fs.watch does not
   const watchers = new TargetWatchers(cli.services.watch, file => {
-    if (incremental.isOutFile(file)) return
     const path = realPath(file)
-    if (incremental.isOutFile(path) || !isRelevantChange(path, state)) return
+    if (!incremental.isRelevantChange(changeKind(path, state.known), path, state.known, state.roots)) return
     pending.add(path)
     if (timer !== undefined) clearTimeout(timer)
     timer = setTimeout(() => {
@@ -262,20 +266,18 @@ async function watch(cli: CliContext, compiler: CompilerApi, options: ZnightOpti
         const files = pending
         pending = new Set()
         const started = performance.now()
+        let known = state.known
         try {
           const result = await incremental.generate(first ? undefined : classifyChanges(files, state.known))
-          state = {
-            known:
-              result.watchFiles === undefined
-                ? state.known
-                : new Set(result.watchFiles.map(file => toPosixPath(resolve(file)))),
-            // the include directories of the source libraries are known once compiled
-            roots: (incremental.includeRoots?.() ?? projectRoots).map(toPosixPath),
+          if (result.watchFiles !== undefined) {
+            known = new Set(result.watchFiles.map(file => toPosixPath(resolve(file))))
           }
           report(cli, compiler, result, root, performance.now() - started)
         } catch (error) {
           cli.reporter.error(`Generation failed: ${errorMessage(error)}`)
         }
+        // the include directories of the source libraries are known once compiled
+        state = { known, roots: incremental.includeRoots().map(realPath) }
         watchers.update(watchTargets(realRoot, state.roots, state.known), files)
         first = false
       } while (pending.size > 0)

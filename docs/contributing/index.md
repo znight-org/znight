@@ -58,7 +58,11 @@ When an implementation needs to deviate, update the specification in the same ch
 
 - **Source condition.** Each package exposes a `@znight/source` export condition pointing to its
   TypeScript sources; repository scripts run with `--conditions=@znight/source`, so nothing needs to
-  be built to test.
+  be built to test. A `tsconfig.json` that type-checks the framework sources through the condition
+  (`"customConditions": ["@znight/source"]`, as the examples do, or importing them by path, as
+  `docs/test` does) also needs
+  `"allowImportingTsExtensions": true` (with `noEmit`): the sources import each other with the
+  `.ts` suffix, which `tsc` otherwise rejects (TS5097).
 - **Sources run as is on Node.js 24 and Bun**: relative imports use the `.ts` suffix;
   `erasableSyntaxOnly` (no parameter properties, enums, namespaces or decorators in `src/`; tests may
   use them); `isolatedDeclarations` (explicit types on exports).

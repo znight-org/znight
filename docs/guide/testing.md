@@ -212,10 +212,19 @@ it('validates the id', async () => {
 `TestApp.create({ metadata, plugins?, providers?, overrides?, only?, start?, logger?, shutdown? })`
 runs `Application.create()` then `app.start()` (unless `start: false`), with signal handlers
 disabled. It applies `overrides` last and by default instantiates only the dependency closure of the
-HTTP controllers (with their guards and interceptors), the message consumers and the overridden
-providers (`only: 'all'` or a list of keys to choose). The default logger only prints warnings and
-errors. `app.get(key)`, `app.container` and `app.app` give access to the running application;
+HTTP controllers (with their guards and interceptors), the message consumers, the overridden
+providers and the global guards, interceptors and exception mappers of
+`HttpPlugin.configure({ ... })` (`only: 'all'` or a list of keys to choose; overrides and those
+globals are added to the list). The default logger only prints warnings and errors.
+`app.get(key)`, `app.container` and `app.app` give access to the running application;
 `await using app = await TestApp.create(...)` closes it automatically.
+
+::: tip Global providers with async dependencies
+Plugin options computed from the container (`HttpPlugin.configure(c => ({ ... }))`) cannot be read
+before the boot. When a global guard declared there depends on an async provider, the boot fails
+with [`ZNIGHT015`](/reference/error-codes#znight015) ("its factory is async"): list it in `only`
+(`only: [UserController, AuthGuard]`), or pass `only: 'all'`.
+:::
 
 `app.inject({ method?, url, headers?, body?, query? })` resolves with
 `{ status, headers, body, bytes, json() }`: `body` is the response decoded as UTF-8, `bytes` the raw

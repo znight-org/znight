@@ -14,6 +14,7 @@ import type { BuildWatcher, ViteConfigLoader, ViteLogLevel, WatcherEvent } from 
 import { resolve } from 'node:path'
 
 import { defineCommand } from '../command.ts'
+import { ORPHAN_GUARD_POLL_MS, orphanGuard } from '../dev/orphan.ts'
 import { AppSupervisor } from '../dev/supervisor.ts'
 import { CliError } from '../errors.ts'
 import { fallbackFormatDiagnostics } from '../integrations/compiler.ts'
@@ -85,6 +86,12 @@ export const devCommand: Command = defineCommand({
     const { colors, reporter } = cli
     // before Vite runs: its build sets process.env.NODE_ENV (to "production") when it is not set
     const env = { ...cli.env }
+    // the application runs detached: it stops by itself when the CLI dies without stopping it (kill -9)
+    const guard = orphanGuard(runtime, { parentPid: process.pid, pollMs: ORPHAN_GUARD_POLL_MS, killTimeoutMs })
+    const runtimeArgs = runtimeArguments(runtime, [
+      ...(guard?.args ?? []),
+      ...(args.inspect === true ? ['--inspect'] : []),
+    ])
     const vite = await cli.services.loadVite(root)
     const tracker = createOutputTracker(root)
     let entry: string | undefined
@@ -94,11 +101,11 @@ export const devCommand: Command = defineCommand({
       killTimeoutMs,
       spawn: () => {
         const file = entry ?? resolve(root, 'dist/main.js')
-        return cli.services.processes.spawn(
-          executable,
-          [...runtimeArguments(runtime, args.inspect === true ? ['--inspect'] : []), file, ...passthrough],
-          { cwd: root, env: { ...env, NODE_ENV: env['NODE_ENV'] ?? 'development' }, detached: true },
-        )
+        return cli.services.processes.spawn(executable, [...runtimeArgs, file, ...passthrough], {
+          cwd: root,
+          env: { ...env, ...guard?.env, NODE_ENV: env['NODE_ENV'] ?? 'development' },
+          detached: true,
+        })
       },
       events: {
         onStart: (child, restart) => {

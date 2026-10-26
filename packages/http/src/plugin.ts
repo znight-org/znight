@@ -1,4 +1,4 @@
-import type { Container, Plugin, PluginContext, PluginOptions, Token, ZnightMetadata } from '@znight/core'
+import type { Container, Plugin, PluginContext, PluginOptions, ProviderKey, Token, ZnightMetadata } from '@znight/core'
 import type { AdapterReply, HttpAdapter, HttpServerAddress, InjectRequest, InjectResponse } from './adapter.ts'
 import type {
   CanActivate,
@@ -192,6 +192,34 @@ export class HttpPlugin implements Plugin {
   /** Number of requests being processed. */
   get inflight(): number {
     return this.#runtime?.pipeline.inflight ?? 0
+  }
+
+  /**
+   * The provider classes the plugin resolves in `onBootstrap` although no compiled metadata
+   * references them: the classes of the `guards`, `interceptors` and `exceptionMappers` options
+   * (instances are left out), in that order, without duplicates. `TestApp` from `@znight/testing`
+   * creates them at boot with their dependencies (an async dependency cannot be created on demand);
+   * pass them to `init: { only }` when restricting the boot with `Application.create()`.
+   *
+   * Options given as a function of the container cannot be read before the bootstrap: the result is
+   * then empty. Never throws: invalid options are reported by `onBootstrap`.
+   */
+  initRoots(): readonly ProviderKey[] {
+    const options: unknown = this.#options
+    if (options === null || typeof options !== 'object') return []
+    const roots = new Set<ProviderKey>()
+    for (const key of GLOBAL_KEYS) {
+      try {
+        const refs: unknown = (options as HttpPluginOptions)[key]
+        if (!Array.isArray(refs)) continue
+        for (const ref of refs) {
+          if (typeof ref === 'function') roots.add(ref as GuardClass)
+        }
+      } catch {
+        // a throwing getter: reported when onBootstrap reads the option
+      }
+    }
+    return [...roots]
   }
 
   /**
@@ -721,6 +749,7 @@ function resolvable<T>(container: Container, metadata: ZnightMetadata, token: To
 }
 
 type GlobalKey = 'guards' | 'interceptors' | 'exceptionMappers'
+const GLOBAL_KEYS: readonly GlobalKey[] = ['guards', 'interceptors', 'exceptionMappers']
 const GLOBAL_METHOD: Readonly<Record<GlobalKey, string>> = {
   guards: 'canActivate',
   interceptors: 'intercept',

@@ -322,11 +322,15 @@ During development, `npm run dev` (`znight dev`) rebuilds in watch mode and rest
 every successful build.
 
 ::: details Running on Bun
-The build output runs on Bun as is: `bun dist/main.js` (or `znight start --runtime bun`). Bun can
-also run your sources directly with the compiler's Bun preload, which regenerates the container
-before the application starts and serves it from memory:
-`bun --preload @znight/compiler/bun src/main.ts` (also with `--watch`). For `bun test`, add it to
-`bunfig.toml`. See [Bun preload](./compiler#bun-preload).
+The build output runs on Bun as is: `bun --no-env-file dist/main.js` (or `znight start --runtime
+bun`). Bun can also run your sources directly with the compiler's Bun preload, which regenerates the
+container before the application starts and serves it from memory:
+`bun --preload @znight/compiler/bun --no-env-file src/main.ts` (also with `--watch`). For `bun test`,
+add it to `bunfig.toml`. See [Bun preload](./compiler#bun-preload).
+
+`--no-env-file` (or `env = false` in `bunfig.toml`) stops Bun from loading `.env` files into
+`process.env` by itself, so that `@znight/config` reads them the same way as on Node.js (see
+[Bun's automatic `.env` loading](/packages/config#bun-env-loading)).
 :::
 
 ::: details Why not `node src/main.ts`?

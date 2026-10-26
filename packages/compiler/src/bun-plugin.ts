@@ -162,7 +162,7 @@ export async function createPreload(options: PreloadOptions = {}): Promise<Gener
       }
     }
   }
-  const result: GenerateResult = { ...compiled, written, stale: false }
+  const result: GenerateResult = { ...compiled, written, stale: false, staleFiles: [] }
   await watchAsText([...result.watchFiles, ...tsconfigFiles(compiler)])
   const root = compiler.options.root
   const printed = logLevel !== 'silent' && result.diagnostics.length > 0

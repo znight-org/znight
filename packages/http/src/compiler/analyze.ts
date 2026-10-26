@@ -23,7 +23,7 @@ import { isMediaTypePattern } from '../mime.ts'
 import { joinPaths, normalizePath } from '../path.ts'
 import { parseByteSize } from '../size.ts'
 import { acceptsUndefined, isRaw, parameterType, planCoercion } from './coercion.ts'
-import { Codes, Ids, PARAM_SOURCES, ROUTE_METHODS } from './model.ts'
+import { Codes, HTTP_PACKAGE, Ids, PARAM_SOURCES, ROUTE_METHODS } from './model.ts'
 import { isRouteMetaDecorator, isValueRef, routeMeta } from './route-decorators.ts'
 
 /** Name of the extension (owner of the decorators in `DecoratorInfo.owner`). */
@@ -145,12 +145,28 @@ function controllerOptions(ctx: Context, decorator: DecoratorInfo): ControllerOp
   return { path, pathLocation: arg.location, scope }
 }
 
-/** HTTP decorators on a class that is not a controller have no effect. */
+/**
+ * HTTP decorators on a class that is not a controller have no effect. On a class another extension
+ * owns (a `@Consumer` of `@znight/messaging`...), adding `@Controller()` is no fix: a class is the
+ * provider of a single extension.
+ */
 function reportOutsideController(cls: ClassInfo, ctx: Context): void {
-  const hint = [`Add @Controller() to ${cls.displayName} (routes are not inherited from base classes)`]
+  const owner = foreignOwner(cls)
+  const hint =
+    owner === undefined
+      ? [`Add @Controller() to ${cls.displayName} (routes are not inherited from base classes)`]
+      : [
+          `${cls.displayName} is a @${owner.name} class of '${owner.module}': HTTP decorators only apply to @Controller() classes`,
+        ]
   const decorators: DecoratorInfo[] = [...cls.decorators]
   for (const method of cls.methods) {
     decorators.push(...method.decorators)
+    const handler =
+      owner === undefined ? undefined : method.decorators.find(decorator => decorator.owner === owner.decorator.owner)
+    if (owner !== undefined && handler !== undefined) {
+      reportHandlerParams(ctx, cls, method, owner, handler)
+      continue
+    }
     for (const param of method.params) {
       decorators.push(...unique(param.decorators))
     }
@@ -160,6 +176,87 @@ function reportOutsideController(cls: ClassInfo, ctx: Context): void {
       error(ctx, decorator.location, `@${decorator.name} has no effect: ${cls.displayName} is not a controller`, hint)
     }
   }
+}
+
+/**
+ * HTTP decorators on the parameters of a handler of the extension owning the class (an `@OnMessage`
+ * handler...). That extension reads its handlers' parameters and reports those it cannot read
+ * (`Headers` imported from `@znight/http` instead of `@znight/messaging`...): an HTTP decorator is
+ * only reported here when the parameter is read through a decorator of that extension, or is
+ * optional (left undefined without a word).
+ */
+function reportHandlerParams(
+  ctx: Context,
+  cls: ClassInfo,
+  method: MethodInfo,
+  owner: QualifiedDecorator,
+  handler: DecoratorInfo,
+): void {
+  for (const param of method.params) {
+    const read = param.decorators.some(decorator => decorator.owner === owner.decorator.owner)
+    if (!read && !param.optional && !param.hasDefault && !param.rest) {
+      continue
+    }
+    for (const decorator of unique(param.decorators)) {
+      if (decorator.owner === EXTENSION_NAME && validTarget(decorator)) {
+        error(
+          ctx,
+          decorator.location,
+          `@${decorator.name} has no effect on parameter '${param.name}' of ${cls.displayName}.${method.name}: it is an @${handler.name} handler of '${owner.module}'`,
+          [`Use the parameter decorators of '${owner.module}', or remove it`],
+        )
+      }
+    }
+  }
+}
+
+/** A decorator with the module and the export name of its identity (`'@znight/messaging#Consumer'`). */
+interface QualifiedDecorator {
+  readonly decorator: DecoratorInfo
+  readonly module: string
+  readonly name: string
+}
+
+function qualify(decorator: DecoratorInfo): QualifiedDecorator | undefined {
+  const identity = decorator.identity
+  const separator = identity?.lastIndexOf('#') ?? -1
+  if (identity === undefined || separator <= 0) {
+    return undefined
+  }
+  return { decorator, module: identity.slice(0, separator), name: identity.slice(separator + 1) }
+}
+
+/** The class decorator through which another extension owns the class (`@Consumer`...). */
+function foreignOwner(cls: ClassInfo): QualifiedDecorator | undefined {
+  for (const decorator of cls.decorators) {
+    const owner = decorator.owner
+    if (owner === undefined || owner === EXTENSION_NAME || owner === 'core' || owner === 'manifest') {
+      continue
+    }
+    const qualified = qualify(decorator)
+    if (qualified !== undefined) {
+      return qualified
+    }
+  }
+  return undefined
+}
+
+/**
+ * A parameter decorator named like an HTTP one but imported from another package (`Headers` and
+ * `Ctx` of `@znight/messaging`, typically auto-imported).
+ */
+function foreignParameterDecorator(param: ParameterInfo): QualifiedDecorator | undefined {
+  for (const decorator of unique(param.decorators)) {
+    const qualified = qualify(decorator)
+    if (
+      qualified !== undefined &&
+      qualified.module !== HTTP_PACKAGE &&
+      PARAM_SOURCES.has(`${HTTP_PACKAGE}#${qualified.name}`)
+    ) {
+      return qualified
+    }
+  }
+  return undefined
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -491,6 +588,17 @@ function analyzeParams(
       decorator => decorator.owner === EXTENSION_NAME && PARAM_SOURCES.has(decorator.identity ?? ''),
     )
     const [decorator, ...extra] = decorators
+    const foreign = decorator === undefined ? foreignParameterDecorator(param) : undefined
+    if (foreign !== undefined) {
+      error(
+        ctx,
+        foreign.decorator.location,
+        `@${foreign.decorator.name} on parameter '${param.name}' of ${where} is imported from '${foreign.module}': route parameters use ${foreign.name} from '${HTTP_PACKAGE}'`,
+        [`Import it from '${HTTP_PACKAGE}': import { ${foreign.name} } from '${HTTP_PACKAGE}'`],
+      )
+      complete = false
+      continue
+    }
     if (decorator === undefined) {
       error(ctx, param.location, `Parameter '${param.name}' of ${where} has no HTTP decorator`, [
         'Decorate it with @Param(), @Query(), @Body(), @Headers(), @UploadedFile(), @UploadedFiles(), @Ctx(), @Req() or @Res()',

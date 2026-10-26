@@ -181,10 +181,11 @@ build (the Vite plugin writes it itself at the end of `vite build`).
 `--watch` watches what the Vite plugin and the Bun preload watch: the `include` directories of the
 project and of its source libraries (recursively), the project root (`package.json`, `tsconfig.json`,
 lockfiles) and the directories of the files the last compile read (library manifests, compiled
-libraries), refreshed after each compile. Only changes that can change the result trigger a compile
-(sources the compiler parses, `.js` included; resolution config files; files it read); a directory
-created, deleted or moved under an `include` directory triggers a rescan, since `fs.watch` reports it
-alone, without its files.
+libraries), refreshed after each compile. Only changes that can change the result trigger a compile,
+by the rules of the Vite plugin (`isRelevantChange()` of the compiler: sources the compiler parses,
+`.js` included; resolution config files; files it read; a file created where a relative import did
+not resolve); a directory created, deleted or moved under an `include` directory triggers a rescan,
+since `fs.watch` reports it alone, without its files.
 
 ## `znight g`
 
@@ -249,6 +250,11 @@ restart is fast and always consistent.
    watcher closes and the application stops gracefully (`SIGINT` after `Ctrl+C`, `SIGTERM` otherwise);
    a second signal kills it. The application runs in its own session and process group, so it
    receives exactly one signal, and never the terminal's.
+6. The CLI dies without stopping it (`kill -9`, the OOM killer) → the application stops by itself
+   (`SIGTERM`, then `SIGKILL` after `--kill-timeout`) within half a second instead of keeping its
+   port: the CLI preloads a small guard into it (`--import` on Node.js, `--preload` on Bun) that
+   watches the CLI process. It needs nothing from the application, and the processes the
+   application starts itself are left alone.
 
 Diagnostics of the compiler are printed on every rebuild by the `znight()` plugin.
 
@@ -377,10 +383,11 @@ relies on these shapes (each is optional; missing pieces are emulated):
 | Export                                                           | Used for                                                                                                        |
 | ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
 | `generate(options)`                                              | `znight generate`; `written: string[]` tells whether the file changed                                           |
-| `generate({ ...options, check })`                                | `znight generate --check`; `stale: boolean`, `staleFiles?: string[]` (else compared with `code` / `library`)    |
+| `generate({ ...options, check })`                                | `znight generate --check`; `stale: boolean`, `staleFiles: string[]` (else compared with `diskCode` / `library`) |
 | `createCompiler(options)`                                        | `znight generate --watch`: `generate(changes)` (`{ changed, added, removed }`), `isOutFile(file)`, `watchFiles` |
-| `includeRoots(compiler)`                                         | `--watch`: the include directories (else computed from `compiler.options` and `compiler.project.libraries()`)   |
-| `compile(options)`                                               | fallback of the above                                                                                           |
+| `includeRoots(compiler)`                                         | `--watch`: the directories to watch recursively (else the whole project)                                        |
+| `isRelevantChange(compiler, kind, file, watched, roots)`         | `--watch`: the file events that trigger a compile (else every event but the generated module)                   |
+| `compile(options)`                                               | fallback of the above (writes `diskCode`, else `code`)                                                          |
 | `formatDiagnostics(diagnostics, { color, cwd, summary: false })` | diagnostics output (a plain formatter otherwise)                                                                |
 | `loadZnightConfig(root)`                                         | `znight generate`: `{ file, options }` of `znight.config.*` / `ZNIGHT_CONFIG`                                   |
 

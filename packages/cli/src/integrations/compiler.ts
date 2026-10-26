@@ -11,7 +11,6 @@ import { dirname, relative, resolve } from 'node:path'
 import { CliError } from '../errors.ts'
 import { createColors } from '../output.ts'
 import { importFromProject } from './resolve.ts'
-import { includeRoots } from './watch.ts'
 
 /** Location of a diagnostic (`Diagnostic.location`, §6.2). */
 export interface DiagnosticLocation {
@@ -86,6 +85,9 @@ export interface CompilerChanges {
   readonly removed?: readonly string[]
 }
 
+/** Kind of a file system event (`ChangeKind` of the compiler). */
+export type ChangeKind = 'changed' | 'added' | 'removed'
+
 /** A compiler keeping its parse cache between compiles (`createCompiler()`), for watch mode. */
 export interface IncrementalCompiler {
   /** Compiles (only `changes` are re-read, everything without) and writes the module when it changed. */
@@ -93,11 +95,17 @@ export interface IncrementalCompiler {
   /** Whether `file` is the generated module (watchers ignore it). */
   isOutFile(file: string): boolean
   /**
-   * Directories where a created or deleted source changes the scan, after a compile: the bases of the
-   * `include` globs in the project root and in every source library (`includeRoots()` of the
-   * compiler). `undefined` when the compiler does not tell (the CLI then uses the project's only).
+   * Directories where a created or deleted source changes the scan (`includeRoots()` of the
+   * compiler: the bases of the `include` globs in the project and in every source library, known once
+   * compiled), to watch recursively. The project root when the compiler does not tell.
    */
-  includeRoots?(): readonly string[] | undefined
+  includeRoots(): readonly string[]
+  /**
+   * Whether a file event can change the next compile (`isRelevantChange()` of the compiler): `watched`
+   * are the `watchFiles` of the last compile, `roots` its {@link includeRoots}. When the compiler does
+   * not tell, every event but the generated module is.
+   */
+  isRelevantChange(kind: ChangeKind, file: string, watched: ReadonlySet<string>, roots: readonly string[]): boolean
 }
 
 /** Options of {@link CompilerApi.formatDiagnostics}. */
@@ -141,6 +149,8 @@ const COMPILER_PACKAGE: string = '@znight/compiler'
 
 /** A compile result as returned by any `@znight/compiler` version (extra fields are optional). */
 interface ModuleResult extends CompileResultLike {
+  /** The disk copy of the module (`code` before it existed; they differ in `build` mode only). */
+  readonly diskCode?: string
   readonly written?: readonly string[]
   readonly stale?: boolean
   /** The stale generated files (check mode), when the compiler tells. */
@@ -153,10 +163,6 @@ interface ModuleResult extends CompileResultLike {
 export interface ModuleIncrementalCompiler {
   generate?: (changes?: CompilerChanges, options?: { check?: boolean }) => Promise<ModuleResult>
   isOutFile?: (file: string) => boolean
-  /** Resolved options: absolute `root`, normalized `include`. */
-  readonly options?: { readonly root?: unknown; readonly include?: unknown } | undefined
-  /** The project: its source libraries once compiled (`libraries()[i].package.dir`). */
-  readonly project?: { readonly libraries?: () => readonly { readonly package?: { readonly dir?: unknown } }[] }
 }
 
 /** The shape of the `@znight/compiler` module (every export optional: partial versions are adapted). */
@@ -166,8 +172,16 @@ export interface CompilerModule {
   createCompiler?: (options?: ZnightOptions) => ModuleIncrementalCompiler
   formatDiagnostics?: (diagnostics: readonly Diagnostic[], options?: FormatDiagnosticsOptions) => string
   loadZnightConfig?: (cwd?: string) => Promise<ZnightConfigLike>
-  /** The watch roots of a compiler (`includeRoots(compiler)`), when exported. */
+  /** The watch roots of a compiler (`includeRoots(compiler)`). */
   includeRoots?: (compiler: ModuleIncrementalCompiler) => readonly string[]
+  /** Whether a file event can change the next compile of a compiler (`isRelevantChange(compiler, ...)`). */
+  isRelevantChange?: (
+    compiler: ModuleIncrementalCompiler,
+    kind: ChangeKind,
+    file: string,
+    watched: ReadonlySet<string>,
+    roots: readonly string[],
+  ) => boolean
 }
 
 /**
@@ -226,7 +240,7 @@ export function adaptCompilerModule(module: CompilerModule): CompilerApi {
       return written(await generate(options), before)
     }
     const result = await compileOnly(options)
-    const changed = !hasErrors(result.diagnostics) && writeIfChanged(result.outFile, result.code)
+    const changed = !hasErrors(result.diagnostics) && writeIfChanged(result.outFile, result.diskCode ?? result.code)
     return { ...result, written: changed }
   }
 
@@ -243,15 +257,24 @@ export function adaptCompilerModule(module: CompilerModule): CompilerApi {
       const compiler = typeof createCompiler === 'function' ? createCompiler(options) : undefined
       const incremental = compiler?.generate
       const outFile = resolveOutFile(options)
+      const isOutFile = (file: string): boolean =>
+        typeof compiler?.isOutFile === 'function' ? compiler.isOutFile(file) : resolve(file) === outFile
+      const { includeRoots, isRelevantChange } = module
       return {
         generate: async changes => {
           if (compiler === undefined || typeof incremental !== 'function') return generateOnce(options)
           const before = readText(outFile)
           return written(await incremental.call(compiler, changes), before)
         },
-        isOutFile: file =>
-          typeof compiler?.isOutFile === 'function' ? compiler.isOutFile(file) : resolve(file) === outFile,
-        includeRoots: () => (compiler === undefined ? undefined : compilerIncludeRoots(module, compiler)),
+        isOutFile,
+        includeRoots: () =>
+          compiler !== undefined && typeof includeRoots === 'function'
+            ? includeRoots(compiler)
+            : [resolve(options.root ?? '.')],
+        isRelevantChange: (kind, file, watched, roots) =>
+          compiler !== undefined && typeof isRelevantChange === 'function'
+            ? isRelevantChange(compiler, kind, file, watched, roots)
+            : !isOutFile(file),
       }
     },
     formatDiagnostics: (diagnostics, options) => format(diagnostics, options),
@@ -267,42 +290,16 @@ export function adaptCompilerModule(module: CompilerModule): CompilerApi {
  */
 function staleOutputs(result: ModuleResult): string[] {
   if (hasErrors(result.diagnostics)) return []
-  const outputs: { file: string; content: string }[] = [{ file: result.outFile, content: result.code }]
+  const outputs: { file: string; content: string }[] = [
+    { file: result.outFile, content: result.diskCode ?? result.code },
+  ]
   const { file, content } = result.library ?? {}
   if (typeof file === 'string' && typeof content === 'string') outputs.push({ file, content })
   return outputs.filter(output => readText(output.file) !== output.content).map(output => output.file)
 }
 
-/**
- * {@link IncrementalCompiler.includeRoots}: `includeRoots()` of the compiler when exported, else the
- * same computation on the compiler's resolved options and source libraries (`undefined` when the
- * compiler does not expose them).
- */
-function compilerIncludeRoots(
-  module: CompilerModule,
-  compiler: ModuleIncrementalCompiler,
-): readonly string[] | undefined {
-  if (typeof module.includeRoots === 'function') return module.includeRoots(compiler)
-  const root = compiler.options?.root
-  const include = compiler.options?.include
-  if (typeof root !== 'string' || !Array.isArray(include)) return undefined
-  const libraries = typeof compiler.project?.libraries === 'function' ? compiler.project.libraries() : []
-  const bases = [root]
-  for (const library of libraries) {
-    const dir = library.package?.dir
-    if (typeof dir === 'string') bases.push(dir)
-  }
-  return includeRoots(
-    bases,
-    include.filter((glob): glob is string => typeof glob === 'string'),
-  )
-}
-
 /** Default `outFile` of the compiler (§6.2). */
 export const DEFAULT_OUT_FILE = 'src/.znight/container.generated.ts'
-
-/** Default `include` of the compiler (§6.2). */
-export const DEFAULT_INCLUDE: readonly string[] = ['src/**/*.{ts,tsx,mts}']
 
 /** Absolute path of the generated module for `options`. */
 export function resolveOutFile(options: ZnightOptions): string {

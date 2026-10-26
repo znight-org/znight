@@ -477,8 +477,9 @@ import { createPreload, loadZnightConfig, znight, znightBunPlugin } from '@znigh
 ### `generate(options)`
 
 Compiles and writes the generated module (`diskCode`, the same in every mode) when its content
-changed. Nothing is written when there is an error. With `check: true` nothing is written and
-`stale` tells whether the file on disk is out of date (`znight generate --check`).
+changed. Nothing is written when there is an error. With `check: true` nothing is written, `stale`
+tells whether the files on disk are missing or out of date and `staleFiles` lists them, the module
+first (then `znight.providers.json` in library mode) (`znight generate --check`).
 
 ```ts
 const result = await generate({ root: process.cwd() })
@@ -523,6 +524,30 @@ compiler.last // latest result
 
 Compiles are serialized: calls made while a compile runs are coalesced into the next one (their
 changes merged), and every caller receives the result of the compile that included its changes.
+
+### Watching: `includeRoots(compiler)`, `isRelevantChange(compiler, kind, file, watched, roots)`
+
+The rules the Vite plugin, the Bun preload and `znight generate --watch` share, for a custom
+watcher of an incremental compiler:
+
+```ts
+import { createCompiler, includeRoots, isRelevantChange } from '@znight/compiler'
+
+const compiler = createCompiler({ root })
+const result = await compiler.generate()
+const roots = includeRoots(compiler) // watch these recursively, plus the directories of result.watchFiles
+const watched = new Set(result.watchFiles)
+// on a file event (kind: 'changed' | 'added' | 'removed')
+if (isRelevantChange(compiler, kind, file, watched, roots)) await compiler.generate({ [kind]: [file] })
+```
+
+- `includeRoots()`: the static bases of the `include` globs in the project and in every source
+  library (known once compiled): absolute, sorted, nested directories dropped.
+- `isRelevantChange()`: a file the last result depends on, a resolution config file
+  (`package.json`, `tsconfig*.json`, lockfiles), a source created or deleted under an include root,
+  a file created where a relative import did not resolve. Never the generated module, nor
+  `node_modules` outside `watched`. For watchers reporting a moved directory as one event
+  (`fs.watch`): a directory created under an include root, a removed path containing watched files.
 
 ### `formatDiagnostics(diagnostics, { color?, cwd?, readFile?, summary? })`
 

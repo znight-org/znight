@@ -1,3 +1,6 @@
+import type { AddressInfo } from 'node:net'
+
+import { createServer } from 'node:http'
 import {
   type CoreLogger,
   ErrorCode,
@@ -377,6 +380,71 @@ describe('TestApp: providers resolved by plugins at bootstrap', () => {
     const error = await rejection(TestApp.create({ metadata: guardedMetadata(), plugins: [invalid], logger: quiet() }))
     expect(error).toBeInstanceOf(TypeError)
     expect(error.message).toContain('initRoots() of the plugin "globals"')
+  })
+})
+
+/** Listens on a free port of 127.0.0.1 (a server of another test file, `znight dev`...). */
+async function occupyPort(): Promise<{ readonly port: number; close(): Promise<void> }> {
+  const server = createServer()
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  return {
+    port: (server.address() as AddressInfo).port,
+    close: () => new Promise<void>(resolve => server.close(() => resolve())),
+  }
+}
+
+/**
+ * A plugin starting a server on a fixed port in `onStart`, failing like the metrics server of
+ * `ObservabilityPlugin` (default port 9464) when the port is taken.
+ */
+function metricsLikePlugin(port: number): Plugin & { readonly closed: () => boolean } {
+  const server = createServer()
+  return {
+    name: 'observability',
+    closed: () => !server.listening,
+    async onStart() {
+      try {
+        await new Promise<void>((resolve, reject) => {
+          server.once('error', reject)
+          server.listen(port, '127.0.0.1', () => resolve())
+        })
+      } catch (error) {
+        throw new Error(`Cannot start the metrics server on 127.0.0.1:${port}`, { cause: error })
+      }
+    },
+    onStop: () => new Promise<void>(resolve => (server.listening ? server.close(() => resolve()) : resolve())),
+  }
+}
+
+describe('TestApp: servers on a port already in use', () => {
+  it('a start failing with EADDRINUSE tells how to give the servers a free port or none', async () => {
+    const taken = await occupyPort()
+    try {
+      const plugin = metricsLikePlugin(taken.port)
+      const error = await rejection(TestApp.create({ metadata, providers, plugins: [plugin], logger: quiet() }))
+      expect(error.code).toBe(ErrorCode.LifecycleFailed)
+      expect(error.message).toContain('Cannot start the metrics server')
+      expect(error.hints).toContainEqual(
+        expect.stringContaining('ObservabilityPlugin with { metrics: { server: false } }'),
+      )
+      expect(error.hints.join('\n')).toContain('HttpPlugin with { port: 0 }')
+      expect(error.hints.filter(hint => hint.includes('no fixed port'))).toHaveLength(1)
+      expect(plugin.closed()).toBe(true)
+    } finally {
+      await taken.close()
+    }
+  })
+
+  it('other start failures get no port hint', async () => {
+    const failing: Plugin = {
+      name: 'failing',
+      onStart() {
+        throw Object.assign(new Error('permission denied'), { code: 'EACCES' })
+      },
+    }
+    const error = await rejection(TestApp.create({ metadata, providers, plugins: [failing], logger: quiet() }))
+    expect(error.message).toContain('permission denied')
+    expect(error.hints.join('\n')).not.toContain('no fixed port')
   })
 })
 

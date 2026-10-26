@@ -143,21 +143,125 @@ export class RetryInterceptor implements MethodInterceptor<{ attempts: number; d
 
 ### Cache
 
-```ts
-@Injectable()
-export class CacheInterceptor implements MethodInterceptor<{ ttlMs: number }> {
-  constructor(private readonly cache: Cache) {}
+Cache the result of an expensive async method for a while: the key is derived from the arguments,
+the time to live comes from the options, and the values live in a store you inject, in memory to
+start with.
 
-  async intercept(invocation: MethodInvocation, { ttlMs }: { ttlMs: number }) {
-    const key = `${invocation.className}.${invocation.methodName}:${JSON.stringify(invocation.args)}`
-    const hit = await this.cache.get(key)
-    if (hit !== undefined) return hit
-    const value = await invocation.proceed()
-    await this.cache.set(key, value, ttlMs)
+::: code-group
+
+```ts [src/cache/cache.store.ts]
+import { Injectable } from '@znight/core'
+
+/** Where cached values live. Swap the implementation (Redis...) without touching the interceptor. */
+export interface CacheStore {
+  /** The entry, or `undefined` when absent or expired (a cached `undefined` is `{ value: undefined }`) */
+  get(key: string): Promise<{ value: unknown } | undefined>
+  set(key: string, value: unknown, ttlMs: number): Promise<void>
+  delete(key: string): Promise<void>
+}
+
+@Injectable()
+export class MemoryCacheStore implements CacheStore {
+  readonly #entries = new Map<string, { value: unknown; expiresAt: number }>()
+
+  async get(key: string) {
+    const entry = this.#entries.get(key)
+    if (entry === undefined) return undefined
+    if (entry.expiresAt <= Date.now()) {
+      this.#entries.delete(key)
+      return undefined
+    }
+    return { value: entry.value }
+  }
+
+  async set(key: string, value: unknown, ttlMs: number) {
+    this.#entries.set(key, { value, expiresAt: Date.now() + ttlMs })
+  }
+
+  async delete(key: string) {
+    this.#entries.delete(key)
+  }
+}
+```
+
+```ts [src/cache/cache.interceptor.ts]
+import { Injectable, type MethodInterceptor, type MethodInvocation } from '@znight/core'
+import type { CacheStore } from './cache.store.js'
+
+export interface CacheOptions {
+  /** Time to live of an entry, in milliseconds. */
+  ttlMs: number
+  /** Key prefix. Default: `<Class>.<method>`. */
+  prefix?: string
+}
+
+/** The cache key of a call: the prefix and the arguments (ids, strings, plain objects). */
+export function cacheKey(invocation: MethodInvocation, options: CacheOptions): string {
+  const prefix = options.prefix ?? `${invocation.className}.${invocation.methodName}`
+  return `${prefix}:${JSON.stringify(invocation.args)}`
+}
+
+@Injectable()
+export class CacheInterceptor implements MethodInterceptor<CacheOptions> {
+  /** Calls in flight: concurrent identical calls share one execution. */
+  readonly #pending = new Map<string, Promise<unknown>>()
+
+  constructor(private readonly store: CacheStore) {}
+
+  intercept(invocation: MethodInvocation, options: CacheOptions) {
+    if (!invocation.isAsync) return invocation.proceed() // a synchronous method must stay synchronous
+    const key = cacheKey(invocation, options)
+    let pending = this.#pending.get(key)
+    if (pending === undefined) {
+      pending = this.#load(key, invocation, options.ttlMs).finally(() => this.#pending.delete(key))
+      this.#pending.set(key, pending)
+    }
+    return pending
+  }
+
+  async #load(key: string, invocation: MethodInvocation, ttlMs: number): Promise<unknown> {
+    const hit = await this.store.get(key)
+    if (hit !== undefined) return hit.value
+    const value = await invocation.proceed() // a failure is not cached
+    await this.store.set(key, value, ttlMs)
     return value
   }
 }
 ```
+
+```ts [src/products/product.service.ts]
+import { Injectable, Intercept } from '@znight/core'
+import { CacheInterceptor } from '../cache/cache.interceptor.js'
+
+@Injectable()
+export class ProductService {
+  constructor(private readonly products: ProductRepository) {}
+
+  @Intercept(CacheInterceptor, { ttlMs: 60_000 })
+  async findById(id: string): Promise<Product | undefined> {
+    return this.products.findById(id) // runs at most once a minute per id
+  }
+}
+```
+
+:::
+
+- `CacheInterceptor` injects the `CacheStore` **interface**: the compiler binds it to its only
+  implementation. To use Redis in production, add a `RedisCacheStore implements CacheStore` and
+  mark it `@Primary()` (or remove the memory store); two implementations without `@Primary()` are
+  [`ZNIGHT008`](/reference/error-codes#znight008).
+- The memory store is per process and only drops an expired entry when it is read again: bound it
+  (an LRU) for keys that never come back, or use a shared store when you run several instances.
+- Keys serialise the arguments with `JSON.stringify`: fine for ids, strings and plain objects, not
+  for class instances or `bigint`. Pass a `prefix` to share entries between methods, and invalidate
+  an entry after a write by injecting `CacheStore` and calling `delete(key)`.
+- Cached values are shared between callers: return immutable data (or copy it).
+- Options are evaluated at build time, so they are literals or exported constants
+  (`{ ttlMs: PRODUCT_TTL_MS }`).
+
+A dedicated `@znight/cache` package is on the roadmap. Until it lands, this recipe is the
+recommended way to cache method results; declare a shorthand such as `@Cached()` for it in a package
+manifest ([below](#shorthand-decorators-in-your-own-packages)).
 
 ### Rewriting arguments
 
@@ -206,8 +310,11 @@ Synchronous methods stay synchronous; async methods are measured until their pro
 
 A wrapper function such as `const Timed = () => Intercept(TimingInterceptor)` is **not** visible to
 the compiler (it reads decorators from the source, it does not run them) and triggers a
-[`ZNIGHT005`](/reference/error-codes#znight005) warning. Packages declare shorthand decorators in
-their manifest instead, which is how `@Logged()` works:
+[`ZNIGHT005`](/reference/error-codes#znight005) warning, like a `const` alias
+(`export const Service = Injectable`). Renaming works through a re-export
+(`export { Injectable as Service } from '@znight/core'`), also from a package of yours (a preset
+re-exporting Znight decorators: the compiler extension of the package declaring them is loaded).
+Packages declare shorthand decorators in their manifest instead, which is how `@Logged()` works:
 
 ::: code-group
 

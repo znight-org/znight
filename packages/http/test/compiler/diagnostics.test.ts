@@ -2,7 +2,12 @@
  * Diagnostics of the extension on invalid applications: ZNIGHT005 (decorator usage), ZNIGHT007
  * (routes), ZNIGHT017 (unvalidated input) and ZNIGHT003 (through the guard / interceptor edges).
  */
-import { analyzeApp, cleanupApps, httpDiagnostics, render, tempApp } from './helpers.ts'
+import type { Diagnostic } from '@znight/compiler'
+
+import fs from 'node:fs'
+import path from 'node:path'
+
+import { analyzeApp, cleanupApps, HTTP_ROOT, httpDiagnostics, render, tempApp } from './helpers.ts'
 import { afterAll, describe, expect, test as it } from 'bun:test'
 
 afterAll(cleanupApps)
@@ -446,6 +451,88 @@ export class ScopedController {
     // the spec (§4.8: "a singleton depends ... through guards ... on a request-scoped provider")
     expect(render(await analyzeApp(app.root))).toEqual([
       'error ZNIGHT003 src/app.ts:12:20 Scope mismatch: singleton SingletonController depends on request-scoped RequestGuard (SingletonController -> RequestGuard)',
+    ])
+  })
+})
+
+describe('ZNIGHT005: decorators of another package', () => {
+  /** An application where `@znight/messaging` (which has `Headers` and `Ctx` too) is installed. */
+  async function withMessaging(source: string): Promise<{ lines: string[]; diagnostics: readonly Diagnostic[] }> {
+    const app = tempApp({ 'src/a.ts': source })
+    fs.symlinkSync(
+      path.resolve(HTTP_ROOT, '../messaging'),
+      path.join(app.root, 'node_modules/@znight/messaging'),
+      'dir',
+    )
+    const result = await analyzeApp(app.root, { discover: true })
+    return { lines: render(result), diagnostics: result.diagnostics }
+  }
+
+  it('leaves the parameters of a consumer handler to @znight/messaging, without suggesting @Controller()', async () => {
+    const { lines, diagnostics } = await withMessaging(`import { Consumer, Message, OnMessage } from '@znight/messaging'
+import { Body, Get, Headers, UseGuard } from '@znight/http'
+
+export class AllowAll { canActivate() { return true } }
+
+@Consumer('orders')
+@UseGuard(AllowAll)
+export class OrderConsumer {
+  @OnMessage()
+  handle(@Headers('x-a') a: string, @Message() @Body() payload: unknown, @Body() extra?: unknown) { return [a, payload, extra] }
+  @Get('/x') other(@Headers('x-b') b: string) { return b }
+}
+`)
+    const http = lines.filter(line => !line.includes("'@znight/http': @OnMessage handler parameters"))
+    expect(http).toEqual([
+      'error ZNIGHT005 src/a.ts:7:1 @UseGuard has no effect: OrderConsumer is not a controller',
+      "error ZNIGHT005 src/a.ts:10:48 @Body has no effect on parameter 'payload' of OrderConsumer.handle: it is an @OnMessage handler of '@znight/messaging'",
+      "error ZNIGHT005 src/a.ts:10:74 @Body has no effect on parameter 'extra' of OrderConsumer.handle: it is an @OnMessage handler of '@znight/messaging'",
+      'error ZNIGHT005 src/a.ts:11:3 @Get has no effect: OrderConsumer is not a controller',
+      'error ZNIGHT005 src/a.ts:11:20 @Headers has no effect: OrderConsumer is not a controller',
+    ])
+    // the misplaced `Headers` of the handler is reported once, by @znight/messaging
+    expect(lines.filter(line => line.includes('src/a.ts:10:10 '))).toEqual([
+      "error ZNIGHT005 src/a.ts:10:10 @Headers on parameter 'a' of OrderConsumer.handle() is imported from '@znight/http': @OnMessage handler parameters use Headers from '@znight/messaging'",
+    ])
+    const hints = diagnostics.flatMap(diagnostic => diagnostic.hints ?? [])
+    expect(hints.filter(hint => hint.includes('Add @Controller()'))).toEqual([])
+    expect(hints).toContain(
+      "OrderConsumer is a @Consumer class of '@znight/messaging': HTTP decorators only apply to @Controller() classes",
+    )
+  })
+
+  it('names the package of a route parameter decorator imported from @znight/messaging', async () => {
+    const { lines, diagnostics } = await withMessaging(`import { Ctx, Headers } from '@znight/messaging'
+import { Controller, Get } from '@znight/http'
+
+@Controller('/users')
+export class UserController {
+  @Get('/') list(@Ctx() context: unknown, @Headers('x-a') a: string) { return [context, a] }
+}
+`)
+    const http = lines.filter(line => line.includes('route parameters') || line.includes('no HTTP decorator'))
+    expect(http).toEqual([
+      "error ZNIGHT005 src/a.ts:6:18 @Ctx on parameter 'context' of UserController.list is imported from '@znight/messaging': route parameters use Ctx from '@znight/http'",
+      "error ZNIGHT005 src/a.ts:6:43 @Headers on parameter 'a' of UserController.list is imported from '@znight/messaging': route parameters use Headers from '@znight/http'",
+    ])
+    expect(diagnostics.flatMap(diagnostic => diagnostic.hints ?? [])).toContain(
+      "Import it from '@znight/http': import { Ctx } from '@znight/http'",
+    )
+  })
+
+  it('names the module of a look-alike decorator, without @znight/messaging', async () => {
+    const app = tempApp({
+      'src/decorators.ts': 'export function Body(): ParameterDecorator { return () => undefined }\n',
+      'src/app.ts': `import { Controller, Post } from '@znight/http'
+import { Body } from './decorators.ts'
+@Controller('/users')
+export class UserController {
+  @Post('/') create(@Body() body: unknown) { return body }
+}
+`,
+    })
+    expect(httpDiagnostics(await analyzeApp(app.root))).toEqual([
+      "error ZNIGHT005 src/app.ts:5:21 @Body on parameter 'body' of UserController.create is imported from 'src/decorators.ts': route parameters use Body from '@znight/http'",
     ])
   })
 })

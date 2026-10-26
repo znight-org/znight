@@ -5,7 +5,15 @@
  * depend on the compiler).
  */
 import type { ZnightError } from '@znight/core'
-import type { CanActivate, HttpContext, HttpControllerDefinition, HttpRouteDefinition } from '../../http/src/index.ts'
+import type {
+  CallHandler,
+  CanActivate,
+  ExceptionMapper,
+  HttpContext,
+  HttpControllerDefinition,
+  HttpInterceptor,
+  HttpRouteDefinition,
+} from '../../http/src/index.ts'
 import type { PluginInitRoots } from '../src/index.ts'
 
 import { ErrorCode, silentLogger } from '@znight/core'
@@ -187,17 +195,79 @@ const guarded = createMetadata(
   { aliases: { 'src/auth.ts#TokenStore': STORE }, extensions: { http: { controllers: [controller] } } },
 )
 
-/** Whether `HttpPlugin` lists the classes of its options for `TestApp` (see `PluginInitRoots`). */
-const listsGlobalProviders = typeof (HttpPlugin.prototype as Partial<PluginInitRoots>).initRoots === 'function'
+/** Records every request it sees (async dependency: the token store). */
+class AuditInterceptor implements HttpInterceptor {
+  readonly seen: string[] = []
+  constructor(private readonly store: TokenStore) {}
+  intercept(ctx: HttpContext, next: CallHandler): Promise<unknown> {
+    this.seen.push(`${ctx.method} ${ctx.path} ${this.store.tokens.size}`)
+    return next()
+  }
+}
 
-describe('TestApp with global guards of HttpPlugin', () => {
-  it.skipIf(!listsGlobalProviders)('boots a global guard with async dependencies (default only)', async () => {
+/** Maps every error to a 418 (async dependency). */
+class TeapotMapper implements ExceptionMapper {
+  constructor(private readonly store: TokenStore) {}
+  map(): HttpResponse {
+    return new HttpResponse({ tokens: this.store.tokens.size }, { status: 418 })
+  }
+}
+
+const INTERCEPTOR = 'src/audit.ts#AuditInterceptor'
+const MAPPER = 'src/errors.ts#TeapotMapper'
+
+const globals = createMetadata(
+  {
+    [TOKEN]: { scope: 'singleton', class: FileController, deps: [], factory: () => new FileController() },
+    [STORE]: {
+      scope: 'singleton',
+      deps: [],
+      async: true,
+      factory: () => Promise.resolve(new TokenStore(new Set(['secret']))),
+    },
+    [INTERCEPTOR]: {
+      scope: 'singleton',
+      class: AuditInterceptor,
+      deps: [STORE],
+      factory: d => new AuditInterceptor(d[0]),
+    },
+    [MAPPER]: { scope: 'singleton', class: TeapotMapper, deps: [STORE], factory: d => new TeapotMapper(d[0]) },
+  },
+  { aliases: { 'src/auth.ts#TokenStore': STORE }, extensions: { http: { controllers: [controller] } } },
+)
+
+describe('TestApp with the global guards, interceptors and mappers of HttpPlugin', () => {
+  it('boots a global guard with async dependencies (default only)', async () => {
     await using app = await TestApp.create({
       metadata: guarded,
-      plugins: [HttpPlugin.configure({ port: 0, guards: [AuthGuard] })],
+      // `HttpPlugin` implements the optional plugin member read by `TestApp.create()`
+      plugins: [HttpPlugin.configure({ port: 0, guards: [AuthGuard] }) satisfies PluginInitRoots],
       logger: silentLogger,
     })
     expect((await app.inject({ url: '/files/download' })).status).toBe(403)
+    expect((await app.inject({ url: '/files/download', headers: { authorization: 'secret' } })).status).toBe(200)
+  })
+
+  it('boots global interceptors and exception mappers with async dependencies (default only)', async () => {
+    await using app = await TestApp.create({
+      metadata: globals,
+      plugins: [HttpPlugin.configure({ port: 0, interceptors: [AuditInterceptor], exceptionMappers: [TeapotMapper] })],
+      logger: silentLogger,
+    })
+    expect((await app.inject({ url: '/files/download' })).status).toBe(200)
+    const missing = await app.inject({ url: '/nowhere' })
+    expect(missing.status).toBe(418)
+    expect(missing.json()).toEqual({ tokens: 1 })
+    expect(app.get(AuditInterceptor).seen).toEqual(['GET /files/download 1'])
+  })
+
+  it('adds the global providers to an explicit only list', async () => {
+    await using app = await TestApp.create({
+      metadata: guarded,
+      plugins: [HttpPlugin.configure({ port: 0, guards: [AuthGuard] })],
+      only: [FileController],
+      logger: silentLogger,
+    })
     expect((await app.inject({ url: '/files/download', headers: { authorization: 'secret' } })).status).toBe(200)
   })
 
@@ -222,5 +292,25 @@ describe('TestApp with global guards of HttpPlugin', () => {
       logger: silentLogger,
     })
     expect((await app.inject({ url: '/files/download', headers: { authorization: 'secret' } })).status).toBe(200)
+  })
+})
+
+describe('TestApp with HttpPlugin on a port already in use', () => {
+  it('rejects with a hint about port 0 (inject() needs no socket)', async () => {
+    await using taken = await TestApp.create({
+      metadata,
+      plugins: [HttpPlugin.configure({ port: 0 })],
+      logger: silentLogger,
+    })
+    const port = (taken.get(HttpPlugin).address as { readonly port: number }).port
+    let error: ZnightError | undefined
+    try {
+      await TestApp.create({ metadata, plugins: [HttpPlugin.configure({ port })], logger: silentLogger })
+    } catch (caught) {
+      error = caught as ZnightError
+    }
+    expect(error?.code).toBe(ErrorCode.LifecycleFailed)
+    expect((error?.cause as { code?: unknown } | undefined)?.code).toBe('EADDRINUSE')
+    expect(error?.hints.join('\n')).toContain('HttpPlugin with { port: 0 }')
   })
 })

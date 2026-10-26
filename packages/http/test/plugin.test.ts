@@ -111,6 +111,118 @@ describe('HttpPlugin options', () => {
   })
 })
 
+describe('initRoots()', () => {
+  class AuthGuard {
+    canActivate(): boolean {
+      return true
+    }
+  }
+  class TimingInterceptor {
+    intercept(_ctx: HttpContext, next: () => Promise<unknown>): Promise<unknown> {
+      return next()
+    }
+  }
+  class DomainErrorMapper {
+    map(): undefined {
+      return undefined
+    }
+  }
+
+  it('lists the classes of the global guards, interceptors and exception mappers, without the instances', () => {
+    const http = HttpPlugin.configure({
+      guards: [AuthGuard, { canActivate: () => true }],
+      interceptors: [{ intercept: (_ctx, next) => next() }, TimingInterceptor],
+      exceptionMappers: [DomainErrorMapper, AuthGuard as never],
+    })
+    expect(http.initRoots()).toEqual([AuthGuard, TimingInterceptor, DomainErrorMapper])
+    expect(HttpPlugin.configure({ port: 0 }).initRoots()).toEqual([])
+    expect(HttpPlugin.configure().initRoots()).toEqual([])
+  })
+
+  it('lists nothing for options computed from the container (not evaluated before the bootstrap)', () => {
+    let evaluated = false
+    const http = HttpPlugin.configure(() => {
+      evaluated = true
+      return { guards: [AuthGuard] }
+    })
+    expect(http.initRoots()).toEqual([])
+    expect(evaluated).toBe(false)
+  })
+
+  it('never throws: invalid options are left to onBootstrap', async () => {
+    const throwing = {
+      get guards(): never {
+        throw new Error('boom')
+      },
+      interceptors: [TimingInterceptor],
+    }
+    const invalid: unknown[] = [null, 42, 'options', { guards: 'AuthGuard' }, { guards: [42, null] }, throwing]
+    expect(invalid.map(options => HttpPlugin.configure(options as never).initRoots())).toEqual([
+      [],
+      [],
+      [],
+      [],
+      [],
+      [TimingInterceptor],
+    ])
+    const error = await bootError(usersMetadata(), { guards: 'AuthGuard' as never })
+    expect(error.message).toContain('option "guards" must be an array')
+  })
+
+  it('lets init({ only }) create global providers with async dependencies at boot', async () => {
+    class TokenStore {
+      constructor(readonly tokens: ReadonlySet<string>) {}
+    }
+    class TokenGuard {
+      constructor(private readonly store: TokenStore) {}
+      canActivate(ctx: HttpContext): boolean {
+        return this.store.tokens.has(ctx.header('authorization') ?? '')
+      }
+    }
+    const store = t('Auth.store')
+    const meta = metadata(
+      {
+        [t('UsersController')]: provider(UsersController),
+        [store]: {
+          scope: 'singleton',
+          deps: [],
+          async: true,
+          factory: () => Promise.resolve(new TokenStore(new Set(['secret']))),
+        },
+        [t('TokenGuard')]: provider(TokenGuard, [store]),
+      },
+      [controller(t('UsersController'), '/users', [route('list', '/', (c: UsersController) => c.list())])],
+    )
+    const options = { port: 0, guards: [TokenGuard] }
+
+    // without the global guard in `only`, its async dependency cannot be created on demand
+    const error = await caught(() =>
+      Application.create({
+        metadata: meta,
+        plugins: [HttpPlugin.configure(options)],
+        init: { only: [UsersController] },
+        logger: silentLogger,
+        shutdown: { signals: false },
+      }),
+    )
+    expect((error as ZnightError).code).toBe(ErrorCode.InstantiationFailed)
+    expect((error as ZnightError).message).toContain('on demand: its factory is async')
+
+    const http = HttpPlugin.configure(options)
+    const app = await Application.create({
+      metadata: meta,
+      plugins: [http],
+      init: { only: [UsersController, ...http.initRoots()] },
+      logger: silentLogger,
+      shutdown: { signals: false },
+    })
+    expect((await http.inject({ method: 'GET', url: '/users' })).status).toBe(403)
+    const allowed = await http.inject({ method: 'GET', url: '/users', headers: { authorization: 'secret' } })
+    expect(allowed.json()).toEqual(['ada'])
+    await app.stop()
+  })
+})
+
 describe('bootstrap errors', () => {
   it('reports invalid route paths (ZNIGHT007)', async () => {
     const error = await bootError(usersMetadata([route('list', '/a//b', (c: UsersController) => c.list())]))

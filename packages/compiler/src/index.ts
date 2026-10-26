@@ -4,8 +4,9 @@
  * This entry exposes the Vite plugin (`znight`, also the default export), the Bun API
  * (`createPreload`, `znightBunPlugin`, `loadZnightConfig`; the ready-made preload is
  * `@znight/compiler/bun`), the programmatic API (`compile`, `generate`, `createCompiler`,
- * `formatDiagnostics`, `renderErrorModule`), the options, the analysis API (analysis → binding →
- * validation → application graph) and the public compiler extension API (§6.5).
+ * `formatDiagnostics`, `renderErrorModule`), the watch helpers of custom watchers (`includeRoots`,
+ * `isRelevantChange`), the options, the analysis API (analysis → binding → validation →
+ * application graph) and the public compiler extension API (§6.5).
  *
  * Compiler extensions (`@znight/<pkg>/compiler`) must only `import type` from this package.
  */
@@ -156,6 +157,7 @@ export type {
   UnionType,
 } from './project/index.ts'
 export type { ZnightPluginApi } from './vite.ts'
+export type { ChangeKind } from './watch.ts'
 
 export { analyze, analyzeProject } from './analyze.ts'
 export { createPreload, loadZnightConfig, ZNIGHT_CONFIG_FILES, znightBunPlugin } from './bun-plugin.ts'
@@ -179,3 +181,4 @@ export {
 export { Project, ValueRef } from './project/index.ts'
 export { COMPILER_VERSION } from './version.ts'
 export { znight as default, znight } from './vite.ts'
+export { includeRoots, isRelevantChange } from './watch.ts'

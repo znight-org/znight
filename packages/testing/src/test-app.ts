@@ -140,6 +140,10 @@ export class TestApp implements AsyncDisposable {
   /**
    * Creates and (by default) starts the application.
    *
+   * Plugins are used as configured: give the servers they start a free port or none in tests
+   * (`HttpPlugin.configure({ port: 0 })`, `ObservabilityPlugin.configure({ metrics: { server: false } })`);
+   * a start failing on a port already in use (`EADDRINUSE`) gets a hint saying so.
+   *
    * @throws the error of `Application.create()` / `app.start()` (everything is rolled back).
    */
   static async create(options: TestAppOptions): Promise<TestApp> {
@@ -163,7 +167,7 @@ export class TestApp implements AsyncDisposable {
       if (options.start !== false) await app.start()
       return new TestApp(app)
     } catch (error) {
-      if (init.only !== undefined) addOnlyHint(error)
+      addHints(error, init.only !== undefined)
       throw error
     }
   }
@@ -309,27 +313,54 @@ function findProvider(key: unknown, providers: ReadonlySet<Token>, index: Metada
 
 const ONLY_HINT = "With TestApp: list it in TestApp.create({ only: [...] }) (or pass only: 'all') to create it at boot"
 
+/** Hint added to start failures caused by a port already in use (`EADDRINUSE`). */
+const PORT_IN_USE_HINT =
+  'With TestApp, servers need no fixed port (inject() sends requests in memory): configure HttpPlugin with { port: 0 } and ObservabilityPlugin with { metrics: { server: false } } (or server: { port: 0 }) in tests'
+
+interface ErrorLike {
+  readonly code?: unknown
+  readonly hints?: unknown
+  readonly cause?: unknown
+}
+
 /**
- * Adds the TestApp form of the container hint to "cannot create on demand: its factory is async"
- * errors (ZNIGHT015, hint `init({ only })`), which `TestApp` exposes as its `only` option.
+ * Adds TestApp hints to a failed `TestApp.create()`, along the `cause` chain:
+ * - the TestApp form of the container hint to "cannot create on demand: its factory is async"
+ *   errors (ZNIGHT015, hint `init({ only })`) of a restricted boot, which `TestApp` exposes as its
+ *   `only` option;
+ * - when a server could not listen because its port is taken (`EADDRINUSE`: a fixed port, such as
+ *   the default `9464` of the observability metrics server, shared by test files running in
+ *   parallel or by `znight dev`), the options giving it a free port or none, on the outermost error
+ *   carrying hints (the `ZnightError` the application wraps plugin failures in).
  */
-function addOnlyHint(error: unknown): void {
-  const seen = new Set<object>()
+function addHints(error: unknown, restricted: boolean): void {
+  const chain: (object & ErrorLike)[] = []
   let current = error
-  while (current !== null && typeof current === 'object' && !seen.has(current)) {
-    seen.add(current)
-    const { code, hints, cause } = current as { code?: unknown; hints?: unknown; cause?: unknown }
-    if (
-      code === ErrorCode.InstantiationFailed &&
-      Array.isArray(hints) &&
-      hints.some(hint => typeof hint === 'string' && hint.includes('init({ only })')) &&
-      !hints.includes(ONLY_HINT)
-    ) {
-      // `hints` is a plain own property of ZnightError; a frozen error is left as is
-      Reflect.set(current, 'hints', [...hints, ONLY_HINT])
-    }
-    current = cause
+  while (current !== null && typeof current === 'object' && !chain.includes(current)) {
+    chain.push(current)
+    current = (current as ErrorLike).cause
   }
+  if (restricted) {
+    for (const item of chain) {
+      if (
+        item.code === ErrorCode.InstantiationFailed &&
+        Array.isArray(item.hints) &&
+        item.hints.some(hint => typeof hint === 'string' && hint.includes('init({ only })'))
+      ) {
+        addHint(item, ONLY_HINT)
+      }
+    }
+  }
+  if (chain.some(item => item.code === 'EADDRINUSE')) {
+    const outermost = chain.find(item => Array.isArray(item.hints))
+    if (outermost !== undefined) addHint(outermost, PORT_IN_USE_HINT)
+  }
+}
+
+function addHint(error: object & ErrorLike, hint: string): void {
+  const hints = error.hints as readonly unknown[]
+  // `hints` is a plain own property of ZnightError; a frozen error is left as is
+  if (!hints.includes(hint)) Reflect.set(error, 'hints', [...hints, hint])
 }
 
 function unique<T>(values: readonly T[]): T[] {

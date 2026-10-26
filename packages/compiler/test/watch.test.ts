@@ -77,6 +77,39 @@ describe('includeRoots(), isOutFile(), isRelevantChange()', () => {
     expect(relevant('changed', `${app.root}/src/.znight/container.generated.ts`)).toBe(false)
     expect(relevant('added', `${app.root}/src/.znight/container.generated.ts`)).toBe(false)
   })
+
+  it('keeps the directory events of watchers reporting a moved directory alone (fs.watch)', () => {
+    const compiler = createCompiler({ root: app.root })
+    const watched = new Set([`${app.root}/src/users/user.service.ts`, `${app.root}/package.json`])
+    const roots = [`${app.root}/src`]
+    const relevant = (kind: 'changed' | 'added' | 'removed', file: string): boolean =>
+      isRelevantChange(compiler, kind, file, watched, roots)
+    fs.mkdirSync(`${app.root}/src/accounts`, { recursive: true })
+    fs.mkdirSync(`${app.root}/docs`, { recursive: true })
+    try {
+      // `mv src/users src/accounts`: the old directory held compiled files, the new one is a source directory
+      expect(relevant('removed', `${app.root}/src/users`)).toBe(true)
+      expect(relevant('added', `${app.root}/src/accounts`)).toBe(true)
+      // a directory created outside the include roots, or that does not exist (anymore)
+      expect(relevant('added', `${app.root}/docs`)).toBe(false)
+      expect(relevant('added', `${app.root}/src/gone`)).toBe(false)
+      // a removed directory without compiled files, a changed directory
+      expect(relevant('removed', `${app.root}/src/empty`)).toBe(false)
+      expect(relevant('removed', `${app.root}/src/use`)).toBe(false)
+      expect(relevant('changed', `${app.root}/src/accounts`)).toBe(false)
+    } finally {
+      fs.rmSync(`${app.root}/src/accounts`, { recursive: true, force: true })
+      fs.rmSync(`${app.root}/docs`, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('the public entry', () => {
+  it('exposes includeRoots() and isRelevantChange() for custom watchers (znight generate --watch)', async () => {
+    const entry = await import('../src/index.ts')
+    expect(entry.includeRoots).toBe(includeRoots)
+    expect(entry.isRelevantChange).toBe(isRelevantChange)
+  })
 })
 
 describe('PendingChanges', () => {

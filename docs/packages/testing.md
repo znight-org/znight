@@ -68,8 +68,10 @@ download.bytes // Uint8Array: the raw body
 - `TestApp.create({ metadata, plugins?, providers?, overrides?, only?, start?, logger?, shutdown? })`
   runs `Application.create()` then `start()` (unless `start: false`); signal handlers are disabled.
 - `overrides` are applied last (highest precedence).
-- Only the dependency closure of controllers (with their guards and interceptors), consumers and
-  overridden providers is instantiated by default (`only: 'all'` or a list of keys otherwise).
+- Only the dependency closure of controllers (with their guards and interceptors), consumers,
+  overridden providers and the providers plugins resolve at bootstrap (`HttpPlugin`'s global
+  guards, interceptors and exception mappers, listed by the plugin's `initRoots()`) is instantiated
+  by default (`only: 'all'` or a list of keys otherwise).
 - `inject({ method?, url, headers?, body?, query? })` goes through the HTTP plugin in memory (no
   network call) and resolves with `{ status, headers, body, bytes, json() }`. Bodies: objects as
   JSON, strings and bytes as is, `FormData` as `multipart/form-data`, `Blob` / `File` with its type.

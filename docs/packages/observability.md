@@ -73,8 +73,11 @@ and `flush()` work as in pino. The level comes from the option, else `LOG_LEVEL`
 Options include `redact` (paths censored by pino), `pretty` (`pino-pretty`), `base`, `timestamp` and
 `transport`: `consoleTransport()` (default, JSON lines on stdout), `prettyTransport()`,
 `cloudwatchTransport()` (Lambda / CloudWatch JSON format) and `datadogTransport()` (HTTP intake with
-batching and retries). The plugin also writes one entry per HTTP request (`request completed`) and per
-message delivery.
+batching and retries; entry fields clashing with Datadog's reserved attributes, such as the HTTP
+`status` of request logs, are kept under other names instead of overwriting them). The plugin also
+writes one entry per HTTP request (`request completed`) and per message delivery. It flushes the
+logger on shutdown, and entries written after that (the final `Application stopped`) are flushed
+as soon as they are written, so they are delivered before the process exits.
 
 ## Metrics
 
@@ -82,8 +85,10 @@ When the optional peer `prom-client` is installed, the plugin records RED metric
 duration) for HTTP requests (`http_server_requests_total`, `http_server_request_duration_seconds`,
 labelled by route pattern, never the raw path) and message deliveries, plus process metrics, and
 serves them on a dedicated server (`http://0.0.0.0:9464/metrics` by default, `server: false` to
-disable it). Add your own with `MetricsRegistry` (`counter`, `gauge`, `histogram`, `summary`:
-get-or-create by name) or the `@Metric()` decorator.
+disable it). Label cardinality stays bounded: the message `type` label is `unmatched` for
+deliveries no handler matched and is capped per handler (`maxTypesPerHandler`, 50, then `_OTHER`).
+Add your own with `MetricsRegistry` (`counter`, `gauge`, `histogram`, `summary`: get-or-create by
+name) or the `@Metric()` decorator.
 
 ## Tracing
 
@@ -91,8 +96,11 @@ Spans are created for every HTTP request (`SERVER`), message delivery (`CONSUMER
 published through `MessageBroker` (`PRODUCER`, its trace context injected into the message headers),
 with W3C trace-context propagation: incoming `traceparent` headers are continued and responses carry a
 `traceresponse` header. Znight only uses the OpenTelemetry **API**: register any SDK (the Node SDK,
-with `serviceName` and an exporter) and spans are exported; without one they are no-ops. Add spans to
-your own methods with `@Traced()` or the `Tracer` (`withSpan`, `startSpan`, `inject`, `extract`).
+with `serviceName` and an exporter) and spans are exported; without one they are no-ops, but the
+incoming trace ids still reach the logs, the `traceresponse` header and the messages published while
+handling the request (Znight registers a minimal `AsyncLocalStorage` context manager when nothing
+did: register your SDK before the first request). Add spans to your own methods with `@Traced()` or
+the `Tracer` (`withSpan`, `startSpan`, `inject`, `extract`).
 
 ## Interceptor decorators
 

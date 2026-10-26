@@ -107,9 +107,38 @@ Signal handlers are installed as soon as the start begins, so `Ctrl+C` during a 
 cleanly. If a step fails, what was started is stopped, everything is disposed, `app.state` becomes
 `'failed'` and the error is rethrown.
 
+### Stopping from a start hook
+
+A start hook may stop the application itself: a one-shot job that does its work in `onReady()`, or
+a provider giving up in `onStart()`. Call `app.stop()` (inject `Application`), awaited or not:
+
+```ts
+import { Application, Injectable, type OnReady } from '@znight/core'
+
+@Injectable()
+export class MigrationJob implements OnReady {
+  constructor(
+    private readonly app: Application,
+    private readonly migrations: Migrator,
+  ) {}
+
+  async onReady() {
+    await this.migrations.run()
+    await this.app.stop() // the job is done: shut down
+  }
+}
+```
+
+`stop()` normally waits for an in-progress start, but the start is waiting for this very hook: called
+from a start hook (or from work the hook awaits), the shutdown runs **right away** instead. What
+completed its `onStart()` is stopped, the remaining start hooks are skipped, and `app.start()`
+resolves once the application is `stopped` (it rejects if the hook throws afterwards). A `SIGTERM`
+received during the boot does not deadlock either.
+
 ## Graceful shutdown: `app.stop()`
 
-`stop()` is idempotent (it waits for an in-progress start) and runs three phases:
+`stop()` is idempotent (it waits for an in-progress start, unless a start hook calls it) and runs
+three phases:
 
 | Phase | What runs                                                                                | Purpose                                             |
 | ----- | ---------------------------------------------------------------------------------------- | --------------------------------------------------- |
@@ -119,6 +148,9 @@ cleanly. If a step fails, what was started is stopped, everything is disposed, `
 
 Every step is attempted even if a previous one failed. Each step has its own timeout
 (`hookTimeoutMs`, 5 s by default) and the whole shutdown a global deadline (`timeoutMs`, 10 s).
+`Infinity` disables a budget (so does any value above 2^31 − 1 ms, about 24.8 days, the longest
+delay a timer accepts); negative and `NaN` values are rejected
+([`ZNIGHT005`](/reference/error-codes#znight005)).
 Failures are collected into one `ZnightAggregateError`
 ([`ZNIGHT021`](/reference/error-codes#znight021)) whose `errors` lists each failed step.
 
@@ -138,6 +170,8 @@ const app = await Application.create({
 
 After `start()`, `SIGINT` and `SIGTERM` trigger `app.stop()`:
 
+- the shutdown logs `Application stopped` once it completed (at `info` after a signal, at `debug`
+  after an explicit `app.stop()`);
 - when the signal-triggered shutdown fails, `process.exitCode` is set to `1`;
 - a **second** signal forces `process.exit(130)`;
 - an explicit `app.stop()` never touches the exit code: your code decides.
@@ -161,8 +195,9 @@ created ──start()──▶ starting ──▶ ready ──stop()──▶ st
 ## Partial initialisation
 
 `init: { only: [...] }` creates only the dependency closure of the given providers. Other singletons
-are created on first use (synchronously, so async factories must be in the closure). It is handy for
-CLI commands or serverless handlers that only need part of the graph:
+are created on first use (synchronously, so async factories must be in the closure), outside of any
+request scope even when a request uses them first. It is handy for CLI commands or serverless
+handlers that only need part of the graph:
 
 ```ts
 const app = await Application.create({
@@ -182,6 +217,10 @@ new one starts:
 ```ts
 const app = await Application.create({ metadata: __ZNIGHT_METADATA__, plugins, hot: import.meta.hot })
 ```
+
+The dispose callback returns the `stop()` promise: HMR runtimes that await it (Vite's module runner,
+Bun) load the new module only once the old application released its port and its consumers. A
+failed stop is logged (`Failed to stop the application`), not thrown at the HMR runtime.
 
 `znight dev` restarts the whole process on every rebuild instead, which is the recommended
 development loop.

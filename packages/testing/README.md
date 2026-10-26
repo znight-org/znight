@@ -153,6 +153,25 @@ container is used: interceptors, scopes and lifecycle hooks all run.
 `app.inject()` needs no listening server: configure the HTTP plugin with `port: 0` (a free port) so
 parallel test files never collide, or pass `start: false` to stop after `onBootstrap`.
 
+The same goes for every server a plugin starts on a fixed port. Once `prom-client` is installed,
+`ObservabilityPlugin` from `@znight/observability` serves `/metrics` on port 9464 by default: a
+second test file, or `znight dev`, then fails to start. Disable that server in tests, or give it a
+free port when a test scrapes it:
+
+```ts
+await using app = await TestApp.create({
+  metadata,
+  plugins: [
+    ObservabilityPlugin.configure({ logging: { level: 'silent' }, metrics: { server: false } }), // or server: { port: 0 }
+    HttpPlugin.configure({ port: 0 }),
+  ],
+})
+```
+
+`TestApp` never changes the options of the plugins it is given (they are configured instances):
+when the start fails because a port is taken (`EADDRINUSE` anywhere in the `cause` chain), the error
+carries a hint naming these options.
+
 | Option      | Type                              | Description                                                                                                                                                                                                                            |
 | ----------- | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `metadata`  | `ZnightMetadata`                  | **Required.** The generated metadata.                                                                                                                                                                                                  |
@@ -174,8 +193,8 @@ factories only).
 
 Providers a plugin resolves while it bootstraps without the metadata referencing them (the global
 `guards`, `interceptors` and `exceptionMappers` of `HttpPlugin.configure({...})`) are instantiated at
-boot too, with their dependencies, when the plugin lists them in an `initRoots()` method (see
-[Compiler contract](#compiler-contract)). Options computed from the container
+boot too, with their dependencies, when the plugin lists them in an `initRoots()` method, as
+`HttpPlugin` does (see [Compiler contract](#compiler-contract)). Options computed from the container
 (`HttpPlugin.configure(c => ({...}))`) cannot be listed before the boot: when such a provider (or one
 of its dependencies) has an async factory, the boot fails with `ZNIGHT015` ("cannot create ... on
 demand: its factory is async"); add it to `only`, or pass `only: 'all'`:

@@ -19,6 +19,7 @@ import {
 } from '../../src/index.ts'
 
 const cwd = process.argv[2]
+const SECRET_PREFIX = 'tok_live_'
 const results = {}
 
 class DbConfig {
@@ -39,6 +40,12 @@ const server = createServer((req, res) => {
     raw += chunk
   })
   req.on('end', () => {
+    if (req.url === '/v1/secret/data/invalid') {
+      // a response that is not JSON: V8's JSON.parse messages quote the input around the error
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(`{"data":{"data":{"API_KEY":${SECRET_PREFIX}SuperSecret}}}`)
+      return
+    }
     if (req.url?.startsWith('/v1/')) {
       res.writeHead(200, { 'content-type': 'application/json' })
       res.end(JSON.stringify({ data: { data: { VAULT_VALUE: req.url } } }))
@@ -100,6 +107,12 @@ try {
     shutdown: { signals: false },
   }).catch(error => error)
   results.validation = app.code
+
+  const invalid = await loadConfigSource(
+    [vault({ address: endpoint, token: 'node-token', path: 'secret/invalid', retries: 0 })],
+    { env: {} },
+  ).catch(error => error)
+  results.invalidVaultResponse = { message: invalid.message, leaked: inspect(invalid).includes(SECRET_PREFIX) }
 } finally {
   server.close()
 }

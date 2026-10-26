@@ -83,8 +83,12 @@ export class UserController {
   duplicate method + path pairs and `:params` without a matching `@Param()`. The most specific route
   wins (static > `:param` > `*`).
 - `HEAD` is served for every `GET` route; unknown paths answer `404`, other methods `405` with
-  `allow`, unmatched `OPTIONS` `204`. A trailing-slash policy (`strict` by default, `ignore`,
-  `redirect`) is applied the same way on every adapter.
+  `allow`, unmatched `OPTIONS` `204` (both `allow` headers list the same methods, `OPTIONS`
+  included). A trailing-slash policy (`strict` by default, `ignore`, `redirect`, whose `location`
+  always stays on the same origin) is applied the same way on every adapter.
+- Routes match the **raw** request path: dot segments are not resolved (`/files/a/../b` gives
+  `ctx.params['*'] = 'a/../b'`), so never build file paths from parameters without the `root`
+  option of `HttpResponse.file()`. Exception: `Bun.serve()` gives the Hono adapter a normalised URL.
 - Paths can be built from constants: ``@Controller(`${API_V1}/users`)`` is evaluated at build time.
 
 ## Parameters
@@ -103,7 +107,10 @@ export class UserController {
 **Coercion.** Path, query and header values are strings on the wire; Znight coerces them from the
 **declared parameter type** in generated code: `string`, `number`, `boolean`, `bigint`, `Date`,
 literal unions, enums, branded primitives and arrays of those (`T[]` also accepts a single value).
-An invalid value is a `400 Bad Request` naming the parameter. A type that cannot be coerced from a
+A `Date` is an ISO 8601 date (`2024-01-02`), a date-time **with** an offset
+(`2024-01-02T10:00:00Z`, `+02:00`) or a millisecond timestamp: impossible dates and date-times
+without offset (they would depend on the server time zone) are rejected. An invalid value is a
+`400 Bad Request` naming the parameter. A type that cannot be coerced from a
 string is a build error ([`ZNIGHT007`](/reference/error-codes#znight007)) for `@Param` / `@Headers`.
 
 Parameters with a default value, `?` or `| undefined` may be absent (`undefined` is injected, so
@@ -383,7 +390,8 @@ externals:
 - `RequestId`: the request identifier (the incoming `x-request-id` when valid, else a UUID).
 
 Inject them in request-scoped providers, or through `Lazy<HttpContext>` in singletons. Request-scoped
-instances are disposed once the response has been sent (streams included).
+instances are disposed once the response has been sent (streams and files included, so a
+request-scoped provider may own a temporary file it deletes when disposed).
 
 ## The request pipeline
 
@@ -406,31 +414,38 @@ request.
 
 `HttpPlugin.configure(options)`, or `HttpPlugin.configure(container => options)`:
 
-| Option             | Default               | Description                                                |
-| ------------------ | --------------------- | ---------------------------------------------------------- |
-| `adapter`          | `nodeAdapter()`       | `fastifyAdapter()`, `expressAdapter()`, `honoAdapter()`... |
-| `port`, `host`     | `3000`, `0.0.0.0`     | Listening address (`port: 0`: a free port)                 |
-| `prefix`           | —                     | Path prefix for every route (`/api`)                       |
-| `guards`           | `[]`                  | Global guards (classes or instances)                       |
-| `interceptors`     | `[]`                  | Global interceptors                                        |
-| `exceptionMappers` | `[]`                  | Map error types to responses                               |
-| `trailingSlash`    | `'strict'`            | `'strict'`, `'ignore'` or `'redirect'`                     |
-| `exposeErrors`     | `false`               | Include messages of unexpected errors in `500` responses   |
-| `bodyLimit`        | 1 MiB                 | Maximum request body size (bytes or `'10mb'`)              |
-| `uploads`          | see [Files](#uploads) | `{ maxFileSize, maxFiles, maxParts, maxFieldSize }`        |
-| `requestIdHeader`  | `x-request-id`        | Header read and echoed (`false`: always generate)          |
-| `drainTimeoutMs`   | `4000`                | Maximum wait for in-flight requests on shutdown            |
+| Option             | Default               | Description                                                            |
+| ------------------ | --------------------- | ---------------------------------------------------------------------- |
+| `adapter`          | `nodeAdapter()`       | `fastifyAdapter()`, `expressAdapter()`, `honoAdapter()`...             |
+| `port`, `host`     | `3000`, `0.0.0.0`     | Listening address (`port: 0`: a free port)                             |
+| `prefix`           | —                     | Path prefix for every route (`/api`)                                   |
+| `guards`           | `[]`                  | Global guards (classes or instances)                                   |
+| `interceptors`     | `[]`                  | Global interceptors                                                    |
+| `exceptionMappers` | `[]`                  | Map error types to responses                                           |
+| `trailingSlash`    | `'strict'`            | `'strict'`, `'ignore'` or `'redirect'`                                 |
+| `exposeErrors`     | `false`               | Include messages of unexpected errors in `500` responses               |
+| `bodyLimit`        | 1 MiB                 | Maximum request body size (bytes or `'10mb'`)                          |
+| `uploads`          | see [Files](#uploads) | `{ maxFileSize, maxFiles, maxParts, maxFieldSize }`                    |
+| `requestIdHeader`  | `x-request-id`        | Header read and echoed (`false`: always generate)                      |
+| `drainTimeoutMs`   | `4000`                | Maximum wait for in-flight requests on shutdown (`Infinity`: no limit) |
 
 ## Adapters
 
-| Adapter                                     | Peer dependencies           | Notes                                                |
-| ------------------------------------------- | --------------------------- | ---------------------------------------------------- |
-| `nodeAdapter()` (`@znight/http`)            | none                        | Built-in `node:http` server (also works on Bun)      |
-| `fastifyAdapter()` (`@znight/http/fastify`) | `fastify`                   | `exposeHeadRoutes` disabled: Znight serves HEAD      |
-| `expressAdapter()` (`@znight/http/express`) | `express`                   | Your middleware runs before the Znight routes        |
-| `honoAdapter()` (`@znight/http/hono`)       | `hono`, `@hono/node-server` | `Bun.serve()` on Bun, `@hono/node-server` on Node.js |
+| Adapter                                     | Peer dependencies           | Notes                                                                                 |
+| ------------------------------------------- | --------------------------- | ------------------------------------------------------------------------------------- |
+| `nodeAdapter()` (`@znight/http`)            | none                        | Built-in `node:http` server (also works on Bun)                                       |
+| `fastifyAdapter()` (`@znight/http/fastify`) | `fastify`                   | `exposeHeadRoutes` disabled: Znight serves HEAD                                       |
+| `expressAdapter()` (`@znight/http/express`) | `express`                   | Your middleware runs before the Znight routes                                         |
+| `honoAdapter()` (`@znight/http/hono`)       | `hono`, `@hono/node-server` | `Bun.serve()` on Bun (`serveOptions`, no 128 MiB cap), `@hono/node-server` on Node.js |
 
 Every adapter implements `inject(request)`: requests handled in memory, without a socket, which is
 what [`TestApp`](/guide/testing#testapp-end-to-end-tests) uses. `inject()` accepts `FormData` bodies
-(uploads) and returns the raw body in `bytes` (downloads); with the `node` and `express` adapters it
-needs `light-my-request`.
+(uploads) and returns the raw body in `bytes` (downloads); `set-cookie` is always an array in its
+`headers`. With the `node` and `express` adapters it needs `light-my-request`.
+
+A plugin instance serves one application at a time (a `HttpPlugin.configure()` shared by the tests
+of a file works; two running applications sharing it fail with
+[`ZNIGHT004`](/reference/error-codes#znight004)), and an adapter instance serves a single
+application: create adapters per application with the function form,
+`HttpPlugin.configure(() => ({ adapter: fastifyAdapter() }))`
+([`ZNIGHT021`](/reference/error-codes#znight021) otherwise).

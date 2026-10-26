@@ -126,6 +126,38 @@ is an object `{ name, load(context) }` returning `{ origin, values }` layers. Th
 combined `ConfigSource` as an injectable provider (and as `plugin.source`), so custom code can read
 raw values too. Without `ConfigPlugin`, each config class reads `process.env` when it is created.
 
+Loader errors never print values. A JSON or YAML syntax error gives the file and the position, not
+the parser message (which quotes the content: a secret, maybe), and the parser error is not kept as
+`cause`:
+
+```txt
+ZnightError: ZNIGHT006: Config loader "json" failed: invalid JSON in config/secrets.json at line 2, column 16: unexpected character
+```
+
+## Bun's automatic `.env` loading {#bun-env-loading}
+
+Bun loads `.env`, `.env.<mode>`, `.env.local` (not in tests) and `.env.<mode>.local` into
+`process.env` **before** your code runs, with its own rules: the mode is `production` or `test` when
+`NODE_ENV` is exactly that and `development` otherwise, `.env.local` wins over `.env.<mode>`, and
+`${VAR}` references are expanded. `env()` then reads those values as if they were the real
+environment: they win over `dotenv()`, are reported as coming from `process.env`, and are loaded even
+without `dotenv()`. The same files give different values on Node.js and on Bun.
+
+Turn Bun's loading off and let `dotenv()` load the files, the same way on both runtimes:
+
+::: code-group
+
+```toml [bunfig.toml]
+env = false
+```
+
+:::
+
+or run `bun --no-env-file dist/main.js` (also with `--preload`). On Bun, `env()` warns once per
+process (`ZnightWarning`) when `process.env` holds variables of the files Bun loaded, naming them. To
+use Bun's loading on purpose, read `process.env` explicitly: `env({ env: process.env })` skips the
+check.
+
 ## Using config in plugin options
 
 Config classes are ordinary providers, so plugins can read them through the
