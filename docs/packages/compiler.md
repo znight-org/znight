@@ -2,34 +2,46 @@
 description: "@znight/compiler - the Vite plugin, CLI and Bun integration that analyses your code at build time and generates the dependency injection container."
 ---
 
-# @znight/compiler <Badge type="warning" text="in development" />
+# @znight/compiler <Badge type="tip" text="available" />
 
 The compiler analyses your sources at build time and generates `__ZNIGHT_METADATA__`: providers,
 dependencies, scopes, resolution order, routes, consumers and config classes. It is a build-time
 dependency only.
 
 ```sh
-npm install -D @znight/compiler vite
+npm install -D @znight/compiler vite   # vite: for the Vite plugin (optional peer dependency)
 ```
 
-<!-- TODO(api): verify against implementation (the project model is implemented; analysis, binding, codegen, Vite plugin and Bun preload are in progress) -->
+Runs on Node.js 24+ and Bun 1.3+.
 
 ## Entry points
 
-| Import                 | Description                                                                               |
-| ---------------------- | ----------------------------------------------------------------------------------------- |
-| `@znight/compiler`     | `znight()` Vite plugin (default export), `compile()`, `generate()`, `formatDiagnostics()` |
-| `@znight/compiler/bun` | Bun plugin / preload regenerating the container before tests and `bun --watch`            |
+| Import                 | Description                                                                                                                                                                                                              |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `@znight/compiler`     | `znight()` Vite plugin (also the default export), `compile()`, `generate()`, `createCompiler()`, `formatDiagnostics()`, the Bun API (`createPreload()`, `znightBunPlugin()`, `loadZnightConfig()`) and the extension API |
+| `@znight/compiler/bun` | The Bun preload (importing it runs it): regenerates the container before `bun test` and `bun --watch`, serves it from memory                                                                                             |
 
 ::: code-group
+
+```ts [znight.config.ts]
+import type { ZnightOptions } from '@znight/compiler'
+
+// read by the Bun preload and `znight generate`, passed to the Vite plugin
+export default { strictValidation: true } satisfies ZnightOptions
+```
 
 ```ts [vite.config.ts]
 import { znight } from '@znight/compiler'
 import { defineConfig } from 'vite'
 
-export default defineConfig({
-  plugins: [znight({ strictValidation: true })],
-})
+import options from './znight.config.ts'
+
+export default defineConfig({ plugins: [znight(options)] })
+```
+
+```toml [bunfig.toml]
+[test]
+preload = ["@znight/compiler/bun"]
 ```
 
 :::
@@ -59,33 +71,52 @@ See the [options table](/guide/compiler#options) in the compiler guide.
 ```ts
 import { compile, formatDiagnostics, generate } from '@znight/compiler'
 
-const { diagnostics, stats } = await compile({ root: process.cwd() })
+const { ok, diagnostics, stats } = await compile({ root: process.cwd() })
 if (diagnostics.length > 0) console.error(formatDiagnostics(diagnostics, { color: true }))
 
-await generate({ check: true }) // CI: fails when the file on disk is stale
+const { stale } = await generate({ check: true }) // CI: never writes, `stale` when the file on disk is out of date
 ```
 
 ```ts
 interface CompileResult {
-  code: string
-  outFile: string
-  diagnostics: Diagnostic[]
+  code: string // the generated module, or the error module when !ok
+  outFile: string // absolute
+  diagnostics: Diagnostic[] // syntax errors (ZNIGHT022) first, then by file and offset
+  ok: boolean // no error diagnostic
   graph: ApplicationGraph
-  stats: { files: number; providers: number; durationMs: number }
+  stats: { files: number; providers: number; durationMs: number; parsed: number }
+  library: LibraryOutput | undefined // library mode: dist/znight.providers.json
+  watchFiles: string[] // sources, manifests and libraries the result depends on
+  decorators: ReadonlyMap<string, DecoratorRanges> // decorator ranges stripped by the Vite plugin / Bun preload
 }
 
 interface Diagnostic {
   code: ErrorCode // 'ZNIGHT001'...
   severity: 'error' | 'warning'
   message: string
-  location?: { file: string; line: number; column: number }
+  location?: {
+    file: string
+    line: number
+    column: number
+    endLine: number
+    endColumn: number
+    start: number
+    end: number
+  }
   hints?: string[]
-  related?: { message: string; location: { file: string; line: number; column: number } }[]
+  related?: { message: string; location: Location }[]
 }
 ```
 
+`generate()` returns the same plus `written` (the files whose content changed) and `stale` (check
+mode). `createCompiler(options)` keeps the parse cache between compiles for watchers
+(`compile(changes)` / `generate(changes)` with `{ changed, added, removed }`).
+
 ## Learn more
 
-- [The compiler guide](/guide/compiler): pipeline, generated module, Vite plugin, Git/CI, Bun preload.
+- [The compiler guide](/guide/compiler): pipeline, options and `znight.config.ts`, generated module,
+  Vite plugin, Git/CI, Bun preload.
+- [Package README](https://github.com/ugho49/Znight/tree/main/packages/compiler#readme): every
+  option, diagnostic and API in detail.
 - [Architecture specification](/contributing/architecture): identities, import routes, binding
   algorithm, extension API.

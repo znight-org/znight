@@ -79,6 +79,16 @@ describe('znight generate with @znight/compiler', () => {
     expect(existsSync(join(root, OUT_FILE))).toBe(false)
   })
 
+  it('reads the options of znight.config.ts (shared with the Bun preload)', async () => {
+    const root = fixture('compile')
+    writeFileSync(join(root, 'znight.config.ts'), "export default { outFile: 'src/di/container.ts' }\n")
+    const run = await cli(['generate'], root)
+    expect(run.code).toBe(0)
+    expect(run.stdout).toContain('Generated src/di/container.ts')
+    expect(existsSync(join(root, 'src/di/container.ts'))).toBe(true)
+    expect(existsSync(join(root, OUT_FILE))).toBe(false)
+  })
+
   it('regenerates on changes with --watch', async () => {
     const root = fixture('compile')
     const signals = new FakeSignals()

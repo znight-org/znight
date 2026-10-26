@@ -7,16 +7,16 @@ description: The Znight packages - core runtime, compiler, HTTP, messaging, conf
 Znight is split into small packages, versioned together (all `@znight/*` packages share the same
 version). Install only what you use.
 
-| Package                                    | What it gives you                                                              | Install as    | Status                                         |
-| ------------------------------------------ | ------------------------------------------------------------------------------ | ------------- | ---------------------------------------------- |
-| [`@znight/core`](./core)                   | Container, application lifecycle, plugins, hooks, AOP, marker decorators       | dependency    | <Badge type="tip" text="available" />          |
-| [`@znight/compiler`](./compiler)           | Vite plugin, CLI/Bun integration: analysis, validation, code generation        | devDependency | <Badge type="warning" text="in development" /> |
-| [`@znight/http`](./http)                   | Controllers, routing, validation, guards, interceptors; Fastify, Express, Hono | dependency    | <Badge type="warning" text="in development" /> |
-| [`@znight/messaging`](./messaging)         | Consumers, retries, dead-letter queues; RabbitMQ, SQS, Kafka, in-memory        | dependency    | <Badge type="warning" text="in development" /> |
-| [`@znight/config`](./config)               | Typed config classes from env, `.env`, JSON/YAML, Vault, AWS Secrets Manager   | dependency    | <Badge type="warning" text="in development" /> |
-| [`@znight/observability`](./observability) | Pino logger, Prometheus metrics, OpenTelemetry tracing                         | dependency    | <Badge type="warning" text="in development" /> |
-| [`@znight/testing`](./testing)             | `TestBed` with auto-mocks, `TestApp` for in-memory end-to-end tests            | devDependency | <Badge type="warning" text="in development" /> |
-| [`@znight/cli`](./cli)                     | `znight new`, `generate`, `dev`, `build`, `start`, code generators             | devDependency | <Badge type="warning" text="in development" /> |
+| Package                                    | What it gives you                                                              | Install as    | Status                                |
+| ------------------------------------------ | ------------------------------------------------------------------------------ | ------------- | ------------------------------------- |
+| [`@znight/core`](./core)                   | Container, application lifecycle, plugins, hooks, AOP, marker decorators       | dependency    | <Badge type="tip" text="available" /> |
+| [`@znight/compiler`](./compiler)           | Vite plugin, CLI/Bun integration: analysis, validation, code generation        | devDependency | <Badge type="tip" text="available" /> |
+| [`@znight/http`](./http)                   | Controllers, routing, validation, guards, interceptors; Fastify, Express, Hono | dependency    | <Badge type="tip" text="available" /> |
+| [`@znight/messaging`](./messaging)         | Consumers, retries, dead-letter queues; RabbitMQ, SQS, Kafka, in-memory        | dependency    | <Badge type="tip" text="available" /> |
+| [`@znight/config`](./config)               | Typed config classes from env, `.env`, JSON/YAML, Vault, AWS Secrets Manager   | dependency    | <Badge type="tip" text="available" /> |
+| [`@znight/observability`](./observability) | Pino logger, Prometheus metrics, OpenTelemetry tracing                         | dependency    | <Badge type="tip" text="available" /> |
+| [`@znight/testing`](./testing)             | `TestBed` with auto-mocks, `TestApp` for in-memory end-to-end tests            | devDependency | <Badge type="tip" text="available" /> |
+| [`@znight/cli`](./cli)                     | `znight new`, `generate`, `dev`, `build`, `start`, code generators             | devDependency | <Badge type="tip" text="available" /> |
 
 ## How a feature package is built
 
@@ -44,4 +44,5 @@ the ones you use, and adapters or drivers live in subpath exports so unused ones
 
 - Node.js 24+ or Bun 1.3+, ESM only.
 - TypeScript with `experimentalDecorators` enabled (for parameter decorators).
-- Vite 7 or 8 for the compiler's Vite plugin (optional when you only use the CLI or the Bun preload).
+- Vite 8 for the compiler's Vite plugin and the `znight dev` / `znight build` commands (not needed
+  when you only use `znight generate` or the Bun preload).

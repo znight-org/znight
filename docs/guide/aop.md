@@ -189,9 +189,18 @@ export class PaymentService {
 ```
 
 `@Logged()` maps to `LoggedInterceptor`, `@Traced()` to `TracedInterceptor` and `@Metric()` to
-`MetricInterceptor`. See [observability](/packages/observability).
+`MetricInterceptor`, provided at runtime by `ObservabilityPlugin`. Their options are literals,
+validated when the application is created (a bad option fails `Application.create()` with
+[`ZNIGHT005`](/reference/error-codes#znight005)):
 
-<!-- TODO(api): verify against implementation (options of @Logged, @Traced, @Metric) -->
+| Decorator   | Options                                                                                                                                       |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@Logged()` | `level` (`'debug'`), `errorLevel` (`'error'`), `args` / `result` (log them, `false`), `message` (`<Class>.<method>()`)                        |
+| `@Traced()` | `name` (`<Class>.<method>`), `attributes` (static span attributes), `kind` (`'internal'`, `'server'`, `'client'`, `'producer'`, `'consumer'`) |
+| `@Metric()` | `type` (`'histogram'` of durations, or `'counter'`), `name`, `help`, `labels` (static), `buckets`                                             |
+
+Synchronous methods stay synchronous; async methods are measured until their promise settles. See
+[observability](/packages/observability).
 
 ### Shorthand decorators in your own packages
 

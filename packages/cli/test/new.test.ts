@@ -110,6 +110,14 @@ describe('project templates', () => {
     expect(option === undefined || main.includes(option)).toBe(true)
   })
 
+  it('znight.config.ts holds the compiler options shared by the Vite plugin, the Bun preload and the CLI', () => {
+    const bun = file(files({ packageManager: 'bun' }), 'znight.config.ts')
+    expect(bun).toContain("import type { ZnightOptions } from '@znight/compiler'")
+    expect(bun).toContain('} satisfies ZnightOptions')
+    expect(bun).toContain('the Bun preload of the\n// tests (bunfig.toml)')
+    expect(file(files({ packageManager: 'npm' }), 'znight.config.ts')).toContain('also used by Vitest')
+  })
+
   it('bun projects test with bun:test and preload the compiler', () => {
     const project = files({ packageManager: 'bun' })
     expect(packageJson(project).scripts['test']).toBe('bun test')
@@ -141,13 +149,15 @@ describe('project templates', () => {
       verbatimModuleSyntax: true,
     })
     expect(config.compilerOptions['emitDecoratorMetadata']).toBeUndefined()
-    expect(config.include).toEqual(['src', 'test', 'vite.config.ts'])
+    expect(config.include).toEqual(['src', 'test', 'vite.config.ts', 'znight.config.ts'])
+    expect(config.compilerOptions['allowImportingTsExtensions']).toBe(true)
   })
 
   it('vite.config.ts uses the znight() plugin; .gitignore ignores the generated container', () => {
     const project = files()
     expect(file(project, 'vite.config.ts')).toContain("import { znight } from '@znight/compiler'")
-    expect(file(project, 'vite.config.ts')).toContain('plugins: [znight()]')
+    expect(file(project, 'vite.config.ts')).toContain("import options from './znight.config.ts'")
+    expect(file(project, 'vite.config.ts')).toContain('plugins: [znight(options)]')
     const ignored = file(project, '.gitignore').split('\n')
     for (const entry of ['node_modules', 'dist', '.znight']) expect(ignored).toContain(entry)
   })

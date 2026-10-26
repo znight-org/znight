@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ES2024",
+    "lib": ["ES2024", "ESNext.Disposable"],
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "moduleDetection": "force",
+    "types": ["bun"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    // Znight decorators are TypeScript decorators: no emitDecoratorMetadata nor reflect-metadata
+    "experimentalDecorators": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    // the tests import the sources with their extension (../src/index.ts)
+    "allowImportingTsExtensions": true,
+    // In this repository only: resolve the @znight/* workspace packages to their TypeScript sources
+    // (not needed with Znight installed from npm)
+    "customConditions": ["@znight/source"]
+  },
+  "include": ["src", "test"]
+}

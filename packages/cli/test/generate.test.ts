@@ -7,6 +7,7 @@ import type {
   FormatDiagnosticsOptions,
   GenerateResultLike,
   IncrementalCompiler,
+  ZnightConfigLike,
   ZnightOptions,
 } from '../src/integrations/compiler.ts'
 import type { WatchTarget } from '../src/integrations/watch.ts'
@@ -49,6 +50,18 @@ class FakeCompiler implements CompilerApi {
   diagnostics: Diagnostic[] = []
   code = CODE
   watchFiles: string[] | undefined
+  /** `loadConfig` result (`znight.config.*`); `undefined`: a compiler without `loadZnightConfig()`. */
+  config: ((root: string) => Promise<ZnightConfigLike>) | undefined
+  readonly configRoots: string[] = []
+
+  get loadConfig(): ((root: string) => Promise<ZnightConfigLike>) | undefined {
+    const config = this.config
+    if (config === undefined) return undefined
+    return root => {
+      this.configRoots.push(root)
+      return config(root)
+    }
+  }
 
   #result(options: ZnightOptions): CompileResultLike {
     return {
@@ -242,6 +255,73 @@ describe('znight generate', () => {
       expect(run.stderr).toContain('vite.config.ts does not register the znight() plugin')
     })
 
+    it('reads znight.config.* first, without loading Vite', async () => {
+      writeFileSync(join(project.path, 'vite.config.ts'), 'export default {}')
+      compiler.config = root =>
+        Promise.resolve({
+          file: join(root, 'znight.config.ts'),
+          options: { root, outFile: 'src/di/container.ts', reportUnused: true, logLevel: 'info' },
+        })
+      let viteLoaded = false
+      const run = await generate([], {
+        services: {
+          loadVite: () => {
+            viteLoaded = true
+            return Promise.reject(new Error('unexpected'))
+          },
+        },
+      })
+      expect(run.code).toBe(0)
+      expect(viteLoaded).toBe(false)
+      expect(compiler.configRoots).toEqual([project.path])
+      // logLevel is an option of the Bun preload: not passed to the compiler
+      expect(compiler.calls[0]?.options).toEqual({
+        root: project.path,
+        outFile: 'src/di/container.ts',
+        reportUnused: true,
+      })
+      expect(run.stdout).toContain('Generated src/di/container.ts')
+    })
+
+    it('resolves the root of znight.config.* against the project root', async () => {
+      compiler.config = () =>
+        Promise.resolve({ file: join(project.path, 'znight.config.ts'), options: { root: 'app' } })
+      const run = await generate()
+      expect(run.code).toBe(0)
+      expect(compiler.calls[0]?.options).toEqual({ root: join(project.path, 'app') })
+    })
+
+    it('falls back to the Vite config without znight.config.*', async () => {
+      compiler.config = root => Promise.resolve({ file: undefined, options: { root } })
+      writeFileSync(join(project.path, 'vite.config.ts'), 'export default {}')
+      const vite = new FakeVite({ configPlugins: [{ name: 'znight', api: { options: { prune: true } } }] })
+      const run = await generate([], { services: { loadVite: () => Promise.resolve(vite) } })
+      expect(run.code).toBe(0)
+      expect(vite.loadedConfigs).toBe(1)
+      expect(compiler.calls[0]?.options).toEqual({ prune: true, root: project.path })
+    })
+
+    it('reads the Vite config given with --config instead of znight.config.*', async () => {
+      compiler.config = root => Promise.resolve({ file: join(root, 'znight.config.ts'), options: { root } })
+      writeFileSync(join(project.path, 'vite.custom.ts'), 'export default {}')
+      const vite = new FakeVite({ configPlugins: [{ name: 'znight', api: { options: { prune: true } } }] })
+      const run = await generate(['--config', 'vite.custom.ts'], {
+        services: { loadVite: () => Promise.resolve(vite) },
+      })
+      expect(run.code).toBe(0)
+      expect(compiler.configRoots).toEqual([])
+      expect(compiler.calls[0]?.options).toEqual({ prune: true, root: project.path })
+    })
+
+    it('fails when znight.config.* cannot be loaded', async () => {
+      compiler.config = () => Promise.reject(new Error('[znight] ZNIGHT_CONFIG points to a missing file: /x.ts'))
+      const run = await generate()
+      expect(run.code).toBe(1)
+      expect(run.stderr).toContain('Cannot load the Znight config (znight.config.*)')
+      expect(run.stderr).toContain('ZNIGHT_CONFIG points to a missing file')
+      expect(compiler.calls).toEqual([])
+    })
+
     it('falls back to the defaults when the Vite config cannot be loaded, fails with --config', async () => {
       writeFileSync(join(project.path, 'vite.config.ts'), 'export default {}')
       const broken = { loadVite: () => Promise.reject(new Error('Cannot find package "vite"')) }
@@ -355,6 +435,20 @@ describe('compiler adapter', () => {
       { root: directory.path, check: true },
       { incremental: { root: directory.path }, changes: { changed: ['a.ts'] } },
     ])
+  })
+
+  it('exposes loadZnightConfig() as loadConfig', async () => {
+    const roots: (string | undefined)[] = []
+    const api = adaptCompilerModule({
+      generate: () => Promise.resolve(result()),
+      loadZnightConfig: cwd => {
+        roots.push(cwd)
+        return Promise.resolve({ file: undefined, options: { root: cwd } })
+      },
+    })
+    expect(await api.loadConfig?.(directory.path)).toEqual({ file: undefined, options: { root: directory.path } })
+    expect(roots).toEqual([directory.path])
+    expect(adaptCompilerModule({ generate: () => Promise.resolve(result()) }).loadConfig).toBeUndefined()
   })
 
   it('detects writes and staleness when the compiler does not report them', async () => {

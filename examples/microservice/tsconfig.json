@@ -1,0 +1,46 @@
+{
+  "compilerOptions": {
+    "target": "ES2024",
+    "lib": ["ES2024", "ESNext.Disposable"],
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "moduleDetection": "force",
+    "types": ["bun"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noPropertyAccessFromIndexSignature": true,
+    // Znight decorators are TypeScript decorators: no emitDecoratorMetadata nor reflect-metadata
+    "experimentalDecorators": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+
+    // ---- In-repo development only (remove these in your own project) -----------------------------
+    // Resolve the @znight/* workspace packages to their TypeScript sources.
+    "customConditions": ["@znight/source"],
+    "allowImportingTsExtensions": true,
+    // The OpenTelemetry packages used by src/observability/tracing.ts are not dependencies of this
+    // workspace yet: resolve the copies installed for @znight/observability. The package directory
+    // is for tsc, the entry file for Bun, which reads these paths at runtime (vite.config.ts aliases
+    // them for the build). In your project, `bun add @opentelemetry/api
+    // @opentelemetry/sdk-trace-base @opentelemetry/context-async-hooks` instead.
+    "paths": {
+      "@opentelemetry/api": [
+        "../../packages/observability/node_modules/@opentelemetry/api",
+        "../../packages/observability/node_modules/@opentelemetry/api/dist/index.mjs"
+      ],
+      "@opentelemetry/sdk-trace-base": [
+        "../../packages/observability/node_modules/@opentelemetry/sdk-trace-base",
+        "../../packages/observability/node_modules/@opentelemetry/sdk-trace-base/build/esm/index-shim.js"
+      ],
+      "@opentelemetry/context-async-hooks": [
+        "../../packages/observability/node_modules/@opentelemetry/context-async-hooks",
+        "../../packages/observability/node_modules/@opentelemetry/context-async-hooks/dist/index.mjs"
+      ]
+    }
+  },
+  "include": ["src", "test", "vite.config.ts", "znight.config.ts"]
+}

@@ -44,7 +44,9 @@ packages/
   observability/  Logger (pino), metrics (prom-client), tracing (OpenTelemetry), interceptors, ObservabilityPlugin
   testing/        TestBed (auto-mocking), TestApp (e2e), mocks and spies
   cli/            `znight` binary: new, generate, g, dev, build, start
-examples/         runnable example applications (planned; the workspace glob is reserved)
+examples/         runnable example applications: rest-api, microservice, worker, monorepo (services + a
+                  source provider library); each has its own tests (`bun run test:examples`)
+tests/            repository-wide tests: boundaries (§2), golden test of the examples (§4.1)
 docs/             VitePress documentation site (this file is rendered under /contributing/)
 ```
 
@@ -75,8 +77,11 @@ Bun types, decorators allowed). `typecheck` runs both.
   `src/adapters/fastify.ts`...) are declared in `tsdown.config.ts` **and** `package.json#exports`
   with the same `@znight/source` / `types` / `default` triple.
 - Tests: `packages/<pkg>/test/**/*.test.ts` with `bun:test`; fixtures in `test/fixtures/`.
-  Broker integration tests run only with `ZNIGHT_INTEGRATION=1`, the CLI end-to-end test only with
-  `ZNIGHT_CLI_E2E=1`.
+  Broker integration tests run only with `ZNIGHT_INTEGRATION=1` (Docker, testcontainers), the CLI
+  end-to-end test only with `ZNIGHT_CLI_E2E=1`, the end-to-end tests of the examples and the golden
+  test only with `ZNIGHT_E2E=1` (after `bun run build`). Root scripts: `test` (packages, docs and
+  `tests/`, from sources), `test:examples` (the `test` script of every example), `test:e2e` (build,
+  then the examples, `tests/` and the CLI end-to-end test with their flags), `test:integration`.
 - Third-party integrations (fastify, amqplib, pino...) are **optional peer dependencies** (plus exact
   devDependencies for tests) unless the package cannot work without them. Adapters and drivers live
   in subpath exports, so their clients are only loaded when used; optional peers needed by a root
@@ -85,7 +90,8 @@ Bun types, decorators allowed). `typecheck` runs both.
   Third-party `dependencies`/`peerDependencies` use caret ranges; `@znight/core` is a
   `workspace:*` dependency (an exact version once packed: lockstep) and the optional
   `@znight/compiler` peer a `workspace:^` range.
-- Boundaries (enforced by the packages' own tests):
+- Boundaries (enforced by the packages' own tests and, for every package, by
+  `tests/boundaries.test.ts`, which follows the value imports of each `package.json#exports` entry):
   - `<pkg>/compiler` entries only `import type` from `@znight/compiler` and never import the
     package's runtime entry (so building never loads fastify, amqplib...). Code they share with the
     runtime lives in import-free modules (`@znight/config` `conventions.ts`/`coerce.ts`,
@@ -340,6 +346,11 @@ functions) has a canonical identity string:
 
 Golden test: compiling a fixture library from its sources and from its `dist` (with and without
 `@znight/source`) yields identical identities, types, import routes and generated output.
+`tests/golden.test.ts` (`ZNIGHT_E2E=1`, after `bun run build`) applies it to every example
+application: each is compiled in a child process with the compiler, its extensions and the analysed
+declarations taken from the sources (`--conditions=@znight/source` and the scan condition) and from
+`dist`, on Node.js and on Bun, in `build` and `serve` modes; every generated module MUST be
+byte-identical.
 
 ### 4.2 Import routes
 
@@ -528,7 +539,18 @@ returns the same shared no-op function.
 | `@HttpCode(status)` `@Header(name, value)`                                           | method                                                                                         |
 | `@UseGuard(...guards)` `@UseInterceptor(...interceptors)`                            | class / method (value refs, variadic)                                                          |
 | `@Validate(schema)`                                                                  | method — sugar for `@Body(schema)`; using both is ZNIGHT005                                    |
+| `@UploadedFile(field?, opts?)` `@UploadedFiles(field?, opts?)`                       | param — static (below)                                                                         |
+| `@BodyLimit(size)`                                                                   | class / method — static `ByteSize` (bytes, `'10mb'`, `Infinity`); the method wins              |
 | `createRouteDecorator<T>(key)`                                                       | user-defined metadata decorators (`@Roles('admin')`, `@Public()`) → `route.meta[key]`          |
+
+Upload parameters: `field` (static string, absent = files of every field) and options (static
+`{ required?, maxSize?, mimeTypes? }`, plus `maxFiles?` for `@UploadedFiles`; `maxSize` is a
+`ByteSize`, `kb` = 1024). `@UploadedFile` is typed `File` (or `Blob`; `node:buffer` types are cast),
+`@UploadedFiles` `File[]`; `required` defaults to `true` unless the parameter is optional
+(`file?: File`, `File | undefined`). Each field is read by one parameter, and a parameter without
+field cannot be combined with other upload parameters (ZNIGHT005); upload parameters on a `GET`,
+`HEAD`, `DELETE` or `OPTIONS` route are a ZNIGHT005 warning. `@Body()` on an upload route receives
+the text fields.
 
 **Impl.** routes are not inherited: route decorators on a class without `@Controller` (e.g. a base
 class) are ZNIGHT005; a route decorator created in a `.d.ts` (its key is not readable) is ZNIGHT005.
@@ -591,7 +613,12 @@ export const EXTENSION_API_VERSION = 1
 export const PROVIDERS_FILE = 'znight.providers.json', PROVIDERS_SCHEMA_VERSION = 1
 // tooling: Project, normalizeOptions, analyze, analyzeProject, loadExtensions,
 // discoverExtensionModules, validateExtension, createGenBuilders, isGenNode, DEFAULT_* constants
-// Vite plugin `znight(options?: ZnightOptions)` and '@znight/compiler/bun' preload: §6.3
+export function znight(options?: ZnightOptions): Plugin<ZnightPluginApi> // Vite plugin, also the default export (§6.3)
+// Bun (side-effect free; the ready-made preload is '@znight/compiler/bun', §6.3)
+export function createPreload(options?: PreloadOptions): Promise<GenerateResult>
+export function znightBunPlugin(options?: ZnightBunPluginOptions): ZnightBunPlugin
+export function loadZnightConfig(cwd?: string): Promise<LoadedZnightConfig> // { file, options }
+export const ZNIGHT_CONFIG_FILES: readonly string[] // znight.config.{ts,mts,js,mjs}
 
 interface ZnightOptions {
   root?: string // default: Vite root / process.cwd()
@@ -628,7 +655,7 @@ interface CompileResult {
   stats: { files: number; providers: number; durationMs: number; parsed: number }
   library: LibraryOutput | undefined // library mode only: znight.providers.json
   watchFiles: string[] // sources, manifests and compiled libraries the result depends on
-  decorators: ReadonlyMap<string, { hash; ranges }> // per analysed file, for stripDecorators
+  decorators: ReadonlyMap<string, DecoratorRanges> // per analysed file, for stripDecorators (§6.3)
 }
 interface GenerateOptions {
   check?: boolean // never write; report `stale`
@@ -686,30 +713,94 @@ interface Diagnostic {
 
 ### 6.3 Vite plugin and Bun preload
 
-**Status**: specified, not yet exported by `@znight/compiler` 0.1 (the CLI falls back to a plain
-Vite server build meanwhile). `createCompiler()` provides everything they need (incremental
-compiles, `decorators`, `watchFiles`, `isOutFile`).
+Both integrations are built on `createCompiler()` (incremental compiles, `decorators`, `watchFiles`,
+`isOutFile`) and exported by `@znight/compiler`, which only `import type`s from `vite` (importing the
+compiler never loads Vite).
 
-- `znight(options)` is the default and named export; its options are exposed as
-  `plugin.api.options` (read by `znight generate`).
-- Applies to the server/SSR environment only (`applyToEnvironment`); one compile per process is
-  shared across environments.
+**Vite plugin.** `znight(options)` is the named and default export. One incremental compiler per
+plugin instance, shared by every environment the plugin applies to.
+
+- `plugin.api` (`ZnightPluginApi`): `options` (the options given to `znight()`, unchanged; read by
+  `znight generate`), `compiler` (created in `configResolved`), `result` (the latest
+  `CompileResult`, `undefined` before the first compile; read by `znight dev`) and `ready()`
+  (compiles the pending changes, resolves with the up-to-date result).
+- Applies to the server environments only (`applyToEnvironment`: `consumer === 'server'`: SSR,
+  Vitest's Node.js environment); client environments are left alone.
 - `config`: when `app !== false` and the user configured neither `build.ssr` nor `build.lib`:
-  `build.ssr = entry`, `build.outDir = 'dist'`, `build.target = 'node24'`, `build.sourcemap = true`,
-  `ssr.target = 'node'`.
-- `buildStart`: compile. In `build`: errors fail the build and nothing is written. In watch/serve:
-  diagnostics are printed and, if there are errors, the generated module is replaced by the error
-  module.
-- `resolveId`/`load`: the outFile id is served from memory (latest result); the disk copy exists for
-  `tsc` and editors and is written only when its content changed. The outFile is ignored by watchers.
-- Watching: include roots and every file of `watchFiles` are watched (`addWatchFile`, server
-  watcher); file create/unlink re-runs the glob; config files clear the resolver cache; events are
-  debounced (~50 ms).
-- `transform` (`enforce: 'pre'`): strips exactly the decorator ranges recorded by the last analysis
-  of that file content (`result.decorators`, matched by content hash; never re-decides); files not
-  analysed are untouched. High-resolution source maps via `magic-string`.
-- `@znight/compiler/bun`: a Bun plugin/preload (`bunfig.toml` `preload`) regenerating the module
-  before tests and `bun --watch`, with the same stripping.
+  `build.ssr = entry` (`app.entry`, default `src/main.ts`), `build.outDir = 'dist'`,
+  `build.target = 'node24'`, `build.sourcemap = true`, `ssr.target = 'node'`, each only when unset.
+  The dev server watcher and `build.watch` ignore the outFile (and the temporary files of its atomic
+  writes).
+- `configResolved`: creates the compiler with `cwd` = Vite root, the compile mode, the runtime
+  conditions (`resolve.conditions` of the server environment, `development|production` mapped, plus
+  `node`, `import`, `default`) and the string `resolve.alias` entries; it is kept while these inputs
+  do not change. Mode: dev server → `serve` (`test` under Vitest or `--mode test`); `vite build` →
+  `build`, except a development build (`--mode development`, used by `znight dev`) → `serve`.
+- `buildStart`: compiles (the first compile of a session is full, later ones only re-read the
+  recorded changes). In `vite build`: errors fail the build (a `ZnightError` whose message is the
+  formatted diagnostics, with `code` (first error) and `diagnostics`) and nothing is written. In
+  `vite build --watch` and the dev server: diagnostics are printed through the Vite logger
+  (deduplicated in the dev server) and, with errors, the generated module is replaced by the error
+  module (§3.3): **the build does not fail**; tools check `plugin.api.result.ok` (`znight dev`
+  keeps the last good process).
+- `resolveId`/`load` (hook filters on the outFile name): relative, absolute and root-relative
+  imports of the outFile, with a JS/TS extension or none, resolve to it and are served from memory
+  (the latest result, after the pending debounced compile). The disk copy exists for `tsc` and
+  editors and is written only when its content changed and the compile is ok. Imports through an
+  alias are not intercepted (they read the disk copy).
+- Watching: in `vite build --watch`, the include roots, every file of `watchFiles`, the root
+  `tsconfig.json` and the `tsconfig` option are watched (`addWatchFile`); `watchChange` records the
+  relevant events (a creation of a known file is a change) for the next `buildStart`. In the dev
+  server, listeners are prepended to the server watcher (the change is recorded before Vite reloads
+  an importer), events are debounced (~50 ms, one compile per burst), `hotUpdate` adds the generated
+  module to the HMR batch and a new result reloads it in the server environments. File
+  create/unlink re-runs the globs; `package.json`/`tsconfig*.json`/lockfile changes clear the
+  resolver cache.
+- `transform` (`enforce: 'pre'`, filter on JS/TS ids): strips exactly the decorator ranges
+  recorded by the last analysis of that file content (below; never re-decides); when a compile is
+  running or due for a scanned file, it waits for it. Files not analysed, virtual ids and the
+  generated module are untouched. High-resolution source maps via `magic-string`.
+- `writeBundle`: library mode writes `dist/znight.providers.json` (§6.4).
+
+**Decorator ranges** (`CompileResult.decorators`: `ReadonlyMap<file, DecoratorRanges>`, scanned files
+only): `{ hash, ranges, memberStarts }`. `hash` is the content hash of the analysed file: ranges
+apply only while the content still has it. `ranges` are the `[start, end)` UTF-16 offsets (`@`
+included) of the decorators owned by the core, an extension or a manifest, sorted, de-duplicated and
+non-overlapping. `memberStarts` are the starts of the ranges beginning a class member (the first
+decorator of a method, accessor or property): stripping replaces that range with `;` (an empty class
+element), so that a preceding field without semicolon cannot absorb the member (`x = a` +
+`[key]() {}` → `x = a[key]() {}`).
+
+**Bun preload.** `@znight/compiler/bun` (`bunfig.toml` `[test] preload` or top-level `preload`,
+`bun --preload`, also with `--watch` / `--hot`): importing it **runs**
+`createPreload((await loadZnightConfig()).options)`. The side-effect-free API is exported by the
+package root:
+
+- `loadZnightConfig(cwd = process.cwd())` → `{ file, options }`: the default export of the first of
+  `znight.config.ts`, `.mts`, `.js`, `.mjs` in `cwd` (`ZNIGHT_CONFIG_FILES`), or of the file named by
+  the `ZNIGHT_CONFIG` environment variable (resolved against `cwd`; a missing file is an error): an
+  options object, or a (possibly async) function returning one (anything else is a `TypeError`).
+  A relative `root` is resolved against the config file directory (its default). Without a file:
+  `{ file: undefined, options: { root: cwd } }`. `znight generate` reads the same file, and
+  `vite.config.ts` imports it (`znight(options)`), so every tool compiles with the same options.
+- `createPreload(options)` (Bun only: `Bun.plugin`): `PreloadOptions` = `CompileOptions` +
+  `logLevel` (`'info'` adds a summary line, `'warn'` (default) prints diagnostics only, `'silent'`;
+  everything on stderr). Mode `test` under `NODE_ENV=test` (`bun test`), `build` with
+  `NODE_ENV=production`, else `serve`; runtime conditions `bun, node, import, default`. It generates
+  the module (disk copy written when it changed), loads every file of `watchFiles` and the tsconfigs
+  **as text modules** (`import(url + '?znight-watch', { with: { type: 'text' } })`: read, never
+  executed) so that `bun --watch` / `bun test --watch` restart when they change — also after a
+  failed compile —, prints the diagnostics, throws a `ZnightError` (code of the first error, no
+  stack) on errors (`bun test` exits 1, `--watch` waits for a fix), then registers
+  `znightBunPlugin`. Resolves with the `GenerateResult`.
+- `znightBunPlugin({ compiler?, ...CompileOptions })` → `{ name, compiler, setup }`: `setup`
+  compiles unless the compiler already has a result; `onLoad` of the outFile serves the result from
+  memory (the first load reuses the preload result, later loads — `bun --hot` — recompile
+  incrementally); `onLoad` of the analysed files **blanks** the decorator ranges (replaced by spaces,
+  line breaks kept, member starts by `;`): every position is unchanged, no source map needed
+  (`stripDecorators: false` disables it).
+- **Impl.** Bun restarts watch processes only for files it loaded: a newly created file is picked up
+  at the next restart.
 
 ### 6.4 Provider libraries
 
@@ -1081,12 +1172,22 @@ interface HttpRouteDefinition {
   interceptors: Token[]
   params: {
     index
-    source: 'param' | 'query' | 'body' | 'headers' | 'request' | 'response' | 'context'
-    name?
+    source: 'param' | 'query' | 'body' | 'headers' | 'request' | 'response' | 'context' | 'file' | 'files'
+    name? // param / query key / header name / multipart field (file, files)
     type? // readable form, only for coerced values
     optional?
     schema?: boolean
   }[] // informational: extraction happens in invoke
+  bodyLimit?: number // @BodyLimit (route, else controller), bytes; Infinity = no limit
+  uploads?: {
+    // one per @UploadedFile / @UploadedFiles parameter
+    field?: string // absent: files of every field
+    multiple?: boolean // @UploadedFiles
+    required?: boolean // informational: presence is checked by invoke
+    maxSize?: number // bytes, default: plugin uploads.maxFileSize
+    maxFiles?: number // @UploadedFiles, default: plugin uploads.maxFiles
+    mimeTypes?: string[] // 'image/png', 'image/*'
+  }[]
   rawResponse?: boolean // @Res()
   invoke: (controller: any, ctx: HttpContext) => unknown
 }
@@ -1096,14 +1197,22 @@ interface HttpRouteDefinition {
 `@znight/http` (`coerce.string|number|integer|boolean|bigint|date|enum|array|optional`, failures →
 400; `validate(schema, value, location)` with any Standard Schema, `await`ed, so the arrow is `async`
 only when a schema is used). `@Validate(S)` without `@Body()` generates `await validate(S, await
-ctx.parseBody(), 'body')`. Unused `ctx` is omitted.
+ctx.parseBody(), 'body')`. Upload parameters read `ctx.files` through the `uploads` helper, imported
+by the generated module only when a route uses it: `@UploadedFile('avatar') avatar: File` →
+`uploads.file(ctx, 'avatar')` (400 `Missing file "avatar"` when absent; `optionalFile` for an
+optional parameter, `files` / `optionalFiles` for `@UploadedFiles`; `undefined` field = every
+field). `@Body()` on an upload route receives the text fields. Unused `ctx` is omitted.
 
 Pipeline (normative), per request — matched or not:
 `container.runInScope({ HttpContext, RequestId }) → hooks.run('http:request', event, () =>
-global guards → controller guards → route guards → body parsing (routes with @Body/@Validate) →
+global guards → controller guards → route guards → body parsing (routes with a @Body() or upload
+parameter; multipart bodies are parsed as they stream in, upload rules enforced on the fly) →
 global/controller/route interceptors (outermost first) → invoke (extract → coerce → validate →
-handler) → serialise)`. Exceptions are mapped to a response inside `hooks.run` and `event.status` /
-`event.error` are set before it resolves.
+handler) → serialise)`. `@Validate(S)` alone parses the body in `invoke`. Exceptions are mapped to
+a response inside `hooks.run` and `event.status` / `event.error` are set before it resolves. The
+request scope (request-scoped instances) and the in-flight count last until a streamed response
+body has been fully read or cancelled by the adapter; stream sources are read in the async context
+of the handler (request-scoped providers and tracing keep working).
 
 - Path grammar: static segments, `:name` params, trailing `*` wildcard (`ctx.params['*']`); anything
   else ZNIGHT007 (at build time, and at boot for hand-written metadata). Parameters are extracted and
@@ -1116,13 +1225,34 @@ handler) → serialise)`. Exceptions are mapped to a response inside `hooks.run`
   path, other method → 405 with `allow`; unmatched `OPTIONS` → 204 with `allow`. 404/405 go through
   the hooks and the exception mappers.
 - Query parsing is done by Znight from the URL (`Record<string, string | string[]>`); coercion to
-  `T[]` accepts a single value. Bodies are parsed by Znight (JSON, text, urlencoded, multipart →
-  `FormData`, otherwise bytes), up to `bodyLimit` (413), `content-encoding` other than identity → 415;
-  other routes read it lazily (`ctx.parseBody()`, `ctx.rawBody()`).
-- Files: see [packages/http/README.md#files](../../packages/http/README.md#files).
+  `T[]` accepts a single value. Bodies are parsed by Znight: JSON, text, urlencoded and multipart →
+  a prototype-less record of the text fields (repeated names → arrays; the files of a multipart body
+  go to `ctx.files`, by field, in body order), otherwise bytes; up to the body limit of the route
+  (413), `content-encoding` other than identity → 415. Routes without `@Body()` nor upload parameters
+  read it lazily (`ctx.parseBody()`, `ctx.rawBody()`, or `ctx.bodyStream()`: a Web stream enforcing
+  the limit, exclusive with the other two).
+- Body limit of a route: `@BodyLimit` (route > controller) when present; otherwise the plugin
+  `bodyLimit` for ordinary routes and, for upload routes, `bodyLimit` + Σ `maxSize × maxFiles` of
+  their upload parameters.
+- Uploads (`multipart/form-data`, RFC 7578): Znight's own streaming parser, shared by every adapter
+  (not `Request.formData()`). On upload routes, files are accepted only in the declared fields
+  (400 otherwise, `details.expected`), each `maxSize` / `maxFiles` (413), `mimeTypes` (415, compared
+  with the declared type) is enforced while reading; a second file for `@UploadedFile` → 400;
+  non-multipart non-empty bodies → 415. Other routes accept files of any field within the plugin
+  `uploads` limits. Plugin-wide limits `uploads: { maxFileSize (10 MiB), maxFiles (10), maxParts
+  (1000), maxFieldSize (1 MiB) }`; part headers ≤ 16 KiB. Errors raised while the body is still
+  being read carry `connection: close`. Files are standard `File` objects held in memory.
+- Files out: `HttpResponse.file(path | file: URL | Blob, { filename, contentType, disposition, root,
+  dotfiles })` (file-backed `Blob`s via `fs.openAsBlob()`; `root` confines the path, links
+  included, dotfiles denied by default → 404; `Content-Length`/`Content-Type`/`Last-Modified`/strong
+  `ETag`; conditional requests 304/412; a single `bytes` range 206/416, other ranges → 200; RFC 6266
+  `Content-Disposition`) and `HttpResponse.stream(source, { contentType, filename, disposition })`
+  (Web stream, Node.js `Readable` or async iterable; pull-based, cancelled when the client
+  disconnects; chunked). Details: [packages/http/README.md#files](../../packages/http/README.md#files).
 - Status precedence: `@HttpCode` > `HttpResponse.status` > default (201 for POST, 200 otherwise);
   `undefined` return → empty body (204 unless POST or `@HttpCode`). Objects → JSON, strings → text,
-  `Uint8Array`/`ReadableStream` → octet-stream, Web `Response` → sent as is.
+  `Uint8Array`/`ArrayBuffer`/views → octet-stream, `ReadableStream`/Node.js `Readable` → streamed
+  octet-stream, `Blob`/`File` → its type and size, Web `Response` → sent as is.
 - Errors: `HttpException(status, message?, details?, { headers, cause })` and subclasses render
   `{ statusCode, error, message, details? }`; schema failures → 400 (`ValidationException`) with
   `details: [{ path, message }]`; other errors → `{ statusCode: 500, error: 'Internal Server Error' }`
@@ -1133,9 +1263,10 @@ handler) → serialise)`. Exceptions are mapped to a response inside `hooks.run`
   valid one (≤ 128 characters of `[A-Za-z0-9_\-.:@/+=]`) and echoed on every response; `false` always
   generates (`generateRequestId`, default `crypto.randomUUID()`) and never echoes.
 - `HttpPlugin.configure({ adapter, port, host, prefix, guards, interceptors, exceptionMappers,
-  trailingSlash, exposeErrors, bodyLimit, requestIdHeader, generateRequestId, drainTimeoutMs })`
-  (defaults: built-in `nodeAdapter()`, `3000`, `0.0.0.0`, `strict`, `false`, 1 MiB, `x-request-id`,
-  4 000 ms); class refs are resolved with `container.tokenOf`. The instance exposes `inject`,
+  trailingSlash, exposeErrors, bodyLimit, uploads, requestIdHeader, generateRequestId,
+  drainTimeoutMs })` (defaults: built-in `nodeAdapter()`, `3000`, `0.0.0.0`, `strict`, `false`,
+  1 MiB, the upload limits above, `x-request-id`, 4 000 ms); class refs are resolved with
+  `container.tokenOf`. The instance exposes `inject`,
   `address`, `routes`, `adapter`, `inflight`.
 - Lifecycle: `register` declares the request-scoped externals; `onBootstrap` resolves options and
   registers routes (ZNIGHT007 / ZNIGHT001 at boot); `onStart` listens; `onStop` drains: stops
@@ -1154,9 +1285,51 @@ interface HttpAdapter {
 }
 ```
 
+```ts
+interface AdapterRequest {
+  method
+  url
+  headers
+  ip
+  raw
+  rawResponse
+  readBody(limit: number): Promise<Uint8Array> // once; 413 past the limit (content-length first)
+  streamBody?(limit: number): ReadableStream<Uint8Array> // pull-based, 413 past the limit, 400 on abort
+  hasBody?(): boolean // for in-memory Web requests without content-length / transfer-encoding
+  rawStatus?(): number | undefined // status written through @Res()
+}
+type ReplyBody = Uint8Array | ReadableStream<Uint8Array> | Blob | null
+interface AdapterReply {
+  status
+  headers
+  body: ReplyBody
+  raw?: boolean
+}
+interface InjectRequest {
+  method
+  url
+  headers?
+  body?
+  query?
+} // body: string | bytes | FormData | Blob | JSON value
+interface InjectResponse {
+  status
+  headers: Record<string, string>
+  body: string
+  bytes: Uint8Array
+  json<T>(): T
+}
+```
+
 Adapters only route and translate I/O; everything else is done by the plugin so every adapter
-behaves the same. `inject` is in-memory (fastify `inject`, hono `request`, node and express via
-`light-my-request`, an optional peer). Subpaths: `@znight/http/node` (built-in, also the root
+behaves the same. An adapter without `streamBody` gets multipart uploads buffered before parsing. A
+`Blob` body is sent with its size (`sendfile` for file-backed blobs on Bun); a stream body MUST be
+read to its end or cancelled (client gone, HEAD...), since the request scope stays open until then.
+`inject` is in-memory (fastify `inject`, hono `request`, node and express via `light-my-request`, an
+optional peer): strings and bytes are sent as is (`text/plain` / `application/octet-stream` without
+`content-type`), a `FormData` as `multipart/form-data` (boundary from the Fetch API encoding), a
+`Blob` / `File` with its type, other values as JSON; the response has the UTF-8 `body` and the raw
+`bytes` (downloads). Subpaths: `@znight/http/node` (built-in, also the root
 default), `/fastify`, `/express`, `/hono` (`Bun.serve` on Bun, `@hono/node-server` on Node),
 `/path` (path grammar helpers). Request-scoped externals: `HttpContext` (and the branded string
 `RequestId`) are provided per request; `HttpPlugin` itself is injectable.
@@ -1400,8 +1573,9 @@ res.status
 res.json()
 ```
 
-- Metadata freshness: the `@znight/compiler/bun` preload (and the Vite plugin under Vitest)
-  regenerate before tests (§6.3; until they ship, run `znight generate` first).
+- Metadata freshness: the `@znight/compiler/bun` preload (`bun test`) and the Vite plugin (Vitest)
+  regenerate the module before the tests import it (§6.3); other runners run `znight generate`
+  first.
   `@znight/testing` itself never compiles: it reads the metadata structurally (providers, aliases,
   externals, `extensions.config` / `http` / `messaging`) and does not depend on the feature packages.
 - `TestBed.create(target, { metadata, provide?, overrides?, config?, mockFn?, deep?, aop? })` →
@@ -1434,22 +1608,25 @@ res.json()
   instantiates only the closure of the HTTP controllers (with their guards and interceptors), the
   message consumers and the override keys (everything when there is none; `only: 'all' | keys`).
   It starts the app unless `start: false` (so pass `port: 0`). Members: `inject(request)` (through
-  the plugin named `http`, method defaulting to `GET`), `get`, `close()` (idempotent),
-  `[Symbol.asyncDispose]`, `app`, `container`. Default logger: console at `warn`.
+  the plugin named `http`, method defaulting to `GET`; the plugin encodes the body: a `FormData` as
+  `multipart/form-data` for uploads, a `Blob` with its type, strings and bytes as is, other values as
+  JSON), `get`, `close()` (idempotent), `[Symbol.asyncDispose]`, `app`, `container`. `inject()`
+  resolves with `{ status, headers, body, bytes, json() }` (`bytes`: the raw body; derived from
+  `body` when the plugin returns none). Default logger: console at `warn`.
 - Metadata helpers for hand-written tests: `createMetadata(record)`, `defineTestMetadata(spec)`
   (class-first, tokens `test#Name`), `testToken`, `override(key, value)`, `overrideFactory(key,
   factory, { deps, scope, async, dispose })`.
 
 ## 11. CLI (`@znight/cli`)
 
-| Command                       | Behaviour                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `znight new [name]`           | Scaffold a project, interactively or from `-y/--yes`, `--pm <bun\|npm\|pnpm\|yarn>` (default: the package manager running the CLI, else `bun` under Bun, else `npm`), `--adapter <node\|fastify\|express\|hono>` (default `node`), `--features <config,observability,messaging\|all\|none>` (default `config,observability`), `--no-install`, `--no-git`, `--dir`, `--force`; `.` scaffolds into the current directory. Bun projects test with `bun test` + preload, others with Vitest                                                                                    |
-| `znight generate`             | Write the generated container (compiler `generate`); `--check` (exit 1 when stale, never writes), `-w/--watch` (incremental), `--root`, `--config`, `--config-loader <bundle\|runner\|native>`. Compiler options are read from the `znight()` plugin of the Vite config when it exposes them (`plugin.api.options` or `api.getOptions()`), else the defaults                                                                                                                                                                                                               |
-| `znight g <schematic> <name>` | `service`, `controller`, `consumer`, `config`, `guard`, `interceptor` (`--aop` for a method interceptor), `factory`; `--path`, `--flat`, `-f/--force`, `-d/--dry-run`, `--root`. Aliases `generate <schematic>` and `generate:<schematic>`                                                                                                                                                                                                                                                                                                                                 |
-| `znight dev`                  | `vite build --watch` (no Vite dev server) and a full process restart after every successful rebuild — no partial HMR of providers: SIGTERM, `--kill-timeout` (5 000 ms) then SIGKILL, `--debounce`d (100 ms) and never overlapping restarts; a failed build keeps the last good process; a second Ctrl+C kills (130). Also `--runtime <auto\|node\|bun>`, `--entry` (default: the entry chunk of the build), `--inspect`, `--clear`, `--mode` (`development`), `--log-level` (`warn`), `--root`, `--config`, `--config-loader`; arguments after `--` go to the application |
-| `znight build`                | `vite build` with the Vite config (`--mode` default `production`, `--log-level`, `--root`, `--config`, `--config-loader`); compiler errors fail the build                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `znight start`                | Run the build (`--entry`, default `dist/main.js` then `dist/main.mjs`; `--runtime <auto\|node\|bun>`; arguments after `--` go to the application) with `NODE_ENV` defaulting to `production`; when the runtime running the CLI provides `process.execve` (POSIX), the CLI `execve`s into the application runtime (same PID, signals, exit code), otherwise it forwards signals and returns the child's code (`128 + n` on signal)                                                                                                                                          |
+| Command                       | Behaviour                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `znight new [name]`           | Scaffold a project, interactively or from `-y/--yes`, `--pm <bun\|npm\|pnpm\|yarn>` (default: the package manager running the CLI, else `bun` under Bun, else `npm`), `--adapter <node\|fastify\|express\|hono>` (default `node`), `--features <config,observability,messaging\|all\|none>` (default `config,observability`), `--no-install`, `--no-git`, `--dir`, `--force`; `.` scaffolds into the current directory. Bun projects test with `bun test` + preload, others with Vitest; the compiler options live in `znight.config.ts`, imported by `vite.config.ts` (`znight(options)`) and read by the preload and `znight generate`                                                                                                                                                                                                                                                       |
+| `znight generate`             | Write the generated container (compiler `generate`); `--check` (exit 1 when stale, never writes), `-w/--watch` (incremental), `--root`, `--config`, `--config-loader <bundle\|runner\|native>`. Compiler options: `znight.config.*` / `ZNIGHT_CONFIG` (`loadZnightConfig()`, Vite not loaded; skipped with `--config`), else the `znight()` plugin of the Vite config when it exposes them (`plugin.api.options` or `api.getOptions()`), else the defaults. Compiles in `serve` mode                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `znight g <schematic> <name>` | `service`, `controller`, `consumer`, `config`, `guard`, `interceptor` (`--aop` for a method interceptor), `factory`; `--path`, `--flat`, `-f/--force`, `-d/--dry-run`, `--root`. Aliases `generate <schematic>` and `generate:<schematic>`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `znight dev`                  | `vite build --watch` (no Vite dev server) and a full process restart after every successful rebuild — no partial HMR of providers: SIGTERM, `--kill-timeout` (5 000 ms) then SIGKILL, `--debounce`d (100 ms) and never overlapping restarts; a failed build keeps the last good process, and so does a failed compilation: the watch build succeeds with the error module, so the CLI reads `plugin.api.result.ok` of `znight()` once the bundle is written, does not restart (a pending restart is cancelled) and reports `Compilation failed` (printing the diagnostics itself with `--log-level silent`); a second Ctrl+C kills (130). Also `--runtime <auto\|node\|bun>`, `--entry` (default: the entry chunk of the build), `--inspect`, `--clear`, `--mode` (`development`), `--log-level` (`warn`), `--root`, `--config`, `--config-loader`; arguments after `--` go to the application |
+| `znight build`                | `vite build` with the Vite config (`--mode` default `production`, `--log-level`, `--root`, `--config`, `--config-loader`); compiler errors fail the build                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `znight start`                | Run the build (`--entry`, default `dist/main.js` then `dist/main.mjs`; `--runtime <auto\|node\|bun>`; arguments after `--` go to the application) with `NODE_ENV` defaulting to `production`; when the runtime running the CLI provides `process.execve` (POSIX), the CLI `execve`s into the application runtime (same PID, signals, exit code), otherwise it forwards signals and returns the child's code (`128 + n` on signal)                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 
 Global: `--help`, `--version`, `--color`/`--no-color` (`NO_COLOR`, `FORCE_COLOR`), `--debug`
 (`ZNIGHT_DEBUG=1`). Exit codes: 0 success, 1 failure, 2 usage error (with a suggestion), 130

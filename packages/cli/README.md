@@ -89,7 +89,8 @@ my-service/
 ├─ test/
 │  ├─ greeting.service.test.ts     # TestBed: real factory, auto-mocked dependencies
 │  └─ greeting.controller.test.ts  # TestApp: in-memory HTTP requests
-├─ vite.config.ts                # plugins: [znight()]
+├─ vite.config.ts                # plugins: [znight(options)]
+├─ znight.config.ts              # compiler options, shared by znight(), the Bun preload and znight generate
 ├─ tsconfig.json                 # strict, experimentalDecorators, moduleResolution bundler, noEmit
 ├─ bunfig.toml                   # bun only: preloads @znight/compiler/bun before the tests
 ├─ package.json                  # type module; scripts dev, build, start, generate, typecheck, test
@@ -98,7 +99,8 @@ my-service/
 
 - `@znight/*` packages are pinned to `^<version of the CLI>` (they are released together).
 - Tests run with `bun test` for Bun projects (the preload regenerates the container), with Vitest
-  otherwise (the `znight()` plugin of `vite.config.ts` regenerates it).
+  otherwise (the `znight()` plugin of `vite.config.ts` regenerates it). Both, like
+  `znight generate`, read the compiler options of `znight.config.ts`.
 - `typecheck` runs `znight generate && tsc --noEmit`: the generated container is git-ignored.
 - The adapter's peer dependencies are added (`fastify`; `express` + `@types/express`; `hono` +
   `@hono/node-server`), plus `light-my-request` (dev) for `TestApp.inject()` with the `node` and
@@ -115,17 +117,45 @@ znight generate --check    # CI: exit 1 when the file is missing or out of date 
 znight generate --watch    # regenerate on every change (incremental: only changed files are re-parsed)
 ```
 
-| Option                                     | Description                                                                    |
-| ------------------------------------------ | ------------------------------------------------------------------------------ |
-| `--check`                                  | Do not write; exit 1 when the generated files are missing or stale             |
-| `-w, --watch`                              | Watch the sources (`include` directories) and `package.json` / `tsconfig.json` |
-| `--root <dir>`                             | Project root (default: the current directory)                                  |
-| `--config <file>`                          | Vite config to read the `znight()` options from (default: `vite.config.*`)     |
-| `--config-loader <bundle\|runner\|native>` | How Vite loads the config file                                                 |
+| Option                                     | Description                                                                               |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------- |
+| `--check`                                  | Do not write; exit 1 when the generated files are missing or stale                        |
+| `-w, --watch`                              | Watch the sources (`include` directories) and `package.json` / `tsconfig.json`            |
+| `--root <dir>`                             | Project root (default: the current directory)                                             |
+| `--config <file>`                          | Vite config to read the `znight()` options from, instead of `znight.config.*` (see below) |
+| `--config-loader <bundle\|runner\|native>` | How Vite loads the config file                                                            |
 
-The compiler options are those given to `znight()` in your Vite config (when the plugin exposes them,
-see [Compiler contract](#compiler-contract)), so that `znight generate` and `vite build` produce the
-same file; without a Vite config the defaults are used and Vite is not even loaded.
+The compiler options are looked up in this order, so that `znight generate`, `vite build` and the
+Bun preload produce the same file:
+
+1. `znight.config.ts` (or `.mts`, `.js`, `.mjs`) in the project root, or the file named by the
+   `ZNIGHT_CONFIG` environment variable — the file the [Bun preload](../compiler/README.md#preload-options)
+   reads (`loadZnightConfig()` of the compiler; its preload-only `logLevel` is ignored). Vite is not
+   loaded;
+2. otherwise the options given to `znight()` in your Vite config (when the plugin exposes them, see
+   [Compiler contract](#compiler-contract)); `--config <file>` skips step 1 and reads that Vite config;
+3. otherwise the defaults (without a Vite config, Vite is not even loaded).
+
+Share one options object between the Vite plugin and the preload with a `znight.config.ts`:
+
+```ts
+// znight.config.ts
+import type { ZnightOptions } from '@znight/compiler'
+
+export default { reportUnused: true } satisfies ZnightOptions
+```
+
+```ts
+// vite.config.ts
+import { znight } from '@znight/compiler'
+import { defineConfig } from 'vite'
+import options from './znight.config.ts'
+
+export default defineConfig({ plugins: [znight(options)] })
+```
+
+`znight generate` compiles in `serve` mode (provider source locations kept) while `vite build` writes
+the disk copy without them: run `znight generate --check` before `znight build`, as below.
 
 In CI:
 
@@ -188,13 +218,23 @@ restart is fast and always consistent.
    stops gracefully), gets `--kill-timeout` ms to exit (then `SIGKILL`), and the new build starts.
    Bursts of builds cause a single restart; restarts never overlap.
 2. A build fails → Vite prints the error and **the last good process keeps running**.
-3. The application crashes or exits → the CLI says so and waits for the next change.
-4. `Ctrl+C` (or `SIGTERM`) → the watcher closes and the application stops gracefully; a second
+3. The compilation fails (`ZNIGHT` errors) → the `znight()` plugin prints the diagnostics; in watch
+   mode it does not fail the build (the bundle contains a module throwing them), so the CLI reads the
+   plugin's result (`plugin.api.result`) and does **not** restart: the last good process keeps
+   running (a restart still pending for a previous build is cancelled), and nothing starts until a
+   build compiles. With `--log-level silent` the CLI prints the diagnostics itself.
+4. The application crashes or exits → the CLI says so and waits for the next change.
+5. `Ctrl+C` (or `SIGTERM`) → the watcher closes and the application stops gracefully; a second
    `Ctrl+C` kills it. The application runs in its own process group, so it receives exactly one
    signal.
 
-Diagnostics of the compiler are printed on every rebuild by the `znight()` plugin. An application built
-from a graph with errors refuses to start and prints them again.
+Diagnostics of the compiler are printed on every rebuild by the `znight()` plugin.
+
+```txt
+✗ ZNIGHT001: Missing provider for 'Clock' required by GreetingService
+  --> src/app/greeting.service.ts:12:30
+✗ Compilation failed with 1 error. The last good build keeps running. Waiting for changes...
+```
 
 | Option                                     | Default           | Description                                                         |
 | ------------------------------------------ | ----------------- | ------------------------------------------------------------------- |
@@ -310,10 +350,15 @@ relies on these shapes (each is optional; missing pieces are emulated):
 | `createCompiler(options)`                                        | `znight generate --watch`: `generate(changes)` (`{ changed, added, removed }`), `isOutFile(file)`, `watchFiles` |
 | `compile(options)`                                               | fallback of the above                                                                                           |
 | `formatDiagnostics(diagnostics, { color, cwd, summary: false })` | diagnostics output (a plain formatter otherwise)                                                                |
+| `loadZnightConfig(root)`                                         | `znight generate`: `{ file, options }` of `znight.config.*` / `ZNIGHT_CONFIG`                                   |
 
-`znight build` and `znight dev` use the `znight()` Vite plugin of the project's Vite config. To read
-its options, `znight generate` looks for the plugin named `znight` in the loaded Vite config and reads
-`plugin.api.options` (or `plugin.api.getOptions()`).
+`znight build` and `znight dev` use the `znight()` Vite plugin of the project's Vite config, found by
+its name (`znight`) among the plugins of the config:
+
+- `znight generate` reads `plugin.api.options` (or `plugin.api.getOptions()`) when the project has
+  no `znight.config.*`;
+- `znight dev` reads `plugin.api.result` (`{ ok, diagnostics }`) once a build is written, to keep the
+  last good process running when the compilation failed.
 
 ## License
 

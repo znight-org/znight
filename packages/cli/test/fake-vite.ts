@@ -23,12 +23,19 @@ export class FakeWatcher {
   }
 }
 
+/** The `plugin.api` of a fake `znight()` plugin: the test sets the compile result. */
+export interface FakeZnightApi {
+  result: { ok: boolean; diagnostics: unknown[] } | undefined
+}
+
 /** Options of {@link FakeVite}. */
 export interface FakeViteOptions {
   /** Error thrown by the build (one-shot, or when starting the watch mode). */
   readonly fail?: unknown
   /** `loadConfigFromFile` result (plugins of the config). */
   readonly configPlugins?: unknown
+  /** A `znight()` plugin in the config of the builds, exposing this API (`configResolved`). */
+  readonly znight?: FakeZnightApi
 }
 
 /** A fake `vite` module recording builds. */
@@ -44,6 +51,7 @@ export class FakeVite implements ViteApi {
 
   build(config: InlineConfig): Promise<unknown> {
     this.builds.push(config)
+    this.#configResolved(config)
     if (config.build?.watch && this.options.fail !== undefined) return Promise.reject(this.options.fail)
     if (config.build?.watch) {
       const watcher = new FakeWatcher()
@@ -58,6 +66,20 @@ export class FakeVite implements ViteApi {
   readonly loadConfigFromFile: ViteApi['loadConfigFromFile'] = (_env, configFile) => {
     this.loadedConfigs++
     return Promise.resolve({ path: configFile ?? 'vite.config.ts', config: { plugins: this.options.configPlugins } })
+  }
+
+  /** Calls `configResolved` of the plugins given to the build, with the config's `znight()` plugin. */
+  #configResolved(config: InlineConfig): void {
+    const plugins = (config.plugins ?? []) as Plugin[]
+    const resolved = [
+      ...(this.options.znight === undefined ? [] : [{ name: 'znight', api: this.options.znight }]),
+      ...plugins,
+    ]
+    for (const plugin of plugins) {
+      const hook = plugin.configResolved
+      const handler = typeof hook === 'function' ? hook : hook?.handler
+      handler?.call({} as never, { plugins: resolved } as never)
+    }
   }
 
   /** Calls `writeBundle` of the plugins given to the last build, as a successful build does. */

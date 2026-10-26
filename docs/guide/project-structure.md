@@ -37,7 +37,9 @@ my-service/
 ├─ test/
 │  ├─ users/user.service.test.ts
 │  └─ e2e/users.e2e.test.ts
-├─ vite.config.ts
+├─ vite.config.ts                   # plugins: [znight(options)]
+├─ znight.config.ts                 # compiler options (Vite plugin, Bun preload, znight generate)
+├─ bunfig.toml                      # Bun: preloads @znight/compiler/bun for bun test
 ├─ tsconfig.json
 └─ package.json
 ```
@@ -87,8 +89,8 @@ import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
 const app = await Application.create({
   metadata: __ZNIGHT_METADATA__,
   plugins: [
-    ConfigPlugin.configure(),
-    ObservabilityPlugin.configure({ logging: { level: 'info' } }),
+    ObservabilityPlugin.configure({ logging: { level: 'info' } }), // first: its hooks wrap everything
+    ConfigPlugin.configure(), // .env files + environment, every @Config class validated at boot
     HttpPlugin.configure(container => ({ port: container.get(AppConfig).port })),
   ],
 })
@@ -98,9 +100,10 @@ await app.start()
 
 :::
 
-<!-- TODO(api): verify against implementation (ConfigPlugin / ObservabilityPlugin options) -->
-
-The Vite plugin uses `src/main.ts` as the server entry by default (option `app.entry`).
+`ConfigPlugin.configure()` defaults to the loaders `[dotenv(), env()]`; plugin options computed from
+the container (`HttpPlugin.configure(container => ...)`) are evaluated at bootstrap, once the config
+classes exist. The Vite plugin uses `src/main.ts` as the server entry by default (option
+`app.entry`).
 
 ::: danger Never import the generated module from a provider
 `container.generated.ts` imports every provider module. If a provider module imports it back
@@ -111,9 +114,9 @@ plugins instead.
 
 ## The generated module
 
-| Path                                 | Committed? | Created by                                                               |
-| ------------------------------------ | ---------- | ------------------------------------------------------------------------ |
-| `src/.znight/container.generated.ts` | No         | Vite plugin (`vite build`, `znight dev`), `znight generate`, Bun preload |
+| Path                                 | Committed? | Created by                                                                       |
+| ------------------------------------ | ---------- | -------------------------------------------------------------------------------- |
+| `src/.znight/container.generated.ts` | No         | Vite plugin (`vite build`, `znight dev`, Vitest), `znight generate`, Bun preload |
 
 The file is regenerated from sources, so it is git-ignored. Create it before running `tsc` or tests
 in CI (`znight generate`), and check it is up to date with `znight generate --check`. See

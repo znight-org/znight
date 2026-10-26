@@ -11,6 +11,7 @@ import type {
   CompilerChanges,
   GenerateResultLike,
   IncrementalCompiler,
+  ZnightConfigLike,
   ZnightOptions,
 } from '../integrations/compiler.ts'
 
@@ -33,8 +34,9 @@ export const generateCommand: Command = defineCommand({
     usage: '[options]',
     examples: ['znight generate', 'znight generate --check   # in CI, before tsc', 'znight generate --watch'],
     details: [
-      'The compiler options are read from the znight() plugin of vite.config.ts when it exposes them,',
-      'so that the generated file is the same as the one of the Vite build.',
+      'The compiler options are read from znight.config.* (or the file named by ZNIGHT_CONFIG), the file',
+      'shared with the Bun preload; without one, from the znight() plugin of vite.config.ts, so that the',
+      'generated file is the same as the one of the Vite build. --config reads the given Vite config.',
       '"znight generate <schematic> <name>" is an alias of "znight g <schematic> <name>".',
     ].join('\n'),
   },
@@ -45,7 +47,11 @@ export const generateCommand: Command = defineCommand({
     },
     watch: { type: 'boolean', alias: 'w', description: 'Regenerate on every change' },
     root: { type: 'string', valueHint: 'dir', description: 'Project root (default: the current directory)' },
-    config: { type: 'string', valueHint: 'file', description: 'Vite config file to read the znight() options from' },
+    config: {
+      type: 'string',
+      valueHint: 'file',
+      description: 'Vite config file to read the znight() options from (instead of znight.config.*)',
+    },
     'config-loader': {
       type: 'enum',
       options: ['bundle', 'runner', 'native'],
@@ -54,8 +60,9 @@ export const generateCommand: Command = defineCommand({
   },
   async run({ args, cli }) {
     const root = resolveRoot(cli, args.root)
-    const options = await compilerOptions(cli, root, args.config, args['config-loader'] as ViteConfigLoader | undefined)
     const compiler = await cli.services.loadCompiler(root)
+    const configLoader = args['config-loader'] as ViteConfigLoader | undefined
+    const options = await compilerOptions(cli, compiler, root, args.config, configLoader)
     if (args.check === true) return check(cli, compiler, options)
     if (args.watch === true) return watch(cli, compiler, options)
     const result = await generateOnce(cli, compiler, options)
@@ -63,13 +70,22 @@ export const generateCommand: Command = defineCommand({
   },
 })
 
-/** Options of `znight()` in the Vite config (when exposed), with `root`. */
+/**
+ * The compiler options, with `root`: those of `znight.config.*` when the project has one (unless a
+ * Vite config is given with `--config`), else those of `znight()` in the Vite config (when exposed),
+ * else the defaults.
+ */
 async function compilerOptions(
   cli: CliContext,
+  compiler: CompilerApi,
   root: string,
   configFile: string | undefined,
   configLoader: ViteConfigLoader | undefined,
 ): Promise<ZnightOptions> {
+  if (configFile === undefined) {
+    const shared = await znightConfigOptions(compiler, root)
+    if (shared !== undefined) return shared
+  }
   let options: ZnightOptions | undefined
   // no Vite config: nothing to read, do not even load Vite
   if (findViteConfig(root, configFile) === undefined) return { root }
@@ -89,6 +105,24 @@ async function compilerOptions(
     )
   }
   return { ...options, root: resolve(root, options?.root ?? '.') }
+}
+
+/** Options of `znight.config.*` (`loadZnightConfig()` of the compiler), `undefined` without the file. */
+async function znightConfigOptions(compiler: CompilerApi, root: string): Promise<ZnightOptions | undefined> {
+  if (compiler.loadConfig === undefined) return undefined
+  let config: ZnightConfigLike
+  try {
+    config = await compiler.loadConfig(root)
+  } catch (error) {
+    throw new CliError('Cannot load the Znight config (znight.config.*)', {
+      cause: error,
+      hints: [errorMessage(error)],
+    })
+  }
+  if (config.file === undefined) return undefined
+  // `logLevel` is an option of the Bun preload only
+  const { logLevel: _preloadLogLevel, ...options } = config.options
+  return { ...options, root: resolve(root, options.root ?? '.') }
 }
 
 function printDiagnostics(cli: CliContext, compiler: CompilerApi, result: CompileResultLike, root: string): void {

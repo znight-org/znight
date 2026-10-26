@@ -179,8 +179,28 @@ factories only).
 | `close()`           | Stops the application (idempotent). Also `await using app = await TestApp.create(...)`.        |
 | `app` / `container` | The `Application` and its `Container`.                                                         |
 
-`inject()` resolves with `{ status, headers, body, json() }`; it rejects with `ZNIGHT001` when the
-application has no HTTP plugin and with `ZNIGHT021` once closed.
+`inject()` resolves with `{ status, headers, body, bytes, json() }` (`body` decoded as UTF-8,
+`bytes` the raw body, for downloads); it rejects with `ZNIGHT001` when the application has no HTTP
+plugin and with `ZNIGHT021` once closed. The plugin encodes the request `body`: strings and bytes as
+is, a `FormData` as `multipart/form-data` (files included), a `Blob` / `File` with its type, other
+values as JSON.
+
+```ts
+import { readFile } from 'node:fs/promises'
+
+test('uploads and downloads', async () => {
+  const form = new FormData()
+  form.append('title', 'Me')
+  form.append('avatar', new File([await readFile('test/fixtures/me.png')], 'me.png', { type: 'image/png' }))
+
+  const uploaded = await app.inject({ method: 'POST', url: '/profile/avatar', body: form })
+  expect(uploaded.status).toBe(201)
+
+  const download = await app.inject({ url: '/reports/q1.pdf', headers: { range: 'bytes=0-99' } })
+  expect(download.status).toBe(206)
+  expect(download.bytes.byteLength).toBe(100)
+})
+```
 
 ## Mocks
 
@@ -302,5 +322,6 @@ without importing any feature package:
 | `extensions.messaging.consumers[].token`                                                           | `TestApp` boot roots                         |
 
 Runtime contract with `@znight/http`: the plugin named `'http'` exposes
-`inject(request: { method: string; url: string; headers?; body?; query? }): Promise<{ status: number; headers; body: string; json<T>(): T }>`
-(`HttpInjector`), dispatching in memory.
+`inject(request: { method: string; url: string; headers?; body?; query? }): Promise<{ status: number; headers; body: string; bytes?: Uint8Array; json<T>(): T }>`
+(`HttpInjector`, `HttpInjectResult`), dispatching in memory; `TestApp` derives `bytes` from `body`
+when a plugin does not return them.

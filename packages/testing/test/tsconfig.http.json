@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["http-plugin.test.ts"],
+  "exclude": []
+}

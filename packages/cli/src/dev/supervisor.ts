@@ -2,8 +2,8 @@
  * Restart orchestration of `znight dev`: one application process at a time, restarted (debounced)
  * after each successful build. Stopping sends SIGTERM, waits for the exit and sends SIGKILL after a
  * timeout. Restarts are serialised and coalesced: a burst of builds causes one restart with the
- * latest output. A failed build simply does not schedule a restart, so the last good process keeps
- * running.
+ * latest output. A failed build simply does not schedule a restart (and cancels a pending one when
+ * its output is broken), so the last good process keeps running.
  */
 import type { ChildHandle, ExitStatus } from '../integrations/process.ts'
 
@@ -74,6 +74,17 @@ export class AppSupervisor {
       this.#debounce = undefined
       void this.restart()
     }, this.#debounceMs)
+  }
+
+  /**
+   * Cancels a restart scheduled by {@link scheduleRestart} and not started yet (the output it would
+   * run turned out to be broken, e.g. a failed compilation). Returns whether one was pending.
+   */
+  cancelRestart(): boolean {
+    if (this.#debounce === undefined) return false
+    clearTimeout(this.#debounce)
+    this.#debounce = undefined
+    return true
   }
 
   /**

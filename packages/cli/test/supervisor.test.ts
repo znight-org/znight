@@ -70,6 +70,19 @@ describe('AppSupervisor', () => {
     expect(children).toHaveLength(2)
   })
 
+  it('cancels a scheduled restart', async () => {
+    const { supervisor, children } = setup(undefined, { debounceMs: 20 })
+    expect(supervisor.cancelRestart()).toBe(false)
+    supervisor.scheduleRestart()
+    expect(supervisor.cancelRestart()).toBe(true)
+    expect(supervisor.cancelRestart()).toBe(false)
+    await delay(40)
+    expect(children).toHaveLength(0)
+    supervisor.scheduleRestart()
+    await waitFor(() => children.length === 1)
+    await supervisor.stop()
+  })
+
   it('debounces scheduled restarts', async () => {
     const { supervisor, children } = setup(undefined, { debounceMs: 30 })
     supervisor.scheduleRestart()

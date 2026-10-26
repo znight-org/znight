@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ES2024",
+    "lib": ["ES2024", "ESNext.Disposable"],
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "moduleDetection": "force",
+    "types": ["bun"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    // Znight decorators are TypeScript decorators: no emitDecoratorMetadata nor reflect-metadata
+    "experimentalDecorators": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    // scripts/publish.ts imports the job definitions with their `.ts` extension (runs as is on Node 24 and Bun)
+    "allowImportingTsExtensions": true,
+    // In-repo only: resolve the @znight/* workspace packages to their TypeScript sources (no build
+    // needed to type-check). A project created with `znight new` does not need this line.
+    "customConditions": ["@znight/source"]
+  },
+  "include": ["src", "test", "scripts", "vite.config.ts", "znight.config.ts"]
+}

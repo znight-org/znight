@@ -2,7 +2,7 @@ import type { HostRuntime } from '../src/runtime.ts'
 
 import { join } from 'node:path'
 
-import { FakeVite } from './fake-vite.ts'
+import { FakeVite, type FakeZnightApi } from './fake-vite.ts'
 import { type CliRun, FakeProcesses, FakeSignals, runCli, temporaryDirectory, waitFor } from './helpers.ts'
 import { afterEach, beforeEach, describe, expect, test as it } from 'bun:test'
 
@@ -108,6 +108,124 @@ describe('znight dev', () => {
     expect(run.stderr).toContain('--> /app/src/main.ts')
     expect(run.stderr).toContain('1 | const = 1')
     expect(run.stderr).toContain('Build failed. The last good build keeps running. Waiting for changes...')
+  })
+
+  describe('compile errors (the znight() plugin does not fail watch builds)', () => {
+    const failed = {
+      ok: false,
+      diagnostics: [
+        {
+          code: 'ZNIGHT001',
+          severity: 'error',
+          message: "Missing provider for 'Mailer' required by Notifier",
+          location: { file: '/app/src/notifier.ts', line: 9, column: 32 },
+        },
+        { code: 'ZNIGHT019', severity: 'warning', message: 'Unused provider' },
+      ],
+    }
+    let api: FakeZnightApi
+
+    beforeEach(() => {
+      api = { result: { ok: true, diagnostics: [] } }
+      vite = new FakeVite({ znight: api })
+    })
+
+    it('keeps the last good process running, restarts once the compilation succeeds', async () => {
+      const running = start()
+      await waitFor(() => vite.watchers.length === 1)
+      vite.succeed()
+      await waitFor(() => processes.children.length === 1)
+
+      api.result = failed
+      vite.succeed()
+      await new Promise(resolve => setTimeout(resolve, 30))
+      expect(processes.children).toHaveLength(1)
+      expect(processes.children[0]?.signals).toEqual([])
+
+      api.result = { ok: true, diagnostics: [] }
+      vite.succeed()
+      await waitFor(() => processes.children.length === 2)
+      signals.emit('SIGINT')
+      const run = await running
+      expect(run.stderr).toContain(
+        'Compilation failed with 1 error. The last good build keeps running. Waiting for changes...',
+      )
+      // Vite prints the diagnostics (the znight() plugin logs them)
+      expect(run.stderr).not.toContain('Missing provider')
+      expect(run.stdout.match(/Built in/g)).toHaveLength(2)
+    })
+
+    it('does not start the application when the first compilation fails', async () => {
+      api.result = failed
+      const running = start()
+      await waitFor(() => vite.watchers.length === 1)
+      vite.succeed()
+      await new Promise(resolve => setTimeout(resolve, 30))
+      expect(processes.children).toHaveLength(0)
+      api.result = { ok: true, diagnostics: [] }
+      vite.succeed()
+      await waitFor(() => processes.children.length === 1)
+      signals.emit('SIGINT')
+      const run = await running
+      expect(run.stderr).toContain('Compilation failed with 1 error. Waiting for changes...')
+      expect(run.stdout).toContain('Started dist/main.js')
+    })
+
+    it('cancels a restart still pending for the previous build', async () => {
+      const running = start(['--debounce', '40'])
+      await waitFor(() => vite.watchers.length === 1)
+      vite.succeed()
+      await waitFor(() => processes.children.length === 1)
+      vite.succeed() // schedules a restart in 40 ms...
+      api.result = failed
+      vite.succeed() // ...which would run the broken output
+      await new Promise(resolve => setTimeout(resolve, 80))
+      expect(processes.children).toHaveLength(1)
+      signals.emit('SIGINT')
+      await running
+    })
+
+    it('prints the diagnostics itself when Vite is silent', async () => {
+      const formatted: unknown[] = []
+      const compiler = {
+        formatDiagnostics: (diagnostics: readonly { code: string }[], options: unknown) => {
+          formatted.push(options)
+          return diagnostics.map(diagnostic => `[formatted] ${diagnostic.code}`).join('\n')
+        },
+      }
+      api.result = failed
+      const running = runCli(['dev', '--debounce', '5', '--log-level', 'silent'], {
+        cwd: project.path,
+        signals,
+        services: {
+          loadVite: () => Promise.resolve(vite),
+          loadCompiler: () => Promise.resolve(compiler as never),
+          processes,
+        },
+      })
+      await waitFor(() => vite.watchers.length === 1)
+      vite.succeed()
+      await waitFor(() => formatted.length === 1)
+      await new Promise(resolve => setTimeout(resolve, 10))
+      signals.emit('SIGINT')
+      const run = await running
+      expect(formatted).toEqual([{ color: false, cwd: project.path, summary: false }])
+      expect(run.stderr).toContain('[formatted] ZNIGHT001\n[formatted] ZNIGHT019')
+      expect(run.stderr.indexOf('[formatted]')).toBeLessThan(run.stderr.indexOf('Compilation failed'))
+    })
+
+    it('falls back to a built-in formatter without the compiler', async () => {
+      api.result = failed
+      const running = start(['--log-level', 'silent'])
+      await waitFor(() => vite.watchers.length === 1)
+      vite.succeed()
+      await new Promise(resolve => setTimeout(resolve, 20))
+      signals.emit('SIGINT')
+      const run = await running
+      expect(run.stderr).toContain("✗ ZNIGHT001: Missing provider for 'Mailer' required by Notifier")
+      expect(run.stderr).toMatch(/--> .*app\/src\/notifier.ts:9:32/)
+      expect(run.stderr).toContain('Compilation failed with 1 error. Waiting for changes...')
+    })
   })
 
   it('does not print the build error twice when Vite logs it', async () => {

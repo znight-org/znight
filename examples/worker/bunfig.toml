@@ -1,0 +1,5 @@
+[test]
+# Regenerates the DI container (src/.znight/container.generated.ts) before the tests run, with the
+# options of znight.config.ts. (Bun has no bunfig setting for export conditions: the in-repo
+# `test` script passes --conditions=@znight/source on the command line instead.)
+preload = ["@znight/compiler/bun"]

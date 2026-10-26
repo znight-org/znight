@@ -2,15 +2,14 @@
 description: "@znight/observability - structured logging with Pino, Prometheus metrics and OpenTelemetry tracing, wired into HTTP requests and message deliveries."
 ---
 
-# @znight/observability <Badge type="warning" text="in development" />
+# @znight/observability <Badge type="tip" text="available" />
 
 Logs, metrics and traces for Znight applications, wired automatically into every HTTP request and
-message delivery through [hooks](/guide/plugins#hooks).
-
-<!-- TODO(api): verify against implementation (this page follows the specification; option names may change) -->
+message delivery through [hooks](/guide/plugins#hooks). Runs on Node.js 24+ and Bun 1.3+.
 
 ```sh
 npm install @znight/observability prom-client   # prom-client only for metrics
+npm install -D pino-pretty                       # optional: pretty logs in development
 ```
 
 ::: code-group
@@ -22,9 +21,9 @@ const app = await Application.create({
   metadata: __ZNIGHT_METADATA__,
   plugins: [
     ObservabilityPlugin.configure({
-      logging: { level: 'info' },
-      metrics: { path: '/metrics' },
-      tracing: { serviceName: 'orders-api' },
+      logging: { level: 'info', redact: ['*.password', 'req.headers.authorization'] },
+      metrics: { prefix: 'orders_', server: { port: 9464, path: '/metrics' } },
+      tracing: { http: { responseHeader: 'x-trace-id' } },
     }),
     HttpPlugin.configure({ port: 3000 }),
   ],
@@ -34,6 +33,9 @@ const app = await Application.create({
 :::
 
 Register `ObservabilityPlugin` **before** the plugins it observes, so its wrappers are the outermost.
+Each part can be turned off (`metrics: false`, `tracing: false`, `logging: { requests: false }`...),
+and the options may be a function of the container (`configure(c => ({ logging: { level:
+c.get(AppConfig).logLevel } }))`).
 
 ## What it provides
 
@@ -44,8 +46,9 @@ Register `ObservabilityPlugin` **before** the plugins it observes, so its wrappe
 | `Tracer`                                                      | OpenTelemetry tracer                                  |
 | `LoggedInterceptor`, `TracedInterceptor`, `MetricInterceptor` | Interceptors behind `@Logged`, `@Traced`, `@Metric`   |
 
-The plugin also installs its logger as the application logger (`app.setLogger()`), so the core and
-every plugin log through pino. Logs are flushed when the application stops (`onDispose`).
+The plugin also installs its logger as the application logger (`app.setLogger()`, entries tagged
+`component: 'znight'`), so the core and every plugin log through pino (`replaceCoreLogger: false`
+opts out). Logs and spans are flushed when the application stops (`onDispose`).
 
 ## Logging
 
@@ -62,20 +65,34 @@ export class PaymentService {
 }
 ```
 
-Every entry written while handling a request or a message automatically carries `requestId`,
-`traceId` and `spanId`, read from the current scope. `@Secret` config values are masked.
+Every entry written while handling a request or a message automatically carries `requestId` (from
+the request scope) and `traceId` / `spanId` (from the active span). The logger accepts
+`(message, context | Error)` and pino's `(context, message)`; `child()`, `isLevelEnabled()`, `level`
+and `flush()` work as in pino. The level comes from the option, else `LOG_LEVEL`, else `info`.
+
+Options include `redact` (paths censored by pino), `pretty` (`pino-pretty`), `base`, `timestamp` and
+`transport`: `consoleTransport()` (default, JSON lines on stdout), `prettyTransport()`,
+`cloudwatchTransport()` (Lambda / CloudWatch JSON format) and `datadogTransport()` (HTTP intake with
+batching and retries). The plugin also writes one entry per HTTP request (`request completed`) and per
+message delivery.
 
 ## Metrics
 
-The plugin records RED metrics (rate, errors, duration) for HTTP requests and message deliveries, and
-exposes them in the Prometheus format. Add your own with `MetricsRegistry` or the `@Metric()`
-decorator.
+When the optional peer `prom-client` is installed, the plugin records RED metrics (rate, errors,
+duration) for HTTP requests (`http_server_requests_total`, `http_server_request_duration_seconds`,
+labelled by route pattern, never the raw path) and message deliveries, plus process metrics, and
+serves them on a dedicated server (`http://0.0.0.0:9464/metrics` by default, `server: false` to
+disable it). Add your own with `MetricsRegistry` (`counter`, `gauge`, `histogram`, `summary`:
+get-or-create by name) or the `@Metric()` decorator.
 
 ## Tracing
 
-Spans are created for every HTTP request and message delivery, with W3C trace-context propagation
-(incoming `traceparent` headers are continued, outgoing responses carry the context). Add spans to
-your own methods with `@Traced()` or the `Tracer`.
+Spans are created for every HTTP request (`SERVER`), message delivery (`CONSUMER`) and message
+published through `MessageBroker` (`PRODUCER`, its trace context injected into the message headers),
+with W3C trace-context propagation: incoming `traceparent` headers are continued and responses carry a
+`traceresponse` header. Znight only uses the OpenTelemetry **API**: register any SDK (the Node SDK,
+with `serviceName` and an exporter) and spans are exported; without one they are no-ops. Add spans to
+your own methods with `@Traced()` or the `Tracer` (`withSpan`, `startSpan`, `inject`, `extract`).
 
 ## Interceptor decorators
 
@@ -84,9 +101,9 @@ import { Logged, Metric, Traced } from '@znight/observability'
 
 @Injectable()
 export class InvoiceService {
-  @Logged({ level: 'debug' }) // logs calls, durations and failures
+  @Logged({ level: 'debug', args: true }) // one entry per call: duration, or the error
   @Traced() // a span per call
-  @Metric() // a duration histogram and an error counter
+  @Metric() // method_duration_seconds{class, method, outcome}
   async issue(order: Order): Promise<Invoice> {
     // ...
   }
@@ -94,4 +111,11 @@ export class InvoiceService {
 ```
 
 These decorators are declared in the package's manifest and backed by
-[method interceptors](/guide/aop): they work on any provider method, sync or async.
+[method interceptors](/guide/aop): they work on any provider method, sync or async (synchronous
+methods stay synchronous). Their options are literals, validated when the application is created.
+
+| Decorator        | Options                                                                    |
+| ---------------- | -------------------------------------------------------------------------- |
+| `@Logged(opts?)` | `level` (`'debug'`), `errorLevel` (`'error'`), `args`, `result`, `message` |
+| `@Traced(opts?)` | `name` (`<Class>.<method>`), `attributes`, `kind` (`'internal'`)           |
+| `@Metric(opts?)` | `type` (`'histogram'` or `'counter'`), `name`, `help`, `labels`, `buckets` |

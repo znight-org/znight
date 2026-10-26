@@ -4,7 +4,7 @@
  * container and, with its `app` defaults, configures a server build (`src/main.ts` → `dist/`).
  */
 import type { InlineConfig, Plugin } from 'vite'
-import type { ZnightOptions } from './compiler.ts'
+import type { Diagnostic, ZnightOptions } from './compiler.ts'
 
 import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -74,25 +74,56 @@ export interface BuildOptions {
   readonly plugins?: readonly Plugin[]
 }
 
-/** Captures the entry chunk written by a build (the file `znight dev` runs). */
+/** The outcome of the compile of the `znight()` plugin (`plugin.api.result`, @znight/compiler). */
+export interface CompileOutcome {
+  /** No error diagnostic. */
+  readonly ok: boolean
+  readonly diagnostics: readonly Diagnostic[]
+}
+
+/** What the CLI reads from the `plugin.api` of `znight()` (structural: any compiler version). */
+interface ZnightPluginApiLike {
+  /** The latest compile result. */
+  readonly result?: unknown
+}
+
+/**
+ * Captures what a build produced: the entry chunk written (the file `znight dev` runs) and the
+ * compile result of the `znight()` plugin. In watch mode the plugin does not fail the build on
+ * compile errors (the bundle contains a module throwing them): `znight dev` reads the result to keep
+ * the last good process running.
+ */
 export interface OutputTracker {
   readonly plugin: Plugin
   /** Absolute path of the entry chunk written by the last build. */
   entry(): string | undefined
   /** `performance.now()` when the last build started (`undefined` before the first one). */
   startedAt(): number | undefined
+  /**
+   * The compile result the last written build was made of (`plugin.api.result` of `znight()`),
+   * `undefined` when the Vite config has no `znight()` plugin exposing it.
+   */
+  compile(): CompileOutcome | undefined
 }
 
 /** Creates an {@link OutputTracker}. */
 export function createOutputTracker(root: string): OutputTracker {
   let entry: string | undefined
   let started: number | undefined
+  let api: ZnightPluginApiLike | undefined
+  let compile: CompileOutcome | undefined
   const plugin: Plugin = {
     name: 'znight:cli-output',
+    configResolved(config) {
+      api = findZnightApi(config.plugins)
+    },
     buildStart() {
       started = performance.now()
+      compile = undefined
     },
     writeBundle(outputOptions, bundle) {
+      // the plugin compiled in its buildStart: its latest result is the one this bundle contains
+      compile = compileOutcome(api?.result)
       const chunks = Object.values(bundle).filter(
         (output): output is Extract<(typeof bundle)[string], { type: 'chunk' }> =>
           output.type === 'chunk' && output.isEntry,
@@ -105,7 +136,24 @@ export function createOutputTracker(root: string): OutputTracker {
           : resolve(root, outputOptions.file)
     },
   }
-  return { plugin, entry: () => entry, startedAt: () => started }
+  return { plugin, entry: () => entry, startedAt: () => started, compile: () => compile }
+}
+
+/** The `plugin.api` of the `znight()` plugin among the resolved plugins. */
+function findZnightApi(plugins: readonly unknown[]): ZnightPluginApiLike | undefined {
+  for (const plugin of plugins) {
+    if (typeof plugin !== 'object' || plugin === null || (plugin as { name?: unknown }).name !== 'znight') continue
+    const api = (plugin as { api?: unknown }).api
+    if (typeof api === 'object' && api !== null && 'result' in api) return api as ZnightPluginApiLike
+  }
+  return undefined
+}
+
+function compileOutcome(result: unknown): CompileOutcome | undefined {
+  if (typeof result !== 'object' || result === null) return undefined
+  const { ok, diagnostics } = result as { ok?: unknown; diagnostics?: unknown }
+  if (typeof ok !== 'boolean') return undefined
+  return { ok, diagnostics: Array.isArray(diagnostics) ? (diagnostics as Diagnostic[]) : [] }
 }
 
 function inlineConfig(options: BuildOptions, watch: boolean): InlineConfig {

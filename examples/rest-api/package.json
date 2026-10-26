@@ -5,11 +5,12 @@
   "type": "module",
   "scripts": {
     "generate": "znight generate",
-    "dev": "znight dev",
+    "dev": "NODE_ENV=development znight dev",
     "build": "znight build",
     "start": "znight start",
     "typecheck": "znight generate && tsc --noEmit",
-    "test": "bun test"
+    "test": "bun test --conditions=@znight/source",
+    "test:e2e": "ZNIGHT_E2E=1 bun test --conditions=@znight/source --timeout 300000 test/e2e.test.ts"
   },
   "dependencies": {
     "@znight/core": "workspace:*",

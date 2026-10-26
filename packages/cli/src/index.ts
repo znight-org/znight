@@ -21,6 +21,7 @@ export type {
   FormatDiagnosticsOptions,
   GenerateResultLike,
   IncrementalCompiler,
+  ZnightConfigLike,
   ZnightOptions,
 } from './integrations/compiler.ts'
 export type {

@@ -103,11 +103,12 @@ your toolchain (through Vite, the CLI or the Bun preload).
 
 ## Project status
 
-::: warning Early development
-Znight is preparing its first release (`v0.1`). The core runtime ([`@znight/core`](/packages/core))
-is implemented; the compiler and the feature packages are being built. Pages describing APIs that may
-still change are marked as such. Feedback and contributions are welcome on
-[GitHub](https://github.com/ugho49/Znight).
+::: warning Before 1.0
+Znight is preparing its first release (`v0.1`). Every package is implemented and tested on Node.js
+24 and Bun: the runtime, the compiler (Vite plugin, Bun preload, CLI), HTTP, messaging,
+configuration, observability and the testing utilities, with runnable example applications in the
+repository. Until 1.0, minor versions may still change APIs. Feedback and contributions are welcome
+on [GitHub](https://github.com/ugho49/Znight).
 :::
 
 ## Next steps

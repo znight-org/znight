@@ -1,10 +1,14 @@
 /**
  * `znight dev`: Vite build in watch mode (no Vite dev server) and a full restart of the application
  * process after every successful rebuild — no partial hot replacement of providers: a restart is
- * fast and always consistent. A failed build keeps the last good process running.
+ * fast and always consistent. A failed build keeps the last good process running, and so does a
+ * failed compilation: in watch mode the `znight()` plugin does not fail the build (the bundle
+ * contains a module throwing the diagnostics), so its result (`plugin.api.result`) is checked
+ * before restarting.
  */
 import type { Command } from '../command.ts'
 import type { CliContext } from '../context.ts'
+import type { Diagnostic } from '../integrations/compiler.ts'
 import type { BuildWatcher, ViteConfigLoader, ViteLogLevel, WatcherEvent } from '../integrations/vite.ts'
 
 import { resolve } from 'node:path'
@@ -12,9 +16,10 @@ import { resolve } from 'node:path'
 import { defineCommand } from '../command.ts'
 import { AppSupervisor } from '../dev/supervisor.ts'
 import { CliError } from '../errors.ts'
+import { fallbackFormatDiagnostics } from '../integrations/compiler.ts'
 import { exitCodeOf } from '../integrations/process.ts'
 import { createOutputTracker, formatBuildError, watchBuild } from '../integrations/vite.ts'
-import { formatDuration } from '../output.ts'
+import { formatDuration, plural } from '../output.ts'
 import { type RuntimeOption, resolveRuntime, runtimeArguments, runtimeExecutable } from '../runtime.ts'
 import { displayPath, onTermination, parseNonNegativeInteger, resolveRoot } from './shared.ts'
 
@@ -31,7 +36,8 @@ export const devCommand: Command = defineCommand({
     details: [
       'Uses "vite build --watch" with the project Vite config (the znight() plugin regenerates the container).',
       'On every successful build the application receives SIGTERM, gets --kill-timeout ms to stop gracefully',
-      '(then SIGKILL), and a new process starts. A failed build keeps the last good process running.',
+      '(then SIGKILL), and a new process starts. A failed build or compilation (ZNIGHT errors) keeps the',
+      'last good process running.',
     ].join('\n'),
   },
   args: {
@@ -141,13 +147,29 @@ export const devCommand: Command = defineCommand({
             `Build failed. ${supervisor.running ? 'The last good build keeps running. ' : ''}Waiting for changes...`,
           )
           break
-        case 'END':
+        case 'END': {
           state.first = false
           if (state.failed) break
+          // the bundle was written, but with a failed compile it throws the diagnostics at startup
+          const compile = tracker.compile()
+          if (compile !== undefined && !compile.ok) {
+            // a restart still pending for a previous build would run this broken output
+            supervisor.cancelRestart()
+            const errors = compile.diagnostics.filter(diagnostic => diagnostic.severity === 'error').length
+            // the znight() plugin prints the diagnostics through the Vite logger, unless it is silenced
+            const printed = logLevel === 'silent' ? printDiagnostics(cli, root, compile.diagnostics) : Promise.resolve()
+            void printed.then(() =>
+              reporter.error(
+                `Compilation failed with ${plural(errors, 'error')}. ${supervisor.running ? 'The last good build keeps running. ' : ''}Waiting for changes...`,
+              ),
+            )
+            break
+          }
           entry = args.entry === undefined ? (tracker.entry() ?? entry) : resolve(root, args.entry)
           reporter.success(`Built in ${formatDuration(performance.now() - (tracker.startedAt() ?? state.started))}`)
           supervisor.scheduleRestart()
           break
+        }
         default:
           break
       }
@@ -176,6 +198,19 @@ export const devCommand: Command = defineCommand({
     return waitForTermination(cli, watcher, supervisor)
   },
 })
+
+/** Prints compiler diagnostics with the project's `formatDiagnostics()` (a built-in formatter otherwise). */
+async function printDiagnostics(cli: CliContext, root: string, diagnostics: readonly Diagnostic[]): Promise<void> {
+  if (diagnostics.length === 0) return
+  const options = { color: cli.colors.isColorSupported, cwd: root, summary: false }
+  let text: string
+  try {
+    text = (await cli.services.loadCompiler(root)).formatDiagnostics(diagnostics, options)
+  } catch {
+    text = fallbackFormatDiagnostics(diagnostics, options)
+  }
+  cli.reporter.logError(text.trimEnd())
+}
 
 function waitForTermination(cli: CliContext, watcher: BuildWatcher, supervisor: AppSupervisor): Promise<number> {
   return new Promise<number>(resolveExit => {

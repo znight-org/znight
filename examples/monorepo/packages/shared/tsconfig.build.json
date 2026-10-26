@@ -1,0 +1,17 @@
+{
+  // `bun run build`: the JavaScript and declarations of the compiled-library flow (dist/), see the
+  // README. The source-library flow (the default in this monorepo) needs no build at all.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "sourceMap": true,
+    "rootDir": "src",
+    "outDir": "dist",
+    // resolve @znight/core to its published declarations, like an npm consumer would
+    "customConditions": [],
+    "allowImportingTsExtensions": false
+  },
+  "include": ["src"],
+  "exclude": ["src/.znight"]
+}

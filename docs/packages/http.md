@@ -89,16 +89,16 @@ export class UserController {
 
 ## Parameters
 
-| Decorator                    | Injects                                                          |
-| ---------------------------- | ---------------------------------------------------------------- |
-| `@Param(name?, schema?)`     | A path parameter (or all of them without `name`)                 |
-| `@Query(name?, schema?)`     | A query parameter (or the whole query object)                    |
-| `@Body(schema?)`             | The parsed request body                                          |
-| `@Headers(name?)`            | A header (lower-cased name) or all headers                       |
-| `@UploadedFile(field?, o?)`  | An uploaded `File` of a multipart body ([Files](#files))         |
-| `@UploadedFiles(field?, o?)` | The uploaded files of a field (`File[]`)                         |
-| `@Ctx()`                     | The adapter-neutral `HttpContext`                                |
-| `@Req()` / `@Res()`          | The native adapter request / response (escape hatch, warning)    |
+| Decorator                    | Injects                                                       |
+| ---------------------------- | ------------------------------------------------------------- |
+| `@Param(name?, schema?)`     | A path parameter (or all of them without `name`)              |
+| `@Query(name?, schema?)`     | A query parameter (or the whole query object)                 |
+| `@Body(schema?)`             | The parsed request body                                       |
+| `@Headers(name?)`            | A header (lower-cased name) or all headers                    |
+| `@UploadedFile(field?, o?)`  | An uploaded `File` of a multipart body ([Files](#files))      |
+| `@UploadedFiles(field?, o?)` | The uploaded files of a field (`File[]`)                      |
+| `@Ctx()`                     | The adapter-neutral `HttpContext`                             |
+| `@Req()` / `@Res()`          | The native adapter request / response (escape hatch, warning) |
 
 **Coercion.** Path, query and header values are strings on the wire; Znight coerces them from the
 **declared parameter type** in generated code: `string`, `number`, `boolean`, `bigint`, `Date`,
@@ -145,14 +145,14 @@ Bodies are parsed by Znight (identically on every adapter), after the guards and
 interceptors, for routes declaring `@Body()` or upload parameters; other routes read them lazily
 with `ctx.parseBody()`, `ctx.rawBody()` (bytes, e.g. for webhook signatures) or `ctx.bodyStream()`.
 
-| `content-type`                      | Body                                                          |
-| ----------------------------------- | ------------------------------------------------------------- |
-| (empty body)                        | `undefined`                                                   |
-| `application/json`, `*/*+json`      | parsed JSON (`400` when malformed)                            |
-| `text/*`                            | string (charset honoured)                                     |
-| `application/x-www-form-urlencoded` | record, repeated keys as arrays                               |
+| `content-type`                      | Body                                                              |
+| ----------------------------------- | ----------------------------------------------------------------- |
+| (empty body)                        | `undefined`                                                       |
+| `application/json`, `*/*+json`      | parsed JSON (`400` when malformed)                                |
+| `text/*`                            | string (charset honoured)                                         |
+| `application/x-www-form-urlencoded` | record, repeated keys as arrays                                   |
 | `multipart/form-data`               | record of the text fields; files in `ctx.files` ([Files](#files)) |
-| anything else / none                | `Uint8Array`                                                  |
+| anything else / none                | `Uint8Array`                                                      |
 
 Bodies above the body limit answer `413` (plugin `bodyLimit`, 1 MiB by default, or
 `@BodyLimit('10mb')` on a route or a controller); a `content-encoding` other than `identity` answers
@@ -160,17 +160,17 @@ Bodies above the body limit answer `413` (plugin `bodyLimit`, 1 MiB by default, 
 
 ## Responses
 
-| Handler returns                                   | Response                                          |
-| ------------------------------------------------- | ------------------------------------------------- |
-| Object / array / number / boolean / `null`        | JSON                                              |
-| `string`                                          | `text/plain; charset=utf-8`                       |
-| `Uint8Array` / `ArrayBuffer`                      | `application/octet-stream`                        |
-| `ReadableStream` / Node.js `Readable`             | streamed `application/octet-stream`               |
-| `Blob` / `File`                                   | its bytes, with its type and size                 |
-| `HttpResponse.file()` / `HttpResponse.stream()`   | a file or a stream ([Files](#files))              |
-| `HttpResponse`                                    | its body, status and headers                      |
-| Web `Response`                                    | sent as is                                        |
-| `undefined`                                       | empty body, `204` (`201` for `POST`)              |
+| Handler returns                                 | Response                             |
+| ----------------------------------------------- | ------------------------------------ |
+| Object / array / number / boolean / `null`      | JSON                                 |
+| `string`                                        | `text/plain; charset=utf-8`          |
+| `Uint8Array` / `ArrayBuffer`                    | `application/octet-stream`           |
+| `ReadableStream` / Node.js `Readable`           | streamed `application/octet-stream`  |
+| `Blob` / `File`                                 | its bytes, with its type and size    |
+| `HttpResponse.file()` / `HttpResponse.stream()` | a file or a stream ([Files](#files)) |
+| `HttpResponse`                                  | its body, status and headers         |
+| Web `Response`                                  | sent as is                           |
+| `undefined`                                     | empty body, `204` (`201` for `POST`) |
 
 Status precedence: `@HttpCode(status)` > `HttpResponse.status` > default (`201` for `POST`, `204`
 without body, `200` otherwise). Headers: content type < `@Header` < `ctx.setHeader()` <
@@ -208,22 +208,22 @@ Uploaded files are standard `File` objects (`name`, `type`, `size`, `arrayBuffer
 `stream()`), held in memory. `@UploadedFile()` / `@UploadedFiles()` without field take the files of
 any field; `@Body(schema?)` receives the text fields (`Record<string, string | string[]>`).
 
-| Option      | Default                                  | Description                                                |
-| ----------- | ---------------------------------------- | ---------------------------------------------------------- |
-| `required`  | `true`, unless the parameter is optional | `400` when no file is sent                                 |
+| Option      | Default                                  | Description                                                  |
+| ----------- | ---------------------------------------- | ------------------------------------------------------------ |
+| `required`  | `true`, unless the parameter is optional | `400` when no file is sent                                   |
 | `maxSize`   | `uploads.maxFileSize` (10 MiB)           | Maximum size of each file (`5_000_000`, `'5mb'`, `Infinity`) |
-| `maxFiles`  | `uploads.maxFiles` (10)                  | `@UploadedFiles`: maximum number of files                  |
-| `mimeTypes` | any                                      | Accepted types: `'image/png'`, `'image/*'`, `'*/*'`        |
+| `maxFiles`  | `uploads.maxFiles` (10)                  | `@UploadedFiles`: maximum number of files                    |
+| `mimeTypes` | any                                      | Accepted types: `'image/png'`, `'image/*'`, `'*/*'`          |
 
 Upload routes parse `multipart/form-data` bodies **as they arrive**, with Znight's own RFC 7578
 parser (not `Request.formData()`, which buffers everything and differs between runtimes), and reject
 an invalid upload as soon as the offending part shows up:
 
-| Status | When                                                                                   |
-| ------ | -------------------------------------------------------------------------------------- |
+| Status | When                                                                                                                              |
+| ------ | --------------------------------------------------------------------------------------------------------------------------------- |
 | `400`  | missing required file, text value instead of a file, second file for `@UploadedFile`, file in an undeclared field, malformed body |
-| `413`  | file above `maxSize`, more than `maxFiles` files, too many parts, field too large, body above the limit |
-| `415`  | refused media type, non-empty body that is not `multipart/form-data`                   |
+| `413`  | file above `maxSize`, more than `maxFiles` files, too many parts, field too large, body above the limit                           |
+| `415`  | refused media type, non-empty body that is not `multipart/form-data`                                                              |
 
 Plugin-wide limits: `HttpPlugin.configure({ uploads: { maxFileSize, maxFiles, maxParts, maxFieldSize } })`
 (defaults: 10 MiB, 10, 1000, 1 MiB). The body limit of an upload route defaults to the sum of what
@@ -301,7 +301,7 @@ async store(@Param('id', FileId) id: string, @Ctx() ctx: HttpContext) {
   scripts in your origin.
 - Keep limits tight (`maxSize`, `maxFiles`, `@BodyLimit`, plugin `uploads`): uploaded files live in
   memory.
-:::
+  :::
 
 ## Errors
 
@@ -406,29 +406,29 @@ request.
 
 `HttpPlugin.configure(options)`, or `HttpPlugin.configure(container => options)`:
 
-| Option              | Default         | Description                                                   |
-| ------------------- | --------------- | ------------------------------------------------------------- |
-| `adapter`           | `nodeAdapter()` | `fastifyAdapter()`, `expressAdapter()`, `honoAdapter()`...    |
-| `port`, `host`      | `3000`, `0.0.0.0` | Listening address (`port: 0`: a free port)                 |
-| `prefix`            | —               | Path prefix for every route (`/api`)                          |
-| `guards`            | `[]`            | Global guards (classes or instances)                          |
-| `interceptors`      | `[]`            | Global interceptors                                           |
-| `exceptionMappers`  | `[]`            | Map error types to responses                                  |
-| `trailingSlash`     | `'strict'`      | `'strict'`, `'ignore'` or `'redirect'`                        |
-| `exposeErrors`      | `false`         | Include messages of unexpected errors in `500` responses      |
-| `bodyLimit`         | 1 MiB           | Maximum request body size (bytes or `'10mb'`)                 |
-| `uploads`           | see [Files](#uploads) | `{ maxFileSize, maxFiles, maxParts, maxFieldSize }`     |
-| `requestIdHeader`   | `x-request-id`  | Header read and echoed (`false`: always generate)             |
-| `drainTimeoutMs`    | `4000`          | Maximum wait for in-flight requests on shutdown               |
+| Option             | Default               | Description                                                |
+| ------------------ | --------------------- | ---------------------------------------------------------- |
+| `adapter`          | `nodeAdapter()`       | `fastifyAdapter()`, `expressAdapter()`, `honoAdapter()`... |
+| `port`, `host`     | `3000`, `0.0.0.0`     | Listening address (`port: 0`: a free port)                 |
+| `prefix`           | —                     | Path prefix for every route (`/api`)                       |
+| `guards`           | `[]`                  | Global guards (classes or instances)                       |
+| `interceptors`     | `[]`                  | Global interceptors                                        |
+| `exceptionMappers` | `[]`                  | Map error types to responses                               |
+| `trailingSlash`    | `'strict'`            | `'strict'`, `'ignore'` or `'redirect'`                     |
+| `exposeErrors`     | `false`               | Include messages of unexpected errors in `500` responses   |
+| `bodyLimit`        | 1 MiB                 | Maximum request body size (bytes or `'10mb'`)              |
+| `uploads`          | see [Files](#uploads) | `{ maxFileSize, maxFiles, maxParts, maxFieldSize }`        |
+| `requestIdHeader`  | `x-request-id`        | Header read and echoed (`false`: always generate)          |
+| `drainTimeoutMs`   | `4000`                | Maximum wait for in-flight requests on shutdown            |
 
 ## Adapters
 
-| Adapter                                    | Peer dependencies           | Notes                                                     |
-| ------------------------------------------ | --------------------------- | --------------------------------------------------------- |
-| `nodeAdapter()` (`@znight/http`)           | none                        | Built-in `node:http` server (also works on Bun)           |
-| `fastifyAdapter()` (`@znight/http/fastify`) | `fastify`                  | `exposeHeadRoutes` disabled: Znight serves HEAD           |
-| `expressAdapter()` (`@znight/http/express`) | `express`                  | Your middleware runs before the Znight routes             |
-| `honoAdapter()` (`@znight/http/hono`)      | `hono`, `@hono/node-server` | `Bun.serve()` on Bun, `@hono/node-server` on Node.js      |
+| Adapter                                     | Peer dependencies           | Notes                                                |
+| ------------------------------------------- | --------------------------- | ---------------------------------------------------- |
+| `nodeAdapter()` (`@znight/http`)            | none                        | Built-in `node:http` server (also works on Bun)      |
+| `fastifyAdapter()` (`@znight/http/fastify`) | `fastify`                   | `exposeHeadRoutes` disabled: Znight serves HEAD      |
+| `expressAdapter()` (`@znight/http/express`) | `express`                   | Your middleware runs before the Znight routes        |
+| `honoAdapter()` (`@znight/http/hono`)       | `hono`, `@hono/node-server` | `Bun.serve()` on Bun, `@hono/node-server` on Node.js |
 
 Every adapter implements `inject(request)`: requests handled in memory, without a socket, which is
 what [`TestApp`](/guide/testing#testapp-end-to-end-tests) uses. `inject()` accepts `FormData` bodies

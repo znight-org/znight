@@ -3,7 +3,7 @@
  * of `metadata.extensions.http` in memory and implements the `inject()` contract of `TestApp`.
  */
 import type { Plugin, PluginContext } from '@znight/core'
-import type { InjectRequest, InjectResponse } from '../../src/index.ts'
+import type { HttpInjectResult, InjectRequest } from '../../src/index.ts'
 import type { HttpRouteLike } from './app.ts'
 
 interface ControllerLike {
@@ -22,10 +22,11 @@ export interface FakeHttpPlugin extends Plugin {
   readonly name: 'http'
   readonly calls: string[]
   readonly requests: (InjectRequest & { readonly method: string })[]
-  inject(request: InjectRequest & { readonly method: string }): Promise<InjectResponse>
+  inject(request: InjectRequest & { readonly method: string }): Promise<HttpInjectResult>
 }
 
-function response(status: number, payload: unknown): InjectResponse {
+/** A response without `bytes` (TestApp derives them from `body`). */
+function response(status: number, payload: unknown): HttpInjectResult {
   const body = payload === undefined ? '' : JSON.stringify(payload)
   return {
     status,

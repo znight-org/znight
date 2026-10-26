@@ -84,6 +84,14 @@ export interface FormatDiagnosticsOptions {
   readonly summary?: boolean
 }
 
+/** Options read from `znight.config.*` (`loadZnightConfig()`, §6.3). */
+export interface ZnightConfigLike {
+  /** The config file, `undefined` when the project has none. */
+  readonly file: string | undefined
+  /** Its options, `root` resolved against the config file directory. */
+  readonly options: ZnightOptions
+}
+
 /** The part of `@znight/compiler` used by the CLI. */
 export interface CompilerApi {
   /** Compiles and writes the generated module when its content changed (`generate()`). */
@@ -94,6 +102,11 @@ export interface CompilerApi {
   createIncremental(options: ZnightOptions): IncrementalCompiler
   /** Code frames for diagnostics (`formatDiagnostics()`). */
   formatDiagnostics(diagnostics: readonly Diagnostic[], options?: FormatDiagnosticsOptions): string
+  /**
+   * The options of `znight.config.*` (or of the file named by `ZNIGHT_CONFIG`) in `root`
+   * (`loadZnightConfig()`). Absent for compilers without it.
+   */
+  loadConfig?(root: string): Promise<ZnightConfigLike>
 }
 
 /**
@@ -119,6 +132,7 @@ export interface CompilerModule {
   generate?: (options?: ZnightOptions & { check?: boolean }) => Promise<ModuleResult>
   createCompiler?: (options?: ZnightOptions) => ModuleIncrementalCompiler
   formatDiagnostics?: (diagnostics: readonly Diagnostic[], options?: FormatDiagnosticsOptions) => string
+  loadZnightConfig?: (cwd?: string) => Promise<ZnightConfigLike>
 }
 
 /**
@@ -151,7 +165,7 @@ function readText(file: string): string | undefined {
  * available, otherwise the same behaviour built on `compile()`.
  */
 export function adaptCompilerModule(module: CompilerModule): CompilerApi {
-  const { compile, generate, createCompiler } = module
+  const { compile, generate, createCompiler, loadZnightConfig } = module
   if (typeof compile !== 'function' && typeof generate !== 'function') {
     throw new CliError('This version of @znight/compiler exposes neither compile() nor generate()', {
       hints: ['upgrade @znight/compiler to the version of @znight/cli'],
@@ -207,6 +221,9 @@ export function adaptCompilerModule(module: CompilerModule): CompilerApi {
       }
     },
     formatDiagnostics: (diagnostics, options) => format(diagnostics, options),
+    ...(typeof loadZnightConfig === 'function'
+      ? { loadConfig: (root: string): Promise<ZnightConfigLike> => loadZnightConfig(root) }
+      : {}),
   }
 }
 

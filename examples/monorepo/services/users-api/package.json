@@ -9,7 +9,8 @@
     "build": "znight build",
     "start": "znight start",
     "typecheck": "znight generate && tsc --noEmit",
-    "test": "bun test"
+    "test": "bun test",
+    "test:e2e": "ZNIGHT_E2E=1 bun test"
   },
   "dependencies": {
     "@znight/core": "workspace:*",

@@ -2,12 +2,12 @@
 description: "@znight/testing - TestBed with auto-mocked dependencies for unit tests and TestApp for in-memory end-to-end tests, with Vitest, Jest or bun:test."
 ---
 
-# @znight/testing <Badge type="warning" text="in development" />
+# @znight/testing <Badge type="tip" text="available" />
 
 Testing utilities for Znight: `TestBed` builds one provider with its dependencies auto-mocked;
-`TestApp` runs the whole application and injects HTTP requests in memory.
-
-<!-- TODO(api): verify against implementation (this page follows the specification; names and options may change) -->
+`TestApp` runs the whole application and injects HTTP requests in memory. It reads the generated
+metadata structurally and depends on no feature package; it works with Vitest, Jest and `bun:test`,
+on Node.js and Bun.
 
 ```sh
 npm install -D @znight/testing
@@ -25,13 +25,17 @@ expect(await instance.findById(1)).toEqual({ id: 1, name: 'Ada' })
 ```
 
 - The target is built with its **real** code; its **direct** dependencies are replaced by mocks.
-- Classes, interfaces and plugin-provided types → auto-mocks; `@Config()` classes → real instances
-  from defaults plus `config` overrides; qualified primitives → must be provided; optional →
+- Classes, interfaces, `@Provides` values and plugin-provided types → auto-mocks; `@Config()`
+  classes → real instances (initializers, `@Default` values, then the `config` option); qualified
+  values (`@Inject('apiUrl')`, primitives) → the `provide` value, an error otherwise; optional →
   `undefined`; arrays → `[]`; `Lazy<T>` → a handle over the mock.
-- Interceptors are not applied unless `aop: 'real'`.
-- `mocks.get()` accepts classes, tokens and display names.
+- Options: `metadata`, `provide`, `overrides` (values or `{ scope, deps, factory }` definitions),
+  `config`, `mockFn`, `deep`, `aop`. Keys are classes, tokens, aliases or unique display names.
+- Interceptors are not applied unless `aop: 'real'`. Lifecycle hooks are never called.
+- `mocks.get()` accepts classes, tokens, aliases and display names (`mocks.get<Logger>('Logger')`);
+  `mocks.clearAll()` / `mocks.resetAll()`.
 - Auto-mocks are not thenable (`then` is `undefined`), so returning one from an async function is
-  safe.
+  safe; with a class, `instanceof` works. `createMock(Class?, partial?)` creates one yourself.
 
 ### Spy implementation
 
@@ -41,24 +45,36 @@ The spy factory is detected automatically: `vi.fn` (Vitest), `jest.fn` (Jest) or
 ## TestApp
 
 ```ts
+import { HttpPlugin } from '@znight/http'
 import { TestApp } from '@znight/testing'
 
-const app = await TestApp.create({
+await using app = await TestApp.create({
   metadata,
-  plugins: [HttpPlugin.configure({ adapter: fastify() })],
+  plugins: [HttpPlugin.configure({ port: 0 })], // any adapter; port 0: a free port
   overrides: [[UserRepository, fakeRepo]],
 })
 
-const res = await app.inject({ method: 'GET', url: '/users/1' })
-expect(res.statusCode).toBe(200)
+const res = await app.inject({ url: '/users/1' }) // method: GET by default
+expect(res.status).toBe(200)
+expect(res.json()).toEqual({ id: 1, name: 'Ada' })
 
-await app.stop()
+const form = new FormData()
+form.append('avatar', new File([png], 'me.png', { type: 'image/png' }))
+const upload = await app.inject({ method: 'POST', url: '/profile/avatar', body: form })
+const download = await app.inject({ url: '/reports/q1.pdf' })
+download.bytes // Uint8Array: the raw body
 ```
 
-- Signal handlers are disabled.
+- `TestApp.create({ metadata, plugins?, providers?, overrides?, only?, start?, logger?, shutdown? })`
+  runs `Application.create()` then `start()` (unless `start: false`); signal handlers are disabled.
 - `overrides` are applied last (highest precedence).
-- Only the dependency closure of controllers and consumers is instantiated by default.
-- `inject()` goes through the adapter in memory: no port, no network.
+- Only the dependency closure of controllers (with their guards and interceptors), consumers and
+  overridden providers is instantiated by default (`only: 'all'` or a list of keys otherwise).
+- `inject({ method?, url, headers?, body?, query? })` goes through the HTTP plugin in memory (no
+  network call) and resolves with `{ status, headers, body, bytes, json() }`. Bodies: objects as
+  JSON, strings and bytes as is, `FormData` as `multipart/form-data`, `Blob` / `File` with its type.
+- `close()` (or `await using`) stops the application; `get(key)`, `container` and `app` give access
+  to it.
 
 ## Keeping metadata fresh
 

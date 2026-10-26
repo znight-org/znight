@@ -532,15 +532,26 @@ container.
 
 ## ZNIGHT019: Unused provider {#znight019}
 
-With `reportUnused: true`, the compiler warns about providers that nothing reachable from the
-application's entry points (controllers, consumers...) depends on.
+With `reportUnused: true`, the compiler warns about providers that are not reachable from any
+**root**. Roots are:
+
+- providers registered by compiler extensions: controllers (with their guards and interceptors),
+  consumers, config classes...;
+- providers with an `onStart`, `onReady` or `onStop` hook;
+- providers referenced as a **value** in your code, outside of types, imports, decorators and
+  `extends` (`app.get(UserService)`, an `overrides` entry...); referencing an abstract class or an
+  interface counts for the provider it is aliased to.
+
+Everything a root depends on (constructor parameters, `@Provides` parameters, multi, lazy,
+interceptors, guards...) is used.
 
 ```ts
 @Injectable()
 export class LegacyExporter {} // ⚠ ZNIGHT019 when nothing injects it
 ```
 
-<!-- TODO(api): verify against implementation (exact definition of roots for reportUnused/prune) -->
+String lookups (`container.get('LegacyExporter')`) are not seen by the compiler: reference the class
+instead, or keep `reportUnused` off.
 
 **How to fix**: delete dead code, or keep it on purpose. Providers that do work on their own through
 lifecycle hooks may legitimately have no dependents. `prune: true` drops unreachable providers from

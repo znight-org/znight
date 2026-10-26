@@ -40,7 +40,7 @@
   "files": ["dist", "src"],
   "scripts": {
     "build": "tsdown",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p test"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p test && tsc --noEmit -p test/tsconfig.http.json"
   },
   "publishConfig": {
     "access": "public"

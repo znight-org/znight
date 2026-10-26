@@ -329,6 +329,42 @@ describe('TestApp.inject', () => {
     await app.close()
   })
 
+  it('derives bytes from the body when the plugin does not provide them', async () => {
+    const http = fakeHttp()
+    const app = await TestApp.create({ metadata, providers, plugins: [http], logger: quiet() })
+    const response = await app.inject({ url: '/nope' })
+    expect(response.body).toBe('{"message":"Not Found"}')
+    expect(response.bytes).toBeInstanceOf(Uint8Array)
+    expect(new TextDecoder().decode(response.bytes)).toBe(response.body)
+    expect(response.json()).toEqual({ message: 'Not Found' })
+    await app.close()
+  })
+
+  it('returns the response of the plugin as is when it has bytes', async () => {
+    const bytes = new Uint8Array([0xff, 0x00, 0x7f])
+    const response = { status: 200, headers: {}, body: '\ufffd\u0000\u007f', bytes, json: <T>() => null as T }
+    const binary = { name: HTTP_PLUGIN_NAME, inject: () => Promise.resolve(response) }
+    const app = await TestApp.create({ metadata, providers, plugins: [binary], logger: quiet() })
+    const received = await app.inject({ url: '/file.bin' })
+    expect(received).toBe(response)
+    expect(received.bytes).toBe(bytes)
+    await app.close()
+  })
+
+  it('passes FormData and Blob bodies to the plugin unchanged', async () => {
+    const http = fakeHttp()
+    const app = await TestApp.create({ metadata, providers, plugins: [http], logger: quiet() })
+    const form = new FormData()
+    form.append('title', 'Me')
+    form.append('avatar', new File(['png'], 'me.png', { type: 'image/png' }))
+    const blob = new Blob(['raw'], { type: 'text/csv' })
+    await app.inject({ method: 'POST', url: '/upload', body: form })
+    await app.inject({ method: 'PUT', url: '/raw', body: blob })
+    expect(http.requests[0]?.body).toBe(form)
+    expect(http.requests[1]?.body).toBe(blob)
+    await app.close()
+  })
+
   it('requires the http plugin', async () => {
     const app = await TestApp.create({ metadata, providers, logger: quiet() })
     const error = await rejection(app.inject({ url: '/users/1' }))

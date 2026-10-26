@@ -9,8 +9,6 @@ and types, binds every dependency, validates the graph and writes a plain TypeSc
 runtime executes. It runs as a **Vite plugin**, from the **CLI** (`znight generate`), as a **Bun
 preload**, or programmatically.
 
-<!-- TODO(api): verify against implementation (the compiler is being implemented; options and APIs follow the specification) -->
-
 ## How it works
 
 ```txt
@@ -59,25 +57,36 @@ export class AdminController {}
 
 ## Options
 
-Pass options to the Vite plugin (`znight(options)`), or to `compile()` / `generate()`:
+The Vite plugin (`znight(options)`), the Bun preload, `znight generate` and `compile()` /
+`generate()` take the same options. Keep them in a `znight.config.ts` (what `znight new` generates):
+the Bun preload and `znight generate` read it, and `vite.config.ts` passes it to the plugin, so
+every tool generates the same container.
 
 ::: code-group
+
+```ts [znight.config.ts]
+import type { ZnightOptions } from '@znight/compiler'
+
+export default {
+  include: ['src/**/*.ts'],
+  strictValidation: true,
+} satisfies ZnightOptions
+```
 
 ```ts [vite.config.ts]
 import { znight } from '@znight/compiler'
 import { defineConfig } from 'vite'
 
-export default defineConfig({
-  plugins: [
-    znight({
-      include: ['src/**/*.ts'],
-      strictValidation: true,
-    }),
-  ],
-})
+import options from './znight.config.ts'
+
+export default defineConfig({ plugins: [znight(options)] })
 ```
 
 :::
+
+`znight.config.ts` (or `.mts`, `.js`, `.mjs`) default-exports the options, or a function returning
+them; the `ZNIGHT_CONFIG` environment variable names another file. A relative `root` is resolved
+against the file's directory.
 
 | Option              | Type                          | Default                                                | Description                                                                                                        |
 | ------------------- | ----------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
@@ -113,19 +122,37 @@ The output is a regular TypeScript module exporting `__ZNIGHT_METADATA__` (also 
 import type { ZnightMetadata } from '@znight/core'
 import type { HttpContext } from '@znight/http'
 import { coerce } from '@znight/http'
+import { DbFactory } from '../db/db.factory.js'
+import { PgUserRepository } from '../users/pg-user.repository.js'
 import { UserController } from '../users/user.controller.js'
 import { UserService } from '../users/user.service.js'
-import { PgUserRepository } from '../users/pg-user.repository.js'
 
 export const __ZNIGHT_METADATA__: ZnightMetadata = {
   version: 1,
   compiler: '0.1.0',
   providers: {
+    ['src/db/db.factory.ts#DbFactory']: {
+      scope: 'singleton',
+      class: DbFactory,
+      deps: [],
+      factory: () => new DbFactory(),
+    },
+    ['src/db/db.factory.ts#DbFactory.createPool']: {
+      scope: 'singleton',
+      deps: ['src/db/db.factory.ts#DbFactory'],
+      factory: d => d[0].createPool(),
+    },
     ['src/users/pg-user.repository.ts#PgUserRepository']: {
       scope: 'singleton',
       class: PgUserRepository,
       deps: ['src/db/db.factory.ts#DbFactory.createPool'],
       factory: d => new PgUserRepository(d[0]),
+    },
+    ['src/users/user.controller.ts#UserController']: {
+      scope: 'singleton',
+      class: UserController,
+      deps: ['src/users/user.service.ts#UserService'],
+      factory: d => new UserController(d[0]),
     },
     ['src/users/user.service.ts#UserService']: {
       scope: 'singleton',
@@ -136,45 +163,45 @@ export const __ZNIGHT_METADATA__: ZnightMetadata = {
         '@znight/observability#LoggedInterceptor',
       ],
       factory: d => new UserService(d[0], d[1]),
-      interceptors: { findById: { async: true, chain: [{ dep: 2, options: { level: 'debug' } }] } },
-    },
-    ['src/users/user.controller.ts#UserController']: {
-      scope: 'singleton',
-      class: UserController,
-      deps: ['src/users/user.service.ts#UserService'],
-      factory: d => new UserController(d[0]),
+      interceptors: { ['findById']: { async: true, chain: [{ dep: 2, options: { ['level']: 'debug' } }] } },
     },
   },
   resolutionOrder: [
+    'src/db/db.factory.ts#DbFactory',
+    'src/db/db.factory.ts#DbFactory.createPool',
     'src/users/pg-user.repository.ts#PgUserRepository',
     'src/users/user.service.ts#UserService',
     'src/users/user.controller.ts#UserController',
   ],
-  aliases: { ['src/users/user.repository.ts#UserRepository']: 'src/users/pg-user.repository.ts#PgUserRepository' },
+  aliases: {
+    ['src/db/db.factory.ts#Pool']: 'src/db/db.factory.ts#DbFactory.createPool',
+    ['src/users/user.repository.ts#UserRepository']: 'src/users/pg-user.repository.ts#PgUserRepository',
+  },
   externals: [
-    { token: '@znight/observability#Logger', providedBy: 'ObservabilityPlugin' },
     { token: '@znight/observability#LoggedInterceptor', providedBy: 'ObservabilityPlugin' },
+    { token: '@znight/observability#Logger', providedBy: 'ObservabilityPlugin' },
   ],
   extensions: {
-    http: {
-      controllers: [
+    ['http']: {
+      ['controllers']: [
         {
-          token: 'src/users/user.controller.ts#UserController',
-          basePath: '/users',
-          guards: [],
-          interceptors: [],
-          meta: {},
-          routes: [
+          ['token']: 'src/users/user.controller.ts#UserController',
+          ['basePath']: '/users',
+          ['guards']: [],
+          ['interceptors']: [],
+          ['meta']: {},
+          ['routes']: [
             {
-              method: 'GET',
-              path: '/:id',
-              fullPath: '/users/:id',
-              handler: 'getUser',
-              meta: {},
-              guards: [],
-              interceptors: [],
-              params: [{ index: 0, source: 'param', name: 'id', type: 'number' }],
-              invoke: (c: UserController, ctx: HttpContext) => c.getUser(coerce.number(ctx.params['id'], 'param "id"')),
+              ['method']: 'GET',
+              ['path']: '/:id',
+              ['fullPath']: '/users/:id',
+              ['handler']: 'getUser',
+              ['meta']: {},
+              ['guards']: [],
+              ['interceptors']: [],
+              ['params']: [{ ['index']: 0, ['source']: 'param', ['name']: 'id', ['type']: 'number' }],
+              ['invoke']: (c: UserController, ctx: HttpContext) =>
+                c.getUser(coerce.number(ctx.params['id'], 'param "id"')),
             },
           ],
         },
@@ -189,8 +216,11 @@ export default __ZNIGHT_METADATA__
 
 Properties of the output:
 
-- **Readable**: factories are ordinary `new X(...)` calls; route handlers are ordinary method calls.
-  Put a breakpoint in it.
+- **Readable**: factories are ordinary `new X(...)` calls (`d => d[0].createPool()` for a
+  `@Provides` method); route handlers are ordinary method calls. Put a breakpoint in it.
+- **Safe keys**: every key that comes from your code or from an extension (tokens, method names,
+  extension data) is a computed string key (`['findById']`), so names such as `__proto__` stay
+  plain properties.
 - **Type-checked**: it compiles under strict settings (`exactOptionalPropertyTypes`,
   `noPropertyAccessFromIndexSignature`, `verbatimModuleSyntax`...), and `invoke` keeps typed
   parameters, so a handler signature that does not match its decorators fails `tsc`.
@@ -206,22 +236,36 @@ Properties of the output:
 import { znight } from '@znight/compiler'
 import { defineConfig } from 'vite'
 
-export default defineConfig({ plugins: [znight()] })
+import options from './znight.config.ts'
+
+export default defineConfig({ plugins: [znight(options)] })
 ```
 
 :::
 
+The plugin keeps one incremental compiler for the server environments of Vite (SSR builds, Vitest's
+Node.js environment); client environments are left alone.
+
 - **Server builds by default.** Unless you configured `build.ssr` or `build.lib` yourself (or set
-  `app: false`), the plugin sets `build.ssr` to `src/main.ts`, `build.outDir` to `dist`,
-  `build.target` to `node24`, enables source maps and targets Node.
-- **`vite build`**: compiles before bundling. Any error fails the build and nothing is written.
-- **Watch mode**: diagnostics are printed on every change. While there are errors, the generated module
-  is replaced by one that throws a `ZnightError` with the formatted diagnostics when imported, so a
-  broken graph never runs silently.
-- **Decorator stripping**: decorators found by the analysis are removed from the transformed code
-  (with high-resolution source maps). Files that were not analysed are untouched.
-- The generated module is served from memory; the copy on disk exists for `tsc` and your editor and is
-  only rewritten when its content changes.
+  `app: false`), the plugin sets `build.ssr` to `src/main.ts` (`app.entry`), `build.outDir` to
+  `dist`, `build.target` to `node24`, enables source maps and targets Node. Values you set are kept.
+- **`vite build`** compiles before bundling. Any error fails the build with the formatted
+  diagnostics and nothing is written. Provider source locations are omitted (`build` mode).
+- **`vite build --watch`** (what `znight dev` runs) and the **dev server** recompile only the files
+  that changed (events are debounced) and print the diagnostics. While there are errors, the
+  generated module is replaced by one that throws a `ZnightError` with the diagnostics when
+  imported: the bundle is still written, so a broken graph never runs silently, and `znight dev`
+  keeps the last good process running instead of restarting into the error.
+- **Vitest** uses your Vite config: the container is compiled (`test` mode) before the tests import
+  it and recompiled in watch mode.
+- **Decorator stripping**: the Znight decorators found by the analysis are removed from the
+  transformed code, with high-resolution source maps. Only the exact ranges recorded for that file
+  content are removed; files that were not analysed, and your other decorators, are untouched.
+- The generated module is **served from memory** (also before it exists on disk, on a fresh
+  checkout); the copy on disk exists for `tsc` and your editor, is only rewritten when its content
+  changes and never while there are errors. Import it by path (relative), not through an alias.
+- Tools read the plugin state through `plugin.api`: `options`, `compiler`, `result` (the latest
+  compile result) and `ready()` (compiles the pending changes).
 
 ## Diagnostics
 
@@ -291,14 +335,12 @@ precomputed graph) and always consistent.
 
 ## Bun preload
 
-Bun runs TypeScript (decorators included) directly. To make sure the container is regenerated before
-your app or your tests start, register the compiler's Bun preload:
+Bun runs TypeScript (decorators included) directly. The compiler's Bun preload regenerates the
+container before your tests or your application start, and serves it from memory:
 
 ::: code-group
 
 ```toml [bunfig.toml]
-preload = ["@znight/compiler/bun"]
-
 [test]
 preload = ["@znight/compiler/bun"]
 ```
@@ -306,11 +348,31 @@ preload = ["@znight/compiler/bun"]
 :::
 
 ```sh
-bun --watch src/main.ts   # regenerated before the app starts and on every restart
-bun test                  # regenerated before the tests run
+bun test                                             # regenerated before the tests run
+bun --preload @znight/compiler/bun --watch src/main.ts  # before the app starts, on every restart
 ```
 
-<!-- TODO(api): verify against implementation (Bun preload entry and options) -->
+The preload reads [`znight.config.ts`](#options), generates the container (`test` mode under
+`bun test`, `build` with `NODE_ENV=production`, `serve` otherwise; the disk copy is written when it
+changed), prints the diagnostics on stderr and, on errors, throws a `ZnightError`: `bun test` exits
+with code 1 and `bun --watch` waits for a fix. The Znight decorators of the analysed files are
+blanked out (replaced by spaces: line and column numbers are unchanged, no source map needed).
+
+Bun restarts `--watch` processes only for files it loaded: the preload makes Bun watch every file
+the container depends on (also after a failed compile), but a newly created provider file is picked
+up at the next restart. The preload-only option `logLevel` (`'info'` adds a summary line, `'warn'`
+by default, `'silent'`) goes in `znight.config.ts` too.
+
+Importing `@znight/compiler/bun` **runs** the preload. Custom preload files use the side-effect-free
+functions of the package root:
+
+```ts
+// preload.ts (bunfig.toml: preload = ["./preload.ts"])
+import { createPreload, loadZnightConfig } from '@znight/compiler'
+
+const { options } = await loadZnightConfig()
+await createPreload({ ...options, logLevel: 'info' })
+```
 
 Under Vitest, the Vite plugin plays the same role.
 
@@ -322,18 +384,23 @@ import { compile, formatDiagnostics, generate } from '@znight/compiler'
 // Analyse and generate in memory: reads sources, writes nothing
 const result = await compile({ root: process.cwd() })
 console.log(formatDiagnostics(result.diagnostics, { color: true }))
-console.log(result.stats) // { files, providers, durationMs }
+console.log(result.stats) // { files, providers, durationMs, parsed }
 
 // Same, and write outFile (or only check it is up to date)
 await generate({ check: process.env.CI === 'true' })
 ```
 
-| Export              | Description                                                     |
-| ------------------- | --------------------------------------------------------------- |
-| `znight(options)`   | The Vite plugin (also the default export)                       |
-| `compile(options)`  | Pure compile: `{ code, outFile, diagnostics, graph, stats }`    |
-| `generate(options)` | Compile and write `outFile`; `check: true` only compares        |
-| `formatDiagnostics` | Pretty-prints diagnostics with code frames (`{ color?, cwd? }`) |
+| Export                     | Description                                                                                            |
+| -------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `znight(options)`          | The Vite plugin (also the default export)                                                              |
+| `compile(options)`         | Pure compile: `{ ok, code, outFile, diagnostics, graph, stats, watchFiles, decorators }`               |
+| `generate(options)`        | Compile and write `outFile` when it changed (`written`); `check: true` only compares (`stale`)         |
+| `createCompiler(options)`  | Incremental compiler for watchers: `compile(changes)` / `generate(changes)` re-read only changed files |
+| `formatDiagnostics`        | Pretty-prints diagnostics with code frames (`{ color?, cwd?, summary? }`)                              |
+| `renderErrorModule`        | The module served instead of the container when the compilation fails                                  |
+| `createPreload(options)`   | The Bun preload with these options (Bun only)                                                          |
+| `znightBunPlugin(options)` | The Bun plugin alone: serves the container from memory, blanks the decorators                          |
+| `loadZnightConfig(cwd?)`   | `{ file, options }` of `znight.config.*` / `ZNIGHT_CONFIG`                                             |
 
 ## Provider libraries
 

@@ -9,14 +9,16 @@
     "build": "znight build",
     "start": "znight start",
     "typecheck": "znight generate && tsc --noEmit",
-    "test": "bun test"
+    "test": "bun test",
+    "test:e2e": "ZNIGHT_E2E=1 bun test"
   },
   "dependencies": {
     "@znight/core": "workspace:*",
     "@znight/messaging": "workspace:*",
     "@znight/config": "workspace:*",
     "@znight/observability": "workspace:*",
-    "@znight-examples/shared": "workspace:*"
+    "@znight-examples/shared": "workspace:*",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@znight/compiler": "workspace:*",

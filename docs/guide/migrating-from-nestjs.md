@@ -9,8 +9,6 @@ guards, interceptors, lifecycle hooks. The differences come from one design deci
 graph is resolved by a **compiler**, not at runtime. This page maps NestJS concepts to Znight and
 walks through a migration.
 
-<!-- TODO(api): verify against implementation (HTTP, messaging, config and testing APIs used on this page) -->
-
 ## What changes, in short
 
 | NestJS                                                   | Znight                                                                  |
@@ -44,19 +42,20 @@ walks through a migration.
 
 ### HTTP
 
-| NestJS                                       | Znight (`@znight/http`)                                       | Notes                                                                       |
-| -------------------------------------------- | ------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| `@Controller('users')`                       | `@Controller('/users')`                                       | Also `{ path, scope }`.                                                     |
-| `@Get() @Post() @Put() @Patch() @Delete()`   | Same                                                          | Plus `@Head()`, `@Options()`, `@All()`.                                     |
-| `@Param('id', ParseIntPipe) id: number`      | `@Param('id') id: number`                                     | Coerced from the declared type; invalid → `400`.                            |
-| `@Query()`, `@Body()`, `@Headers()`          | `@Query(name?, schema?)`, `@Body(schema?)`, `@Headers(name?)` | Schemas validate and transform.                                             |
-| `@Req()`, `@Res()`                           | `@Req()`, `@Res()`                                            | Adapter-specific escape hatches (warning). Prefer `@Ctx()` (`HttpContext`). |
-| `@HttpCode(204)`, `@Header('x', 'y')`        | Same                                                          |                                                                             |
-| `@UseGuards(AuthGuard)`                      | `@UseGuard(AuthGuard)`                                        | Guards are providers, injected like any other.                              |
-| `@UseInterceptors(X)`                        | `@UseInterceptor(X)`                                          | Route-level. For any provider method: `@Intercept()` ([AOP](./aop)).        |
-| `@UsePipes(ValidationPipe)`                  | Schemas on parameters, or `@Validate(schema)`                 | See [validation](#validationpipe-schemas).                                  |
-| `@UseFilters()` / `ExceptionFilter`          | `exceptionMappers` option of `HttpPlugin`                     | `HttpException(status, message, details?)` for expected errors.             |
-| `@SetMetadata('roles', [...])` + `Reflector` | `createRouteDecorator<T>('roles')`                            | See [route metadata](#reflector-createroutedecorator).                      |
+| NestJS                                        | Znight (`@znight/http`)                                       | Notes                                                                             |
+| --------------------------------------------- | ------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `@Controller('users')`                        | `@Controller('/users')`                                       | Also `{ path, scope }`.                                                           |
+| `@Get() @Post() @Put() @Patch() @Delete()`    | Same                                                          | Plus `@Head()`, `@Options()`, `@All()`.                                           |
+| `@Param('id', ParseIntPipe) id: number`       | `@Param('id') id: number`                                     | Coerced from the declared type; invalid → `400`.                                  |
+| `@Query()`, `@Body()`, `@Headers()`           | `@Query(name?, schema?)`, `@Body(schema?)`, `@Headers(name?)` | Schemas validate and transform.                                                   |
+| `@Req()`, `@Res()`                            | `@Req()`, `@Res()`                                            | Adapter-specific escape hatches (warning). Prefer `@Ctx()` (`HttpContext`).       |
+| `@HttpCode(204)`, `@Header('x', 'y')`         | Same                                                          |                                                                                   |
+| `@UseGuards(AuthGuard)`                       | `@UseGuard(AuthGuard)`                                        | Guards are providers implementing `CanActivate`, injected like any other.         |
+| `@UseInterceptors(X)`                         | `@UseInterceptor(X)`                                          | Route-level. For any provider method: `@Intercept()` ([AOP](./aop)).              |
+| `@UsePipes(ValidationPipe)`                   | Schemas on parameters, or `@Validate(schema)`                 | See [validation](#validationpipe-schemas).                                        |
+| `@UseFilters()` / `ExceptionFilter`           | `exceptionMappers` option of `HttpPlugin`                     | `HttpException(status, message, details?)` for expected errors.                   |
+| `@SetMetadata('roles', [...])` + `Reflector`  | `createRouteDecorator<T>('roles')`                            | See [route metadata](#reflector-createroutedecorator).                            |
+| `@UploadedFile()` + `FileInterceptor('file')` | `@UploadedFile('file', { maxSize, mimeTypes })`               | No interceptor nor Multer: standard `File` objects, limits checked while reading. |
 
 ### Messaging, config, lifecycle
 
@@ -201,13 +200,23 @@ export class RolesGuard implements CanActivate {
 
 In Znight, route metadata is collected by the compiler and stored in the generated route definition
 (`route.meta`). Declare the decorator with `createRouteDecorator` and read the value from the context
-in your guard: no reflection.
+in your guard (`Roles.get(ctx)`, or `ctx.route?.meta['roles']`): no reflection.
 
 ```ts
 // Znight
-import { createRouteDecorator } from '@znight/http'
+import { Injectable } from '@znight/core'
+import { type CanActivate, Controller, createRouteDecorator, Get, type HttpContext, UseGuard } from '@znight/http'
 
-export const Roles = createRouteDecorator<string[]>('roles')
+export const Roles = createRouteDecorator<readonly string[]>('roles')
+
+@Injectable()
+export class RolesGuard implements CanActivate {
+  canActivate(ctx: HttpContext): boolean {
+    const roles = Roles.get(ctx) // route metadata wins over controller metadata
+    const user = ctx.state.get('user') as { roles: string[] } | undefined // set by an authentication guard
+    return roles === undefined || roles.some(role => user?.roles.includes(role) === true)
+  }
+}
 
 @Controller('/admin')
 export class AdminController {
@@ -215,14 +224,6 @@ export class AdminController {
   @Roles(['admin'])
   @UseGuard(RolesGuard)
   stats() {}
-}
-
-@Injectable()
-export class RolesGuard implements Guard {
-  canActivate(ctx: HttpContext): boolean {
-    const roles = ctx.route.meta['roles'] as string[] | undefined
-    return roles === undefined || roles.some(role => ctx.user?.roles.includes(role))
-  }
 }
 ```
 

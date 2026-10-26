@@ -198,10 +198,33 @@ export default defineConfig({
 
 :::
 
-For HTTP functions and edge runtimes, use an HTTP adapter able to handle a request without opening a
-port (such as Hono's fetch-style handler).
+For HTTP functions and edge runtimes, use the Hono adapter: `adapter.fetch` is a Fetch handler
+(`(request: Request) => Promise<Response>`) running the whole Znight pipeline. Routes are registered
+when the application is created (`onBootstrap`), so the handler works without `app.start()`, which
+would listen on a port:
 
-<!-- TODO(api): verify against implementation (serverless/fetch handler of @znight/http adapters) -->
+::: code-group
+
+```ts [src/worker.ts]
+import { Application } from '@znight/core'
+import { HttpPlugin } from '@znight/http'
+import { honoAdapter } from '@znight/http/hono'
+import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
+
+const adapter = honoAdapter()
+await Application.create({
+  metadata: __ZNIGHT_METADATA__,
+  plugins: [HttpPlugin.configure({ adapter })],
+  shutdown: { signals: false },
+})
+
+export default { fetch: adapter.fetch }
+```
+
+:::
+
+Without `app.start()`, the `onStart` / `onReady` hooks of providers and plugins do not run: keep the
+work they would do in factories (or lazy) for such deployments.
 
 ## Checklist
 

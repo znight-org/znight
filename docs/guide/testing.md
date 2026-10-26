@@ -39,8 +39,12 @@ Tests that use the container import the generated module, so it must be up to da
 
   :::
 
-- **Vitest**: add the Vite plugin to your Vitest config; it regenerates the module before tests.
+- **Vitest**: Vitest uses your `vite.config.ts`, so the `znight()` plugin compiles the module before
+  the tests import it (and recompiles in watch mode).
 - **Anything else**: run `znight generate` before the test command.
+
+Both read the compiler options of `znight.config.ts` ([options](./compiler#options)), like
+`znight generate`.
 
 ## Plain unit tests
 
@@ -93,23 +97,39 @@ describe('UserService', () => {
 
 How each kind of dependency is handled:
 
-| Dependency                                | In the TestBed                                                          |
-| ----------------------------------------- | ----------------------------------------------------------------------- |
-| Class, interface, plugin-provided type    | Auto-mock: every method is a spy returning `undefined` until configured |
-| `@Config()` class                         | A real instance built from defaults, plus your `config` overrides       |
-| Qualified primitive (`@Inject('apiUrl')`) | Must be provided                                                        |
-| Optional                                  | `undefined`                                                             |
-| Array (multi)                             | `[]`                                                                    |
-| `Lazy<T>`                                 | A handle whose `get()` returns the mock of `T`                          |
-| Method interceptors                       | Not applied (unless `aop: 'real'`)                                      |
+| Dependency                                       | In the TestBed                                                                                     |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------------- |
+| Class, interface, `@Provides` value, plugin type | Auto-mock: every method is a spy returning `undefined` until configured                            |
+| `@Config()` class                                | A real instance: initializers, then `@Default` values, then your `config` values                   |
+| Qualified value (`@Inject('apiUrl')`, primitive) | The `provide` value (a `ZNIGHT001` error naming it otherwise)                                      |
+| Optional                                         | `undefined` (or the `provide` value)                                                               |
+| Array (multi)                                    | `[]` (or the provided members)                                                                     |
+| `Lazy<T>`                                        | A handle whose `get()` returns the mock of `T` (the same as `mocks.get(T)`)                        |
+| Method interceptors                              | Not created, not applied (unless `aop: 'real'`: built with auto-mocked dependencies, then applied) |
 
-Auto-mocks are safe to `await` and to serialise: `then`, `toJSON`, `Symbol.toPrimitive` and
-`asymmetricMatch` are `undefined`. `mocks.get()` accepts a class, a token or a display name.
+```ts
+const { instance, mocks, container } = await TestBed.create(PaymentService, {
+  metadata,
+  provide: { 'AppFactory.apiUrl': 'http://test' }, // qualified values, optional and multi members
+  overrides: [[Clock, fixedClock]], // values or { scope, deps, factory } definitions, win over provide
+  config: { payment: { currency: 'EUR' } }, // values of @Config('payment') classes
+  deep: true, // unconfigured methods return deep mocks instead of undefined
+  aop: 'real', // apply the method interceptors
+})
+```
+
+Keys of `provide` and `overrides` are classes, tokens, aliases or unique display names. TestBed never
+calls lifecycle hooks; `container` holds the target and what was injected into it.
+
+Auto-mocks are safe to `await` and to serialise: `then`, `toJSON`, `asymmetricMatch`, `$$typeof`,
+`nodeType`, `__esModule` and symbol keys (`Symbol.toPrimitive`...) read as `undefined`. With a class,
+`instanceof` works. `mocks.get()` accepts a class, a token, an alias or a display name and explains
+why a key was not auto-mocked; `mocks.clearAll()` / `mocks.resetAll()` forget calls (and programmed
+behaviours). `createMock(Class?)` creates a standalone mock.
 
 The spy implementation is detected automatically: `vi.fn` (Vitest), `jest.fn` (Jest) or `mock`
-(`bun:test`), with a built-in Jest-compatible fallback. Pass `mockFn` to choose explicitly.
-
-<!-- TODO(api): verify against implementation (TestBed options: metadata, config, aop, mockFn, provided values) -->
+(`bun:test`), with a built-in Jest-compatible fallback. Pass `mockFn` to choose explicitly (or
+`setDefaultMockFn()` once).
 
 ## The real container with overrides
 
@@ -152,13 +172,14 @@ it('uses the fake repository', async () => {
 
 ## TestApp: end-to-end tests
 
-`TestApp` starts the real application with its plugins, without opening a port: requests are injected
-in memory through the HTTP adapter.
+`TestApp` starts the real application with its plugins and injects requests **in memory** through
+the HTTP adapter: the whole pipeline runs (routing, guards, validation, interceptors, serialisation)
+without any network call.
 
 ```ts
 import { afterAll, beforeAll, expect, it } from 'bun:test'
 import { HttpPlugin } from '@znight/http'
-import { fastify } from '@znight/http/fastify'
+import { fastifyAdapter } from '@znight/http/fastify'
 import { TestApp } from '@znight/testing'
 import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
 import { UserRepository } from '../src/users/user.repository.js'
@@ -168,29 +189,91 @@ let app: TestApp
 beforeAll(async () => {
   app = await TestApp.create({
     metadata,
-    plugins: [HttpPlugin.configure({ adapter: fastify() })],
+    // port 0: the started application listens on a free port, so test files never collide
+    plugins: [HttpPlugin.configure({ adapter: fastifyAdapter(), port: 0 })],
     overrides: [[UserRepository, new FakeUserRepository([{ id: 1, name: 'Ada' }])]],
   })
 })
 
-afterAll(() => app.stop())
+afterAll(() => app.close())
 
 it('GET /users/:id', async () => {
-  const res = await app.inject({ method: 'GET', url: '/users/1' })
-  expect(res.statusCode).toBe(200)
+  const res = await app.inject({ url: '/users/1' }) // method: GET by default
+  expect(res.status).toBe(200)
   expect(res.json()).toEqual({ id: 1, name: 'Ada' })
 })
 
 it('validates the id', async () => {
   const res = await app.inject({ method: 'GET', url: '/users/abc' })
-  expect(res.statusCode).toBe(400)
+  expect(res.status).toBe(400)
 })
 ```
 
-`TestApp` disables signal handlers, applies `overrides` last, and by default instantiates only the
-dependency closure of controllers and consumers.
+`TestApp.create({ metadata, plugins?, providers?, overrides?, only?, start?, logger?, shutdown? })`
+runs `Application.create()` then `app.start()` (unless `start: false`), with signal handlers
+disabled. It applies `overrides` last and by default instantiates only the dependency closure of the
+HTTP controllers (with their guards and interceptors), the message consumers and the overridden
+providers (`only: 'all'` or a list of keys to choose). The default logger only prints warnings and
+errors. `app.get(key)`, `app.container` and `app.app` give access to the running application;
+`await using app = await TestApp.create(...)` closes it automatically.
 
-<!-- TODO(api): verify against implementation (TestApp.create options, inject() response shape, messaging helpers) -->
+`app.inject({ method?, url, headers?, body?, query? })` resolves with
+`{ status, headers, body, bytes, json() }`: `body` is the response decoded as UTF-8, `bytes` the raw
+bytes (downloads). Request bodies are encoded for you: objects as JSON, strings and bytes as is, a
+`FormData` as `multipart/form-data`, a `Blob` / `File` with its type.
+
+### Uploads and downloads
+
+Send files as a `FormData` body, read binary responses from `bytes`:
+
+```ts
+import { readFile } from 'node:fs/promises'
+
+it('POST /profile/avatar stores the image', async () => {
+  const form = new FormData()
+  form.append('title', 'Me') // text fields: @Body() receives { title: 'Me' }
+  form.append('avatar', new File([await readFile('test/fixtures/me.png')], 'me.png', { type: 'image/png' }))
+
+  const res = await app.inject({ method: 'POST', url: '/profile/avatar', body: form })
+  expect(res.status).toBe(201)
+  expect(res.json()).toMatchObject({ title: 'Me', size: expect.any(Number) })
+})
+
+it('rejects other file types', async () => {
+  const form = new FormData()
+  form.append('avatar', new File(['hello'], 'me.txt', { type: 'text/plain' }))
+  const res = await app.inject({ method: 'POST', url: '/profile/avatar', body: form })
+  expect(res.status).toBe(415) // @UploadedFile('avatar', { mimeTypes: ['image/png', 'image/jpeg'] })
+})
+
+it('GET /reports/:name supports ranges', async () => {
+  const res = await app.inject({ url: '/reports/q1.pdf', headers: { range: 'bytes=0-99' } })
+  expect(res.status).toBe(206)
+  expect(res.headers['content-range']).toMatch(/^bytes 0-99\//)
+  expect(res.bytes.byteLength).toBe(100)
+})
+```
+
+The upload rules of the route (`maxSize`, `maxFiles`, `mimeTypes`, required files) apply exactly as
+over the network: see [files](/packages/http#files).
+
+### Messages
+
+Message consumers are tested with the in-memory driver of `@znight/messaging`: a deterministic
+broker that your test drives and inspects.
+
+```ts
+import { MessagingPlugin } from '@znight/messaging'
+import { memory } from '@znight/messaging/memory'
+
+const driver = memory()
+await using app = await TestApp.create({ metadata, plugins: [MessagingPlugin.configure({ driver })] })
+
+driver.send('orders', { payload: { id: 1 }, type: 'order.placed' }) // as an external producer
+await driver.idle() // nothing in flight, scheduled or deliverable
+expect(driver.settlements('orders')).toMatchObject([{ action: 'ack' }])
+expect(driver.deadLetters('orders')).toEqual([])
+```
 
 ## Testing interceptors and plugins
 

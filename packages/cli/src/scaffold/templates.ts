@@ -43,6 +43,7 @@ export function renderProject(options: ProjectOptions): ProjectFile[] {
     { path: 'package.json', content: packageJson(options, flags) },
     { path: 'tsconfig.json', content: tsconfigJson(flags) },
     { path: 'vite.config.ts', content: viteConfig() },
+    { path: 'znight.config.ts', content: znightConfig(flags) },
     { path: '.gitignore', content: gitignore() },
     { path: 'README.md', content: readme(options, flags) },
     { path: 'src/main.ts', content: mainTs(flags) },
@@ -136,9 +137,11 @@ function tsconfigJson(flags: Flags): string {
     "isolatedModules": true,
     "resolveJsonModule": true,
     "skipLibCheck": true,
-    "noEmit": true
+    "noEmit": true,
+    // vite.config.ts imports ./znight.config.ts (also loaded as is by Node.js and Bun)
+    "allowImportingTsExtensions": true
   },
-  "include": ["src", "test", "vite.config.ts"]
+  "include": ["src", "test", "vite.config.ts", "znight.config.ts"]
 }
 `
 }
@@ -147,11 +150,29 @@ function viteConfig(): string {
   return `import { znight } from '@znight/compiler'
 import { defineConfig } from 'vite'
 
+import options from './znight.config.ts'
+
 // znight() generates the dependency injection container at build time and configures a server
 // build: src/main.ts -> dist/main.js (Node.js 24 target, source maps).
 export default defineConfig({
-  plugins: [znight()],
+  plugins: [znight(options)],
 })
+`
+}
+
+function znightConfig(flags: Flags): string {
+  const readers = flags.bun
+    ? `// Options of the Znight compiler. The znight() Vite plugin (vite.config.ts), the Bun preload of the
+// tests (bunfig.toml) and \`znight generate\` read them, so they all generate the same container.`
+    : `// Options of the Znight compiler. The znight() Vite plugin (vite.config.ts, also used by Vitest)
+// and \`znight generate\` read them, so they all generate the same container.`
+  return `import type { ZnightOptions } from '@znight/compiler'
+
+${readers}
+// https://github.com/ugho49/Znight/tree/main/packages/compiler#options
+export default {
+  // reportUnused: true, // warn about providers nothing uses (ZNIGHT019)
+} satisfies ZnightOptions
 `
 }
 
@@ -550,6 +571,8 @@ function readme(options: ProjectOptions, flags: Flags): string {
     '   ├─ greeting.service.ts      # @Injectable',
     '   └─ health.controller.ts     # GET /health',
     'test/                          # TestBed (unit) and TestApp (HTTP) tests',
+    'vite.config.ts                 # znight() plugin: generates the container, server build',
+    'znight.config.ts               # compiler options',
   ].filter(line => line !== undefined)
   const configNote = flags.config
     ? `
@@ -563,6 +586,9 @@ problem listed.
   const testNote = flags.bun
     ? '`bun test` regenerates the container first (`bunfig.toml` preloads `@znight/compiler/bun`).'
     : 'Vitest uses `vite.config.ts`, so the `znight()` plugin regenerates the container before the tests.'
+  const compilerNote = flags.bun
+    ? 'the `znight()` Vite plugin, the Bun preload of the tests and `znight generate`'
+    : 'the `znight()` Vite plugin (builds and Vitest) and `znight generate`'
   return `# ${options.name}
 
 A [Znight](https://github.com/ugho49/Znight) application: dependency injection resolved at **build
@@ -595,6 +621,7 @@ ${tree.join('\n')}
 \`\`\`
 
 Providers are discovered by the compiler from their decorators: there are no modules to declare.
+Its options live in \`znight.config.ts\`, read by ${compilerNote}.
 Add code with the generators:
 
 \`\`\`sh

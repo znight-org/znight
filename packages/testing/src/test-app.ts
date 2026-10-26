@@ -27,7 +27,12 @@ export interface InjectRequest {
   /** Path, with an optional query string (`/users?page=2`). */
   readonly url: string
   readonly headers?: Readonly<Record<string, string>>
-  /** Request body: objects are sent as JSON, strings and bytes as is. */
+  /**
+   * Request body, encoded by the HTTP plugin: a string or bytes are sent as is (`text/plain` /
+   * `application/octet-stream` without `content-type` header), a `FormData` as
+   * `multipart/form-data` (files included: uploads), a `Blob` / `File` with its type, anything else
+   * as JSON (`application/json`).
+   */
   readonly body?: unknown
   /** Query parameters added to those of `url`. */
   readonly query?: Readonly<Record<string, string | readonly string[]>>
@@ -38,18 +43,26 @@ export interface InjectResponse {
   readonly status: number
   /** Response headers (lower-cased names). */
   readonly headers: Readonly<Record<string, string | readonly string[] | undefined>>
-  /** Raw body. */
+  /** The body decoded as UTF-8. */
   readonly body: string
+  /** The raw body bytes (downloads, binary responses). */
+  readonly bytes: Uint8Array
   /** The body parsed as JSON. */
   json<T = unknown>(): T
 }
+
+/**
+ * What the `inject()` of the HTTP plugin resolves with: an {@link InjectResponse} whose `bytes` may
+ * be absent (`TestApp.inject()` then encodes `body` as UTF-8).
+ */
+export type HttpInjectResult = Omit<InjectResponse, 'bytes'> & { readonly bytes?: Uint8Array }
 
 /**
  * What `TestApp.inject()` expects from the plugin named `'http'`: an in-memory dispatch (no socket).
  * `HttpPlugin` from `@znight/http` implements it.
  */
 export interface HttpInjector {
-  inject(request: InjectRequest & { readonly method: string }): Promise<InjectResponse>
+  inject(request: InjectRequest & { readonly method: string }): Promise<HttpInjectResult>
 }
 
 /** Options of {@link TestApp.create}. */
@@ -146,7 +159,8 @@ export class TestApp implements AsyncDisposable {
 
   /**
    * Dispatches a request in memory through the HTTP plugin (`HttpPlugin`): routing, guards,
-   * interceptors, validation, serialisation, without opening a socket.
+   * interceptors, validation, serialisation, without opening a socket. Send uploads as a
+   * `FormData` body; read downloads from `response.bytes`.
    *
    * @throws ZnightError ZNIGHT001 when the application has no HTTP plugin, ZNIGHT021 once closed.
    */
@@ -165,7 +179,7 @@ export class TestApp implements AsyncDisposable {
         })
       }
       const method = (request.method ?? 'GET').toUpperCase()
-      return Promise.resolve(plugin.inject({ ...request, method }))
+      return Promise.resolve(plugin.inject({ ...request, method })).then(withBytes)
     } catch (error) {
       return Promise.reject(error)
     }
@@ -180,6 +194,21 @@ export class TestApp implements AsyncDisposable {
   /** {@link close}, for `await using app = await TestApp.create(...)`. */
   [Symbol.asyncDispose](): Promise<void> {
     return this.close()
+  }
+}
+
+const ENCODER = new TextEncoder()
+
+/** The plugin response, with `bytes` derived from `body` when the plugin did not provide them. */
+function withBytes(response: HttpInjectResult): InjectResponse {
+  if (response.bytes instanceof Uint8Array) return response as InjectResponse
+  const bytes = ENCODER.encode(response.body)
+  return {
+    status: response.status,
+    headers: response.headers,
+    body: response.body,
+    bytes,
+    json: <T = unknown>(): T => response.json<T>(),
   }
 }
 

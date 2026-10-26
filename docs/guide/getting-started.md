@@ -32,15 +32,38 @@ bunx @znight/cli new my-service
 
 :::
 
-The CLI asks for a package manager and an HTTP adapter (Fastify, Express or Hono), then creates the
-project described below. Start it in development mode:
+In a terminal, the CLI asks for the project name, the package manager, the HTTP adapter (the built-in
+`node:http` server, Fastify, Express or Hono), the features (configuration, observability,
+messaging), and whether to install the dependencies and initialise git. `--yes` takes the defaults
+(`node` adapter, configuration and observability); flags answer the questions up front:
+
+```sh
+npx @znight/cli new my-service --yes --adapter fastify --features all
+```
+
+It creates a small greeting API with its tests:
+
+```txt
+my-service/
+├─ src/
+│  ├─ main.ts                    # Application.create() with the plugins, then start()
+│  └─ app/                       # app.config.ts, greeting.service.ts, greeting.controller.ts,
+│                                # greeting.schemas.ts, health.controller.ts (greeting.consumer.ts)
+├─ test/                         # TestBed (unit) and TestApp (in-memory HTTP) tests
+├─ vite.config.ts                # plugins: [znight(options)]
+├─ znight.config.ts              # compiler options, shared with the Bun preload and znight generate
+├─ bunfig.toml                   # Bun projects: preloads @znight/compiler/bun for bun test
+├─ tsconfig.json
+└─ package.json                  # scripts: dev, build, start, generate, typecheck, test
+```
+
+Bun projects test with `bun test` (the preload regenerates the container), the others with Vitest
+(the Vite plugin does). Start it in development mode:
 
 ```sh
 cd my-service
 npm run dev # znight dev: rebuilds and restarts on every change
 ```
-
-<!-- TODO(api): verify against implementation (CLI prompts, template names and generated files) -->
 
 Prefer to understand every file? Set the project up by hand instead.
 
@@ -71,7 +94,7 @@ bun add -d @znight/compiler @znight/cli vite typescript @types/node
 | ------------------ | --------------------------------------------------------------------------- |
 | `@znight/core`     | Runtime: container, application lifecycle, plugins, decorators              |
 | `@znight/http`     | HTTP controllers and the `HttpPlugin` (Fastify here; Express/Hono work too) |
-| `@znight/compiler` | Build time only: Vite plugin that generates the container                   |
+| `@znight/compiler` | Build time only: Vite plugin (and Bun preload) generating the container     |
 | `@znight/cli`      | Optional: `znight dev`, `znight generate`, code generators                  |
 
 ### 2. Configure TypeScript
@@ -103,7 +126,7 @@ need them). You do **not** need `emitDecoratorMetadata` nor `reflect-metadata`.
 
 ### 3. Add the Vite plugin
 
-The compiler is a Vite plugin. With its defaults it also configures Vite to build a server
+The compiler runs as a Vite plugin. With its defaults it also configures Vite to build a server
 application: entry `src/main.ts`, output `dist/`, target `node24`, source maps on.
 
 ::: code-group
@@ -118,6 +141,10 @@ export default defineConfig({
 ```
 
 :::
+
+Compiler options go to `znight({ ... })`. Once you have some, move them to a `znight.config.ts` and
+pass them to the plugin (`znight(options)`): the Bun preload and `znight generate` read that file too
+([options](./compiler#options)).
 
 ### 4. Scripts and ignored files
 
@@ -246,7 +273,8 @@ export class UserController {
 
 :::
 
-<!-- TODO(api): verify against implementation (HttpException signature, adapter import path) -->
+`HttpException(status, message?, details?)` renders `{ statusCode, error, message }`; subclasses
+such as `NotFoundException` set the status for you.
 
 ## Bootstrap the application
 
@@ -257,12 +285,12 @@ export class UserController {
 ```ts [src/main.ts]
 import { Application } from '@znight/core'
 import { HttpPlugin } from '@znight/http'
-import { fastify } from '@znight/http/fastify'
+import { fastifyAdapter } from '@znight/http/fastify'
 import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
 
 const app = await Application.create({
   metadata: __ZNIGHT_METADATA__,
-  plugins: [HttpPlugin.configure({ adapter: fastify(), port: 3000 })],
+  plugins: [HttpPlugin.configure({ adapter: fastifyAdapter(), port: 3000 })],
 })
 
 await app.start() // Ctrl+C (SIGINT) or SIGTERM stops it gracefully
@@ -294,9 +322,11 @@ During development, `npm run dev` (`znight dev`) rebuilds in watch mode and rest
 every successful build.
 
 ::: details Running on Bun
-The build output runs on Bun as is: `bun dist/main.js`. Bun can also run your sources directly
-(`bun src/main.ts`): register the compiler's Bun preload so the container is regenerated before the
-app and tests start. See [Bun preload](./compiler#bun-preload).
+The build output runs on Bun as is: `bun dist/main.js` (or `znight start --runtime bun`). Bun can
+also run your sources directly with the compiler's Bun preload, which regenerates the container
+before the application starts and serves it from memory:
+`bun --preload @znight/compiler/bun src/main.ts` (also with `--watch`). For `bun test`, add it to
+`bunfig.toml`. See [Bun preload](./compiler#bun-preload).
 :::
 
 ::: details Why not `node src/main.ts`?
@@ -321,13 +351,13 @@ export const __ZNIGHT_METADATA__: ZnightMetadata = {
       deps: [],
       factory: () => new InMemoryUserRepository(),
     },
+    // UserController...
     ['src/users/user.service.ts#UserService']: {
       scope: 'singleton',
       class: UserService,
       deps: ['src/users/in-memory-user.repository.ts#InMemoryUserRepository'],
       factory: d => new UserService(d[0]),
     },
-    // UserController, routes in extensions.http...
   },
   resolutionOrder: [
     'src/users/in-memory-user.repository.ts#InMemoryUserRepository',
@@ -337,7 +367,11 @@ export const __ZNIGHT_METADATA__: ZnightMetadata = {
   aliases: {
     ['src/users/user.repository.ts#UserRepository']: 'src/users/in-memory-user.repository.ts#InMemoryUserRepository',
   },
-  // ...
+  extensions: {
+    ['http']: {
+      // the routes of UserController
+    },
+  },
 }
 ```
 
@@ -349,14 +383,13 @@ Remove `@Injectable()` from `InMemoryUserRepository` and build again:
 
 ```txt
 ✗ ZNIGHT001: Missing provider for 'UserRepository' required by UserService
-  --> src/users/user.service.ts:6:38
-   |
- 6 |   constructor(private readonly users: UserRepository) {}
-   |                                       ^^^^^^^^^^^^^^
-   = hint: InMemoryUserRepository implements UserRepository but is not decorated with @Injectable()
-           (src/users/in-memory-user.repository.ts:5)
+ --> src/users/user.service.ts:6:39
+  |
+6 |   constructor(private readonly users: UserRepository) {}
+  |                                       ^^^^^^^^^^^^^^
+  = hint: InMemoryUserRepository (src/users/in-memory-user.repository.ts:5) implements UserRepository but is not a provider: add @Injectable()
 
-Build failed with 1 error.
+Build failed with 1 error
 ```
 
 The mistake never reaches production. Every code is explained in the

@@ -42,6 +42,7 @@ export { createSpy, isBuiltinSpy } from './spy.ts'
 export {
   HTTP_PLUGIN_NAME,
   type HttpInjector,
+  type HttpInjectResult,
   type InjectRequest,
   type InjectResponse,
   TestApp,

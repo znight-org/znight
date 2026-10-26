@@ -5,5 +5,7 @@
     "noPropertyAccessFromIndexSignature": false
   },
   "include": ["."],
-  "exclude": ["fixtures"]
+  // the HTTP tests load @znight/http, whose metadata augmentation would type the hand-written
+  // metadata of the other tests: they are type-checked separately (tsconfig.http.json)
+  "exclude": ["fixtures", "http-plugin.test.ts"]
 }
