@@ -44,6 +44,11 @@
     "znight": "./dist/cli.mjs"
   },
   "devDependencies": {
-    "vite": "catalog:"
+    "vite": "catalog:",
+    "@znight/compiler": "workspace:*"
+  },
+  "peerDependencies": {
+    "@znight/compiler": "workspace:^",
+    "vite": "^8.0.0"
   }
 }

@@ -34,7 +34,12 @@
         "picocolors": "^1.1.1",
       },
       "devDependencies": {
+        "@znight/compiler": "workspace:*",
         "vite": "catalog:",
+      },
+      "peerDependencies": {
+        "@znight/compiler": "workspace:^",
+        "vite": "^8.0.0",
       },
     },
     "packages/compiler": {
@@ -52,7 +57,7 @@
         "vite": "catalog:",
       },
       "peerDependencies": {
-        "vite": "^7.0.0 || ^8.0.0",
+        "vite": "^8.0.0",
       },
       "optionalPeers": [
         "vite",
@@ -66,14 +71,17 @@
       },
       "devDependencies": {
         "@aws-sdk/client-secrets-manager": "3.1156.0",
+        "@znight/compiler": "workspace:*",
         "yaml": "2.9.1",
       },
       "peerDependencies": {
         "@aws-sdk/client-secrets-manager": "^3.0.0",
+        "@znight/compiler": "workspace:^",
         "yaml": "^2.0.0",
       },
       "optionalPeers": [
         "@aws-sdk/client-secrets-manager",
+        "@znight/compiler",
         "yaml",
       ],
     },
@@ -90,6 +98,7 @@
       "devDependencies": {
         "@hono/node-server": "2.1.5",
         "@types/express": "5.0.6",
+        "@znight/compiler": "workspace:*",
         "express": "5.3.0",
         "fastify": "5.12.7",
         "hono": "4.13.14",
@@ -99,6 +108,7 @@
       },
       "peerDependencies": {
         "@hono/node-server": "^2.1.5",
+        "@znight/compiler": "workspace:^",
         "express": "^5.3.0",
         "fastify": "^5.12.7",
         "hono": "^4.13.14",
@@ -106,6 +116,7 @@
       },
       "optionalPeers": [
         "@hono/node-server",
+        "@znight/compiler",
         "express",
         "fastify",
         "hono",
@@ -124,6 +135,7 @@
         "@testcontainers/kafka": "12.2.1",
         "@testcontainers/localstack": "12.2.1",
         "@testcontainers/rabbitmq": "12.2.1",
+        "@znight/compiler": "workspace:*",
         "amqplib": "2.2.0",
         "testcontainers": "12.2.1",
         "zod": "catalog:",
@@ -131,11 +143,13 @@
       "peerDependencies": {
         "@aws-sdk/client-sqs": "^3.600.0",
         "@platformatic/kafka": "^2.0.0",
+        "@znight/compiler": "workspace:^",
         "amqplib": "^2.0.0",
       },
       "optionalPeers": [
         "@aws-sdk/client-sqs",
         "@platformatic/kafka",
+        "@znight/compiler",
         "amqplib",
       ],
     },

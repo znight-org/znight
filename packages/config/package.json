@@ -50,7 +50,8 @@
   },
   "peerDependencies": {
     "@aws-sdk/client-secrets-manager": "^3.0.0",
-    "yaml": "^2.0.0"
+    "yaml": "^2.0.0",
+    "@znight/compiler": "workspace:^"
   },
   "peerDependenciesMeta": {
     "@aws-sdk/client-secrets-manager": {
@@ -58,11 +59,15 @@
     },
     "yaml": {
       "optional": true
+    },
+    "@znight/compiler": {
+      "optional": true
     }
   },
   "devDependencies": {
     "@aws-sdk/client-secrets-manager": "3.1156.0",
-    "yaml": "2.9.1"
+    "yaml": "2.9.1",
+    "@znight/compiler": "workspace:*"
   },
   "znight": {
     "apiVersion": 1,

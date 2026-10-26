@@ -73,7 +73,8 @@
   "peerDependencies": {
     "@aws-sdk/client-sqs": "^3.600.0",
     "@platformatic/kafka": "^2.0.0",
-    "amqplib": "^2.0.0"
+    "amqplib": "^2.0.0",
+    "@znight/compiler": "workspace:^"
   },
   "peerDependenciesMeta": {
     "@aws-sdk/client-sqs": {
@@ -83,6 +84,9 @@
       "optional": true
     },
     "amqplib": {
+      "optional": true
+    },
+    "@znight/compiler": {
       "optional": true
     }
   },
@@ -94,7 +98,8 @@
     "@testcontainers/rabbitmq": "12.2.1",
     "amqplib": "2.2.0",
     "testcontainers": "12.2.1",
-    "zod": "catalog:"
+    "zod": "catalog:",
+    "@znight/compiler": "workspace:*"
   },
   "znight": {
     "apiVersion": 1,
