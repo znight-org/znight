@@ -257,6 +257,13 @@ functions) has a canonical identity string:
   and following re-exports _inside_ the package; re-exports into another package continue with that
   package's rules. The result is independent of symlinks, `node_modules` layout and conditions.
 - Member access on a default/namespace import (`import pg from 'pg'; pg.Pool`) maps to `pg#Pool`.
+- Declarations only exported from a subpath entry: `<package>/<subpath>#Export` (the root entry wins
+  when it exports the declaration too). `@types/x` maps to `x`. Namespace members use a dotted path
+  (`@lib#tokens.Holder`). Package-internal (non-exported) declarations get
+  `<package>/<relpath>#Name` and are never valid import routes. Node built-ins and untyped packages:
+  `node:events#EventEmitter`, `cjs-only#Thing`; globals: `globalThis#Date`.
+- Known limitation: a `const` widened by declaration emit (`PREFIX: string` in `.d.ts`) evaluates
+  to a value from sources but to a reference from `dist`.
 - Compiler options that name types (`externals`) take identities, never bare names.
 
 Golden test: compiling `examples/*` with and without `@znight/source` yields identical identities
@@ -271,6 +278,9 @@ route `(specifier, exportName | 'default')`:
   exported by that module (alias-aware; re-exporting module when it is only re-exported there);
 - package declaration: bare specifier of the public entry + public export name. Never a path into
   another package.
+- Routes always point to the declaring module (an ESM barrel can only re-export what the declaring
+  module exports). CommonJS packages (`export =`, untyped) are imported through `default` plus a
+  member path.
 - A provider or referenced value that is not exported (or an anonymous default export) is
   ZNIGHT005 with the fix-it "export it".
 
@@ -631,6 +641,16 @@ class Container {
   `Symbol.asyncDispose`, `Symbol.dispose`). Transient instances belong to their consumer.
 - Lookups use `Map`s / `Object.hasOwn`, never plain-object indexing with user tokens.
 
+Additional API (implemented): `provide(token, value)` (application-level precedence),
+`registerExternal(token, { scope })` (a plugin declaring e.g. a request-scoped external),
+`instances()` (created singletons in resolution order with idempotent `dispose()`), `metadata`.
+Two registrations at the same precedence level (plugin vs plugin) → ZNIGHT004 naming the first
+registrant. Built-in externals (`CoreTokens`): `@znight/core#Container`, `@znight/core#Application`,
+`@znight/core#Hooks`, `@znight/core#CoreLogger` — declared in `@znight/core`'s manifest so user
+providers can inject them. `get(Class)` falls back to the class name for abstract bases behind
+aliases. Cleanup errors are attached to the original error (`getSuppressedErrors(error)`);
+aggregated errors are `ZnightAggregateError` (a `ZnightError` with `.errors`).
+
 ### 8.2 Application & plugins
 
 ```ts
@@ -677,6 +697,10 @@ Sequence:
    Signal listeners are removed. Only the signal path sets `process.exitCode` (1 on failure) and a
    second signal forces exit (130). `import.meta.hot?.dispose(() => app.stop())` when available.
    `app.state`: `'created' | 'starting' | 'ready' | 'stopping' | 'stopped' | 'failed'`.
+Implementation notes: signal handlers are installed when `start()` begins (Ctrl+C during a slow
+boot shuts down gracefully); only providers whose `onStart` ran receive `onStop` (disposal always
+runs); `hookTimeoutMs` defaults to 5 s; HMR: pass `hot: import.meta.hot`; tests can inject
+`shutdown.process`. `hooks.run()` resolves with `fn`'s result.
 
 ### 8.3 Hooks
 
