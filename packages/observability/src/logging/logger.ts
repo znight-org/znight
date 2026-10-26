@@ -273,7 +273,7 @@ const DEFAULT_SCOPE_FIELDS: Readonly<Record<string, string>> = Object.freeze({ r
 function pinoOptions(options: LoggerOptions, transports: readonly LogTransport[]): PinoLoggerOptions {
   const result: PinoLoggerOptions = {}
   for (const transport of transports) Object.assign(result, transport.loggerOptions)
-  const envLevel = globalThis.process?.env?.LOG_LEVEL
+  const envLevel = globalThis.process?.env?.['LOG_LEVEL']
   result.level =
     options.level !== undefined || envLevel === undefined || envLevel === ''
       ? parseLevel(options.level ?? 'info', 'level')
@@ -330,8 +330,8 @@ function mixinOf(options: LoggerOptions): (() => Record<string, unknown>) | unde
     if (traceContext) {
       const spanContext = trace.getSpanContext(otelContext.active())
       if (spanContext !== undefined && isSpanContextValid(spanContext)) {
-        context.traceId = spanContext.traceId
-        context.spanId = spanContext.spanId
+        context['traceId'] = spanContext.traceId
+        context['spanId'] = spanContext.spanId
       }
     }
     if (user !== undefined) Object.assign(context, user())

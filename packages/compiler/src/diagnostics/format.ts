@@ -85,7 +85,7 @@ function summaryLine(diagnostics: readonly Diagnostic[], colors: Colors): string
 }
 
 function colorEnabled(option: boolean | undefined): boolean {
-  const noColor = process.env.NO_COLOR
+  const noColor = process.env['NO_COLOR']
   if (noColor !== undefined && noColor !== '') {
     return false
   }

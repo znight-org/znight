@@ -79,11 +79,11 @@ export class PackageRegistry {
       const parsed: unknown = JSON.parse(text)
       if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
         const json = parsed as Record<string, unknown>
-        const name = typeof json.name === 'string' && json.name !== '' ? json.name : undefined
+        const name = typeof json['name'] === 'string' && json['name'] !== '' ? json['name'] : undefined
         info = {
           name,
           publicName: name === undefined ? undefined : publicPackageName(name),
-          version: typeof json.version === 'string' ? json.version : undefined,
+          version: typeof json['version'] === 'string' ? json['version'] : undefined,
           dir,
           packageJsonPath,
           text,
@@ -126,7 +126,7 @@ export class PackageRegistry {
     if (name === undefined) {
       return []
     }
-    const exportsField = info.json.exports
+    const exportsField = info.json['exports']
     if (typeof exportsField !== 'object' || exportsField === null || Array.isArray(exportsField)) {
       return [{ subpath: '.', specifier: name }]
     }

@@ -73,7 +73,7 @@ export const schematicCommand: Command = defineCommand({
     }
     const root = args.root === undefined ? findProjectRoot(cli.cwd) : resolveRoot(cli, args.root)
     const manifest = readManifest(root)
-    const zod = manifest.dependencies?.zod !== undefined || manifest.devDependencies?.zod !== undefined
+    const zod = manifest.dependencies?.['zod'] !== undefined || manifest.devDependencies?.['zod'] !== undefined
     let plan: ReturnType<typeof planSchematic>
     try {
       plan = planSchematic({

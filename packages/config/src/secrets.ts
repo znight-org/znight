@@ -34,7 +34,7 @@ export function maskSecrets(instance: object, secrets: Iterable<string>): void {
   const target = instance as Record<PropertyKey, unknown>
   const className = instance.constructor?.name || 'Config'
 
-  if (target.toJSON === undefined) {
+  if (target['toJSON'] === undefined) {
     define(instance, 'toJSON', function maskedToJSON(this: object): Record<string, unknown> {
       return maskedView(this, masked)
     })

@@ -276,13 +276,13 @@ function decode(
     classInfo: identity => input.analyzer.infoOfIdentity(identity),
     binding: id => handles.get(id),
     location: encoded => ({
-      file: library ? `${library.package.dir}/${String(encoded.file)}` : String(encoded.file),
-      line: Number(encoded.line),
-      column: Number(encoded.column),
-      endLine: Number(encoded.endLine),
-      endColumn: Number(encoded.endColumn),
-      start: Number(encoded.start),
-      end: Number(encoded.end),
+      file: library ? `${library.package.dir}/${String(encoded['file'])}` : String(encoded['file']),
+      line: Number(encoded['line']),
+      column: Number(encoded['column']),
+      endLine: Number(encoded['endLine']),
+      endColumn: Number(encoded['endColumn']),
+      start: Number(encoded['start']),
+      end: Number(encoded['end']),
     }),
   })
 }

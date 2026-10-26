@@ -105,7 +105,7 @@ function startTimeOf(startTime: unknown): { startTime?: number } {
 function addRequestAttributes(attributes: Attributes, headers: HttpRequestEvent['headers']): void {
   const userAgent = headers['user-agent']
   if (userAgent !== undefined) attributes[Attr.USER_AGENT_ORIGINAL] = userAgent
-  const host = headers['x-forwarded-host'] ?? headers.host
+  const host = headers['x-forwarded-host'] ?? headers['host']
   if (host !== undefined) {
     const { address, port } = splitHost(host.split(',')[0]?.trim() ?? host)
     if (address !== '') attributes[Attr.SERVER_ADDRESS] = address

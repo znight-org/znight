@@ -47,22 +47,22 @@ function tokensOf(value: unknown): Token[] {
 /** Configuration classes declared by `@znight/config` (`extensions.config.configs`), by token. */
 export function readConfigClasses(metadata: ZnightMetadata): Map<Token, ConfigClassInfo> {
   const result = new Map<Token, ConfigClassInfo>()
-  for (const entry of arrayOf(extension(metadata, 'config')?.configs)) {
-    if (!isRecord(entry) || typeof entry.token !== 'string') continue
+  for (const entry of arrayOf(extension(metadata, 'config')?.['configs'])) {
+    if (!isRecord(entry) || typeof entry['token'] !== 'string') continue
     const fields: ConfigFieldInfo[] = []
-    for (const field of arrayOf(entry.fields)) {
-      if (!isRecord(field) || typeof field.property !== 'string') continue
+    for (const field of arrayOf(entry['fields'])) {
+      if (!isRecord(field) || typeof field['property'] !== 'string') continue
       fields.push({
-        property: field.property,
-        env: typeof field.env === 'string' ? field.env : undefined,
-        hasDefault: Object.hasOwn(field, 'default') && field.default !== undefined,
-        default: field.default,
-        required: field.required === true,
+        property: field['property'],
+        env: typeof field['env'] === 'string' ? field['env'] : undefined,
+        hasDefault: Object.hasOwn(field, 'default') && field['default'] !== undefined,
+        default: field['default'],
+        required: field['required'] === true,
       })
     }
-    const prefix = entry.prefix
-    result.set(entry.token, {
-      token: entry.token,
+    const prefix = entry['prefix']
+    result.set(entry['token'], {
+      token: entry['token'],
       prefix: typeof prefix === 'string' && prefix !== '' ? prefix : undefined,
       fields,
     })
@@ -76,12 +76,12 @@ export function readConfigClasses(metadata: ZnightMetadata): Map<Token, ConfigCl
  */
 export function readHttpRoots(metadata: ZnightMetadata): Token[] {
   const roots: Token[] = []
-  for (const controller of arrayOf(extension(metadata, 'http')?.controllers)) {
+  for (const controller of arrayOf(extension(metadata, 'http')?.['controllers'])) {
     if (!isRecord(controller)) continue
-    if (typeof controller.token === 'string') roots.push(controller.token)
-    roots.push(...tokensOf(controller.guards), ...tokensOf(controller.interceptors))
-    for (const route of arrayOf(controller.routes)) {
-      if (isRecord(route)) roots.push(...tokensOf(route.guards), ...tokensOf(route.interceptors))
+    if (typeof controller['token'] === 'string') roots.push(controller['token'])
+    roots.push(...tokensOf(controller['guards']), ...tokensOf(controller['interceptors']))
+    for (const route of arrayOf(controller['routes'])) {
+      if (isRecord(route)) roots.push(...tokensOf(route['guards']), ...tokensOf(route['interceptors']))
     }
   }
   return roots
@@ -90,8 +90,8 @@ export function readHttpRoots(metadata: ZnightMetadata): Token[] {
 /** Message consumers (`extensions.messaging.consumers[].token`). */
 export function readMessagingRoots(metadata: ZnightMetadata): Token[] {
   const roots: Token[] = []
-  for (const consumer of arrayOf(extension(metadata, 'messaging')?.consumers)) {
-    if (isRecord(consumer) && typeof consumer.token === 'string') roots.push(consumer.token)
+  for (const consumer of arrayOf(extension(metadata, 'messaging')?.['consumers'])) {
+    if (isRecord(consumer) && typeof consumer['token'] === 'string') roots.push(consumer['token'])
   }
   return roots
 }

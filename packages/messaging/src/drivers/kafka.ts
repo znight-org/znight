@@ -216,7 +216,7 @@ export class KafkaDriver implements MessagingDriver {
 
   async subscribe(topic: string, handler: DeliveryHandler, options: SubscribeOptions): Promise<Subscription> {
     this.#producerOrThrow(`subscribe to "${topic}"`)
-    const configuredGroup = options.options.groupId
+    const configuredGroup = options.options['groupId']
     if (configuredGroup !== undefined && (typeof configuredGroup !== 'string' || configuredGroup === '')) {
       throw consumerError(`Kafka: the groupId of ${options.consumer} must be a non-empty string`)
     }

@@ -22,7 +22,7 @@ export function errorMessage(error: unknown): string {
 
 /** Whether the runtime runs in development mode (`NODE_ENV !== 'production'`). */
 export function isDevelopment(): boolean {
-  return globalThis.process?.env?.NODE_ENV !== 'production'
+  return globalThis.process?.env?.['NODE_ENV'] !== 'production'
 }
 
 /** Monotonic clock in milliseconds. */

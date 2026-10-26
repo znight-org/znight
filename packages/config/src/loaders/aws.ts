@@ -127,7 +127,7 @@ async function createClient(
   const region =
     options.region ?? setting(context, undefined, 'AWS_REGION') ?? setting(context, undefined, 'AWS_DEFAULT_REGION')
   const config: Record<string, unknown> = { ...options.clientConfig }
-  if (region !== undefined) config.region = region
+  if (region !== undefined) config['region'] = region
   return { client: new sdk.SecretsManagerClient(config), owned: true, sdk }
 }
 

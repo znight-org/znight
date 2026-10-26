@@ -53,7 +53,7 @@ export const startCommand: Command = defineCommand({
       throw new CliError(`Cannot find "${runtime}" in PATH`, { hints: ['install it, or choose another --runtime'] })
     }
     const argv = [...runtimeArguments(runtime), entry, ...passthrough]
-    const env = { ...cli.env, NODE_ENV: cli.env.NODE_ENV ?? 'production' }
+    const env = { ...cli.env, NODE_ENV: cli.env['NODE_ENV'] ?? 'production' }
     const { processes } = cli.services
     if (processes.execve !== undefined) {
       const clean: Record<string, string> = {}

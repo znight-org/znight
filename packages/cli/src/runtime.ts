@@ -21,7 +21,7 @@ export interface HostRuntime {
 
 /** Detects the runtime executing this process. */
 export function detectHostRuntime(): HostRuntime {
-  const isBun = typeof process.versions.bun === 'string'
+  const isBun = typeof process.versions['bun'] === 'string'
   return { name: isBun ? 'bun' : 'node', execPath: process.execPath, platform: process.platform }
 }
 
@@ -40,10 +40,10 @@ export function which(
   platform: NodeJS.Platform = process.platform,
 ): string | undefined {
   const extensions =
-    platform === 'win32' ? ['', ...(env.PATHEXT ?? '.EXE;.CMD;.BAT;.COM').split(';').filter(Boolean)] : ['']
+    platform === 'win32' ? ['', ...(env['PATHEXT'] ?? '.EXE;.CMD;.BAT;.COM').split(';').filter(Boolean)] : ['']
   const candidates = isAbsolute(command)
     ? [command]
-    : (env.PATH ?? env.Path ?? '')
+    : (env['PATH'] ?? env['Path'] ?? '')
         .split(platform === 'win32' ? ';' : delimiter)
         .filter(directory => directory !== '')
         .map(directory => join(directory, command))

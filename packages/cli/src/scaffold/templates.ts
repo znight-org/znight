@@ -77,10 +77,10 @@ function packageJson(options: ProjectOptions, flags: Flags): string {
   if (flags.config) dependencies['@znight/config'] = znight
   if (flags.observability) dependencies['@znight/observability'] = znight
   if (flags.messaging) dependencies['@znight/messaging'] = znight
-  if (flags.adapter === 'fastify') dependencies.fastify = versionOf('fastify')
-  if (flags.adapter === 'express') dependencies.express = versionOf('express')
+  if (flags.adapter === 'fastify') dependencies['fastify'] = versionOf('fastify')
+  if (flags.adapter === 'express') dependencies['express'] = versionOf('express')
   if (flags.adapter === 'hono') {
-    dependencies.hono = versionOf('hono')
+    dependencies['hono'] = versionOf('hono')
     dependencies['@hono/node-server'] = versionOf('@hono/node-server')
   }
   const devDependencies: Record<string, string> = {
@@ -92,7 +92,7 @@ function packageJson(options: ProjectOptions, flags: Flags): string {
     vite: versionOf('vite'),
   }
   if (flags.bun) devDependencies['@types/bun'] = versionOf('@types/bun')
-  else devDependencies.vitest = versionOf('vitest')
+  else devDependencies['vitest'] = versionOf('vitest')
   if (flags.adapter === 'express') devDependencies['@types/express'] = versionOf('@types/express')
   // in-memory requests (TestApp.inject) with the node and express adapters
   if (flags.adapter === 'node' || flags.adapter === 'express') {

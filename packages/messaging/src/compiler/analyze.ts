@@ -205,7 +205,7 @@ function readConsumerOptions(decorator: DecoratorInfo, cls: ClassInfo, ctx: Cont
   }
 
   let queue = ''
-  const rawQueue = value.queue
+  const rawQueue = value['queue']
   if (rawQueue === undefined) {
     fail('queue', 'the "queue" option is required', ["Write @Consumer({ queue: 'orders', ... })"])
   } else if (typeof rawQueue !== 'string' || rawQueue === '') {
@@ -215,7 +215,7 @@ function readConsumerOptions(decorator: DecoratorInfo, cls: ClassInfo, ctx: Cont
   }
 
   let scope: Scope = 'singleton'
-  const rawScope = value.scope
+  const rawScope = value['scope']
   if (rawScope !== undefined) {
     if (typeof rawScope === 'string' && CONSUMER_SCOPES.includes(rawScope)) {
       scope = rawScope as Scope
@@ -224,7 +224,7 @@ function readConsumerOptions(decorator: DecoratorInfo, cls: ClassInfo, ctx: Cont
     }
   }
 
-  const concurrency = value.concurrency
+  const concurrency = value['concurrency']
   if (
     concurrency !== undefined &&
     !(typeof concurrency === 'number' && Number.isSafeInteger(concurrency) && concurrency > 0)
@@ -232,7 +232,7 @@ function readConsumerOptions(decorator: DecoratorInfo, cls: ClassInfo, ctx: Cont
     fail('concurrency', `"concurrency" must be a positive integer, got ${describeValue(concurrency)}`)
   }
 
-  const deadLetter = value.deadLetter
+  const deadLetter = value['deadLetter']
   if (deadLetter !== undefined && deadLetter !== false && (typeof deadLetter !== 'string' || deadLetter === '')) {
     fail('deadLetter', `"deadLetter" must be a queue name or false, got ${describeValue(deadLetter)}`)
   } else if (deadLetter === queue && queue !== '') {

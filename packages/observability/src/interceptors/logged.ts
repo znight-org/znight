@@ -68,7 +68,7 @@ export class LoggedInterceptor implements MethodInterceptor<LoggedOptions | unde
         method: invocation.methodName,
         durationMs: elapsedMs(started),
       }
-      if (settings.args) fields.args = invocation.args
+      if (settings.args) fields['args'] = invocation.args
       return fields
     }
     return observeCall(invocation.isAsync, () => invocation.proceed(), {
@@ -76,14 +76,14 @@ export class LoggedInterceptor implements MethodInterceptor<LoggedOptions | unde
         this.#record(() => {
           if (!logger.isLevelEnabled(settings.level)) return
           const fields = entry()
-          if (settings.result) fields.result = value
+          if (settings.result) fields['result'] = value
           logger.log(settings.level, `${label} completed`, fields)
         }),
       failure: error =>
         this.#record(() => {
           if (!logger.isLevelEnabled(settings.errorLevel)) return
           const fields = entry()
-          fields.err = error
+          fields['err'] = error
           logger.log(settings.errorLevel, `${label} failed`, fields)
         }),
     })

@@ -59,7 +59,7 @@ export function logHttpRequests(logger: Logger, options: HttpRequestLogOptions =
             requestId: event.requestId,
           }
           const error = event.error ?? thrown
-          if (status >= 500 && error !== undefined) entry.err = error
+          if (status >= 500 && error !== undefined) entry['err'] = error
           logger.log(severity, status >= 500 ? 'request failed' : 'request completed', entry)
         }
       })
@@ -102,7 +102,7 @@ export function logMessages(logger: Logger, options: MessageLogOptions = {}): Ho
             durationMs: elapsedMs(startOf(event.startTime, started)),
           }
           const error = event.error ?? thrown
-          if (outcome !== 'ack' && error !== undefined) entry.err = error
+          if (outcome !== 'ack' && error !== undefined) entry['err'] = error
           logger.log(severity, MESSAGES[outcome] ?? 'message failed', entry)
         }
       })

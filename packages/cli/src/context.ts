@@ -89,7 +89,7 @@ export function createContext(options: CliContextOptions = {}): CliContext {
   const colors = createColors(shouldUseColor({ env, stream: stdout, flag: options.color }))
   const interactive =
     options.interactive ??
-    (process.stdin.isTTY === true && stdout.isTTY === true && env.CI === undefined && env.TERM !== 'dumb')
+    (process.stdin.isTTY === true && stdout.isTTY === true && env['CI'] === undefined && env['TERM'] !== 'dumb')
   return {
     cwd: options.cwd ?? process.cwd(),
     env,
@@ -101,7 +101,8 @@ export function createContext(options: CliContextOptions = {}): CliContext {
     runtime: options.runtime ?? detectHostRuntime(),
     version: options.version ?? cliVersion(),
     signals: options.signals ?? processSignals,
-    debug: options.debug ?? (env.ZNIGHT_DEBUG !== undefined && env.ZNIGHT_DEBUG !== '' && env.ZNIGHT_DEBUG !== '0'),
+    debug:
+      options.debug ?? (env['ZNIGHT_DEBUG'] !== undefined && env['ZNIGHT_DEBUG'] !== '' && env['ZNIGHT_DEBUG'] !== '0'),
     services: {
       loadCompiler: options.services?.loadCompiler ?? loadCompiler,
       loadVite: options.services?.loadVite ?? loadVite,

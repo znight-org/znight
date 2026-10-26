@@ -74,7 +74,7 @@ export function normalizeRetryDecorator(
     ])
   }
 
-  const attempts = options.attempts
+  const attempts = options['attempts']
   if (attempts === undefined) {
     fail('attempts', '"attempts" is required', [
       'attempts counts the first delivery: { attempts: 3 } means 1 delivery + 2 retries',
@@ -87,18 +87,20 @@ export function normalizeRetryDecorator(
     )
   }
 
-  const backoff = options.backoff === undefined ? DEFAULT_BACKOFF : options.backoff
+  const rawBackoff = options['backoff']
+  const backoff = rawBackoff === undefined ? DEFAULT_BACKOFF : rawBackoff
   if (backoff !== 'fixed' && backoff !== 'exponential') {
     fail('backoff', `"backoff" must be 'fixed' or 'exponential', got ${describeValue(backoff)}`)
   }
 
-  const delay = options.delay === undefined ? DEFAULT_RETRY_DELAY_MS : options.delay
+  const rawDelay = options['delay']
+  const delay = rawDelay === undefined ? DEFAULT_RETRY_DELAY_MS : rawDelay
   const delayValid = isDuration(delay)
   if (!delayValid) {
     fail('delay', `"delay" must be a finite number of milliseconds >= 0, got ${describeValue(delay)}`)
   }
 
-  const maxDelay = options.maxDelay
+  const maxDelay = options['maxDelay']
   if (maxDelay !== undefined) {
     if (!isDuration(maxDelay) || (delayValid && maxDelay < delay)) {
       fail(

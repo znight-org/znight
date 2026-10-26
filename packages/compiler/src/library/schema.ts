@@ -191,12 +191,12 @@ export function encodeValue(value: unknown, hooks: EncodeHooks, stack: Set<objec
         return {
           [TAG]: 'location',
           file,
-          line: location.line as number,
-          column: location.column as number,
-          endLine: location.endLine as number,
-          endColumn: location.endColumn as number,
-          start: location.start as number,
-          end: location.end as number,
+          line: location['line'] as number,
+          column: location['column'] as number,
+          endLine: location['endLine'] as number,
+          endColumn: location['endColumn'] as number,
+          start: location['start'] as number,
+          end: location['end'] as number,
         }
       }
       stack.add(value)
@@ -252,23 +252,23 @@ export function decodeValue(value: EncodedValue, hooks: DecodeHooks): unknown {
     case 'undefined':
       return undefined
     case 'number':
-      return record.value === '-0' ? -0 : Number(record.value)
+      return record['value'] === '-0' ? -0 : Number(record['value'])
     case 'bigint':
-      return BigInt(String(record.value))
+      return BigInt(String(record['value']))
     case 'regexp':
-      return new RegExp(String(record.source), String(record.flags))
+      return new RegExp(String(record['source']), String(record['flags']))
     case 'date':
-      return new Date(decodeValue(record.value as EncodedValue, hooks) as number)
+      return new Date(decodeValue(record['value'] as EncodedValue, hooks) as number)
     case 'ref':
-      return hooks.ref(String(record.identity))
+      return hooks.ref(String(record['identity']))
     case 'class':
-      return hooks.classInfo(String(record.identity))
+      return hooks.classInfo(String(record['identity']))
     case 'binding':
-      return hooks.binding(Number(record.id))
+      return hooks.binding(Number(record['id']))
     case 'location':
       return hooks.location(record)
     case 'object': {
-      const inner = record.value as Readonly<Record<string, EncodedValue>>
+      const inner = record['value'] as Readonly<Record<string, EncodedValue>>
       const result: Record<string, unknown> = {}
       for (const [key, entry] of Object.entries(inner)) {
         result[key] = decodeValue(entry, hooks)

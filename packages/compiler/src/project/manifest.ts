@@ -68,7 +68,7 @@ const IDENTIFIER = /^[A-Za-z_$][\w$]*$/
 
 /** Reads and validates the `znight` field of a package.json. */
 export function readManifest(info: PackageInfo): ManifestResult {
-  const raw = info.json.znight
+  const raw = info.json['znight']
   if (raw === undefined) {
     return { manifest: undefined, diagnostics: [] }
   }
@@ -96,7 +96,7 @@ export function readManifest(info: PackageInfo): ManifestResult {
   const field = raw as Record<string, unknown>
 
   let apiVersion = MANIFEST_API_VERSION
-  const declaredVersion = field.apiVersion
+  const declaredVersion = field['apiVersion']
   if (declaredVersion === undefined) {
     report('warning', `manifest has no "apiVersion", assuming ${MANIFEST_API_VERSION}`, [
       `Add "apiVersion": ${MANIFEST_API_VERSION} to the "znight" field`,
@@ -120,7 +120,7 @@ export function readManifest(info: PackageInfo): ManifestResult {
   }
 
   const compiler: string[] = []
-  const compilerField = field.compiler
+  const compilerField = field['compiler']
   if (compilerField !== undefined) {
     const list = Array.isArray(compilerField) ? compilerField : [compilerField]
     for (const item of list) {
@@ -137,17 +137,17 @@ export function readManifest(info: PackageInfo): ManifestResult {
 
   const provides: ProvidedExternal[] = []
   for (const [index, entry] of arrayField(field, 'provides', report)) {
-    const exportName = entry.export
+    const exportName = entry['export']
     if (typeof exportName !== 'string' || !IDENTIFIER.test(exportName)) {
       report('error', `manifest "provides[${index}].export" must be an export name (got ${JSON.stringify(exportName)})`)
       continue
     }
-    const plugin = entry.plugin
+    const plugin = entry['plugin']
     if (plugin !== undefined && typeof plugin !== 'string') {
       report('error', `manifest "provides[${index}].plugin" must be a string`)
       continue
     }
-    const scope = entry.scope ?? 'singleton'
+    const scope = entry['scope'] ?? 'singleton'
     if (typeof scope !== 'string' || !SCOPES.includes(scope)) {
       report(
         'error',
@@ -155,7 +155,7 @@ export function readManifest(info: PackageInfo): ManifestResult {
       )
       continue
     }
-    const optional = entry.optional ?? false
+    const optional = entry['optional'] ?? false
     if (typeof optional !== 'boolean') {
       report('error', `manifest "provides[${index}].optional" must be a boolean`)
       continue
@@ -171,8 +171,8 @@ export function readManifest(info: PackageInfo): ManifestResult {
 
   const interceptors: InterceptorDeclaration[] = []
   for (const [index, entry] of arrayField(field, 'interceptors', report)) {
-    const decorator = entry.decorator
-    const interceptor = entry.interceptor
+    const decorator = entry['decorator']
+    const interceptor = entry['interceptor']
     if (typeof decorator !== 'string' || !IDENTIFIER.test(decorator)) {
       report(
         'error',
@@ -196,7 +196,7 @@ export function readManifest(info: PackageInfo): ManifestResult {
   }
 
   let library: 'source' | undefined
-  const libraryField = field.library
+  const libraryField = field['library']
   if (libraryField === 'source') {
     library = 'source'
   } else if (libraryField !== undefined) {
@@ -204,7 +204,7 @@ export function readManifest(info: PackageInfo): ManifestResult {
   }
 
   let providers: string | undefined
-  const providersField = field.providers
+  const providersField = field['providers']
   if (typeof providersField === 'string' && providersField !== '') {
     providers = resolvePath(providersField, info.dir)
   } else if (providersField !== undefined) {

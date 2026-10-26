@@ -62,7 +62,7 @@ export function dotenv(options: DotenvLoaderOptions = {}): ConfigLoader {
   return {
     name: 'dotenv',
     async load(context) {
-      const files = explicit ?? dotenvFiles(options.nodeEnv ?? context.env.NODE_ENV)
+      const files = explicit ?? dotenvFiles(options.nodeEnv ?? context.env['NODE_ENV'])
       const optional = options.optional ?? explicit === undefined
       const layers: ConfigLayer[] = []
       for (const path of files) {

@@ -89,7 +89,7 @@ export const devCommand: Command = defineCommand({
         return cli.services.processes.spawn(
           executable,
           [...runtimeArguments(runtime, args.inspect === true ? ['--inspect'] : []), file, ...passthrough],
-          { cwd: root, env: { ...cli.env, NODE_ENV: cli.env.NODE_ENV ?? 'development' }, detached: true },
+          { cwd: root, env: { ...cli.env, NODE_ENV: cli.env['NODE_ENV'] ?? 'development' }, detached: true },
         )
       },
       events: {

@@ -30,10 +30,10 @@ export interface ColorInputs {
  */
 export function shouldUseColor({ env, stream, flag }: ColorInputs): boolean {
   if (flag !== undefined) return flag
-  if (env.NO_COLOR !== undefined && env.NO_COLOR !== '') return false
-  const force = env.FORCE_COLOR
+  if (env['NO_COLOR'] !== undefined && env['NO_COLOR'] !== '') return false
+  const force = env['FORCE_COLOR']
   if (force !== undefined) return force !== '0' && force !== 'false'
-  return stream.isTTY === true && env.TERM !== 'dumb'
+  return stream.isTTY === true && env['TERM'] !== 'dumb'
 }
 
 /** picocolors formatters, enabled or not. */

@@ -317,35 +317,35 @@ export function toDatadogEntry(
 ): Record<string, unknown> {
   const { msg, message, level, time, timestamp, err, ...rest } = record
   const entry: Record<string, unknown> = rest
-  entry.message = firstString(message, msg) ?? ''
+  entry['message'] = firstString(message, msg) ?? ''
   const label = levelLabel(level)
-  entry.status = label === undefined ? 'info' : DATADOG_STATUS[label]
-  if (label !== undefined) entry.level = label
+  entry['status'] = label === undefined ? 'info' : DATADOG_STATUS[label]
+  if (label !== undefined) entry['level'] = label
   const date = timestamp ?? time
-  if (date !== undefined) entry.timestamp = date
-  entry.ddsource = settings.source
-  if (typeof entry.hostname !== 'string') entry.hostname = settings.hostname
-  if (typeof entry.service !== 'string' && settings.service !== undefined) entry.service = settings.service
-  if (settings.tags !== undefined) entry.ddtags = settings.tags
+  if (date !== undefined) entry['timestamp'] = date
+  entry['ddsource'] = settings.source
+  if (typeof entry['hostname'] !== 'string') entry['hostname'] = settings.hostname
+  if (typeof entry['service'] !== 'string' && settings.service !== undefined) entry['service'] = settings.service
+  if (settings.tags !== undefined) entry['ddtags'] = settings.tags
   if (err !== undefined) {
-    if (entry.error === undefined && typeof err === 'object' && err !== null) {
+    if (entry['error'] === undefined && typeof err === 'object' && err !== null) {
       const { type, message: errorText, stack, ...details } = err as Record<string, unknown>
-      entry.error = { kind: type, message: errorText, stack, ...details }
+      entry['error'] = { kind: type, message: errorText, stack, ...details }
     } else {
-      entry.err = err
+      entry['err'] = err
     }
   }
   if (settings.traceCorrelation) {
-    const traceId = entry.traceId
-    const spanId = entry.spanId
+    const traceId = entry['traceId']
+    const spanId = entry['spanId']
     if (
       typeof traceId === 'string' &&
       /^[\da-f]{32}$/i.test(traceId) &&
       typeof spanId === 'string' &&
       /^[\da-f]{16}$/i.test(spanId)
     ) {
-      const dd = typeof entry.dd === 'object' && entry.dd !== null ? (entry.dd as Record<string, unknown>) : {}
-      entry.dd = {
+      const dd = typeof entry['dd'] === 'object' && entry['dd'] !== null ? (entry['dd'] as Record<string, unknown>) : {}
+      entry['dd'] = {
         ...dd,
         trace_id: BigInt(`0x${traceId.slice(16)}`).toString(10),
         span_id: BigInt(`0x${spanId}`).toString(10),
@@ -361,7 +361,7 @@ function firstString(...values: unknown[]): string | undefined {
 }
 
 function truncated(entry: Record<string, unknown>): Record<string, unknown> {
-  const message = typeof entry.message === 'string' ? entry.message : ''
+  const message = typeof entry['message'] === 'string' ? entry['message'] : ''
   const kept: Record<string, unknown> = { truncated: true }
   for (const key of [
     'status',
@@ -377,26 +377,26 @@ function truncated(entry: Record<string, unknown>): Record<string, unknown> {
   ]) {
     if (entry[key] !== undefined) kept[key] = entry[key]
   }
-  kept.message = message.length > TRUNCATED_MESSAGE_CHARS ? `${message.slice(0, TRUNCATED_MESSAGE_CHARS)}…` : message
+  kept['message'] = message.length > TRUNCATED_MESSAGE_CHARS ? `${message.slice(0, TRUNCATED_MESSAGE_CHARS)}…` : message
   return kept
 }
 
 function settingsOf(options: DatadogTransportOptions): Settings {
   const env = globalThis.process?.env ?? {}
-  const apiKey = options.apiKey ?? env.DD_API_KEY
+  const apiKey = options.apiKey ?? env['DD_API_KEY']
   if (apiKey === undefined || apiKey === '') {
     throw new ZnightError(ErrorCode.MissingConfig, 'Datadog log transport: no API key', {
       hints: ['Set the DD_API_KEY environment variable or pass datadogTransport({ apiKey })'],
     })
   }
-  const site = options.site ?? env.DD_SITE ?? 'datadoghq.com'
+  const site = options.site ?? env['DD_SITE'] ?? 'datadoghq.com'
   const fetchImpl = options.fetch ?? globalThis.fetch
   if (typeof fetchImpl !== 'function')
     throw invalidOption('datadogTransport fetch', 'no fetch implementation available')
   return {
     url: options.url ?? `https://http-intake.logs.${site}/api/v2/logs`,
     apiKey,
-    service: options.service ?? env.DD_SERVICE,
+    service: options.service ?? env['DD_SERVICE'],
     source: options.source ?? 'nodejs',
     hostname: options.hostname ?? safeHostname(),
     tags: tagsOf(options.tags, env),
@@ -428,8 +428,8 @@ function tagsOf(
   if (Array.isArray(tags)) list.push(...(tags as readonly string[]))
   else if (tags !== undefined) for (const [key, value] of Object.entries(tags)) list.push(`${key}:${value}`)
   const has = (key: string): boolean => list.some(tag => tag.startsWith(`${key}:`))
-  if (env.DD_ENV && !has('env')) list.push(`env:${env.DD_ENV}`)
-  if (env.DD_VERSION && !has('version')) list.push(`version:${env.DD_VERSION}`)
+  if (env['DD_ENV'] && !has('env')) list.push(`env:${env['DD_ENV']}`)
+  if (env['DD_VERSION'] && !has('version')) list.push(`version:${env['DD_VERSION']}`)
   return list.length === 0 ? undefined : list.join(',')
 }
 

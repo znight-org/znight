@@ -72,7 +72,7 @@ export function detectPackageManager(
   env: Readonly<Record<string, string | undefined>>,
   runningOnBun: boolean,
 ): PackageManager {
-  const agent = env.npm_config_user_agent ?? ''
+  const agent = env['npm_config_user_agent'] ?? ''
   const name = agent.split('/')[0]
   if (name === 'bun' || name === 'npm' || name === 'pnpm' || name === 'yarn') return name
   return runningOnBun ? 'bun' : 'npm'
