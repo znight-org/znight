@@ -35,7 +35,12 @@
     "access": "public"
   },
   "dependencies": {
-    "@znight/core": "workspace:*"
+    "@znight/core": "workspace:*",
+    "magic-string": "^1.4.4",
+    "oxc-parser": "^0.155.0",
+    "oxc-resolver": "^11.24.2",
+    "picocolors": "^1.1.1",
+    "tinyglobby": "^0.2.17"
   },
   "peerDependencies": {
     "vite": "^7.0.0 || ^8.0.0"
@@ -44,5 +49,8 @@
     "vite": {
       "optional": true
     }
+  },
+  "devDependencies": {
+    "vite": "catalog:"
   }
 }

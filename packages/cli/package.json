@@ -35,9 +35,15 @@
     "access": "public"
   },
   "dependencies": {
-    "@znight/core": "workspace:*"
+    "@clack/prompts": "^1.8.1",
+    "@znight/core": "workspace:*",
+    "citty": "^0.2.2",
+    "picocolors": "^1.1.1"
   },
   "bin": {
     "znight": "./dist/cli.mjs"
+  },
+  "devDependencies": {
+    "vite": "catalog:"
   }
 }
