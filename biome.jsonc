@@ -71,6 +71,8 @@
     }
   },
   "javascript": {
+    // Parameter decorators (@Inject, @Param, @Body...) are core to the Znight DX
+    "parser": { "unsafeParameterDecoratorsEnabled": true },
     "formatter": {
       "jsxQuoteStyle": "double",
       "quoteProperties": "asNeeded",

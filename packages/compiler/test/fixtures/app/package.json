@@ -1,0 +1,16 @@
+{
+  "name": "fixture-app",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@fixture/bad-manifest": "1.0.0",
+    "@fixture/lib": "1.0.0",
+    "@fixture/manifest-lib": "1.0.0",
+    "cjs-only": "1.0.0",
+    "legacy-ns": "1.0.0",
+    "pg": "8.0.0"
+  },
+  "devDependencies": {
+    "@types/pg": "8.0.0"
+  }
+}

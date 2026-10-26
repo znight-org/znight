@@ -33,5 +33,30 @@
   },
   "publishConfig": {
     "access": "public"
+  },
+  "znight": {
+    "apiVersion": 1,
+    "provides": [
+      {
+        "export": "Container",
+        "plugin": "@znight/core",
+        "scope": "singleton"
+      },
+      {
+        "export": "Application",
+        "plugin": "Application",
+        "scope": "singleton"
+      },
+      {
+        "export": "Hooks",
+        "plugin": "Application",
+        "scope": "singleton"
+      },
+      {
+        "export": "CoreLogger",
+        "plugin": "Application",
+        "scope": "singleton"
+      }
+    ]
   }
 }

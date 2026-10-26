@@ -1,0 +1,3 @@
+# Fixture packages are hand-written (or generated once with tsdown) and committed.
+!node_modules
+!dist
