@@ -58,16 +58,16 @@ describe('instrumentation never changes the outcome', () => {
   })
 
   it('names the LOG_LEVEL variable when it is invalid', () => {
-    const saved = process.env.LOG_LEVEL
-    process.env.LOG_LEVEL = 'chatty'
+    const saved = process.env['LOG_LEVEL']
+    process.env['LOG_LEVEL'] = 'chatty'
     try {
       expect(() => new Logger({ destination: { write: () => undefined } })).toThrow(
         /Invalid LOG_LEVEL environment variable/,
       )
       expect(new Logger({ level: 'warn', destination: { write: () => undefined } }).level).toBe('warn')
     } finally {
-      if (saved === undefined) delete process.env.LOG_LEVEL
-      else process.env.LOG_LEVEL = saved
+      if (saved === undefined) delete process.env['LOG_LEVEL']
+      else process.env['LOG_LEVEL'] = saved
     }
   })
 })

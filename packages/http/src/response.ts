@@ -1,6 +1,19 @@
 import type { HeaderValue } from './exceptions.ts'
 
+import { type ContentDispositionType, contentDisposition, FileBody, type FileResponseOptions } from './files.ts'
+import { contentTypeFor, OCTET_STREAM } from './mime.ts'
 import { isValidStatus } from './status.ts'
+import { isStreamSource, type StreamSource, toByteStream } from './stream.ts'
+
+/** Options of {@link HttpResponse.stream}. */
+export interface StreamResponseOptions {
+  /** Media type. Default: from the extension of `filename`, else `application/octet-stream`. */
+  readonly contentType?: string
+  /** Name proposed to the client (`Content-Disposition: attachment` unless `disposition` says otherwise). */
+  readonly filename?: string
+  /** `attachment` or `inline`. Default: `attachment` when `filename` is set, otherwise no header. */
+  readonly disposition?: ContentDispositionType
+}
 
 /** Options of {@link HttpResponse}. */
 export interface HttpResponseInit {
@@ -64,6 +77,55 @@ export class HttpResponse<T = unknown> {
   /** A redirect (`302 Found` by default) to `location`. */
   static redirect(location: string, status: RedirectStatus = 302): HttpResponse<undefined> {
     return new HttpResponse(undefined, { status, headers: { location } })
+  }
+
+  /**
+   * Sends a file from disk (`string` path or `file:` URL) or a `Blob` / `File`, streamed with
+   * `Content-Length`, `Content-Type` (from the extension, see `contentTypeFor`), `Last-Modified`,
+   * `ETag` and `Accept-Ranges`. Conditional requests answer 304 / 412 and single byte ranges 206
+   * (416 when unsatisfiable). A missing file answers 404.
+   *
+   * ```ts
+   * @Get('/reports/:name')
+   * download(@Param('name') name: string) {
+   *   // `root` confines the path: '../../etc/passwd' answers 404
+   *   return HttpResponse.file(name, { root: REPORTS_DIR, filename: `rapport ${name}` })
+   * }
+   * ```
+   *
+   * Never pass a path built from the request without `root`.
+   */
+  static file(file: string | URL | Blob, options?: FileResponseOptions): HttpResponse<FileBody> {
+    return new HttpResponse(new FileBody(file, options))
+  }
+
+  /**
+   * Streams a Web `ReadableStream`, a Node.js `Readable` or an async iterable (async generator) of
+   * `Uint8Array` / `string` chunks. The source is read as the client receives the data
+   * (backpressure) and cancelled when the client disconnects; it runs in the request scope.
+   *
+   * ```ts
+   * @Get('/export.csv')
+   * export() {
+   *   return HttpResponse.stream(this.rows.csvLines(), { filename: 'export.csv' }) // text/csv; charset=utf-8
+   * }
+   * ```
+   */
+  static stream(source: StreamSource, options: StreamResponseOptions = {}): HttpResponse<ReadableStream<Uint8Array>> {
+    if (!isStreamSource(source)) {
+      throw new TypeError(
+        'HttpResponse.stream() expects a ReadableStream, a Node.js Readable or an async iterable of Uint8Array / string chunks',
+      )
+    }
+    const headers: Record<string, HeaderValue> = {
+      'content-type':
+        options.contentType ??
+        (options.filename === undefined ? undefined : contentTypeFor(options.filename)) ??
+        OCTET_STREAM,
+    }
+    const disposition = options.disposition ?? (options.filename === undefined ? undefined : 'attachment')
+    if (disposition !== undefined) headers['content-disposition'] = contentDisposition(options.filename, disposition)
+    return new HttpResponse(toByteStream(source), { headers })
   }
 
   /** A copy of this response with `name` set to `value`. */

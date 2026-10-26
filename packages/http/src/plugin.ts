@@ -9,15 +9,19 @@ import type {
   HttpInterceptorClass,
 } from './interfaces.ts'
 import type { HttpControllerDefinition, HttpMetadata, HttpMethod, HttpRouteDefinition } from './metadata.ts'
+import type { ByteSize } from './size.ts'
 
 import { displayName, ErrorCode, resolveOptions, ZnightError } from '@znight/core'
 
 import { nodeAdapter } from './adapters/node.ts'
+import { isMediaTypePattern } from './mime.ts'
 import { compareRoutePaths, compareStrings, joinPaths, parseRoutePath, type RoutePath, RoutePathError } from './path.ts'
 import { Pipeline, type Resolvable, type RoutePlan } from './pipeline.ts'
 import { RouteTable } from './router.ts'
+import { parseByteSize } from './size.ts'
 import { isValidStatus } from './status.ts'
 import { HttpTokens } from './tokens.ts'
+import { bodyPlan, DEFAULT_UPLOAD_LIMITS, type ResolvedUploadLimits, type UploadLimits } from './uploads.ts'
 
 /** How requests whose path ends with an extra `/` are handled. */
 export type TrailingSlashPolicy = 'strict' | 'ignore' | 'redirect'
@@ -52,8 +56,14 @@ export interface HttpPluginOptions {
   readonly trailingSlash?: TrailingSlashPolicy
   /** Send the message of unexpected errors in 500 responses (development only). Default: `false`. */
   readonly exposeErrors?: boolean
-  /** Maximum request body size in bytes (413 above). Default: 1 MiB. */
-  readonly bodyLimit?: number
+  /**
+   * Maximum request body size (413 above): bytes or a size with a unit (`'10mb'`; `kb` = 1024
+   * bytes), `Infinity` for no limit. Routes override it with `@BodyLimit`; upload routes default to
+   * the sum of their file limits plus this value. Default: 1 MiB.
+   */
+  readonly bodyLimit?: ByteSize
+  /** Limits of multipart bodies and defaults of the upload parameters (see `UploadLimits`). */
+  readonly uploads?: UploadLimits
   /**
    * Header carrying the request id: reused when the client sends a valid one (≤ 128 characters of
    * `[A-Za-z0-9_-.:@/+=]`), echoed on every response. `false`: always generate, never echo.
@@ -86,6 +96,7 @@ interface Resolved {
   readonly trailingSlash: TrailingSlashPolicy
   readonly exposeErrors: boolean
   readonly bodyLimit: number
+  readonly uploads: ResolvedUploadLimits
   readonly requestIdHeader: string | undefined
   readonly generateRequestId: () => string
   readonly drainTimeoutMs: number
@@ -210,7 +221,7 @@ export class HttpPlugin implements Plugin {
       ctx.logger,
       {
         adapter: options.adapter.name,
-        bodyLimit: options.bodyLimit,
+        body: bodyPlan({}, options.bodyLimit, options.uploads),
         exposeErrors: options.exposeErrors,
         requestIdHeader: options.requestIdHeader,
         generateRequestId: options.generateRequestId,
@@ -319,9 +330,11 @@ function resolve(options: HttpPluginOptions): Resolved {
   if (trailingSlash !== 'strict' && trailingSlash !== 'ignore' && trailingSlash !== 'redirect') {
     throw invalidOption('trailingSlash', '"strict", "ignore" or "redirect"', trailingSlash)
   }
-  const bodyLimit = options.bodyLimit ?? DEFAULT_BODY_LIMIT
-  if (!Number.isSafeInteger(bodyLimit) || bodyLimit < 0)
-    throw invalidOption('bodyLimit', 'a positive integer', bodyLimit)
+  const bodyLimit = parseByteSize(options.bodyLimit ?? DEFAULT_BODY_LIMIT)
+  if (bodyLimit === undefined) {
+    throw invalidOption('bodyLimit', "a size in bytes (1048576, '10mb', Infinity)", options.bodyLimit)
+  }
+  const uploads = resolveUploadLimits(options.uploads)
   const drainTimeoutMs = options.drainTimeoutMs ?? DEFAULT_DRAIN_TIMEOUT_MS
   if (typeof drainTimeoutMs !== 'number' || !(drainTimeoutMs >= 0)) {
     throw invalidOption('drainTimeoutMs', 'a positive number', drainTimeoutMs)
@@ -350,9 +363,41 @@ function resolve(options: HttpPluginOptions): Resolved {
     trailingSlash,
     exposeErrors: options.exposeErrors === true,
     bodyLimit,
+    uploads,
     requestIdHeader: requestIdHeader === false ? undefined : requestIdHeader.toLowerCase(),
     generateRequestId,
     drainTimeoutMs,
+  }
+}
+
+function resolveUploadLimits(value: UploadLimits | undefined): ResolvedUploadLimits {
+  if (value === undefined) return DEFAULT_UPLOAD_LIMITS
+  if (value === null || typeof value !== 'object') throw invalidOption('uploads', 'an object', value)
+  const size = (key: 'maxFileSize' | 'maxFieldSize'): number => {
+    const raw = value[key]
+    if (raw === undefined) return DEFAULT_UPLOAD_LIMITS[key]
+    const parsed = parseByteSize(raw)
+    if (parsed === undefined) throw invalidOption(`uploads.${key}`, "a size in bytes (1048576, '10mb', Infinity)", raw)
+    return parsed
+  }
+  const count = (key: 'maxFiles' | 'maxParts'): number => {
+    const raw = value[key]
+    if (raw === undefined) return DEFAULT_UPLOAD_LIMITS[key]
+    if (raw !== Number.POSITIVE_INFINITY && (!Number.isSafeInteger(raw) || raw < 1)) {
+      throw invalidOption(`uploads.${key}`, 'a positive integer (or Infinity)', raw)
+    }
+    return raw
+  }
+  for (const key of Object.keys(value)) {
+    if (!['maxFileSize', 'maxFiles', 'maxParts', 'maxFieldSize'].includes(key)) {
+      throw invalidOption('uploads', '{ maxFileSize?, maxFiles?, maxParts?, maxFieldSize? }', value)
+    }
+  }
+  return {
+    maxFileSize: size('maxFileSize'),
+    maxFiles: count('maxFiles'),
+    maxParts: count('maxParts'),
+    maxFieldSize: size('maxFieldSize'),
   }
 }
 
@@ -439,7 +484,8 @@ function buildRegistrations(
         ...controllerInterceptors,
         ...route.interceptors.map(token => lookup<HttpInterceptor>(token, `interceptor of ${where}`)),
       ]
-      const parseBody = route.params.some(param => param.source === 'body')
+      const body = bodyPlan(route, options.bodyLimit, options.uploads)
+      const parseBody = body.upload || route.params.some(param => param.source === 'body')
       const plan = (method: string): RoutePlan => ({
         definition: route,
         path,
@@ -448,6 +494,7 @@ function buildRegistrations(
         guards,
         interceptors,
         parseBody,
+        body,
       })
       if (route.method === 'ALL') catchAll.push({ path, plan })
       else explicit.push({ method: route.method, path, plan: plan(route.method) })
@@ -558,6 +605,53 @@ function assertRoute(route: HttpRouteDefinition, where: string): void {
       ErrorCode.InvalidRoute,
       `Invalid route ${where}: guards, interceptors and params must be arrays`,
     )
+  }
+  if (route.bodyLimit !== undefined && !isSize(route.bodyLimit)) {
+    throw new ZnightError(
+      ErrorCode.InvalidRoute,
+      `Invalid route ${where}: bodyLimit must be a number of bytes (or Infinity), got ${describeValue(route.bodyLimit)}`,
+    )
+  }
+  if (route.uploads !== undefined) assertUploads(route, where)
+}
+
+function isSize(value: unknown): boolean {
+  return value === Number.POSITIVE_INFINITY || (Number.isSafeInteger(value) && (value as number) >= 0)
+}
+
+function assertUploads(route: HttpRouteDefinition, where: string): void {
+  const invalid = (reason: string): ZnightError =>
+    new ZnightError(ErrorCode.InvalidRoute, `Invalid route ${where}: ${reason}`, {
+      hints: ['uploads: [{ field?, multiple?, required?, maxSize?, maxFiles?, mimeTypes? }]'],
+    })
+  if (!Array.isArray(route.uploads)) throw invalid('uploads must be an array')
+  const fields = new Set<string | undefined>()
+  for (const upload of route.uploads) {
+    if (upload === null || typeof upload !== 'object') throw invalid(`invalid upload ${describeValue(upload)}`)
+    const { field, maxSize, maxFiles, mimeTypes } = upload
+    if (field !== undefined && (typeof field !== 'string' || field === '')) {
+      throw invalid(`invalid upload field ${describeValue(field)}`)
+    }
+    if (fields.has(field) || (fields.size > 0 && (field === undefined || fields.has(undefined)))) {
+      throw invalid(
+        field === undefined
+          ? 'an upload without field (every file) cannot be combined with other uploads'
+          : `several uploads for the field "${field}"`,
+      )
+    }
+    fields.add(field)
+    if (maxSize !== undefined && !isSize(maxSize)) throw invalid(`invalid maxSize ${describeValue(maxSize)}`)
+    if (maxFiles !== undefined && (!isSize(maxFiles) || maxFiles < 1)) {
+      throw invalid(`invalid maxFiles ${describeValue(maxFiles)}`)
+    }
+    if (
+      mimeTypes !== undefined &&
+      (!Array.isArray(mimeTypes) ||
+        mimeTypes.length === 0 ||
+        !mimeTypes.every(type => typeof type === 'string' && isMediaTypePattern(type)))
+    ) {
+      throw invalid(`invalid mimeTypes ${describeValue(mimeTypes)}`)
+    }
   }
 }
 

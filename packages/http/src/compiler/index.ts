@@ -3,8 +3,8 @@
  * `@znight/compiler` through `package.json#znight.compiler`.
  *
  * - `analyzeClass`: `@Controller` classes become providers; their decorated methods become routes
- *   (paths, parameters with type-based coercion or Standard Schema validation, guards,
- *   interceptors, status, headers, `createRouteDecorator` metadata);
+ *   (paths, parameters with type-based coercion or Standard Schema validation, uploaded files,
+ *   guards, interceptors, status, headers, body limits, `createRouteDecorator` metadata);
  * - `validate`: route paths, `:param` ↔ `@Param`, duplicate routes (ZNIGHT007);
  * - `generate`: `metadata.extensions.http` with one `invoke` function per route (README,
  *   "Compiler contract").
@@ -27,12 +27,14 @@ export type {
   MetaEntry,
   ParamCoercion,
   ScalarCoercion,
+  UploadData,
 } from './model.ts'
 
 const ROUTE: DecoratorSpec = { targets: ['method'], params: ['static'] }
 const NAME_OR_SCHEMA: DecoratorSpec = { targets: ['parameter'], params: ['value', 'value'] }
 const NO_ARGUMENT: DecoratorSpec = { targets: ['parameter'], params: [] }
 const CLASS_REFS: DecoratorSpec = { targets: ['class', 'method'], params: [], rest: 'value' }
+const UPLOAD: DecoratorSpec = { targets: ['parameter'], params: ['static', 'static'] }
 
 /** Decorators owned by the extension, by canonical identity (static / value arguments, §4.6). */
 const decorators: Readonly<Record<string, DecoratorSpec>> = Object.freeze({
@@ -50,6 +52,9 @@ const decorators: Readonly<Record<string, DecoratorSpec>> = Object.freeze({
   [Ids.UseGuard]: CLASS_REFS,
   [Ids.UseInterceptor]: CLASS_REFS,
   [Ids.Validate]: { targets: ['method'], params: ['value'] },
+  [Ids.UploadedFile]: UPLOAD,
+  [Ids.UploadedFiles]: UPLOAD,
+  [Ids.BodyLimit]: { targets: ['class', 'method'], params: ['static'] },
 })
 
 /** The `@znight/http` compiler extension. */

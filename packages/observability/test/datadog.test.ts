@@ -130,8 +130,8 @@ describe('datadogTransport', () => {
       pid: process.pid,
     })
     // pino's own hostname wins over the option
-    expect(typeof info?.hostname).toBe('string')
-    expect(typeof info?.timestamp).toBe('number')
+    expect(typeof info?.['hostname']).toBe('string')
+    expect(typeof info?.['timestamp']).toBe('number')
     expect(info).not.toHaveProperty('msg')
     expect(info).not.toHaveProperty('time')
     expect(debug).toMatchObject({ status: 'debug' })
@@ -152,7 +152,7 @@ describe('datadogTransport', () => {
     await dd.flush()
     expect(intake.received.map(request => request.entries.length)).toEqual([2, 2, 1])
     expect(intake.received[0]?.headers['content-encoding']).toBeUndefined()
-    expect(intake.entries.map(entry => entry.message)).toEqual(['m0', 'm1', 'm2', 'm3', 'm4'])
+    expect(intake.entries.map(entry => entry['message'])).toEqual(['m0', 'm1', 'm2', 'm3', 'm4'])
 
     intake.reset()
     const bySize = transport({ maxBatchBytes: 1024, compress: false })
@@ -169,14 +169,14 @@ describe('datadogTransport', () => {
     logger.info('a')
     logger.info('b')
     await sleep(50)
-    expect(intake.entries.map(entry => entry.message)).toEqual(['a', 'b'])
+    expect(intake.entries.map(entry => entry['message'])).toEqual(['a', 'b'])
 
     intake.reset()
     const timed = transport({ flushIntervalMs: 20 })
     new Logger({ transport: timed }).info('timed')
     expect(intake.received).toHaveLength(0)
     await sleep(120)
-    expect(intake.entries.map(entry => entry.message)).toEqual(['timed'])
+    expect(intake.entries.map(entry => entry['message'])).toEqual(['timed'])
     await timed.close()
   })
 
@@ -187,7 +187,7 @@ describe('datadogTransport', () => {
     new Logger({ transport: dd }).info('eventually')
     await dd.flush()
     expect(intake.received).toHaveLength(4)
-    expect(intake.received.every(request => request.entries[0]?.message === 'eventually')).toBe(true)
+    expect(intake.received.every(request => request.entries[0]?.['message'] === 'eventually')).toBe(true)
     expect(errors).toEqual([])
     expect(dd.dropped).toBe(0)
   })
@@ -216,7 +216,7 @@ describe('datadogTransport', () => {
     intake.reset()
     logger.info('after')
     await dd.flush()
-    expect(intake.entries.map(entry => entry.message)).toEqual(['after'])
+    expect(intake.entries.map(entry => entry['message'])).toEqual(['after'])
   })
 
   it('retries network errors then reports the loss', async () => {
@@ -252,16 +252,16 @@ describe('datadogTransport', () => {
     new Logger({ transport: dd }).info('y'.repeat(1_100_000), { traceId: 'abc' })
     await dd.flush()
     const [entry] = intake.entries
-    expect(entry?.truncated).toBe(true)
-    expect(String(entry?.message).length).toBeLessThan(70_000)
+    expect(entry?.['truncated']).toBe(true)
+    expect(String(entry?.['message']).length).toBeLessThan(70_000)
     expect(entry).toMatchObject({ status: 'info', traceId: 'abc', service: 'users-api' })
   })
 
   it('reads DD_* environment variables', async () => {
-    process.env.DD_API_KEY = 'env-key'
-    process.env.DD_ENV = 'staging'
-    process.env.DD_VERSION = '1.2.3'
-    process.env.DD_SERVICE = 'env-service'
+    process.env['DD_API_KEY'] = 'env-key'
+    process.env['DD_ENV'] = 'staging'
+    process.env['DD_VERSION'] = '1.2.3'
+    process.env['DD_SERVICE'] = 'env-service'
     const dd = datadogTransport({ url, tags: { team: 'core' }, compress: false, flushIntervalMs: 60_000 })
     new Logger({ transport: dd, base: null }).info('env')
     await dd.flush()
@@ -274,7 +274,7 @@ describe('datadogTransport', () => {
   })
 
   it('requires an API key (ZNIGHT006) and validates options (ZNIGHT005)', () => {
-    delete process.env.DD_API_KEY
+    delete process.env['DD_API_KEY']
     const missing = (() => {
       try {
         datadogTransport({ url })

@@ -33,7 +33,7 @@ it('TestBed results and mocks are typed from classes', async () => {
   const concrete: PgUserRepository = mocks.get(PgUserRepository)
   const asRepository: UserRepository = repository
   const untyped: DeepMock = mocks.get('Logger')
-  untyped.info?.mockReturnValue(undefined)
+  untyped['info']?.mockReturnValue(undefined)
   const logger: Mocked<Logger> = mocks.get(token<Logger>('@znight/observability#Logger'))
   logger.info.mockImplementation(() => undefined)
   const explicit: Mocked<Logger> = mocks.get<Logger>('Logger')

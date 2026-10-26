@@ -8,7 +8,9 @@
 import type { ClassMarker, MethodMarker, ParameterMarker, Scope } from '@znight/core'
 import type { HttpContext } from './context.ts'
 import type { GuardClass, HttpInterceptorClass } from './interfaces.ts'
+import type { ByteSize } from './size.ts'
 import type { StandardSchemaV1 } from './standard-schema.ts'
+import type { UploadedFileOptions, UploadedFilesOptions } from './uploads.ts'
 
 function marker(): void {
   // intentionally empty: decorators are compile-time markers
@@ -147,6 +149,77 @@ export function Body(_schema?: StandardSchemaV1): ParameterMarker {
  */
 export function Headers(_name?: string): ParameterMarker {
   return parameterMarker
+}
+
+/**
+ * Injects a file of a `multipart/form-data` body as a standard `File` (`name`, `type`, `size`,
+ * `arrayBuffer()`, `text()`, `stream()`), held in memory. The route parses multipart bodies before
+ * its interceptors, enforcing the options while the body is read: a file above `maxSize` answers
+ * 413, a refused type 415, a second file in the field or a file in an undeclared field 400, a
+ * missing required file 400, a non-multipart body 415. `@Body()` receives the text fields.
+ *
+ * ```ts
+ * @Post('/avatar')
+ * upload(@UploadedFile('avatar', { maxSize: '2mb', mimeTypes: ['image/png', 'image/jpeg'] }) avatar: File) {}
+ *
+ * @Post('/attachment')
+ * attach(@UploadedFile('file') file?: File) {} // optional: undefined when absent
+ * ```
+ *
+ * `File.name` and `File.type` are sent by the client: never trust them (see the README, "Files").
+ *
+ * @param field static: the multipart field; omitted: the single file of the body, whatever its field.
+ * @param options static: `{ required?, maxSize?, mimeTypes? }`.
+ */
+export function UploadedFile(field?: string, options?: UploadedFileOptions): ParameterMarker
+export function UploadedFile(options: UploadedFileOptions): ParameterMarker
+export function UploadedFile(
+  _fieldOrOptions?: string | UploadedFileOptions,
+  _options?: UploadedFileOptions,
+): ParameterMarker {
+  return parameterMarker
+}
+
+/**
+ * Injects the files of a multipart field (`File[]`, in body order), or of every field without
+ * `field`. Same rules as {@link UploadedFile}; above `maxFiles` files the request answers 413. An
+ * optional parameter (`files?: File[]`, `required: false`) receives an empty array when no file is
+ * sent.
+ *
+ * ```ts
+ * @Post('/documents')
+ * add(@UploadedFiles('documents', { maxFiles: 5, maxSize: '20mb', mimeTypes: ['application/pdf'] }) documents: File[]) {}
+ * ```
+ *
+ * @param field static: the multipart field; omitted: the files of every field.
+ * @param options static: `{ required?, maxSize?, maxFiles?, mimeTypes? }`.
+ */
+export function UploadedFiles(field?: string, options?: UploadedFilesOptions): ParameterMarker
+export function UploadedFiles(options: UploadedFilesOptions): ParameterMarker
+export function UploadedFiles(
+  _fieldOrOptions?: string | UploadedFilesOptions,
+  _options?: UploadedFilesOptions,
+): ParameterMarker {
+  return parameterMarker
+}
+
+/**
+ * Sets the maximum request body size of a route, or of every route of a controller (the route wins),
+ * over the plugin `bodyLimit` (and over the limit computed for upload routes). `Infinity` disables
+ * the limit, e.g. for a route streaming its body with `ctx.bodyStream()`.
+ *
+ * ```ts
+ * @Put('/files/:name')
+ * @BodyLimit('5gb')
+ * async store(@Param('name') name: string, @Ctx() ctx: HttpContext) {
+ *   await pipeline(Readable.fromWeb(ctx.bodyStream()), createWriteStream(join(DIR, safeName(name))))
+ * }
+ * ```
+ *
+ * @param size static: bytes (`10_485_760`) or a size with a unit (`'10mb'`, `'512kb'`; `kb` = 1024 bytes).
+ */
+export function BodyLimit(_size: ByteSize): ClassMarker & MethodMarker {
+  return classOrMethodMarker
 }
 
 /** Injects the native request of the adapter (escape hatch; the compiler warns). */

@@ -58,7 +58,7 @@ describe('public entries', () => {
 
   it('declares the manifest of §7', async () => {
     const pkg = (await import('../package.json', { with: { type: 'json' } })).default as Record<string, unknown>
-    expect(pkg.znight).toEqual({
+    expect(pkg['znight']).toEqual({
       apiVersion: 1,
       compiler: '@znight/messaging/compiler',
       provides: [

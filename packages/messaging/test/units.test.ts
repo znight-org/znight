@@ -177,7 +177,7 @@ describe('headers', () => {
     expect(headerValueToString(new Date(0))).toBe('1970-01-01T00:00:00.000Z')
     expect(headerValueToString({ a: [1, 2n] })).toBe('{"a":[1,"2"]}')
     const cyclic: Record<string, unknown> = {}
-    cyclic.self = cyclic
+    cyclic['self'] = cyclic
     expect(headerValueToString(cyclic)).toBe('[object Object]')
   })
 
@@ -198,7 +198,7 @@ describe('headers', () => {
       { queue: 'q.dlq', reason: 'max-attempts', error: new Error('x'.repeat(2000)), attempt: 3 },
       'q',
     )
-    expect(headers.a).toBe('1')
+    expect(headers['a']).toBe('1')
     expect(headers[MessagingHeaders.Attempt]).toBeUndefined()
     expect(headers[MessagingHeaders.DeadLetterReason]).toBe('max-attempts')
     expect(headers[MessagingHeaders.OriginalQueue]).toBe('q')

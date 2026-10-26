@@ -447,7 +447,7 @@ describe('traceMessagePublish', () => {
       [Attr.ZNIGHT_MESSAGE_TYPE]: 'order.created',
       [Attr.MESSAGING_SYSTEM]: 'rabbitmq',
     })
-    expect(published.headers.traceparent).toBe(formatTraceparent(producer.spanContext()))
+    expect(published.headers['traceparent']).toBe(formatTraceparent(producer.spanContext()))
 
     // the consumer continues the trace
     const consumerHooks = new Hooks({ logger: silentLogger })

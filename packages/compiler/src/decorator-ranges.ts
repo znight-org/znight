@@ -14,6 +14,12 @@ export interface DecoratorRanges {
   readonly hash: string
   /** `[start, end)` UTF-16 offsets of each decorator (`@` included), sorted, non-overlapping. */
   readonly ranges: readonly Span[]
+  /**
+   * Starts of the ranges that begin a class member (the first decorator of a method, accessor or
+   * property). Stripping one leaves a `;` (an empty class element): without it, a preceding field
+   * without semicolon could absorb the member (`x = a` + `[key]() {}` → `x = a[key]() {}`).
+   */
+  readonly memberStarts: readonly number[]
 }
 
 /** Decorators owned by the core, an extension or a manifest, by absolute file path (scanned files only). */
@@ -22,8 +28,11 @@ export function collectDecoratorRanges(
   classes: readonly ClassInfo[],
 ): ReadonlyMap<string, DecoratorRanges> {
   const byFile = new Map<string, Span[]>()
+  const memberStarts = new Map<string, Set<number>>()
+  const owned = (decorator: DecoratorInfo): boolean =>
+    decorator.owner !== undefined && project.isScanned(decorator.location.file)
   const add = (decorator: DecoratorInfo): void => {
-    if (decorator.owner === undefined || !project.isScanned(decorator.location.file)) {
+    if (!owned(decorator)) {
       return
     }
     const list = byFile.get(decorator.location.file)
@@ -34,6 +43,22 @@ export function collectDecoratorRanges(
       byFile.set(decorator.location.file, [span])
     }
   }
+  const addMember = (decorators: readonly DecoratorInfo[]): void => {
+    decorators.forEach(add)
+    const first = decorators.reduce<DecoratorInfo | undefined>(
+      (current, decorator) =>
+        current === undefined || decorator.location.start < current.location.start ? decorator : current,
+      undefined,
+    )
+    if (first !== undefined && owned(first)) {
+      const starts = memberStarts.get(first.location.file)
+      if (starts) {
+        starts.add(first.location.start)
+      } else {
+        memberStarts.set(first.location.file, new Set([first.location.start]))
+      }
+    }
+  }
   for (const cls of classes) {
     cls.decorators.forEach(add)
     if (cls.ctor.declaredBy === cls.identity) {
@@ -42,13 +67,13 @@ export function collectDecoratorRanges(
       }
     }
     for (const method of cls.methods) {
-      method.decorators.forEach(add)
+      addMember(method.decorators)
       for (const param of method.params) {
         param.decorators.forEach(add)
       }
     }
     for (const property of cls.properties) {
-      property.decorators.forEach(add)
+      addMember(property.decorators)
     }
   }
   const result = new Map<string, DecoratorRanges>()
@@ -64,6 +89,7 @@ export function collectDecoratorRanges(
     result.set(file, {
       hash: source.hash,
       ranges: [...unique.values()].sort((a, b) => a.start - b.start || a.end - b.end),
+      memberStarts: [...(memberStarts.get(file) ?? [])].sort((a, b) => a - b),
     })
   }
   return result

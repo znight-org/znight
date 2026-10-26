@@ -27,12 +27,30 @@ export interface AdapterRequest {
    * bytes (checked on `content-length` first, then while reading).
    */
   readBody(limit: number): Promise<Uint8Array>
+  /**
+   * The body as a Web stream, read as the consumer pulls it (once; exclusive with `readBody`). It
+   * errors with a `PayloadTooLargeException` past `limit` bytes (`content-length` checked first) and
+   * with a `BadRequestException` when the client aborts. Cancelling it discards the rest of the body
+   * without closing the connection before the response is written. Optional: without it the plugin
+   * streams the result of `readBody` (multipart uploads are then buffered before being parsed).
+   */
+  streamBody?(limit: number): ReadableStream<Uint8Array>
+  /**
+   * Whether the request has a body, for requests whose headers do not say it (Web `Request`s built
+   * in memory have neither `content-length` nor `transfer-encoding`). Optional: the headers are
+   * used otherwise.
+   */
+  hasBody?(): boolean
   /** Status written by a handler that took over the response with `@Res()`, when known. */
   rawStatus?(): number | undefined
 }
 
-/** Body of a reply: bytes, a stream, or nothing. */
-export type ReplyBody = Uint8Array | ReadableStream<Uint8Array> | null
+/**
+ * Body of a reply: bytes, a stream, a `Blob` (files: send it with its size, e.g. `new Response(blob)`
+ * or `blob.stream()`), or nothing. Adapters MUST either read a stream to its end or cancel it
+ * (client disconnected, response not sent...): the request scope stays open until then.
+ */
+export type ReplyBody = Uint8Array | ReadableStream<Uint8Array> | Blob | null
 
 /** A response computed by the plugin, written by the adapter. */
 export interface AdapterReply {
@@ -82,7 +100,8 @@ export interface InjectRequest {
   readonly headers?: Readonly<Record<string, string>>
   /**
    * Request body: a string or bytes are sent as is (`text/plain` / `application/octet-stream` when
-   * no `content-type` is given), anything else is sent as JSON (`application/json`).
+   * no `content-type` is given), a `FormData` as `multipart/form-data` (files included), a `Blob` /
+   * `File` with its type, anything else as JSON (`application/json`).
    */
   readonly body?: unknown
   /** Query parameters appended to `url`. */
@@ -96,6 +115,8 @@ export interface InjectResponse {
   readonly headers: Record<string, string>
   /** Body decoded as UTF-8. */
   readonly body: string
+  /** Raw body bytes (binary downloads). */
+  readonly bytes: Uint8Array
   /** `JSON.parse(body)`. */
   json<T = unknown>(): T
 }

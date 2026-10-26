@@ -42,8 +42,8 @@ describe('createMock', () => {
 
   it('untyped mocks are deep mocks', () => {
     const anything = createMock()
-    anything.a?.b?.c?.(1)
-    expect(anything.a?.b?.c).toHaveBeenCalledWith(1)
+    anything['a']?.['b']?.['c']?.(1)
+    expect(anything['a']?.['b']?.['c']).toHaveBeenCalledWith(1)
   })
 
   it('{ deep: true } makes unconfigured methods return the same deep mock', () => {

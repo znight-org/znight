@@ -388,8 +388,11 @@ function readText(file: string): string | undefined {
 
 let temporaryCounter = 0
 
-/** Writes `content` to `file` when it differs (atomic rename). Returns `true` when written. */
-async function writeIfChanged(file: string, content: string): Promise<boolean> {
+/**
+ * Writes `content` to `file` when it differs (atomic rename). Returns `true` when written.
+ * Internal (shared with the Vite plugin and the Bun preload).
+ */
+export async function writeIfChanged(file: string, content: string): Promise<boolean> {
   if (readText(file) === content) {
     return false
   }

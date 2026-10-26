@@ -133,7 +133,7 @@ describe('config classes', () => {
   })
 
   it('generates the field definitions of the README example', () => {
-    const database = storedConfigs(result).DatabaseConfig
+    const database = storedConfigs(result)['DatabaseConfig']
     expect(database).toEqual({
       kind: 'config',
       token: 'src/config.ts#DatabaseConfig',
@@ -190,7 +190,7 @@ describe('config classes', () => {
 
   it('maps TypeScript types to field types and allowed values', () => {
     const fields = Object.fromEntries(
-      (storedConfigs(result).AppConfig?.fields ?? []).map(field => [
+      (storedConfigs(result)['AppConfig']?.fields ?? []).map(field => [
         field.property,
         [field.type, field.enum, field.required, ...(Object.hasOwn(field, 'default') ? [field.default] : [])],
       ]),
@@ -233,21 +233,21 @@ describe('config classes', () => {
 
   it('derives names from the prefix, @Env, @Secret and @Key', () => {
     const names = Object.fromEntries(
-      (storedConfigs(result).AppConfig?.fields ?? []).map(field => [
+      (storedConfigs(result)['AppConfig']?.fields ?? []).map(field => [
         field.property,
         [field.env, field.key, field.secret],
       ]),
     )
-    expect(names.maxConnections).toEqual(['MAX_CONNECTIONS', 'maxConnections', false])
-    expect(names.token).toEqual(['API_TOKEN', 'token', true])
-    expect(names.same).toEqual(['SAME', 'same', true])
-    expect(names.apiKey).toEqual(['API_KEY', 'apiKey', true])
+    expect(names['maxConnections']).toEqual(['MAX_CONNECTIONS', 'maxConnections', false])
+    expect(names['token']).toEqual(['API_TOKEN', 'token', true])
+    expect(names['same']).toEqual(['SAME', 'same', true])
+    expect(names['apiKey']).toEqual(['API_KEY', 'apiKey', true])
     expect(names['quoted-name']).toEqual(['QUOTED_NAME', 'quoted-name', false])
-    expect(storedConfigs(result).AppConfig?.prefix).toBeUndefined()
+    expect(storedConfigs(result)['AppConfig']?.prefix).toBeUndefined()
   })
 
   it('only emits optional keys when they have a value', () => {
-    const fields = storedConfigs(result).AppConfig?.fields ?? []
+    const fields = storedConfigs(result)['AppConfig']?.fields ?? []
     const name = fields.find(field => field.property === 'name') as object
     expect(Object.keys(name)).toEqual(['property', 'env', 'key', 'type', 'required', 'secret'])
     const retries = fields.find(field => field.property === 'retries') as object
@@ -333,16 +333,22 @@ export class RegionConfig extends PlainBase {
   it('includes the properties of base classes (with the prefix of the config class)', () => {
     expect(render(app.root, result.diagnostics)).toEqual([])
     const configs = storedConfigs(result)
-    expect(configs.ApiConfig?.bases).toEqual(['src/base.ts#BaseConfig'])
-    expect(configs.ApiConfig?.fields.map(field => [field.property, field.env, field.required, field.secret])).toEqual([
+    expect(configs['ApiConfig']?.bases).toEqual(['src/base.ts#BaseConfig'])
+    expect(
+      configs['ApiConfig']?.fields.map(field => [field.property, field.env, field.required, field.secret]),
+    ).toEqual([
       ['logLevel', 'LOG_LEVEL', false, false],
       ['token', 'API_TOKEN', true, true],
       ['port', 'API_PORT', false, false],
       ['url', 'API_URL', true, false],
     ])
-    expect(configs.WorkerConfig?.fields.map(field => field.env)).toEqual(['LOG_LEVEL', 'WORKER_TOKEN', 'WORKER_PORT'])
-    expect(configs.RegionConfig?.fields.map(field => field.property)).toEqual(['region', 'zone'])
-    expect(configs.RegionConfig?.bases).toEqual(['src/base.ts#PlainBase'])
+    expect(configs['WorkerConfig']?.fields.map(field => field.env)).toEqual([
+      'LOG_LEVEL',
+      'WORKER_TOKEN',
+      'WORKER_PORT',
+    ])
+    expect(configs['RegionConfig']?.fields.map(field => field.property)).toEqual(['region', 'zone'])
+    expect(configs['RegionConfig']?.bases).toEqual(['src/base.ts#PlainBase'])
   })
 
   it('does not register base classes as providers', () => {

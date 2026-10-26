@@ -1,0 +1,8 @@
+{
+  "name": "integration-app",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@znight/core": "0.1.0"
+  }
+}

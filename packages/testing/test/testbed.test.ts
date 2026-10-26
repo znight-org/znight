@@ -195,6 +195,94 @@ describe('TestBed.create: dependency kinds', () => {
     expect(second.instance.config.tags).toEqual(['a', 'b'])
   })
 
+  it('configuration defaults are converted to the field type, like @znight/config does at runtime', async () => {
+    class ServerConfig {
+      url!: URL
+      port!: number
+      verbose!: boolean
+      hosts!: string[]
+      ports!: number[]
+      extra!: unknown
+      label!: string
+      fallback!: unknown
+      initialized = 'initializer'
+      untouched = 'initializer'
+    }
+    class Server {
+      constructor(readonly config: ServerConfig) {}
+    }
+    const field = (property: string, type: string, value: unknown) => ({
+      property,
+      env: property.toUpperCase(),
+      key: `server.${property}`,
+      type,
+      default: value,
+      required: false,
+      secret: false,
+    })
+    const serverMetadata = createMetadata(
+      {
+        'src/server.config.ts#ServerConfig': {
+          scope: 'singleton',
+          class: ServerConfig,
+          deps: [],
+          factory: () => new ServerConfig(),
+        },
+        'src/server.ts#Server': {
+          scope: 'singleton',
+          class: Server,
+          deps: ['src/server.config.ts#ServerConfig'],
+          factory: d => new Server(d[0] as ServerConfig),
+        },
+      },
+      {
+        extensions: {
+          config: {
+            configs: [
+              {
+                token: 'src/server.config.ts#ServerConfig',
+                prefix: 'server',
+                fields: [
+                  field('url', 'url', ' http://localhost:5432/db '),
+                  field('port', 'number', '8080'),
+                  field('verbose', 'boolean', 'yes'),
+                  field('hosts', 'string[]', 'a, b,'),
+                  field('ports', 'number[]', ['1', 2]),
+                  field('extra', 'json', '{"retries":3}'),
+                  field('label', 'string', 42),
+                  field('fallback', 'number', 'not a number'),
+                  field('initialized', 'string', 'default'),
+                ],
+              },
+            ],
+          },
+        },
+      },
+    )
+    const { instance } = await TestBed.create(Server, { metadata: serverMetadata })
+    const config = instance.config
+    expect(config).toBeInstanceOf(ServerConfig)
+    expect(config.url).toBeInstanceOf(URL)
+    expect(config.url.href).toBe('http://localhost:5432/db')
+    expect(config).toMatchObject({
+      port: 8080,
+      verbose: true,
+      hosts: ['a', 'b'],
+      ports: [1, 2],
+      extra: { retries: 3 },
+      label: '42',
+      fallback: 'not a number', // not convertible: kept as is
+      initialized: 'default', // @Default wins over the initializer, as at runtime
+    })
+    const custom = await TestBed.create(Server, {
+      metadata: serverMetadata,
+      config: { server: { port: 9090 } },
+    })
+    expect(config.untouched).toBe('initializer')
+    expect(custom.instance.config.port).toBe(9090)
+    expect(custom.instance.config.url).not.toBe(config.url) // a new URL per instance
+  })
+
   it('invalid configuration values are ZNIGHT012', async () => {
     const unknownClass = await rejection(TestBed.create(UserService, { metadata, provide, config: { Nope: {} } }))
     expect(unknownClass.code).toBe(ErrorCode.InvalidConfig)

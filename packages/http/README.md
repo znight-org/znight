@@ -1,10 +1,10 @@
 # @znight/http
 
 HTTP for [Znight](../../README.md): controllers, routing, parameter coercion, validation with any
-[Standard Schema](https://standardschema.dev) library (Zod, Valibot, ArkType...), guards,
-interceptors, exception mappers, request scopes and graceful shutdown. It ships a zero-dependency
-server on `node:http` and adapters for **Fastify**, **Express** and **Hono**, and behaves the same
-on every one of them.
+[Standard Schema](https://standardschema.dev) library (Zod, Valibot, ArkType...), file uploads and
+downloads, streaming, guards, interceptors, exception mappers, request scopes and graceful shutdown.
+It ships a zero-dependency server on `node:http` and adapters for **Fastify**, **Express** and
+**Hono**, and behaves the same on every one of them (on Node.js and Bun).
 
 Like the rest of Znight, routes are resolved **at build time**: `@znight/http/compiler` reads your
 decorators and generates the route table and one `invoke` function per handler (argument
@@ -24,6 +24,7 @@ Runs on Node.js >= 24 and Bun >= 1.3 (ESM only). Decorators require `"experiment
 - [Validation](#validation)
 - [Request bodies](#request-bodies)
 - [Responses](#responses)
+- [Files](#files)
 - [Errors](#errors)
 - [Guards](#guards)
 - [Interceptors](#interceptors)
@@ -108,6 +109,7 @@ curl -X POST localhost:3000/api/users -H 'content-type: application/json' -d '{"
 | `@All(path?)`                            | method         | GET, HEAD, POST, PUT, PATCH, DELETE and OPTIONS, for methods without their own route   |
 | `@HttpCode(status)`                      | method         | Status of successful responses                                                         |
 | `@Header(name, value)`                   | method         | Header of successful responses (repeatable)                                            |
+| `@BodyLimit(size)`                       | class / method | Maximum request body size of the route(s) (`'10mb'`), see [Limits](#limits)            |
 | `@UseGuard(...guards)`                   | class / method | [Guards](#guards)                                                                      |
 | `@UseInterceptor(...interceptors)`       | class / method | [Interceptors](#interceptors)                                                          |
 | `@Validate(schema)`                      | method         | Sugar for `@Body(schema)`                                                              |
@@ -161,6 +163,8 @@ prepended to every route.
 | `@Body()`               | The parsed body (see [Request bodies](#request-bodies)), usually with a schema         |
 | `@Headers('x-api-key')` | A request header (case-insensitive), coerced                                           |
 | `@Headers()`            | Every header (`Record<string, string \| undefined>`, lower-case names)                 |
+| `@UploadedFile('f')`    | An uploaded `File` of a multipart body (see [Files](#uploads))                         |
+| `@UploadedFiles('f')`   | The uploaded files of a field (`File[]`)                                               |
 | `@Ctx()`                | The [`HttpContext`](#the-request-context)                                              |
 | `@Req()` / `@Res()`     | The native request / response of the adapter (escape hatch, see [Adapters](#adapters)) |
 
@@ -221,34 +225,37 @@ error with `strictValidation`).
 ## Request bodies
 
 Znight parses bodies itself (identically on every adapter), after the guards and before the
-interceptors, for routes declaring `@Body()`:
+interceptors, for routes declaring `@Body()` or [upload parameters](#uploads):
 
-| `content-type`                      | Body                                  |
-| ----------------------------------- | ------------------------------------- |
-| (empty body)                        | `undefined`                           |
-| `application/json`, `*/*+json`      | parsed JSON (`400` when malformed)    |
-| `text/*`                            | string (charset honoured)             |
-| `application/x-www-form-urlencoded` | record, repeated keys as arrays       |
-| `multipart/form-data`               | `FormData` (files are `File` objects) |
-| anything else / none                | `Uint8Array`                          |
-- Bodies above `bodyLimit` (default 1 MiB) answer `413` (checked on `content-length` first, then
-  while reading; the connection is closed).
+| `content-type`                      | Body                                                                          |
+| ----------------------------------- | ----------------------------------------------------------------------------- |
+| (empty body)                        | `undefined`                                                                   |
+| `application/json`, `*/*+json`      | parsed JSON (`400` when malformed)                                            |
+| `text/*`                            | string (charset honoured)                                                     |
+| `application/x-www-form-urlencoded` | record, repeated keys as arrays                                               |
+| `multipart/form-data`               | record of the **text fields**, repeated names as arrays; files in `ctx.files` |
+| anything else / none                | `Uint8Array`                                                                  |
+- Bodies above the body limit answer `413`: `bodyLimit` (default 1 MiB), `@BodyLimit(size)` on the
+  route or controller, or the computed limit of upload routes (see [Limits](#limits)). It is
+  checked on `content-length` first, then while reading; the connection is closed.
 - A `content-encoding` other than `identity` answers `415` (decompress upstream).
-- Other routes do not read the body: call `await ctx.parseBody()` (memoised) or
-  `await ctx.rawBody()` (bytes, e.g. to verify a webhook signature), or stream it from `@Req()`.
+- Other routes do not read the body: call `await ctx.parseBody()` (memoised),
+  `await ctx.rawBody()` (bytes, e.g. to verify a webhook signature) or `ctx.bodyStream()` (a Web
+  stream, nothing buffered: see [Large files](#large-files)).
 
 ## Responses
 
-| Handler result                               | Response                                                      |
-| -------------------------------------------- | ------------------------------------------------------------- |
-| object, array, number, boolean, `null`       | JSON (`application/json; charset=utf-8`), `toJSON()` honoured |
-| `string`                                     | `text/plain; charset=utf-8`                                   |
-| `Uint8Array`, `Buffer`, `ArrayBuffer`, views | `application/octet-stream`                                    |
-| `ReadableStream`, Node.js `Readable`         | streamed `application/octet-stream`                           |
-| `Blob` / `File`                              | streamed with the blob type                                   |
-| `undefined`                                  | empty body, `204` (`201` for `@Post`)                         |
-| `HttpResponse`                               | its body (same rules), status and headers                     |
-| Web `Response`                               | sent as is (`@HttpCode` / `@Header` do not apply)             |
+| Handler result                                  | Response                                                      |
+| ----------------------------------------------- | ------------------------------------------------------------- |
+| object, array, number, boolean, `null`          | JSON (`application/json; charset=utf-8`), `toJSON()` honoured |
+| `string`                                        | `text/plain; charset=utf-8`                                   |
+| `Uint8Array`, `Buffer`, `ArrayBuffer`, views    | `application/octet-stream`                                    |
+| `ReadableStream`, Node.js `Readable`            | streamed `application/octet-stream`                           |
+| `Blob` / `File`                                 | its bytes, with the blob type and its size                    |
+| `HttpResponse.file()` / `HttpResponse.stream()` | a file or a stream, see [Files](#downloads)                   |
+| `undefined`                                     | empty body, `204` (`201` for `@Post`)                         |
+| `HttpResponse`                                  | its body (same rules), status and headers                     |
+| Web `Response`                                  | sent as is (`@HttpCode` / `@Header` do not apply)             |
 
 **Status precedence:** `@HttpCode` > `HttpResponse.status` > default (`201` for `@Post` routes,
 `204` without body, `200` otherwise).
@@ -263,6 +270,8 @@ return HttpResponse.created(user, `/users/${user.id}`) // location header
 return HttpResponse.accepted()
 return HttpResponse.noContent()
 return HttpResponse.redirect('/login', 303)
+return HttpResponse.file('report.pdf', { root: REPORTS_DIR }) // see Files
+return HttpResponse.stream(rows(), { filename: 'export.csv' })
 return new HttpResponse(csv, { status: 200, headers: { 'content-type': 'text/csv' } }).withHeader('x-total', '42')
 ```
 
@@ -279,6 +288,316 @@ promise settles. Returning a Web `Response` is portable and usually better.
 | `fastify` | `FastifyRequest`       | `FastifyReply` (return `reply.send(...)`)            |
 | `express` | Express `Request`      | Express `Response`                                   |
 | `hono`    | Web `Request`          | Hono `Context` (return `c.text(...)`, `c.json(...)`) |
+
+## Files
+
+Uploads, downloads and streamed responses work the same on every adapter, on Node.js and Bun,
+without dependency: files are standard [`File`](https://developer.mozilla.org/docs/Web/API/File)
+objects, streams are Web `ReadableStream`s.
+
+- [Uploads](#uploads): `@UploadedFile` / `@UploadedFiles`, text fields with `@Body()`
+- [Limits](#limits): sizes, counts, media types, body limits
+- [Downloads](#downloads): `HttpResponse.file()`, conditional requests and ranges
+- [Streaming responses](#streaming-responses): `HttpResponse.stream()`
+- [Large files](#large-files): `ctx.bodyStream()`, presigned URLs
+- [Security](#security)
+
+### Uploads
+
+```ts
+import { Body, BodyLimit, Controller, Post, UploadedFile, UploadedFiles } from '@znight/http'
+import { z } from 'zod'
+
+export const AvatarForm = z.object({ title: z.string().min(1), public: z.stringbool().default(false) })
+
+@Controller('/profile')
+export class ProfileController {
+  constructor(private readonly storage: Storage) {}
+
+  @Post('/avatar')
+  async avatar(
+    @UploadedFile('avatar', { maxSize: '2mb', mimeTypes: ['image/png', 'image/jpeg'] }) avatar: File,
+    @Body(AvatarForm) form: z.output<typeof AvatarForm>, // the text fields of the form
+  ) {
+    const key = await this.storage.save(crypto.randomUUID(), avatar.stream(), avatar.type)
+    return { key, size: avatar.size, title: form.title }
+  }
+
+  @Post('/documents')
+  add(
+    @UploadedFiles('documents', { maxFiles: 5, maxSize: '20mb', mimeTypes: ['application/pdf'] }) documents: File[],
+    @UploadedFile('cover') cover?: File, // optional: undefined when absent
+  ) {}
+}
+```
+
+```sh
+curl -F title=Me -F avatar=@me.png localhost:3000/profile/avatar
+```
+
+| Decorator                        | Injects                                                                             |
+| -------------------------------- | ----------------------------------------------------------------------------------- |
+| `@UploadedFile('avatar', opts?)` | the file of the field (`File`, or `File \| undefined` when optional)                |
+| `@UploadedFile(opts?)`           | the single file of the body, whatever its field                                     |
+| `@UploadedFiles('docs', opts?)`  | the files of the field, in body order (`File[]`)                                    |
+| `@UploadedFiles(opts?)`          | every file of the body                                                              |
+| `@Body(schema?)`                 | the **text fields**: `Record<string, string \| string[]>` (repeated names → arrays) |
+
+The injected values are standard `File` objects, held in memory: `name`, `type`, `size`,
+`lastModified`, `arrayBuffer()`, `bytes()`, `text()`, `stream()`, `slice()`. `file.type` is the
+media type declared by the client, lower-cased (`application/octet-stream` when absent). Text fields
+are strings: validate them with a schema that converts them (`z.coerce.number()`,
+`z.stringbool()`); a repeated name gives an array and a single one a string
+(`z.union([z.string(), z.array(z.string())])` accepts both).
+
+Options (statically evaluated, like every decorator argument):
+
+| Option      | Default                                  | Description                                                                                                                                        |
+| ----------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `required`  | `true`, unless the parameter is optional | Answer `400` when no file is sent. An optional parameter (`file?: File`, `File \| undefined`) receives `undefined`; `@UploadedFiles` receives `[]` |
+| `maxSize`   | plugin `uploads.maxFileSize` (10 MiB)    | Maximum size of **each** file: bytes or `'512kb'`, `'5mb'` (`kb` = 1024), `Infinity`                                                               |
+| `maxFiles`  | plugin `uploads.maxFiles` (10)           | `@UploadedFiles` only: maximum number of files                                                                                                     |
+| `mimeTypes` | any                                      | Accepted types: `'image/png'`, `'image/*'`, `'*/*'` (parameters are ignored)                                                                       |
+
+Routes with upload parameters parse `multipart/form-data` bodies **before the interceptors**, as the
+body arrives, and enforce the options while reading: an invalid upload is rejected as soon as the
+offending part shows up, before the rest of the body is read. Files are only accepted in the
+declared fields. Errors:
+
+| Status | When                                                                | Message                                                                                  |
+| ------ | ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `400`  | a required file is missing                                          | `Missing file "avatar"` / `Missing files "documents"`                                    |
+| `400`  | a text value was sent in a file field                               | `Expected a file in field "avatar", received a text value`                               |
+| `400`  | a second file for `@UploadedFile`                                   | `Expected a single file in field "avatar"`                                               |
+| `400`  | a file in an undeclared field                                       | `Unexpected file field "other"` (`details.expected` lists the fields)                    |
+| `400`  | a malformed body (boundary, part headers, truncated body)           | `Invalid multipart body: ...`                                                            |
+| `413`  | a file above `maxSize`                                              | `File in field "avatar" exceeds the maximum size of 2 MiB`                               |
+| `413`  | more than `maxFiles` files                                          | `Too many files in field "documents" (at most 5)`                                        |
+| `413`  | too many parts, a text field too large, a body above the body limit | `Too many parts in the multipart body (at most 1000)`...                                 |
+| `415`  | a refused media type                                                | `Unsupported file type "text/plain" in field "avatar" (accepted: image/png, image/jpeg)` |
+| `415`  | a non-empty body that is not `multipart/form-data`                  | `Expected a multipart/form-data body (received "application/json")`                      |
+
+`details` carries the field and the limit (`{ field: 'avatar', maxSize: 2097152 }`). Errors raised
+while the body is still being sent carry `connection: close`: the rest of the body is discarded and
+the connection closed after the response.
+
+On routes **without** upload parameters, a multipart body read with `@Body()` or
+`ctx.parseBody()` also gives the text fields; its files are available in `ctx.files` (by field,
+within the plugin `uploads` limits and the body limit), and files of any field are accepted.
+
+> **Why not `Request.formData()`?** The Web-standard `formData()` buffers the whole body before
+> parsing it, has no per-file limits and its results differ between Node.js and Bun (default part
+> types, `filename*`, malformed bodies). Znight uses its own streaming RFC 7578 parser, shared by every
+> adapter: same results everywhere, early rejection, explicit limits.
+
+### Limits
+
+| Limit                            | Where                                          | Default                    |
+| -------------------------------- | ---------------------------------------------- | -------------------------- |
+| size of each file                | `maxSize` option, plugin `uploads.maxFileSize` | 10 MiB                     |
+| number of files of a parameter   | `maxFiles` option, plugin `uploads.maxFiles`   | 10 (1 for `@UploadedFile`) |
+| number of parts (fields + files) | plugin `uploads.maxParts`                      | 1000                       |
+| size of a text field             | plugin `uploads.maxFieldSize`                  | 1 MiB                      |
+| size of the part headers         | built in                                       | 16 KiB                     |
+| size of the whole body           | `@BodyLimit(size)`, plugin `bodyLimit`         | see below                  |
+
+```ts
+HttpPlugin.configure({
+  bodyLimit: '1mb', // JSON, text, forms...
+  uploads: { maxFileSize: '25mb', maxFiles: 20, maxParts: 200, maxFieldSize: '64kb' },
+})
+```
+
+The **body limit** of a route is `@BodyLimit(size)` (on the route, or on the controller for all its
+routes) when present. Otherwise it is the plugin `bodyLimit` for ordinary routes and, for upload
+routes, the sum of what their upload parameters accept (`maxSize × maxFiles` each) plus `bodyLimit`
+(room for the text fields and the multipart framing): an avatar route with `maxSize: '2mb'` accepts
+bodies up to 3 MiB by default. Set `@BodyLimit` to cap a route accepting many large files, or
+`@BodyLimit(Infinity)` to disable the limit of a route that streams its body itself.
+
+Uploaded files are **held in memory** within these limits: keep them proportionate to your memory
+and expected concurrency, and see [Large files](#large-files) beyond a few dozen megabytes.
+`parseByteSize('10mb')` (→ `10485760`) and `formatByteSize(n)` convert sizes like the options do.
+
+### Downloads
+
+`HttpResponse.file(path | URL | Blob, options?)` sends a file:
+
+```ts
+import { Controller, Get, HttpResponse, Param } from '@znight/http'
+
+const REPORTS = '/srv/app/reports'
+
+@Controller('/reports')
+export class ReportController {
+  @Get('/*')
+  download(@Param('*') name: string) {
+    // `root` confines the path: '../../etc/passwd' or a symbolic link leaving the directory answer 404
+    return HttpResponse.file(name, { root: REPORTS })
+  }
+
+  @Get('/:id/export')
+  async export(@Param('id') id: string) {
+    const report = await this.reports.find(id)
+    return HttpResponse.file(report.path, { filename: `Rapport été ${report.year}.pdf` }) // attachment
+  }
+
+  @Get('/:id/preview')
+  preview(@Param('id') id: string) {
+    return HttpResponse.file(this.reports.pathOf(id), { disposition: 'inline', contentType: 'application/pdf' })
+  }
+
+  @Get('/generated.json')
+  generated() {
+    return HttpResponse.file(new File([JSON.stringify(data)], 'data.json', { type: 'application/json' }))
+  }
+}
+```
+
+| Option        | Default                                                                                               | Description                                                                                             |
+| ------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `root`        | none (the path is used as given, relative to the working directory)                                   | Directory the path is resolved in; the real file (links followed) must stay inside it, otherwise `404`  |
+| `dotfiles`    | `'deny'`                                                                                              | With `root`: `'allow'` to send names starting with a dot (`.env`, `.git/config` answer `404` otherwise) |
+| `filename`    | none                                                                                                  | Name proposed to the client; makes the response an `attachment`                                         |
+| `disposition` | `attachment` with `filename`, else no header                                                          | `'attachment'` (download) or `'inline'` (display); without `filename` the file name is used             |
+| `contentType` | the `Blob` type, else from the extension of `filename` / of the path, else `application/octet-stream` | Media type (text types get `; charset=utf-8`)                                                           |
+
+The response carries `Content-Type`, `Content-Length`, `Accept-Ranges: bytes`, `Last-Modified` and a
+strong `ETag` (`"<mtime>-<size>"`, from the modification time and the size; `File` objects use
+`lastModified`), and answers:
+
+| Request                                                                     | Response                                                         |
+| --------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `GET` / `HEAD`                                                              | `200` (`HEAD`: headers only)                                     |
+| `If-None-Match` matching (weak comparison) or `If-Modified-Since` not older | `304 Not Modified`, no body                                      |
+| `If-Match` not matching, or `If-Unmodified-Since` older                     | `412 Precondition Failed`                                        |
+| `Range: bytes=0-499`, `bytes=500-`, `bytes=-500` (single range, `GET`)      | `206 Partial Content` with `Content-Range`                       |
+| a range starting after the end                                              | `416 Range Not Satisfiable` with `Content-Range: bytes */<size>` |
+| several ranges, another unit, a stale `If-Range`                            | `200` with the whole file (as RFC 9110 allows)                   |
+| a missing file, a directory, a path leaving `root`, a dotfile               | `404` `File not found` (the path is never echoed)                |
+
+`Content-Disposition` follows RFC 6266: an ASCII fallback in `filename` and the UTF-8 name in
+`filename*` (RFC 8187 / 5987), directory parts and control characters removed:
+`attachment; filename="Rapport _t_ 2024.pdf"; filename*=UTF-8''Rapport%20%C3%A9t%C3%A9%202024.pdf`.
+`contentDisposition(filename, type?)` builds this header for your own responses,
+`contentTypeFor(filename)` looks a type up in the built-in table, `parseRange(header, size)` parses a
+`Range` header and `matchesMediaType(type, patterns)` applies `mimeTypes`-like filters.
+
+Files on disk are sent as file-backed blobs (`fs.openAsBlob()`): read lazily as the client receives
+them, no descriptor kept open, `sendfile` on Bun. Headers set with `.withHeader()`
+(`cache-control`...), `@Header` and `ctx.setHeader()` are added; a `200` follows the usual status
+precedence, `206` / `304` keep theirs.
+
+Returning a `File` / `Blob` directly sends it with its type and size (no `Content-Disposition`,
+ranges or validators: use `HttpResponse.file(blob)` for those).
+
+### Streaming responses
+
+`HttpResponse.stream(source, { contentType?, filename?, disposition? })` streams a Web
+`ReadableStream`, a Node.js `Readable` or any async iterable (async generator) of `Uint8Array` /
+`string` chunks (strings are encoded as UTF-8):
+
+```ts
+@Get('/export.csv')
+export() {
+  const users = this.users
+  async function* lines() {
+    yield 'id,email\n'
+    for await (const user of users.iterate()) yield `${user.id},${user.email}\n`
+  }
+  return HttpResponse.stream(lines(), { filename: 'users.csv' }) // text/csv; charset=utf-8, attachment
+}
+
+@Get('/logs')
+logs() {
+  return HttpResponse.stream(createReadStream('/var/log/app.log'), { contentType: 'text/plain; charset=utf-8' })
+}
+```
+
+- **Backpressure**: the source is read only as fast as the client receives the data (on every
+  adapter); a slow client never makes the server buffer the whole stream.
+- **Cancellation**: when the client disconnects, the source is cancelled (`return()` of the
+  iterator — `finally` blocks run —, `destroy()` of a `Readable`, `cancel()` of a Web stream).
+- **Request scope**: request-scoped instances live until the stream has been fully sent or
+  cancelled, and the source runs in the request scope (`Lazy<HttpContext>`, request-scoped
+  providers and tracing contexts keep working while it produces chunks).
+- **Errors**: a source failing after the headers were sent cannot change the status: the connection
+  is closed (the client sees a truncated response) and the error is logged (`The response stream
+  failed`).
+- **Shutdown**: streamed responses are in-flight requests: the graceful drain waits for them up to
+  `drainTimeoutMs`, then closes their connections (cancelling their sources).
+
+Streams have no `Content-Length` (chunked transfer encoding). Returning a `ReadableStream` or a
+`Readable` directly also works (`application/octet-stream`).
+
+### Large files
+
+Uploaded files are buffered in memory. For files of hundreds of megabytes or more:
+
+1. **Upload directly to object storage (recommended).** The API authorises the upload and returns a
+   presigned URL (S3, GCS, Azure Blob, R2...); the client sends the file to the storage, then
+   notifies the API. Your servers never carry the bytes; storage handles resumable and multipart
+   uploads.
+
+   ```ts
+   @Post('/uploads')
+   async createUpload(@Body(NewUpload) input: NewUpload) {
+     const key = `uploads/${crypto.randomUUID()}`
+     const url = await getSignedUrl(s3, new PutObjectCommand({ Bucket, Key: key, ContentType: input.type }), {
+       expiresIn: 300,
+     })
+     return { key, url } // the client PUTs the file to `url`, then calls POST /uploads/:key/complete
+   }
+   ```
+
+2. **Stream the raw body.** Send the file as the request body (`PUT /files/:name`, `curl -T`) and
+   read it with `ctx.bodyStream()`: nothing is buffered, backpressure applies (the request is paused
+   while you write), and the body limit of the route still applies (`@BodyLimit`):
+
+   ```ts
+   import { createWriteStream } from 'node:fs'
+   import { join } from 'node:path'
+   import { Readable } from 'node:stream'
+   import { pipeline } from 'node:stream/promises'
+
+   @Put('/files/:id')
+   @BodyLimit('5gb')
+   async store(@Param('id', FileId) id: string, @Ctx() ctx: HttpContext) {
+     // never build the path from the client's file name
+     await pipeline(Readable.fromWeb(ctx.bodyStream()), createWriteStream(join(UPLOADS_DIR, id)))
+     return HttpResponse.created(undefined, `/files/${id}`)
+   }
+   ```
+
+   `ctx.bodyStream()` reads the body once and is exclusive with `@Body()`, upload parameters,
+   `ctx.parseBody()` and `ctx.rawBody()`. A `multipart/form-data` body read this way is raw: parse
+   it with a streaming parser of your choice (e.g. `busboy`) if you must accept huge browser form
+   uploads.
+
+3. **Serve large files with `HttpResponse.file()`**: they are streamed from disk, with ranges for
+   resumable downloads and video seeking.
+
+### Security
+
+- **Never trust the client's file name.** `File.name` is chosen by the client (it may contain
+  `../`, absolute paths, control characters or names of existing files). Do not use it as a path:
+  store files under generated identifiers and keep the original name as metadata. When you must
+  display or reuse it, `path.basename()` it and limit its characters.
+- **Never trust the client's media type.** `File.type` and `mimeTypes` filters rely on what the client
+  declares: they reject honest mistakes, not attackers. When the type matters, check the content
+  (magic numbers, e.g. with [`file-type`](https://github.com/sindresorhus/file-type)) and decode
+  images with a library that re-encodes them.
+- **Confine downloads.** Always pass `root` to `HttpResponse.file()` when any part of the path comes
+  from the request: `..` segments, absolute paths, encoded separators (`..%2F`), symbolic links
+  leaving the directory and dotfiles (`.env`, `.git/`) answer `404`. Without `root`, the path is used
+  as given.
+- **Store uploads outside of the web root**, never in a directory served statically, and do not serve
+  user content inline from your application's origin: send it as an `attachment`, with
+  `X-Content-Type-Options: nosniff`, or from a separate domain (an uploaded HTML or SVG file served
+  inline runs scripts in your origin).
+- **Keep limits tight.** Limits protect memory and CPU: size each route for what it accepts
+  (`maxSize`, `maxFiles`, `@BodyLimit`) and lower the plugin defaults if your routes accept less.
+  Rate-limit upload routes and consider quotas and malware scanning for untrusted files.
 
 ## Errors
 
@@ -401,19 +720,21 @@ export class TimingInterceptor implements HttpInterceptor {
 `HttpContext` is adapter-neutral. Use it with `@Ctx()`, in guards, interceptors and mappers, or
 inject it in request-scoped providers.
 
-| Member                                             | Description                                                            |
-| -------------------------------------------------- | ---------------------------------------------------------------------- |
-| `requestId`                                        | Incoming `x-request-id` (when valid) or a generated UUID               |
-| `method`, `url`, `path`                            | Upper-case method, raw target (`/a%20b?x=1`), raw path                 |
-| `params`                                           | Decoded route parameters (`'*'` for the wildcard)                      |
-| `query`                                            | Parsed query, repeated keys as arrays (parsed on first access)         |
-| `headers`, `header(name)`                          | Request headers (lower-case names)                                     |
-| `body`, `parseBody()`, `rawBody()`                 | Parsed body ([when](#request-bodies)), lazy parsing, raw bytes         |
-| `route`                                            | `{ method, path, controller, handler, meta }`, `undefined` for 404/405 |
-| `state`                                            | `Map` shared by guards, interceptors and handlers                      |
-| `setHeader()`, `appendHeader()`, `responseHeaders` | Response headers, also sent with errors                                |
-| `request`, `response`                              | Native objects of the adapter                                          |
-| `adapter`, `ip`                                    | Adapter name, remote address                                           |
+| Member                                             | Description                                                              |
+| -------------------------------------------------- | ------------------------------------------------------------------------ |
+| `requestId`                                        | Incoming `x-request-id` (when valid) or a generated UUID                 |
+| `method`, `url`, `path`                            | Upper-case method, raw target (`/a%20b?x=1`), raw path                   |
+| `params`                                           | Decoded route parameters (`'*'` for the wildcard)                        |
+| `query`                                            | Parsed query, repeated keys as arrays (parsed on first access)           |
+| `headers`, `header(name)`                          | Request headers (lower-case names)                                       |
+| `body`, `parseBody()`, `rawBody()`                 | Parsed body ([when](#request-bodies)), lazy parsing, raw bytes           |
+| `files`                                            | Files of a multipart body by field (`Record<string, File[]>`)            |
+| `bodyStream()`                                     | The body as a Web stream, nothing buffered ([Large files](#large-files)) |
+| `route`                                            | `{ method, path, controller, handler, meta }`, `undefined` for 404/405   |
+| `state`                                            | `Map` shared by guards, interceptors and handlers                        |
+| `setHeader()`, `appendHeader()`, `responseHeaders` | Response headers, also sent with errors                                  |
+| `request`, `response`                              | Native objects of the adapter                                            |
+| `adapter`, `ip`                                    | Adapter name, remote address                                             |
 
 Each request runs in a container scope seeded with `HttpContext` and `RequestId`:
 
@@ -432,8 +753,9 @@ export class AuditService {
 }
 ```
 
-Request-scoped instances are disposed when the request completes (before a streamed body has been
-fully sent).
+Request-scoped instances are disposed when the response has been sent: for a streamed body, once
+the stream has been fully sent or cancelled (client disconnected), so stream producers can use
+them.
 
 ## Hooks and observability
 
@@ -466,21 +788,22 @@ app.hooks.wrap('http:request', async (event, next) => {
 `HttpPlugin.configure(options)` — `options` may also be a function of the container, evaluated
 once at bootstrap: `HttpPlugin.configure(c => ({ port: c.get(AppConfig).port }))`.
 
-| Option              | Default         | Description                                                                                    |
-| ------------------- | --------------- | ---------------------------------------------------------------------------------------------- |
-| `adapter`           | `nodeAdapter()` | Server implementation                                                                          |
-| `port`              | `3000`          | Port (`0`: a free port, see `plugin.address`)                                                  |
-| `host`              | `0.0.0.0`       | Interface to bind                                                                              |
-| `prefix`            | —               | Static path prefixed to every route (`/api`)                                                   |
-| `guards`            | `[]`            | Global guards: provider classes or instances                                                   |
-| `interceptors`      | `[]`            | Global interceptors (outermost first)                                                          |
-| `exceptionMappers`  | `[]`            | Exception mappers, tried in order                                                              |
-| `trailingSlash`     | `'strict'`      | `'strict'`, `'ignore'` or `'redirect'`                                                         |
-| `exposeErrors`      | `false`         | Send the message of unexpected errors in 500 responses                                         |
-| `bodyLimit`         | `1048576`       | Maximum body size in bytes                                                                     |
-| `requestIdHeader`   | `x-request-id`  | Header read (when ≤ 128 chars of `[A-Za-z0-9_-.:@/+=]`) and echoed; `false` to always generate |
-| `generateRequestId` | `randomUUID`    | Request id generator                                                                           |
-| `drainTimeoutMs`    | `4000`          | Maximum wait for in-flight requests on shutdown (keep it below `shutdown.hookTimeoutMs`)       |
+| Option              | Default               | Description                                                                                    |
+| ------------------- | --------------------- | ---------------------------------------------------------------------------------------------- |
+| `adapter`           | `nodeAdapter()`       | Server implementation                                                                          |
+| `port`              | `3000`                | Port (`0`: a free port, see `plugin.address`)                                                  |
+| `host`              | `0.0.0.0`             | Interface to bind                                                                              |
+| `prefix`            | —                     | Static path prefixed to every route (`/api`)                                                   |
+| `guards`            | `[]`                  | Global guards: provider classes or instances                                                   |
+| `interceptors`      | `[]`                  | Global interceptors (outermost first)                                                          |
+| `exceptionMappers`  | `[]`                  | Exception mappers, tried in order                                                              |
+| `trailingSlash`     | `'strict'`            | `'strict'`, `'ignore'` or `'redirect'`                                                         |
+| `exposeErrors`      | `false`               | Send the message of unexpected errors in 500 responses                                         |
+| `bodyLimit`         | `1048576`             | Maximum body size: bytes or `'10mb'` (see [Limits](#limits); routes: `@BodyLimit`)             |
+| `uploads`           | see [Limits](#limits) | `{ maxFileSize, maxFiles, maxParts, maxFieldSize }` of multipart bodies                        |
+| `requestIdHeader`   | `x-request-id`        | Header read (when ≤ 128 chars of `[A-Za-z0-9_-.:@/+=]`) and echoed; `false` to always generate |
+| `generateRequestId` | `randomUUID`          | Request id generator                                                                           |
+| `drainTimeoutMs`    | `4000`                | Maximum wait for in-flight requests on shutdown (keep it below `shutdown.hookTimeoutMs`)       |
 
 The plugin instance (`app.getPlugin<HttpPlugin>('http')`, or injected as `HttpPlugin`) exposes
 `address` (`{ host, port, family, url }`, `String(address)` is the URL; `undefined` when not
@@ -572,6 +895,10 @@ On Bun the server is `Bun.serve()`; on Node.js, `@hono/node-server`. Pass `app` 
 `adapter.fetch` is the Fetch handler of the application. `inject()` uses
 `app.request()`.
 
+`Bun.serve()` sends streamed bodies with chunked transfer encoding even when a `Content-Length`
+header is set (unless the whole stream is available at once): files sent with
+`HttpResponse.file()` and `Blob` / `File` results are sent as blobs, with their length.
+
 ### Optional peer dependencies
 
 | Package             | Needed for                                        |
@@ -596,20 +923,33 @@ expect(response.status).toBe(201)
 expect(response.json()).toEqual({ id: 1, name: 'Ada', email: 'ada@example.com' })
 ```
 
-`InjectRequest`: `{ method, url, headers?, body?, query? }` — strings and bytes are sent as is,
-other bodies as JSON. `InjectResponse`: `{ status, headers, body, json() }` (lower-case header
-names, repeated headers joined with `, `). For end-to-end tests over the network, start the
-application with `port: 0` and use `String(http.address)` as the base URL.
+`InjectRequest`: `{ method, url, headers?, body?, query? }` — strings and bytes are sent as is, a
+`FormData` as `multipart/form-data` (files included), a `Blob` / `File` with its type, other bodies
+as JSON. `InjectResponse`: `{ status, headers, body, bytes, json() }` (lower-case header names,
+repeated headers joined with `, `; `bytes` holds the raw body, for downloads). For end-to-end tests
+over the network, start the application with `port: 0` and use `String(http.address)` as the base
+URL.
+
+```ts
+const form = new FormData()
+form.append('title', 'Me')
+form.append('avatar', new File([await Bun.file('test/fixtures/me.png').bytes()], 'me.png', { type: 'image/png' }))
+const uploaded = await http.inject({ method: 'POST', url: '/profile/avatar', body: form })
+
+const partial = await http.inject({ method: 'GET', url: '/reports/q1.pdf', headers: { range: 'bytes=0-99' } })
+expect(partial.status).toBe(206)
+expect(partial.bytes.byteLength).toBe(100)
+```
 
 ## Lifecycle and graceful shutdown
 
-| Plugin hook   | What happens                                                                                                                          |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `register`    | Declares the request-scoped externals `HttpContext` and `RequestId`, registers the plugin                                             |
-| `onBootstrap` | Resolves options, controllers, guards, interceptors and mappers; validates and registers routes                                       |
-| `onStart`     | Listens (logs the address)                                                                                                            |
-| `onStop`      | Stops accepting connections, closes idle ones, waits for in-flight requests (`drainTimeoutMs`), then closes the remaining connections |
-| `onDispose`   | Closes the server and the adapter                                                                                                     |
+| Plugin hook   | What happens                                                                                                                                                 |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `register`    | Declares the request-scoped externals `HttpContext` and `RequestId`, registers the plugin                                                                    |
+| `onBootstrap` | Resolves options, controllers, guards, interceptors and mappers; validates and registers routes                                                              |
+| `onStart`     | Listens (logs the address)                                                                                                                                   |
+| `onStop`      | Stops accepting connections, closes idle ones, waits for in-flight requests and streamed responses (`drainTimeoutMs`), then closes the remaining connections |
+| `onDispose`   | Closes the server and the adapter                                                                                                                            |
 
 While draining, responses carry `connection: close`. Singletons (controllers, singleton guards,
 interceptors and mappers) are resolved at bootstrap; request-scoped and transient ones on every
@@ -654,6 +994,10 @@ a default value, or `| undefined` / `| null` in its type; route parameters are a
 Anything else (objects, other unions, tuples, nested arrays) is an error for `@Param` / `@Headers`
 and a ZNIGHT017 warning for `@Query` (the raw value is passed): use a schema.
 
+Upload parameters are typed `File` (`@UploadedFile`) or `File[]` / `readonly File[]`
+(`@UploadedFiles`); `Blob`, `unknown`, `any`, `node:buffer`'s `File` and missing annotations are
+accepted too. `file?: File` / `File | undefined` makes an upload optional (`required: false`).
+
 ### Diagnostics
 
 - **ZNIGHT005** (invalid decorator usage): a decorator on the wrong target, outside a controller or
@@ -661,15 +1005,19 @@ and a ZNIGHT017 warning for `@Query` (the raw value is passed): use a schema.
   bad header names, a schema that is not a reference to an exported binding); a handler that is
   static, `private`/`protected`, `#private`, an accessor or has a computed name; a handler parameter
   without HTTP decorator; `@Validate(S)` combined with `@Body(S2)`; an invalid
-  `createRouteDecorator` declaration. `@Res()` and `@Body(SomeClass)` (a class is not a schema) are
-  warnings.
+  `createRouteDecorator` declaration; upload parameters: a type other than `File` / `File[]`, an
+  invalid field or option (unknown key, `maxSize` that is not a size, `maxFiles` on
+  `@UploadedFile`, invalid media type patterns), `{ required: false }` on a parameter typed `File`,
+  two parameters reading the same field, a parameter without field combined with others; an
+  invalid `@BodyLimit`. `@Res()`, `@Body(SomeClass)` (a class is not a schema) and upload
+  parameters on `GET` / `HEAD` / `DELETE` / `OPTIONS` routes are warnings.
 - **ZNIGHT007** (invalid route): path grammar (base path, route path and their combination); a
   `:param` not consumed by `@Param('param')` (a `@Param()`, `@Ctx()` or `@Req()` parameter consumes
   them all); a `@Param('x')` without `:x` in the path; a `@Param` / `@Headers` type that cannot be
   coerced; two routes with the same method and path shape anywhere in the application.
 - **ZNIGHT017** (unvalidated input): a non-primitive `@Body()` / `@Query()` without schema (`string`,
-  `unknown`, `Uint8Array`, `FormData`, `Record<string, string | string[]>` are fine). A warning, an
-  error with the compiler option `strictValidation`.
+  `unknown`, `Uint8Array`, `FormData`, `Record<string, string | string[]>` — the text fields of a
+  form — are fine). A warning, an error with the compiler option `strictValidation`.
 - **ZNIGHT003** (scope mismatch): a singleton controller uses a request-scoped guard or interceptor
   (directly or through transient ones). Make the controller request-scoped, or the guard a
   singleton (it receives the `HttpContext` as argument).
@@ -709,8 +1057,8 @@ This section is the stable contract between the runtime and the compiler extensi
 
 ### Metadata (`metadata.extensions.http`)
 
-Types: `HttpMetadata`, `HttpControllerDefinition`, `HttpRouteDefinition`, `HttpParamDefinition`
-(exported from `@znight/http`; architecture §9.1).
+Types: `HttpMetadata`, `HttpControllerDefinition`, `HttpRouteDefinition`, `HttpParamDefinition`,
+`HttpUploadDefinition` (exported from `@znight/http`; architecture §9.1).
 
 ```ts
 extensions: {
@@ -737,6 +1085,27 @@ extensions: {
             rawResponse: true,                // only when the handler takes @Res()
             invoke: (c: UserController, ctx: HttpContext) => c.find(coerce.number(ctx.params['id'], 'param "id"')),
           },
+          {
+            method: 'POST',
+            path: '/:id/avatar',
+            fullPath: '/users/:id/avatar',
+            handler: 'avatar',
+            meta: {},
+            guards: [],
+            interceptors: [],
+            params: [
+              { index: 0, source: 'param', name: 'id', type: 'string' },
+              { index: 1, source: 'file', name: 'avatar' },                 // 'file' / 'files', name = field
+              { index: 2, source: 'files', name: 'extra', optional: true },
+            ],
+            bodyLimit: 10485760,              // @BodyLimit (route, else controller), bytes; omitted when absent
+            uploads: [                        // one per upload parameter, in parameter order; omitted when none
+              { field: 'avatar', required: true, maxSize: 2097152, mimeTypes: ['image/*'] },
+              { field: 'extra', multiple: true, maxFiles: 3 },
+            ],
+            invoke: (c: UserController, ctx: HttpContext) =>
+              c.avatar(coerce.string(ctx.params['id'], 'param "id"'), uploads.file(ctx, 'avatar'), uploads.optionalFiles(ctx, 'extra')),
+          },
         ],
       },
     ],
@@ -745,8 +1114,9 @@ extensions: {
 ```
 
 Rules:
-- Optional fields (`status`, `headers`, `rawResponse`, param `name`/`type`/`optional`/`schema`)
-  are omitted when absent (`exactOptionalPropertyTypes`).
+- Optional fields (`status`, `headers`, `bodyLimit`, `uploads`, `rawResponse`, param
+  `name`/`type`/`optional`/`schema`, upload `field`/`multiple`/`required`/`maxSize`/`maxFiles`/
+  `mimeTypes`) are omitted when absent (`exactOptionalPropertyTypes`).
 - `meta` values: a `createRouteDecorator` call without argument stores `true`. A decorator is a
   route decorator when its callee is a `const` initialised with a call to
   `@znight/http#createRouteDecorator`; its `key` (first argument) is static.
@@ -754,7 +1124,18 @@ Rules:
   `@Validate(S)` + `@Body(S2)` is ZNIGHT005. Without a `@Body()` parameter the body is still
   validated (and discarded): `invoke: async (c, ctx) => { await validate(S, await ctx.parseBody(), 'body'); return c.m() }`.
 - The plugin parses the body before the interceptors when `params` contains a `source: 'body'`
-  entry; `ctx.body` is `undefined` otherwise (generated code then uses `await ctx.parseBody()`).
+  entry or `uploads` is not empty; `ctx.body` is `undefined` otherwise (generated code then uses
+  `await ctx.parseBody()`).
+- `uploads` (`HttpUploadDefinition`: `{ field?, multiple?, required?, maxSize?, maxFiles?, mimeTypes? }`)
+  drives the multipart parsing of the route: files are only accepted in these fields (any field for
+  an entry without `field`), `maxSize` defaults to the plugin `uploads.maxFileSize`, `maxFiles` to
+  `uploads.maxFiles` (always 1 without `multiple`), `mimeTypes` are patterns (`type/subtype`,
+  `type/*`, `*/*`). At most one entry per field, and an entry without field stands alone (checked
+  at boot, ZNIGHT007). `required` is informational: presence is checked by `invoke` (`uploads.file`
+  vs `uploads.optionalFile`). Sizes are bytes (`Infinity` allowed): the compiler converts
+  `'2mb'`-like options with `parseByteSize` (binary units).
+- `bodyLimit` (bytes, `Infinity` allowed) overrides the plugin `bodyLimit`; without it, routes with
+  `uploads` use `bodyLimit + Σ maxSize × maxFiles`.
 - Guards, interceptors and controllers referenced by tokens must be providers (the compiler
   registers injectable helper classes, §6.5 `resolveClassRef`). Request-scoped guards/interceptors
   are allowed.
@@ -782,6 +1163,9 @@ is synchronous. It returns the handler result as is (promises included).
 | `@Headers('X-Api-Key') key: T`          | `coerce.X(ctx.headers['x-api-key'], 'header "x-api-key"')` (name lower-cased)  |
 | `@Headers()`                            | `ctx.headers as never`                                                         |
 | `@Req()` / `@Res()`                     | `ctx.request as never` / `ctx.response as never` (+ `rawResponse: true`)       |
+| `@UploadedFile('f') f: File`            | `uploads.file(ctx, 'f')` · optional: `uploads.optionalFile(ctx, 'f')`          |
+| `@UploadedFiles('f') f: File[]`         | `uploads.files(ctx, 'f')` · optional: `uploads.optionalFiles(ctx, 'f')`        |
+| `@UploadedFile()` / `@UploadedFiles()`  | the same helpers with `undefined` as field (any field)                         |
 | `@Ctx()`                                | `ctx`                                                                          |
 
 `coerce.X` by declared type (`T`):
@@ -824,12 +1208,22 @@ function validate<S extends StandardSchemaV1>(
   value: unknown,
   location: string,
 ): InferSchemaOutput<S> | Promise<InferSchemaOutput<S>>
+
+const uploads: {
+  file(ctx: HttpContext, field: string | undefined): File // 400 `Missing file "field"` when absent
+  optionalFile(ctx: HttpContext, field: string | undefined): File | undefined
+  files(ctx: HttpContext, field: string | undefined): File[] // 400 `Missing files "field"` when empty
+  optionalFiles(ctx: HttpContext, field: string | undefined): File[]
+}
 ```
 
 Every coercion failure throws `BadRequestException` (400); `validate` throws `ValidationException`
-(400, `details: [{ path, message }]`) and `TypeError` when `schema` is not a Standard Schema.
-Generated modules import them with `import { coerce, validate } from '@znight/http'` and the context
-type with `import type { HttpContext } from '@znight/http'`.
+(400, `details: [{ path, message }]`) and `TypeError` when `schema` is not a Standard Schema; the
+`uploads` helpers read `ctx.files` (`undefined` field: every field) and throw `BadRequestException`
+for missing required files (`Expected a file in field "f", received a text value` when the field
+was sent as text). Generated modules import them with
+`import { coerce, uploads, validate } from '@znight/http'` and the context type with
+`import type { HttpContext } from '@znight/http'`.
 
 ### Manifest
 
@@ -849,8 +1243,10 @@ Tokens: `@znight/http#HttpContext`, `@znight/http#RequestId`, `@znight/http#Http
 (`HttpTokens`). `RequestId` is a branded string type alias. Decorator identities:
 `@znight/http#Controller`, `#Get`, `#Post`, `#Put`, `#Patch`, `#Delete`, `#Head`, `#Options`,
 `#All`, `#Param`, `#Query`, `#Body`, `#Headers`, `#Req`, `#Res`, `#Ctx`, `#HttpCode`, `#Header`,
-`#UseGuard`, `#UseInterceptor`, `#Validate`, `#createRouteDecorator`. `@Param`/`@Query` take
-either a static name (string) and an optional schema, or a schema alone.
+`#BodyLimit`, `#UploadedFile`, `#UploadedFiles`, `#UseGuard`, `#UseInterceptor`, `#Validate`,
+`#createRouteDecorator`. `@Param`/`@Query` take either a static name (string) and an optional
+schema, or a schema alone; `@UploadedFile`/`@UploadedFiles` a static field and/or static options;
+`@BodyLimit` a static size (class or method).
 
 ## Writing an adapter
 
@@ -872,8 +1268,20 @@ interface HttpAdapter {
   or match it with `matchRoutePath` / the segment trie. Routes arrive sorted (HEAD first, most
   specific first), ready for first-match routers.
 - Build an `AdapterRequest` (`method`, raw `url`, lower-case `headers`, `readBody(limit)`, native
-  `raw`/`rawResponse`) and write the `AdapterReply` (`status`, `headers`, `body`: bytes, stream or
-  `null`; write nothing when `raw`).
+  `raw`/`rawResponse`) and write the `AdapterReply` (`status`, `headers`, `body`: bytes, a stream, a
+  `Blob` or `null`; write nothing when `raw`).
+- Optionally implement `streamBody(limit)`: the body as a pull-based Web stream (pause the source
+  while the consumer does not read), erroring with `PayloadTooLargeException` past `limit` bytes
+  (check `content-length` first) and with `BadRequestException` when the client aborts; cancelling
+  it must **discard** the rest of the body without closing the connection (the error response is
+  still written). Without it, multipart bodies are buffered with `readBody` before being parsed and
+  `ctx.bodyStream()` streams the buffered bytes. `hasBody()` tells whether a request without
+  `content-length` / `transfer-encoding` has a body (Web `Request`s built in memory).
+- A stream `body` MUST be read to its end or cancelled (client gone, response not sent): the request
+  scope and the in-flight count are released then. Send `Blob` bodies with their length
+  (`new Response(blob)`, or `blob.stream()` with the `content-length` header the plugin sets).
+- `inject()` accepts `FormData` and `Blob` bodies (encode them with `new Response(body)`) and returns
+  the raw body in `InjectResponse.bytes`.
 - Parameters, query, body parsing, HEAD bodies and errors are handled by the plugin: do not parse
   bodies or decode parameters in the adapter.
 
@@ -881,7 +1289,10 @@ interface HttpAdapter {
 
 - No built-in CORS, compression, static files or cookies parsing yet: use the native ecosystem
   through the Fastify / Express / Hono adapters (their middleware runs before Znight routes).
-- Request bodies are buffered (up to `bodyLimit`); stream large uploads from `@Req()`.
+- Request bodies read with `@Body()` and uploaded files are buffered in memory (within the limits):
+  stream large bodies with `ctx.bodyStream()` or upload to object storage (see
+  [Large files](#large-files)). There is no streaming API for multipart parts yet.
 - Compressed request bodies are rejected (415).
-- Request-scoped instances are disposed before a streamed response body is fully sent.
+- `HttpResponse.file()` honours a single byte range (several ranges get the whole file) and no
+  `Cache-Control` by default (add it with `.withHeader()`).
 - `inject()` with the `node` and `express` adapters needs `light-my-request`.

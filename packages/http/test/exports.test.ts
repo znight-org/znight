@@ -13,6 +13,7 @@ describe('public entries', () => {
       'BadGatewayException',
       'BadRequestException',
       'Body',
+      'BodyLimit',
       'ConflictException',
       'Controller',
       'Ctx',
@@ -47,23 +48,32 @@ describe('public entries', () => {
       'UnauthorizedException',
       'UnprocessableEntityException',
       'UnsupportedMediaTypeException',
+      'UploadedFile',
+      'UploadedFiles',
       'UseGuard',
       'UseInterceptor',
       'Validate',
       'ValidationException',
       'coerce',
+      'contentDisposition',
+      'contentTypeFor',
       'createRouteDecorator',
+      'formatByteSize',
       'isHttpException',
       'isHttpResponse',
       'isJsonType',
       'isStandardSchema',
       'isValidStatus',
+      'matchesMediaType',
       'nodeAdapter',
       'parseBody',
+      'parseByteSize',
       'parseMediaType',
       'parseQuery',
+      'parseRange',
       'statusText',
       'toIssueDetail',
+      'uploads',
       'validate',
     ])
   })
@@ -81,6 +91,7 @@ describe('public entries', () => {
       'string',
     ])
     expect(typeof entry.validate).toBe('function')
+    expect(Object.keys(entry.uploads).sort()).toEqual(['file', 'files', 'optionalFile', 'optionalFiles'])
     expect(entry.HttpTokens).toEqual({
       Context: '@znight/http#HttpContext',
       RequestId: '@znight/http#RequestId',

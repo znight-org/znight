@@ -280,7 +280,7 @@ describe('loadConfig', () => {
 
   describe('without ConfigSource', () => {
     it('reads process.env', () => {
-      process.env.ZNIGHT_LOAD_TEST_PORT = '9090'
+      process.env['ZNIGHT_LOAD_TEST_PORT'] = '9090'
       try {
         class Server {
           port!: number
@@ -288,7 +288,7 @@ describe('loadConfig', () => {
         const config = loadConfig(Server, undefined, [field('port', 'number', { env: 'ZNIGHT_LOAD_TEST_PORT' })])
         expect(config.port).toBe(9090)
       } finally {
-        delete process.env.ZNIGHT_LOAD_TEST_PORT
+        delete process.env['ZNIGHT_LOAD_TEST_PORT']
       }
     })
 

@@ -110,7 +110,7 @@ function isEntityName(node: AstNode): boolean {
   if (node.type === 'Identifier') {
     return true
   }
-  if (node.type === 'MemberExpression' && node.computed !== true) {
+  if (node.type === 'MemberExpression' && node['computed'] !== true) {
     const object = child(node, 'object')
     return child(node, 'property')?.type === 'Identifier' && object !== undefined && isEntityName(object)
   }

@@ -254,7 +254,7 @@ export function appMetadata(): ZnightMetadata {
     interceptors: [],
     meta: {},
     params: [{ index: 0, source: 'param', name: 'id', type: 'string' }],
-    invoke: (controller, ctx) => (controller as UserController).getUser(ctx.params.id as string),
+    invoke: (controller, ctx) => (controller as UserController).getUser(ctx.params['id'] as string),
   }
   return createMetadata(providers, {
     aliases: { [T.UserRepository]: T.PgUserRepository },

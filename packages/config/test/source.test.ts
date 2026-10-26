@@ -119,18 +119,18 @@ describe('envSource', () => {
   it('snapshots defined variables', () => {
     const env: Record<string, string | undefined> = { A: '1', B: undefined }
     const source = envSource(env)
-    env.A = '2'
+    env['A'] = '2'
     expect(source.get('A')).toBe('1')
     expect(source.has('B')).toBe(false)
     expect(source.origin('A')).toBe('process.env')
   })
 
   it('defaults to process.env', () => {
-    process.env.ZNIGHT_CONFIG_SOURCE_TEST = 'yes'
+    process.env['ZNIGHT_CONFIG_SOURCE_TEST'] = 'yes'
     try {
       expect(envSource().get('ZNIGHT_CONFIG_SOURCE_TEST')).toBe('yes')
     } finally {
-      delete process.env.ZNIGHT_CONFIG_SOURCE_TEST
+      delete process.env['ZNIGHT_CONFIG_SOURCE_TEST']
     }
   })
 })

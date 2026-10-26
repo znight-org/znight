@@ -11,13 +11,16 @@ build error with a precise location and a fix-it.
 bun add -d @znight/compiler
 ```
 
-Runs on Node.js >= 24 and Bun >= 1.3. In an application you normally use it through the Vite
-plugin, the Bun preload or the `znight` CLI (`znight generate`, `znight dev`, `znight build`); this
-README documents what they all share: the compiler, its options, its diagnostics and its
-programmatic API.
+Runs on Node.js >= 24 and Bun >= 1.3. In an application you use it through the
+[Vite plugin](#vite-plugin) (`vite build`, the dev server, Vitest), the [Bun preload](#bun-preload)
+(`bun test`, `bun --watch`) or the `znight` CLI (`znight generate`, `znight dev`, `znight build`);
+this README documents them and what they all share: the compiler, its options, its diagnostics and
+its programmatic API.
 
 - [What the compiler does](#what-the-compiler-does)
 - [The generated module](#the-generated-module)
+- [Vite plugin](#vite-plugin)
+- [Bun preload](#bun-preload)
 - [How dependencies are resolved](#how-dependencies-are-resolved)
 - [Decorators](#decorators)
 - [Diagnostics](#diagnostics)
@@ -135,6 +138,146 @@ Properties of the generated code:
 `znight generate` before `tsc`. In CI, `znight generate --check` fails when it is stale. The file is
 only written when its content changes (watchers are not triggered for nothing), and never when the
 compilation fails.
+
+## Vite plugin
+
+```ts
+// vite.config.ts
+import { znight } from '@znight/compiler' // also the default export
+import { defineConfig } from 'vite'
+
+export default defineConfig({ plugins: [znight()] })
+```
+
+`znight(options)` ([options](#options)) keeps **one incremental compiler** per plugin instance,
+shared by every Vite environment it applies to: the **server environments** (`ssr`, Vitest's Node.js
+environment, custom environments with `consumer: 'server'`). Client environments are left alone.
+
+| Command                             | Behaviour                                                                                                                                                                                                                                                 |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `vite build`                        | compiles once (`buildStart`, also for several server environments); compile errors **fail the build** with the formatted diagnostics and nothing is written; warnings are printed                                                                         |
+| `vite build --watch` (`znight dev`) | before each rebuild, recompiles the files reported by the watcher (only those are re-read); diagnostics are printed and, with errors, the generated module is replaced by the **error module** (importing it throws a `ZnightError` with the diagnostics) |
+| dev server, Vitest                  | the same, driven by the dev server watcher: events are debounced (50 ms, one compile per burst of saves) and a new result reloads the generated module                                                                                                    |
+
+```
+[plugin znight]
+ZnightError: ✗ ZNIGHT001: Missing provider for 'Mailer' required by Notifier
+ --> src/notifier.ts:9:32
+  |
+9 |   constructor(readonly mailer: Mailer) {}
+  |                                ^^^^^^
+  = hint: Implement Mailer with a class decorated with @Injectable()
+Build failed with 1 error
+```
+
+- **Generated module**: imports of `outFile` (relative, with a `.js`/`.ts` extension or none) are
+  served **from memory** with the latest result — also before the file exists, so Vitest works on a
+  fresh checkout. The disk copy (for `tsc` and editors) is written only when its content changed,
+  never with errors, and watchers ignore it: writing it never triggers a rebuild.
+- **Decorators** (`stripDecorators`, default `true`): the Znight decorators are removed from the
+  bundle — exactly the ranges recorded by the last analysis of that file content (never
+  re-decided; a file changed since is left untouched), with high-resolution source maps. Their
+  `@znight/*` imports are then tree-shaken. Other decorators are kept.
+- **Watching**: every file the result depends on (`watchFiles`), the include roots (created and
+  deleted files re-run the globs), `package.json` and `tsconfig.json` (they clear the module
+  resolution caches).
+- **Logs**: `[znight] 12 providers compiled in 18 ms` (follows Vite's `logLevel`).
+- **Compile mode**: `serve` in the dev server (`test` under Vitest), `build` for `vite build`
+  (provider source locations omitted), except development builds (`vite build --mode development`,
+  used by `znight dev`), compiled as `serve`.
+- `plugin.api`: `options` (the options given to `znight()`, read by `znight generate`), `compiler`,
+  `result` (latest `CompileResult`), `ready()` (compiles the pending changes).
+
+### App defaults
+
+Unless `app: false`, or `build.ssr` / `build.lib` is configured, `znight()` configures a Node.js
+server build. Values you set yourself are never overridden.
+
+| Setting           | Default                                                |
+| ----------------- | ------------------------------------------------------ |
+| `build.ssr`       | `app.entry` (`'src/main.ts'`), built to `dist/main.js` |
+| `build.outDir`    | `'dist'`                                               |
+| `build.target`    | `'node24'`                                             |
+| `build.sourcemap` | `true`                                                 |
+| `ssr.target`      | `'node'`                                               |
+
+Dependencies installed in `node_modules` stay **external** (Vite's SSR default): `dist/main.js`
+imports them at runtime. Linked packages (workspaces) are bundled; list them in `ssr.external` when
+they ship JavaScript. The bundle runs on Node.js (`node dist/main.js`) and Bun.
+
+### Vitest
+
+Vitest uses your Vite config: the plugin compiles before the tests import the generated module,
+serves it from memory and recompiles in watch mode (test mode: provider source locations are kept).
+
+## Bun preload
+
+```toml
+# bunfig.toml
+[test]
+preload = ["@znight/compiler/bun"]
+```
+
+`bun test` then regenerates the container before the tests. For an application:
+`bun --preload @znight/compiler/bun src/main.ts` (also with `--watch` and `--hot`), or a top-level
+`preload` in `bunfig.toml`. The preload:
+
+1. reads the [options](#preload-options) (`znight.config.ts`);
+2. generates the container (the disk copy is written when its content changed), in `test` mode under
+   `bun test`, `build` mode with `NODE_ENV=production`, else `serve`;
+3. prints the diagnostics on stderr and, on errors, throws a `ZnightError`: `bun test` exits with
+   code 1, `bun --watch` / `bun test --watch` wait for a fix;
+4. registers a Bun plugin serving the generated module **from memory** (recompiled when it is loaded
+   again, e.g. by `bun --hot`) and **blanking the Znight decorators** of the analysed files: they are
+   replaced by spaces, so every line and column is unchanged and no source map is needed
+   (`stripDecorators: false` disables it).
+
+Bun restarts `--watch` processes only for the files it loaded. The preload loads every file the
+compile result depends on **as text** (read, never executed), so saving any of them restarts the
+process — also after a failed compile, when the application did not even start. A newly created
+file is picked up at the next restart.
+
+### Preload options
+
+The default export of `znight.config.ts` (or `.mts`, `.js`, `.mjs`) in the current directory, or
+of the file named by the `ZNIGHT_CONFIG` environment variable: the [options](#options) (an object,
+or a function returning one), plus `logLevel` (`'info'` adds the summary line, `'warn'` by default,
+`'silent'`). A relative `root` is resolved against the config file directory. Share the file with
+the Vite plugin:
+
+```ts
+// znight.config.ts
+import type { ZnightOptions } from '@znight/compiler'
+
+export default { reportUnused: true } satisfies ZnightOptions
+```
+
+```ts
+// vite.config.ts
+import { znight } from '@znight/compiler'
+import options from './znight.config.ts'
+
+export default { plugins: [znight(options)] }
+```
+
+### Custom preload files
+
+Importing `@znight/compiler/bun` **runs** the preload. A custom preload file uses the
+side-effect-free API of the package root instead:
+
+```ts
+// preload.ts — bunfig.toml: preload = ["./preload.ts"]
+import { createPreload } from '@znight/compiler'
+import { myExtension } from './compiler-extension.ts'
+
+await createPreload({ extensions: [myExtension], logLevel: 'info' })
+```
+
+| Function                   | Does                                                                                                                                          |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `createPreload(options)`   | the preload above with these options; returns the `GenerateResult`, throws a `ZnightError` on errors (Bun only)                               |
+| `znightBunPlugin(options)` | the Bun plugin alone (`await Bun.plugin(znightBunPlugin({ root }))`): compiles in `setup` unless given a `compiler` that already has a result |
+| `loadZnightConfig(cwd?)`   | `{ file, options }` of `znight.config.*` / `ZNIGHT_CONFIG` (`{ root: cwd }` without a config file)                                            |
 
 ## How dependencies are resolved
 
@@ -291,12 +434,18 @@ The Vite plugin, the Bun preload, the CLI and `compile()` take the same options:
 
 `compile()`, `generate()` and `createCompiler()` also accept `mode` (`'build'`, `'serve'` or
 `'test'`, default `'serve'`: `build` omits source locations), `cwd` (base of a relative `root`),
-`runtimeConditions` (default `['node', 'import', 'default']`) and `aliases` (string aliases).
+`runtimeConditions` (default `['node', 'import', 'default']`) and `aliases` (string aliases). The
+Vite plugin derives them from the Vite config (mode, `resolve.conditions` of the server
+environment, string `resolve.alias` entries); the Bun preload uses the Bun conditions
+(`['bun', 'node', 'import', 'default']`) and also takes `logLevel`
+([preload options](#preload-options)).
 
 ## Programmatic API
 
 ```ts
 import { compile, createCompiler, formatDiagnostics, generate, renderErrorModule } from '@znight/compiler'
+// integrations: the Vite plugin and the Bun API
+import { createPreload, loadZnightConfig, znight, znightBunPlugin } from '@znight/compiler'
 ```
 
 ### `generate(options)`
@@ -318,17 +467,17 @@ result.written // files written by this call (only when they changed)
 
 The same, without writing anything: returns
 
-| Field         | Content                                                                                                                               |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `code`        | the generated module, or the **error module** when there is an error (see `renderErrorModule`)                                        |
-| `outFile`     | absolute path of the generated module                                                                                                 |
-| `diagnostics` | syntax errors (ZNIGHT022) first, then every other diagnostic sorted by location                                                       |
-| `ok`          | `false` when at least one diagnostic is an error                                                                                      |
-| `graph`       | the application graph (providers, externals, aliases, edges, extension data)                                                          |
-| `stats`       | `{ files, providers, durationMs, parsed }`                                                                                            |
-| `library`     | library mode: `{ file, content, data }` of `znight.providers.json`                                                                    |
-| `watchFiles`  | files the result depends on (scanned sources, package manifests)                                                                      |
-| `decorators`  | Znight decorators of each analysed file (`path → { hash, ranges }`), removed by `stripDecorators` when the content hash still matches |
+| Field         | Content                                                                                                                                                                                                                                                              |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `code`        | the generated module, or the **error module** when there is an error (see `renderErrorModule`)                                                                                                                                                                       |
+| `outFile`     | absolute path of the generated module                                                                                                                                                                                                                                |
+| `diagnostics` | syntax errors (ZNIGHT022) first, then every other diagnostic sorted by location                                                                                                                                                                                      |
+| `ok`          | `false` when at least one diagnostic is an error                                                                                                                                                                                                                     |
+| `graph`       | the application graph (providers, externals, aliases, edges, extension data)                                                                                                                                                                                         |
+| `stats`       | `{ files, providers, durationMs, parsed }`                                                                                                                                                                                                                           |
+| `library`     | library mode: `{ file, content, data }` of `znight.providers.json`                                                                                                                                                                                                   |
+| `watchFiles`  | files the result depends on (scanned sources, package manifests)                                                                                                                                                                                                     |
+| `decorators`  | Znight decorators of each analysed file (`path → { hash, ranges, memberStarts }`), removed by `stripDecorators` when the content hash still matches (the first decorator of a class member leaves a `;`, so that a field without semicolon cannot absorb the member) |
 
 ### `createCompiler(options)`
 
@@ -513,6 +662,14 @@ this package are:
 - Unused-provider roots do not see string lookups (`container.get('UserService')`).
 - Compiled provider libraries cannot contain providers with extension-generated factories, and
   their `source` locations point to the package declarations.
+- The Vite plugin applies to server environments only: Vite library builds (`build.lib`, a client
+  environment) do not compile; build provider libraries with `generate({ library: true })` /
+  `znight generate`. Vitest browser-like environments (`jsdom`, `happy-dom`) import the disk copy
+  of the generated module, without stripping.
+- The generated module must be imported by path (relative or absolute), not through an alias, to
+  be served from memory.
+- `bun --watch` and `bun test --watch` restart only for files Bun has loaded: a newly created
+  provider file is picked up at the next restart (save any loaded file).
 
 ## License
 

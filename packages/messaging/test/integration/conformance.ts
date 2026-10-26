@@ -17,7 +17,7 @@ import {
 import { handler, memoryLogger, messagingMetadata, sleep, type TestConsumer } from '../helpers.ts'
 import { afterEach, describe, expect, it } from 'bun:test'
 
-export const integration: boolean = process.env.ZNIGHT_INTEGRATION === '1'
+export const integration: boolean = process.env['ZNIGHT_INTEGRATION'] === '1'
 
 /** Polls `predicate` until it holds. */
 export async function waitFor(predicate: () => boolean, timeoutMs = 30_000, label = 'condition'): Promise<void> {

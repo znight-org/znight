@@ -26,6 +26,9 @@ export const Ids: {
   readonly UseGuard: string
   readonly UseInterceptor: string
   readonly Validate: string
+  readonly UploadedFile: string
+  readonly UploadedFiles: string
+  readonly BodyLimit: string
   readonly createRouteDecorator: string
   readonly RouteDecorator: string
 } = Object.freeze({
@@ -42,6 +45,9 @@ export const Ids: {
   UseGuard: '@znight/http#UseGuard',
   UseInterceptor: '@znight/http#UseInterceptor',
   Validate: '@znight/http#Validate',
+  UploadedFile: '@znight/http#UploadedFile',
+  UploadedFiles: '@znight/http#UploadedFiles',
+  BodyLimit: '@znight/http#BodyLimit',
   createRouteDecorator: '@znight/http#createRouteDecorator',
   RouteDecorator: '@znight/http#RouteDecorator',
 })
@@ -67,6 +73,8 @@ export const PARAM_SOURCES: ReadonlyMap<string, HttpParamSource> = new Map<strin
   [Ids.Req, 'request'],
   [Ids.Res, 'response'],
   [Ids.Ctx, 'context'],
+  [Ids.UploadedFile, 'file'],
+  [Ids.UploadedFiles, 'files'],
 ])
 
 /** Error codes used by the extension (see `ErrorCode` in `@znight/core`). */
@@ -107,6 +115,24 @@ export interface ParamCoercion {
   readonly cast: boolean
 }
 
+/** An upload parameter (`@UploadedFile` / `@UploadedFiles`). */
+export interface UploadData {
+  /** Multipart field; `undefined`: any field. */
+  readonly field: string | undefined
+  /** `@UploadedFiles`. */
+  readonly multiple: boolean
+  /** A file must be sent (`required` option, else the parameter is not optional). */
+  readonly required: boolean
+  /** `maxSize` in bytes (`Infinity` allowed). */
+  readonly maxSize: number | undefined
+  /** `maxFiles` (`@UploadedFiles` only). */
+  readonly maxFiles: number | undefined
+  /** `mimeTypes` patterns, as written. */
+  readonly mimeTypes: readonly string[] | undefined
+  /** The injected value does not have the declared type (`node:buffer` File, `File | null`): `as never`. */
+  readonly cast: boolean
+}
+
 /** A handler parameter. */
 export interface HttpParamData {
   /** Position in the handler signature. */
@@ -124,6 +150,8 @@ export interface HttpParamData {
   readonly schema: ValueRef | undefined
   /** Coercion of a named value without schema. */
   readonly coercion: ParamCoercion | undefined
+  /** Upload parameter (`source` `file` / `files`). */
+  readonly upload?: UploadData
   /** Location of the parameter decorator. */
   readonly location: Location
 }
@@ -157,6 +185,8 @@ export interface HttpRouteData {
   readonly complete: boolean
   /** `@Validate(S)` on a handler without `@Body()` parameter: the body is validated and discarded. */
   readonly bodySchema: ValueRef | undefined
+  /** `@BodyLimit` of the method (or of the controller), in bytes. */
+  readonly bodyLimit: number | undefined
   readonly rawResponse: boolean
   /** Location of the route decorator. */
   readonly location: Location

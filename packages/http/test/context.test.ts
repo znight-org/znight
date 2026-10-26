@@ -2,6 +2,7 @@ import type { AdapterRequest, RequestId } from '../src/index.ts'
 
 import { RequestContext } from '../src/context.ts'
 import { BadRequestException } from '../src/index.ts'
+import { bodyPlan, DEFAULT_UPLOAD_LIMITS } from '../src/uploads.ts'
 import { describe, expect, it } from 'bun:test'
 
 function request(overrides: Partial<AdapterRequest> = {}, body = ''): AdapterRequest & { reads: number } {
@@ -28,7 +29,7 @@ function context(source: AdapterRequest): RequestContext {
     adapter: 'test',
     route: undefined,
     params: { id: '1' },
-    bodyLimit: 100,
+    body: bodyPlan({}, 100, DEFAULT_UPLOAD_LIMITS),
   })
 }
 

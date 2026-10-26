@@ -169,7 +169,7 @@ const users = controller(t('UsersController'), '/users', [
 // -------------------------------------------------------------------------------------------------
 
 export class BodyController {
-  async echo(body: unknown) {
+  async echo(body: unknown, files: Readonly<Record<string, readonly File[]>> = {}) {
     if (body === undefined) return { kind: 'undefined' }
     if (typeof body === 'string') return { kind: 'string', value: body }
     if (body instanceof Uint8Array)
@@ -186,7 +186,15 @@ export class BodyController {
       }
       return { kind: 'form-data', entries }
     }
-    return { kind: 'object', value: body }
+    const names = Object.keys(files)
+    if (names.length === 0) return { kind: 'object', value: body }
+    const received: Record<string, unknown> = {}
+    for (const name of names) {
+      received[name] = await Promise.all(
+        (files[name] ?? []).map(async file => ({ name: file.name, type: file.type, text: await file.text() })),
+      )
+    }
+    return { kind: 'object', value: body, files: received }
   }
   async raw(ctx: HttpContext) {
     const bytes = await ctx.rawBody()
@@ -200,7 +208,7 @@ export class BodyController {
 }
 
 const body = controller(t('BodyController'), '/body', [
-  route('echo', '/echo', (c: BodyController, ctx) => c.echo(ctx.body), {
+  route('echo', '/echo', (c: BodyController, ctx) => c.echo(ctx.body, ctx.files), {
     method: 'POST',
     params: [{ index: 0, source: 'body' }],
   }),

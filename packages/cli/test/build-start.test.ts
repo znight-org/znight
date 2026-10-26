@@ -99,7 +99,7 @@ describe('znight start', () => {
     await waitFor(() => processes.children.length === 1)
     const child = processes.children[0]
     expect(child?.options).toMatchObject({ cwd: project.path, detached: true })
-    expect(child?.options.env.NODE_ENV).toBe('test')
+    expect(child?.options.env['NODE_ENV']).toBe('test')
     signals.emit('SIGTERM')
     signals.emit('SIGHUP')
     expect(child?.signals).toEqual(['SIGTERM', 'SIGHUP'])

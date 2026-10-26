@@ -1,10 +1,14 @@
 import type { ReplyBody } from './adapter.ts'
 import type { HeaderValue, HttpErrorBody } from './exceptions.ts'
+import type { ResolvedFile } from './files.ts'
+import type { HttpResponse } from './response.ts'
 
 import { Readable } from 'node:stream'
 
+import { isFileBody } from './files.ts'
 import { isHttpResponse } from './response.ts'
 import { isBodylessStatus } from './status.ts'
+import { discardStream, toByteStream } from './stream.ts'
 import { emptyRecord } from './utils.ts'
 
 const ENCODER = new TextEncoder()
@@ -78,6 +82,25 @@ export function serializeResult(result: unknown, options: SerializeOptions): Ser
   return finish(finalStatus, headers, body, options.method)
 }
 
+/**
+ * Serialises a resolved file response (`HttpResponse.file()`): the file headers, then `@Header`,
+ * `ctx.setHeader()` and the `HttpResponse` headers. 206 / 304 keep their status; a 200 follows the
+ * usual precedence (`@HttpCode` > `HttpResponse.status` > 200).
+ */
+export function serializeFileReply(
+  file: ResolvedFile,
+  response: HttpResponse,
+  options: SerializeOptions,
+): SerializedReply {
+  const status = file.status === 200 ? (options.status ?? response.status ?? 200) : file.status
+  const headers = emptyRecord<HeaderValue>()
+  assignHeaders(headers, file.headers)
+  if (options.headers !== undefined) assignHeaders(headers, options.headers)
+  if (options.context !== undefined) assignHeaders(headers, options.context)
+  assignHeaders(headers, response.headers)
+  return finish(status, headers, file.body, options.method)
+}
+
 /** `201` for POST routes, otherwise `204` without payload and `200` with one. */
 function defaultStatus(routeMethod: string, payload: unknown): number {
   if (routeMethod === 'POST') return 201
@@ -134,7 +157,7 @@ function finish(
 }
 
 function discard(body: ReplyBody): void {
-  if (body instanceof ReadableStream) body.cancel().catch(() => undefined)
+  if (body instanceof ReadableStream) discardStream(body)
 }
 
 function encode(payload: unknown, headers: Record<string, HeaderValue>): ReplyBody {
@@ -152,12 +175,13 @@ function encode(payload: unknown, headers: Record<string, HeaderValue>): ReplyBo
   if (payload instanceof Blob) {
     headers['content-type'] = payload.type === '' ? ContentType.bytes : payload.type
     headers['content-length'] = String(payload.size)
-    return payload.stream()
+    return payload
   }
   if (isNodeReadable(payload)) {
     headers['content-type'] = ContentType.bytes
-    return Readable.toWeb(payload) as ReadableStream<Uint8Array>
+    return toByteStream(payload)
   }
+  if (isFileBody(payload)) throw new TypeError('A file body (HttpResponse.file()) cannot be serialised here')
   const json = JSON.stringify(payload)
   if (json === undefined) throw new TypeError(`Cannot serialise a ${typeof payload} as a response body`)
   return bytes(ENCODER.encode(json), headers, ContentType.json)

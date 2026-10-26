@@ -220,7 +220,7 @@ describe('awsSecretsManager() with the AWS SDK', () => {
           body,
           authorization: req.headers.authorization,
         })
-        if (body.SecretId === 'prod/missing') {
+        if (body['SecretId'] === 'prod/missing') {
           res.writeHead(400, {
             'content-type': 'application/x-amz-json-1.1',
             'x-amzn-errortype': 'ResourceNotFoundException',
@@ -231,9 +231,9 @@ describe('awsSecretsManager() with the AWS SDK', () => {
         res.writeHead(200, { 'content-type': 'application/x-amz-json-1.1' })
         res.end(
           JSON.stringify({
-            ARN: `arn:aws:secretsmanager:eu-west-3:123456789012:secret:${String(body.SecretId)}`,
-            Name: body.SecretId,
-            SecretString: JSON.stringify({ SDK_SECRET: `value-of-${String(body.SecretId)}` }),
+            ARN: `arn:aws:secretsmanager:eu-west-3:123456789012:secret:${String(body['SecretId'])}`,
+            Name: body['SecretId'],
+            SecretString: JSON.stringify({ SDK_SECRET: `value-of-${String(body['SecretId'])}` }),
             VersionId: 'v1',
           }),
         )

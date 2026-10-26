@@ -17,10 +17,12 @@ import type {
   ValueRef,
 } from '@znight/compiler'
 import type { HttpMethod } from '../metadata.ts'
-import type { HttpControllerData, HttpParamData, HttpRouteData, ParamCoercion } from './model.ts'
+import type { HttpControllerData, HttpParamData, HttpRouteData, ParamCoercion, UploadData } from './model.ts'
 
+import { isMediaTypePattern } from '../mime.ts'
 import { joinPaths, normalizePath } from '../path.ts'
-import { isRaw, parameterType, planCoercion } from './coercion.ts'
+import { parseByteSize } from '../size.ts'
+import { acceptsUndefined, isRaw, parameterType, planCoercion } from './coercion.ts'
 import { Codes, Ids, PARAM_SOURCES, ROUTE_METHODS } from './model.ts'
 import { isRouteMetaDecorator, isValueRef, routeMeta } from './route-decorators.ts'
 
@@ -33,6 +35,16 @@ type Scope = 'singleton' | 'request' | 'transient'
 const SCOPES: readonly Scope[] = ['singleton', 'request', 'transient']
 /** RFC 9110 token (header names). */
 const TOKEN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/
+/** Types an upload parameter may have (`File`, `Blob`, arrays of them for `@UploadedFiles`); `true`: cast needed. */
+const FILE_TYPES: ReadonlyMap<string, boolean> = new Map([
+  ['globalThis#File', false],
+  ['globalThis#Blob', false],
+  ['node:buffer#File', true],
+  ['node:buffer#Blob', true],
+])
+/** Methods whose requests usually have no body (upload parameters there are a warning). */
+const BODYLESS_METHODS: ReadonlySet<HttpMethod> = new Set<HttpMethod>(['GET', 'HEAD', 'DELETE', 'OPTIONS'])
+const UPLOAD_OPTIONS = ['required', 'maxSize', 'maxFiles', 'mimeTypes']
 /** Values that are fine without schema (`@Body() body: string`, `@Body() bytes: Uint8Array`...). */
 const UNVALIDATED_REFERENCES = new Set([
   'globalThis#Uint8Array',
@@ -63,9 +75,10 @@ export function analyzeHttpClass(cls: ClassInfo, ctx: Context): void {
   const guards = classRefs(ctx, cls, cls.decorators, Ids.UseGuard, 'guard')
   const interceptors = classRefs(ctx, cls, cls.decorators, Ids.UseInterceptor, 'interceptor')
   const meta = routeMeta(ctx, cls, cls.decorators)
+  const bodyLimit = bodyLimitOf(ctx, cls.decorators)
   const routes: HttpRouteData[] = []
   for (const method of cls.methods) {
-    routes.push(...analyzeMethod(ctx, cls, method, basePath))
+    routes.push(...analyzeMethod(ctx, cls, method, basePath, bodyLimit))
   }
   ctx.store({
     token,
@@ -153,7 +166,13 @@ function reportOutsideController(cls: ClassInfo, ctx: Context): void {
 // Routes
 // -------------------------------------------------------------------------------------------------
 
-function analyzeMethod(ctx: Context, cls: ClassInfo, method: MethodInfo, basePath: string): HttpRouteData[] {
+function analyzeMethod(
+  ctx: Context,
+  cls: ClassInfo,
+  method: MethodInfo,
+  basePath: string,
+  controllerBodyLimit: number | undefined,
+): HttpRouteData[] {
   const where = `${cls.displayName}.${method.name}`
   const routeDecorators = method.decorators.filter(decorator => ROUTE_METHODS.has(decorator.identity ?? ''))
   if (routeDecorators.length === 0) {
@@ -174,6 +193,8 @@ function analyzeMethod(ctx: Context, cls: ClassInfo, method: MethodInfo, basePat
   const bodySchema =
     bodyValidation !== undefined && !params.some(param => param.source === 'body') ? bodyValidation.schema : undefined
   const rawResponse = params.some(param => param.source === 'response')
+  const bodyLimit = bodyLimitOf(ctx, decorators) ?? controllerBodyLimit
+  const uploads = checkUploads(ctx, params, where)
 
   const routes: HttpRouteData[] = []
   for (const decorator of routeDecorators) {
@@ -193,6 +214,15 @@ function analyzeMethod(ctx: Context, cls: ClassInfo, method: MethodInfo, basePat
       rawPath = arg.value
     }
     const path = normalizePath(rawPath)
+    if (uploads && BODYLESS_METHODS.has(httpMethod)) {
+      ctx.report({
+        code: Codes.InvalidDecorator,
+        severity: 'warning',
+        message: `${where} reads uploaded files but is a ${httpMethod} route: ${httpMethod} requests usually have no body`,
+        location: decorator.location,
+        hints: ['Upload files with @Post(), @Put() or @Patch()'],
+      })
+    }
     routes.push({
       method: httpMethod,
       rawPath,
@@ -207,12 +237,68 @@ function analyzeMethod(ctx: Context, cls: ClassInfo, method: MethodInfo, basePat
       params,
       complete,
       bodySchema,
+      bodyLimit,
       rawResponse,
       location: decorator.location,
       pathLocation: arg?.location ?? decorator.location,
     })
   }
   return routes
+}
+
+/** `@BodyLimit(size)` of a class or method, in bytes. */
+function bodyLimitOf(ctx: Context, decorators: readonly DecoratorInfo[]): number | undefined {
+  const [decorator, ...duplicates] = decorators.filter(candidate => candidate.identity === Ids.BodyLimit)
+  for (const duplicate of duplicates) {
+    error(ctx, duplicate.location, '@BodyLimit is applied several times', ['Keep a single @BodyLimit(size)'])
+  }
+  if (decorator === undefined) {
+    return undefined
+  }
+  const [arg] = decorator.args
+  if (arg === undefined) {
+    error(ctx, decorator.location, '@BodyLimit requires a size', ["@BodyLimit('10mb') or @BodyLimit(10_485_760)"])
+    return undefined
+  }
+  if (!arg.evaluated) {
+    return undefined
+  }
+  const size = parseByteSize(arg.value)
+  if (size === undefined) {
+    error(ctx, arg.location, `@BodyLimit expects a size in bytes, got ${describe(arg.value)}`, [
+      "A non-negative integer (10_485_760), a size with a unit ('10mb', '512kb'; kb = 1024 bytes) or Infinity",
+    ])
+  }
+  return size
+}
+
+/**
+ * Checks the upload parameters of a handler together (one parameter per field; a parameter without
+ * field takes every file and stands alone). Returns whether the handler reads uploaded files.
+ */
+function checkUploads(ctx: Context, params: readonly HttpParamData[], where: string): boolean {
+  const uploads = params.filter(param => param.upload !== undefined)
+  uploads.forEach((param, index) => {
+    const field = param.upload?.field
+    const previous = uploads
+      .slice(0, index)
+      .find(other => field === undefined || other.upload?.field === undefined || other.upload.field === field)
+    if (previous === undefined) {
+      return
+    }
+    ctx.report({
+      code: Codes.InvalidDecorator,
+      severity: 'error',
+      message:
+        field !== undefined && previous.upload?.field === field
+          ? `The field "${field}" of ${where} is read by several upload parameters`
+          : `${where}: an upload parameter without field receives every file of the body and cannot be combined with other upload parameters`,
+      location: param.location,
+      hints: ['Give each @UploadedFile / @UploadedFiles parameter its own field'],
+      related: [{ message: 'Other upload parameter', location: previous.location }],
+    })
+  })
+  return uploads.length > 0
 }
 
 /** HTTP method decorators (and parameter decorators) on a method without route decorator. */
@@ -407,7 +493,7 @@ function analyzeParams(
     const [decorator, ...extra] = decorators
     if (decorator === undefined) {
       error(ctx, param.location, `Parameter '${param.name}' of ${where} has no HTTP decorator`, [
-        'Decorate it with @Param(), @Query(), @Body(), @Headers(), @Ctx(), @Req() or @Res()',
+        'Decorate it with @Param(), @Query(), @Body(), @Headers(), @UploadedFile(), @UploadedFiles(), @Ctx(), @Req() or @Res()',
       ])
       complete = false
       continue
@@ -504,6 +590,20 @@ function analyzeParam(
       }
       return { ...base, key: undefined, optional: declared.optional, schema, coercion: undefined }
     }
+    case 'file':
+    case 'files': {
+      const upload = uploadOf(ctx, decorator, param, declared, where, source === 'files')
+      return upload === undefined
+        ? undefined
+        : {
+            ...base,
+            key: upload.field,
+            optional: !upload.required,
+            schema: undefined,
+            coercion: undefined,
+            upload,
+          }
+    }
     case 'headers': {
       const [arg] = decorator.args
       if (arg === undefined) {
@@ -543,6 +643,214 @@ function analyzeParam(
       return coercion ? { ...base, key, type, optional, schema: undefined, coercion } : undefined
     }
   }
+}
+
+/** `@UploadedFile(field?, options?)` / `@UploadedFiles(field?, options?)`: field, options and type. */
+function uploadOf(
+  ctx: Context,
+  decorator: DecoratorInfo,
+  param: ParameterInfo,
+  declared: ReturnType<typeof parameterType>,
+  where: string,
+  multiple: boolean,
+): UploadData | undefined {
+  const name = `@${decorator.name}`
+  const [first, second] = decorator.args
+  let field: string | undefined
+  let options: ArgInfo | undefined
+  if (first !== undefined) {
+    if (!first.evaluated) {
+      return undefined // already reported
+    }
+    if (typeof first.value === 'string') {
+      if (first.value === '') {
+        error(ctx, first.location, `${name} expects a non-empty field name`, [`${name}('avatar')`])
+        return undefined
+      }
+      field = first.value
+      options = second
+    } else if (first.value === undefined) {
+      options = second
+    } else if (isPlainObject(first.value)) {
+      if (second !== undefined) {
+        error(ctx, second.location, `${name}(options) takes a single argument`, [
+          `Put the field first: ${name}('field', { ... })`,
+        ])
+        return undefined
+      }
+      options = first
+    } else {
+      error(ctx, first.location, `${name} expects a field name (string) or options, got ${describe(first.value)}`, [
+        `${name}('avatar'), ${name}('avatar', { maxSize: '5mb' }) or ${name}({ maxSize: '5mb' })`,
+      ])
+      return undefined
+    }
+  }
+  const parsed = uploadOptions(ctx, name, options, multiple)
+  if (parsed === undefined) {
+    return undefined
+  }
+  const type = uploadType(ctx, declared.type, multiple)
+  if (!type.ok) {
+    error(
+      ctx,
+      param.typeLocation,
+      `${name} parameter '${param.name}' of ${where} must be typed ${multiple ? 'File[]' : 'File'}, got ${type.got}`,
+      [multiple ? `${param.name}: File[]` : `${param.name}: File (or ${param.name}?: File when optional)`],
+    )
+    return undefined
+  }
+  const required = parsed.required ?? !declared.optional
+  let cast = type.cast
+  if (!multiple && !required) {
+    const acceptsMissing =
+      declared.type === undefined ||
+      param.optional ||
+      param.hasDefault ||
+      acceptsUndefined(declared.type) ||
+      isRaw(ctx.types.stripNullish(declared.type).type)
+    if (!acceptsMissing && !declared.optional) {
+      error(
+        ctx,
+        options?.location ?? decorator.location,
+        `${name}: '${param.name}' of ${where} is optional ({ required: false }) but typed ${ctx.types.format(declared.type as TypeInfo)}`,
+        [`Type it ${param.name}?: File (undefined when no file is sent)`],
+      )
+      return undefined
+    }
+    // `File | null` receives undefined
+    cast ||= !acceptsMissing
+  }
+  return {
+    field,
+    multiple,
+    required,
+    maxSize: parsed.maxSize,
+    maxFiles: parsed.maxFiles,
+    mimeTypes: parsed.mimeTypes,
+    cast,
+  }
+}
+
+interface ParsedUploadOptions {
+  readonly required: boolean | undefined
+  readonly maxSize: number | undefined
+  readonly maxFiles: number | undefined
+  readonly mimeTypes: readonly string[] | undefined
+}
+
+/** The options object of an upload decorator (`undefined` after an error). */
+function uploadOptions(
+  ctx: Context,
+  name: string,
+  arg: ArgInfo | undefined,
+  multiple: boolean,
+): ParsedUploadOptions | undefined {
+  const result: { -readonly [K in keyof ParsedUploadOptions]: ParsedUploadOptions[K] } = {
+    required: undefined,
+    maxSize: undefined,
+    maxFiles: undefined,
+    mimeTypes: undefined,
+  }
+  if (arg === undefined) {
+    return result
+  }
+  if (!arg.evaluated) {
+    return undefined
+  }
+  if (arg.value === undefined) {
+    return result
+  }
+  const allowed = multiple ? UPLOAD_OPTIONS : UPLOAD_OPTIONS.filter(option => option !== 'maxFiles')
+  const shape = `{ ${allowed.map(option => `${option}?`).join(', ')} }`
+  if (!isPlainObject(arg.value)) {
+    error(ctx, arg.location, `${name} options must be an object ${shape}, got ${describe(arg.value)}`)
+    return undefined
+  }
+  let ok = true
+  const invalid = (message: string, hints: readonly string[] = []): void => {
+    ok = false
+    error(ctx, arg.location, `${name}: ${message}`, hints)
+  }
+  for (const [key, value] of Object.entries(arg.value)) {
+    if (value === undefined) {
+      continue
+    }
+    switch (key) {
+      case 'required':
+        if (typeof value === 'boolean') {
+          result.required = value
+        } else {
+          invalid(`"required" must be a boolean, got ${describe(value)}`)
+        }
+        break
+      case 'maxSize': {
+        const size = parseByteSize(value)
+        if (size === undefined) {
+          invalid(`"maxSize" must be a size in bytes, got ${describe(value)}`, [
+            "A non-negative integer (5_242_880), a size with a unit ('5mb', '512kb'; kb = 1024 bytes) or Infinity",
+          ])
+        } else {
+          result.maxSize = size
+        }
+        break
+      }
+      case 'maxFiles':
+        if (!multiple) {
+          invalid('"maxFiles" only applies to @UploadedFiles (a single file is expected here)', [
+            'Use @UploadedFiles() to receive several files',
+          ])
+        } else if (value === Number.POSITIVE_INFINITY || (Number.isSafeInteger(value) && (value as number) >= 1)) {
+          result.maxFiles = value as number
+        } else {
+          invalid(`"maxFiles" must be a positive integer, got ${describe(value)}`)
+        }
+        break
+      case 'mimeTypes': {
+        const patterns = Array.isArray(value) ? value : undefined
+        const wrong = patterns?.filter(pattern => typeof pattern !== 'string' || !isMediaTypePattern(pattern)) ?? []
+        if (patterns === undefined || patterns.length === 0) {
+          invalid(`"mimeTypes" must be a non-empty array of media types, got ${describe(value)}`, [
+            "mimeTypes: ['image/png', 'image/*']",
+          ])
+        } else if (wrong.length > 0) {
+          invalid(`invalid media type ${wrong.map(describe).join(', ')} in "mimeTypes"`, [
+            "Use type/subtype, type/* or */* without parameters: 'image/png', 'image/*'",
+          ])
+        } else {
+          result.mimeTypes = patterns as string[]
+        }
+        break
+      }
+      default:
+        invalid(`unknown option "${key}"`, [`Options: ${shape}`])
+    }
+  }
+  return ok ? result : undefined
+}
+
+/** Whether a parameter type can receive uploaded files (and whether the value must be cast). */
+function uploadType(
+  ctx: Context,
+  type: TypeInfo | undefined,
+  multiple: boolean,
+): { readonly ok: true; readonly cast: boolean } | { readonly ok: false; readonly got: string } {
+  if (type === undefined) {
+    return { ok: true, cast: false }
+  }
+  const { type: base } = ctx.types.stripNullish(type)
+  if (isRaw(base)) {
+    return { ok: true, cast: false }
+  }
+  let target: TypeInfo | undefined = base
+  if (multiple) {
+    target = base.kind === 'array' ? base.element : undefined
+  }
+  if (target !== undefined && isRaw(target)) {
+    return { ok: true, cast: false }
+  }
+  const cast = target?.kind === 'reference' ? FILE_TYPES.get(target.identity) : undefined
+  return cast === undefined ? { ok: false, got: ctx.types.format(type) } : { ok: true, cast }
 }
 
 /** Name and/or schema of `@Param(name?, schema?)` / `@Query(name?, schema?)`. */
@@ -660,7 +968,7 @@ function checkUnvalidated(
   where: string,
   what: 'body' | 'query',
 ): void {
-  if (type !== undefined && acceptedWithoutSchema(ctx, type, what)) {
+  if (type !== undefined && acceptedWithoutSchema(ctx, type)) {
     return
   }
   const described = type === undefined ? 'untyped' : `typed ${ctx.types.format(type)}`
@@ -681,7 +989,7 @@ function unvalidated(ctx: Context, decorator: DecoratorInfo, detail: string, ext
   })
 }
 
-function acceptedWithoutSchema(ctx: Context, type: TypeInfo, what: 'body' | 'query'): boolean {
+function acceptedWithoutSchema(ctx: Context, type: TypeInfo): boolean {
   const { type: base } = ctx.types.stripNullish(type)
   switch (base.kind) {
     case 'primitive':
@@ -692,9 +1000,8 @@ function acceptedWithoutSchema(ctx: Context, type: TypeInfo, what: 'body' | 'que
       if (UNVALIDATED_REFERENCES.has(base.identity)) {
         return true
       }
-      // Record<string, string | string[]> (the shape of ctx.query / ctx.params)
+      // Record<string, string | string[]> (the shape of ctx.query and of form bodies)
       return (
-        what === 'query' &&
         base.identity === 'globalThis#Record' &&
         base.typeArgs.length === 2 &&
         isStringLike(base.typeArgs[1] as TypeInfo)
@@ -754,6 +1061,7 @@ function validTarget(decorator: DecoratorInfo): boolean {
       return decorator.target === 'class'
     case Ids.UseGuard:
     case Ids.UseInterceptor:
+    case Ids.BodyLimit:
       return decorator.target === 'class' || decorator.target === 'method'
     default:
       return decorator.target === 'method'

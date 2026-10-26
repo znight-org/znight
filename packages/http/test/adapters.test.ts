@@ -299,8 +299,9 @@ for (const adapter of ADAPTERS) {
                 })
               ).json(),
             ).toEqual({
-              kind: 'form-data',
-              entries: { field: 'value', file: { name: 'a.txt', size: 12, text: 'file content' } },
+              kind: 'object',
+              value: { field: 'value' },
+              files: { file: [{ name: 'a.txt', type: 'text/plain', text: 'file content' }] },
             })
           })
 

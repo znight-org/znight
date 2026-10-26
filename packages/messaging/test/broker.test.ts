@@ -120,7 +120,7 @@ describe('MessageBroker.publish', () => {
     const { app, broker, driver } = await createTestApp([])
     const events: MessagePublishEvent[] = []
     app.hooks.wrap('messaging:publish', async (event, next) => {
-      event.headers.traceparent = '00-abc-def-01'
+      event.headers['traceparent'] = '00-abc-def-01'
       await next()
       events.push(event)
     })

@@ -32,8 +32,8 @@ Spec references: [`docs/internals/architecture.md`](../../../../docs/internals/a
   tables (§6.1). `SourceFile` instances are reused while their content hash is unchanged, so AST
   nodes can be used as `WeakMap` keys across compiles.
 - oxc 0.155 does **not** recover from syntax errors: a file with an error has an empty program.
-  Report `project.syntaxErrors()` before any analysis result (there is no `ZNIGHTxxx` code for
-  syntax errors yet — see "Gaps").
+  `project.syntaxErrors()` lists them; the compiler reports them first, as ZNIGHT022 errors
+  (`ErrorCode.SyntaxError`), and the file is ignored until it parses again.
 
 ## Quick start
 
@@ -331,8 +331,10 @@ directory, plus the entry files. They keep package identities and package routes
   identity; `externals` and manifest `provides` already are identities.
 - **Codegen**: `project.importRoute(target)` for every value/type the generated module imports;
   `ValueRef.symbol` for decorator argument references.
-- **Vite plugin**: one `Project` per plugin instance; `refresh({ changed/added/removed })` from the
-  watcher; watch `file.facts.moduleRequests` targets and evaluation `files`.
+- **Vite plugin / Bun preload** (`../vite.ts`, `../bun-plugin.ts`): one incremental compiler (one
+  `Project`) per plugin instance; watcher events become `compile({ changed/added/removed })`
+  (`../watch.ts` decides which events matter: `watchFiles`, resolution config files, sources
+  created or deleted under the include roots).
 - **Diagnostics**: `Diagnostic` in `diagnostics.ts` is the §6.2 shape (`location` is a superset with
   `start`/`end` for code frames). Collect with `DiagnosticBag` for de-duplication and ordering.
 
@@ -352,8 +354,6 @@ Biome is disabled for fixtures by `test/fixtures/biome.json`):
 
 ## Gaps and decisions to revisit
 
-- No error code exists for syntax errors (oxc returns an empty program); `syntaxErrors()` exposes
-  them. Proposal: add one to `ErrorCode` (spec §4.8).
 - Ambient module declarations (`declare module 'x' {}`, e.g. `@types/node`) are not indexed:
   builtins resolve to `external` symbols (`node:events#EventEmitter`) without declarations.
 - `exports` patterns (`"./features/*"`) are not enumerated as public entries.

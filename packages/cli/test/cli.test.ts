@@ -145,13 +145,13 @@ describe('argument parsing', () => {
       '--features',
       'config',
     ]) as Record<string, unknown>
-    expect(args.name).toBe('my-app')
-    expect(args.yes).toBe(true)
-    expect(args.pm).toBe('pnpm')
-    expect(args.adapter).toBe('hono')
-    expect(args.install).toBe(false)
-    expect(args.git).toBe(true)
-    expect(args.features).toBe('config')
+    expect(args['name']).toBe('my-app')
+    expect(args['yes']).toBe(true)
+    expect(args['pm']).toBe('pnpm')
+    expect(args['adapter']).toBe('hono')
+    expect(args['install']).toBe(false)
+    expect(args['git']).toBe(true)
+    expect(args['features']).toBe('config')
   })
 
   it('accepts camelCase and kebab-case spellings', async () => {

@@ -22,13 +22,13 @@ function logger(options: ConstructorParameters<typeof Logger>[0] = {}): { log: L
 }
 
 describe('Logger', () => {
-  const savedLevel = process.env.LOG_LEVEL
+  const savedLevel = process.env['LOG_LEVEL']
   beforeEach(() => {
-    delete process.env.LOG_LEVEL
+    delete process.env['LOG_LEVEL']
   })
   afterEach(() => {
-    if (savedLevel === undefined) delete process.env.LOG_LEVEL
-    else process.env.LOG_LEVEL = savedLevel
+    if (savedLevel === undefined) delete process.env['LOG_LEVEL']
+    else process.env['LOG_LEVEL'] = savedLevel
   })
 
   it('writes one JSON entry per call with the message and the context', () => {
@@ -36,8 +36,8 @@ describe('Logger', () => {
     log.info('User created', { userId: 42 })
     expect(entries).toHaveLength(1)
     expect(entries[0]).toMatchObject({ level: 30, msg: 'User created', userId: 42 })
-    expect(typeof entries[0]?.time).toBe('number')
-    expect(entries[0]?.pid).toBe(process.pid)
+    expect(typeof entries[0]?.['time']).toBe('number')
+    expect(entries[0]?.['pid']).toBe(process.pid)
   })
 
   it('accepts the pino argument order and errors as details', () => {
@@ -54,7 +54,7 @@ describe('Logger', () => {
       msg: 'Payment failed',
       err: { type: 'TypeError', message: 'declined' },
     })
-    expect(JSON.stringify(entries[1]?.err)).toContain('TypeError: declined')
+    expect(JSON.stringify(entries[1]?.['err'])).toContain('TypeError: declined')
     expect(entries[2]).toMatchObject({ msg: 'raw', err: { message: 'raw' } })
     expect(entries[3]).toMatchObject({ only: 'context' })
     expect(entries[3]?.msg).toBeUndefined()
@@ -65,7 +65,7 @@ describe('Logger', () => {
   it('serializes errors under `err` and `error`, including causes', () => {
     const { log, entries } = logger()
     log.error('failed', { error: new Error('outer', { cause: new Error('inner') }) })
-    const error = entries[0]?.error as { message: string; stack: string }
+    const error = entries[0]?.['error'] as { message: string; stack: string }
     expect(error.message).toBe('outer: inner')
     expect(error.stack).toContain('caused by: Error: inner')
   })
@@ -89,7 +89,7 @@ describe('Logger', () => {
     log.trace('now shown')
     expect(entries.at(-1)).toMatchObject({ level: 10, msg: 'now shown' })
 
-    process.env.LOG_LEVEL = 'WARN'
+    process.env['LOG_LEVEL'] = 'WARN'
     expect(logger().log.level).toBe('warn')
     expect(logger({ level: 'error' }).log.level).toBe('error')
 
@@ -172,7 +172,7 @@ describe('Logger', () => {
     log.info('hello', { user: { name: 'ada', password: 'p' } })
     expect(entries[0]).toMatchObject({ name: 'api', service: 'users', message: 'hello', user: { name: 'ada' } })
     expect(entries[0]).not.toHaveProperty('pid')
-    expect(new Date(entries[0]?.time as string).toISOString()).toBe(entries[0]?.time as string)
+    expect(new Date(entries[0]?.['time'] as string).toISOString()).toBe(entries[0]?.['time'] as string)
 
     const bare = logger({ base: null, timestamp: false })
     bare.log.info('bare')
@@ -190,7 +190,7 @@ describe('Logger', () => {
     const { log, entries } = logger({ mixin: () => ({ sequence: ++counter }) })
     log.info('a')
     log.child({ c: 1 }).info('b')
-    expect(entries.map(entry => entry.sequence)).toEqual([1, 2])
+    expect(entries.map(entry => entry['sequence'])).toEqual([1, 2])
   })
 
   describe('context enrichment', () => {

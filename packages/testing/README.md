@@ -71,15 +71,15 @@ Lifecycle hooks (`onStart`...) are not called: call them yourself when the test 
 
 Only **direct** dependencies are replaced, by kind:
 
-| Dependency                                                     | Injected                                                                     |
-| -------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| Class, interface, abstract class, `@Provides` value, external  | A deep auto-mock (`mocks.get(...)`)                                          |
-| Configuration class (`@Config`)                                | A real instance: field initializers, declared defaults, then `config` values |
-| Qualified value without class (`@Inject('dbUrl')`, primitives) | The `provide` value, otherwise a `ZNIGHT001` error naming it                 |
-| Optional (`@Optional()`, `T \| undefined`)                     | `undefined`, unless provided                                                 |
-| Multi (`T[]`)                                                  | `[]`, plus the members that are provided                                     |
-| `Lazy<T>`                                                      | `{ get: () => mock }` (the same mock as `mocks.get(T)`)                      |
-| Interceptor (`@Intercept`, `@Logged`...)                       | Nothing, and interceptors are not applied (see `aop`)                        |
+| Dependency                                                     | Injected                                                                                                                         |
+| -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Class, interface, abstract class, `@Provides` value, external  | A deep auto-mock (`mocks.get(...)`)                                                                                              |
+| Configuration class (`@Config`)                                | A real instance: field initializers, then `@Default` values (converted to the field type, like at runtime), then `config` values |
+| Qualified value without class (`@Inject('dbUrl')`, primitives) | The `provide` value, otherwise a `ZNIGHT001` error naming it                                                                     |
+| Optional (`@Optional()`, `T \| undefined`)                     | `undefined`, unless provided                                                                                                     |
+| Multi (`T[]`)                                                  | `[]`, plus the members that are provided                                                                                         |
+| `Lazy<T>`                                                      | `{ get: () => mock }` (the same mock as `mocks.get(T)`)                                                                          |
+| Interceptor (`@Intercept`, `@Logged`...)                       | Nothing, and interceptors are not applied (see `aop`)                                                                            |
 
 A dependency used several times (e.g. directly and lazily) always receives the same value.
 Qualified **class** providers (`@Named('replica') class Replica`) are auto-mocked: their type is known.
@@ -297,7 +297,7 @@ without importing any feature package:
 | -------------------------------------------------------------------------------------------------- | -------------------------------------------- |
 | `providers[token].{ class, deps, factory, async, interceptors, name, source }`                     | `TestBed` (target factory, dependency kinds) |
 | `aliases`, `externals`                                                                             | key lookups, error messages                  |
-| `extensions.config.configs[].{ token, prefix, fields[].{ property, default } }`                    | `TestBed` configuration instances            |
+| `extensions.config.configs[].{ token, prefix, fields[].{ property, type, default } }`              | `TestBed` configuration instances            |
 | `extensions.http.controllers[].{ token, guards, interceptors, routes[].{ guards, interceptors } }` | `TestApp` boot roots                         |
 | `extensions.messaging.consumers[].token`                                                           | `TestApp` boot roots                         |
 

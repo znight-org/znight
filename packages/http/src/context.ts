@@ -1,8 +1,12 @@
 import type { Token } from '@znight/core'
 import type { AdapterRequest } from './adapter.ts'
 import type { HeaderValue } from './exceptions.ts'
+import type { MultipartResult } from './multipart.ts'
+import type { BodyPlan } from './uploads.ts'
 
-import { parseBody } from './body.ts'
+import { checkContentEncoding, hasBody, parseBody, parseMediaType } from './body.ts'
+import { UnsupportedMediaTypeException } from './exceptions.ts'
+import { parseMultipart, readMultipart } from './multipart.ts'
 import { parseQuery, type QueryRecord, splitUrl } from './query.ts'
 import { emptyRecord } from './utils.ts'
 
@@ -47,10 +51,16 @@ export interface HttpContext {
   /** Request headers, lower-case names. */
   readonly headers: Readonly<Record<string, string | undefined>>
   /**
-   * Parsed body. Populated before the interceptors for routes declaring `@Body()` (and after
-   * {@link parseBody} resolved otherwise); `undefined` until then and for empty bodies.
+   * Parsed body. Populated before the interceptors for routes declaring `@Body()` or upload
+   * parameters (and after {@link parseBody} resolved otherwise); `undefined` until then and for
+   * empty bodies. Forms (urlencoded and multipart) are records of their text fields.
    */
   readonly body: unknown
+  /**
+   * Files of a `multipart/form-data` body by field name, in body order (standard `File` objects,
+   * held in memory). Populated with {@link body}; empty for other bodies.
+   */
+  readonly files: Readonly<Record<string, readonly File[]>>
   /** The matched route, `undefined` for unmatched requests (404/405). */
   readonly route: HttpRouteInfo | undefined
   /** Per-request storage for guards, interceptors and handlers (`ctx.state.set('user', user)`). */
@@ -73,13 +83,23 @@ export interface HttpContext {
   appendHeader(name: string, value: string): void
   /**
    * Reads and parses the body (once): JSON (`application/json`, `+json`), text (`text/*`), forms
-   * (`application/x-www-form-urlencoded` → record, `multipart/form-data` → `FormData`), raw bytes
-   * otherwise; `undefined` when empty. Fails with 400 (malformed), 413 (`bodyLimit`) or 415
-   * (unsupported encoding).
+   * (`application/x-www-form-urlencoded` and `multipart/form-data` → record of the text fields,
+   * repeated names as arrays; files in {@link files}), raw bytes otherwise; `undefined` when empty.
+   * Fails with 400 (malformed), 413 (body or upload limits) or 415 (unsupported encoding, refused
+   * file type, non-multipart body on an upload route).
    */
   parseBody(): Promise<unknown>
   /** The raw body bytes (once; shared with {@link parseBody}), e.g. to check a webhook signature. */
   rawBody(): Promise<Uint8Array>
+  /**
+   * The request body as a Web stream, read as it arrives (nothing is buffered): the escape hatch
+   * for large uploads (`PUT /files/:name` piped to disk or object storage). The body limit of the
+   * route still applies (`@BodyLimit`, `Infinity` to disable): past it the stream errors with a
+   * `PayloadTooLargeException` (413). Exclusive with {@link rawBody} / {@link parseBody}: throws when
+   * the body was already read (routes with `@Body()` or upload parameters read it before the
+   * handler).
+   */
+  bodyStream(): ReadableStream<Uint8Array>
 }
 
 /** Implementation of {@link HttpContext} used by the pipeline (internal). */
@@ -96,13 +116,15 @@ export class RequestContext implements HttpContext {
   readonly adapter: string
   readonly ip: string | undefined
   readonly #source: AdapterRequest
-  readonly #bodyLimit: number
+  readonly #plan: BodyPlan
   readonly #rawQuery: string
   #query: QueryRecord | undefined
   #state: Map<string | symbol, unknown> | undefined
   #responseHeaders: Record<string, HeaderValue> | undefined
   #body: unknown
+  #files: Readonly<Record<string, readonly File[]>> | undefined
   #raw: Promise<Uint8Array> | undefined
+  #streamed = false
   #parsed: Promise<unknown> | undefined
 
   constructor(
@@ -112,11 +134,11 @@ export class RequestContext implements HttpContext {
       readonly adapter: string
       readonly route: HttpRouteInfo | undefined
       readonly params: Readonly<Record<string, string>>
-      readonly bodyLimit: number
+      readonly body: BodyPlan
     },
   ) {
     this.#source = source
-    this.#bodyLimit = init.bodyLimit
+    this.#plan = init.body
     const { path, query } = splitUrl(source.url)
     this.#rawQuery = query
     this.requestId = init.requestId
@@ -146,6 +168,15 @@ export class RequestContext implements HttpContext {
     return this.#body
   }
 
+  get files(): Readonly<Record<string, readonly File[]>> {
+    return this.#files ?? NO_FILES
+  }
+
+  /** Maximum body size of the route, in bytes. */
+  get bodyLimit(): number {
+    return this.#plan.limit
+  }
+
   get responseHeaders(): Readonly<Record<string, HeaderValue>> {
     return this.#responseHeaders ?? EMPTY_HEADERS
   }
@@ -173,18 +204,77 @@ export class RequestContext implements HttpContext {
   }
 
   rawBody(): Promise<Uint8Array> {
-    this.#raw ??= this.#source.readBody(this.#bodyLimit)
+    if (this.#raw === undefined) {
+      if (this.#streamed) return Promise.reject(alreadyStreamed())
+      this.#raw = this.#source.readBody(this.#plan.limit)
+    }
     return this.#raw
   }
 
+  bodyStream(): ReadableStream<Uint8Array> {
+    if (this.#raw !== undefined || this.#streamed) throw alreadyStreamed()
+    this.#streamed = true
+    return openBodyStream(this.#source, this.#plan.limit)
+  }
+
   parseBody(): Promise<unknown> {
-    this.#parsed ??= this.rawBody().then(async bytes => {
-      const body = await parseBody(bytes, this.headers['content-type'], this.headers['content-encoding'])
-      this.#body = body
-      return body
-    })
+    this.#parsed ??= this.#parse()
     return this.#parsed
+  }
+
+  async #parse(): Promise<unknown> {
+    const headers = this.headers
+    const contentType = headers['content-type']
+    const media = parseMediaType(contentType)
+    if (media?.type === 'multipart/form-data') {
+      checkContentEncoding(headers['content-encoding'])
+      const policy = this.#plan.multipart
+      let result: MultipartResult
+      if (this.#raw === undefined) {
+        if (this.#streamed) throw alreadyStreamed()
+        this.#streamed = true
+        result = await readMultipart(openBodyStream(this.#source, this.#plan.limit), contentType as string, policy)
+      } else {
+        result = parseMultipart(await this.#raw, contentType as string, policy)
+      }
+      this.#files = result.files
+      this.#body = result.fields
+      return result.fields
+    }
+    if (this.#plan.upload) {
+      // upload routes only accept multipart bodies (an empty body means "no file")
+      if (!hasBody(headers) && this.#source.hasBody?.() !== true) return undefined
+      throw new UnsupportedMediaTypeException(
+        `Expected a multipart/form-data body${media === undefined ? '' : ` (received ${JSON.stringify(media.type)})`}`,
+      )
+    }
+    const bytes = await this.rawBody()
+    const body = await parseBody(bytes, contentType, headers['content-encoding'])
+    this.#body = body
+    return body
   }
 }
 
+/** The body as a stream: the adapter's `streamBody`, or the buffered body when it has none. */
+function openBodyStream(source: AdapterRequest, limit: number): ReadableStream<Uint8Array> {
+  if (typeof source.streamBody === 'function') return source.streamBody(limit)
+  return new ReadableStream<Uint8Array>(
+    {
+      async pull(controller) {
+        const bytes = await source.readBody(limit)
+        if (bytes.byteLength > 0) controller.enqueue(bytes)
+        controller.close()
+      },
+    },
+    { highWaterMark: 0 },
+  )
+}
+
+function alreadyStreamed(): Error {
+  return new Error(
+    'The request body was already read: bodyStream() cannot be combined with rawBody(), parseBody(), @Body() or upload parameters',
+  )
+}
+
 const EMPTY_HEADERS: Readonly<Record<string, HeaderValue>> = Object.freeze({})
+const NO_FILES: Readonly<Record<string, readonly File[]>> = Object.freeze(emptyRecord<readonly File[]>())

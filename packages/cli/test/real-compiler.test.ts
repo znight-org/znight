@@ -13,7 +13,7 @@ import { afterAll, describe, expect, test } from 'bun:test'
 // not a literal: the type-check of the CLI tests does not depend on the compiler sources
 const COMPILER: string = '@znight/compiler'
 const compiler: Record<string, unknown> = await import(COMPILER).catch(() => ({}))
-const available = typeof compiler.generate === 'function' && typeof compiler.createCompiler === 'function'
+const available = typeof compiler['generate'] === 'function' && typeof compiler['createCompiler'] === 'function'
 const it = available ? test : test.skip
 
 const TMP = join(import.meta.dir, '.tmp', `real-compiler-${process.pid}`)

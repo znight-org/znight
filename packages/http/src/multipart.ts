@@ -8,6 +8,10 @@
  * and enforces the upload rules of the route (expected fields, file count, size and media type) on
  * the fly, so an invalid upload is rejected as soon as the offending part shows up. Files are
  * buffered in memory as standard `File` objects, within the limits.
+ *
+ * Status codes: malformed bodies, unexpected file fields and several files for a single-file field
+ * → 400; a file, a field, too many files or too many parts → 413; a refused media type → 415. Errors
+ * raised while the body is being read carry `connection: close` (the rest of the body is discarded).
  */
 import type { HttpExceptionOptions } from './exceptions.ts'
 import type { QueryRecord } from './query.ts'
@@ -25,8 +29,6 @@ export interface FileRule {
   readonly field: string | undefined
   /** `@UploadedFiles` (an array) rather than `@UploadedFile` (a single file). */
   readonly multiple: boolean
-  /** At least one file must be present. */
-  readonly required: boolean
   /** Maximum size of each file, in bytes. */
   readonly maxSize: number
   /** Maximum number of files (1 for a single file). */
@@ -38,8 +40,9 @@ export interface FileRule {
 /** How a multipart body is read. */
 export interface MultipartPolicy {
   /**
-   * Upload rules of the route. Without rules, every file field is accepted (generic parsing).
-   * With named rules only, a file in another field is rejected (400).
+   * Upload rules of the route (files are only accepted in their fields: a file in another field is
+   * rejected with 400, unless a rule has no field). Without rules, every file is accepted without
+   * limit (but the body limit).
    */
   readonly rules: readonly FileRule[]
   /** Maximum number of parts (text fields and files). */
@@ -76,6 +79,20 @@ const HEADER_END = Buffer.from('\r\n\r\n')
 const EMPTY: Buffer = Buffer.alloc(0)
 const DECODER = new TextDecoder()
 
+const PRINTABLE = /^[\u0020-\u007e]*$/
+
+/**
+ * A received file. Its `type` is the media type declared by the client, lower-cased (empty when it
+ * contains characters outside printable ASCII), identical on every runtime (Bun's `File` adds
+ * `;charset=utf-8` to some text types).
+ */
+function createFile(chunks: Uint8Array[], name: string, type: string): File {
+  const file = new File(chunks, name, { type })
+  const normalized = PRINTABLE.test(type) ? type.toLowerCase() : ''
+  if (file.type !== normalized) Object.defineProperty(file, 'type', { value: normalized, configurable: true })
+  return file
+}
+
 /** Description of a part, from its headers. */
 export interface PartInfo {
   readonly name: string
@@ -109,6 +126,8 @@ export class MultipartParser {
   #buffer: Buffer = Buffer.from('\r\n')
   #state: State = 'preamble'
   #sink: PartSink | undefined
+  /** Bytes of the header block already searched for its end (avoids rescanning on every chunk). */
+  #scanned = 0
 
   constructor(boundary: string, handler: PartHandler, maxHeaderSize: number = MAX_HEADER_SIZE) {
     this.#delimiter = Buffer.from(`\r\n--${boundary}`, 'latin1')
@@ -188,15 +207,17 @@ export class MultipartParser {
       end = 0
       next = 2
     } else {
-      end = buffer.indexOf(HEADER_END)
+      end = buffer.indexOf(HEADER_END, Math.max(0, this.#scanned - (HEADER_END.length - 1)))
       if (end === -1) {
         if (buffer.length > this.#maxHeaderSize) throw malformed('the headers of a part are too large')
+        this.#scanned = buffer.length
         return false
       }
       if (end > this.#maxHeaderSize) throw malformed('the headers of a part are too large')
       next = end + 4
     }
     const part = parsePartHeaders(buffer.toString('utf8', 0, end))
+    this.#scanned = 0
     this.#buffer = buffer.subarray(next)
     this.#sink = this.#handler.start(part)
     this.#state = 'body'
@@ -400,7 +421,7 @@ class Collector implements PartHandler {
   start(part: PartInfo): PartSink {
     this.#parts++
     if (this.#parts > this.#policy.maxParts) {
-      throw new BadRequestException(
+      throw new PayloadTooLargeException(
         `Too many parts in the multipart body (at most ${this.#policy.maxParts})`,
         { maxParts: this.#policy.maxParts },
         CLOSE,
@@ -466,7 +487,7 @@ class Collector implements PartHandler {
       },
       end: () => {
         if (!admitted) return
-        const file = new File(chunks, filename, { type })
+        const file = createFile(chunks, filename, type)
         const list = this.files[name]
         if (list === undefined) this.files[name] = [file]
         else list.push(file)
@@ -495,10 +516,13 @@ class Collector implements PartHandler {
       const count = (this.#counts.get(rule) ?? 0) + 1
       this.#counts.set(rule, count)
       if (count > rule.maxFiles) {
-        const message = rule.multiple
-          ? `Too many files${rule.field === undefined ? '' : ` in field ${JSON.stringify(rule.field)}`} (at most ${rule.maxFiles})`
-          : `Expected a single file${rule.field === undefined ? '' : ` in field ${JSON.stringify(rule.field)}`}`
-        throw new BadRequestException(message, { field, maxFiles: rule.maxFiles }, CLOSE)
+        const where = rule.field === undefined ? '' : ` in field ${JSON.stringify(truncate(rule.field))}`
+        if (!rule.multiple) throw new BadRequestException(`Expected a single file${where}`, { field }, CLOSE)
+        throw new PayloadTooLargeException(
+          `Too many files${where} (at most ${rule.maxFiles})`,
+          { field, maxFiles: rule.maxFiles },
+          CLOSE,
+        )
       }
       if (rule.mimeTypes !== undefined && !matchesMediaType(type, rule.mimeTypes)) {
         throw new UnsupportedMediaTypeException(
@@ -553,28 +577,6 @@ export function parseMultipart(bytes: Uint8Array, contentType: string, policy: M
   parser.write(bytes)
   parser.end()
   return collector.result()
-}
-
-/**
- * Checks the `required` rules once the body was read (400 `Missing file "avatar"`, or `Expected a
- * file in field "avatar"` when the field was sent as text).
- */
-export function checkRequiredFiles(result: MultipartResult, rules: readonly FileRule[]): void {
-  for (const rule of rules) {
-    if (!rule.required) continue
-    const count = rule.field === undefined ? result.list.length : (result.files[rule.field]?.length ?? 0)
-    if (count > 0) continue
-    if (rule.field !== undefined && result.fields[rule.field] !== undefined) {
-      throw new BadRequestException(`Expected a file in field ${JSON.stringify(rule.field)}, received a text value`, {
-        field: rule.field,
-      })
-    }
-    const what = rule.multiple ? 'files' : 'file'
-    throw new BadRequestException(
-      rule.field === undefined ? `Missing ${what}` : `Missing ${what} ${JSON.stringify(rule.field)}`,
-      rule.field === undefined ? undefined : { field: rule.field },
-    )
-  }
 }
 
 /** Converts a parse result to a `FormData` (entries in body order). */

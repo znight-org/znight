@@ -11,6 +11,7 @@ import type {
   HttpRouteData,
   MetaEntry,
   ParamCoercion,
+  UploadData,
 } from './model.ts'
 
 import { compareStrings } from '../path.ts'
@@ -18,10 +19,17 @@ import { HTTP_PACKAGE } from './model.ts'
 
 type Context = GenerateContext<HttpControllerData>
 
+/** `uploads` helper by kind and presence (`@UploadedFile` / `@UploadedFiles`, required or not). */
+const UPLOAD_HELPERS = {
+  file: { required: 'file', optional: 'optionalFile' },
+  files: { required: 'files', optional: 'optionalFiles' },
+} as const
+
 /** Imports of `@znight/http` helpers, created on first use (the generated module has no unused import). */
 interface Helpers {
   coerce(): GenNode
   validate(): GenNode
+  uploads(): GenNode
   context(): GenNode
 }
 
@@ -38,6 +46,7 @@ export function generateHttp(ctx: Context): GenNode | undefined {
 function createHelpers(ctx: Context): Helpers {
   let coerce: GenNode | undefined
   let validate: GenNode | undefined
+  let uploads: GenNode | undefined
   let context: GenNode | undefined
   return {
     coerce: () => {
@@ -47,6 +56,10 @@ function createHelpers(ctx: Context): Helpers {
     validate: () => {
       validate ??= ctx.importFrom(HTTP_PACKAGE, 'validate')
       return validate
+    },
+    uploads: () => {
+      uploads ??= ctx.importFrom(HTTP_PACKAGE, 'uploads')
+      return uploads
     },
     context: () => {
       context ??= ctx.importFrom(HTTP_PACKAGE, 'HttpContext', { type: true })
@@ -85,6 +98,13 @@ function routeNode(ctx: Context, helpers: Helpers, controller: HttpControllerDat
     ['interceptors', tokens(ctx, route.interceptors)],
     ['params', ctx.arr(route.params.map(param => paramNode(ctx, param)))],
   )
+  if (route.bodyLimit !== undefined) {
+    entries.push(['bodyLimit', route.bodyLimit])
+  }
+  const uploads = route.params.flatMap(param => (param.upload === undefined ? [] : [param.upload]))
+  if (uploads.length > 0) {
+    entries.push(['uploads', ctx.arr(uploads.map(upload => uploadNode(ctx, upload)))])
+  }
   if (route.rawResponse) {
     entries.push(['rawResponse', true])
   }
@@ -108,6 +128,30 @@ function paramNode(ctx: Context, param: HttpParamData): GenNode {
   }
   if (param.schema !== undefined) {
     entries.push(['schema', true])
+  }
+  return ctx.obj(entries)
+}
+
+/** `{ field?, multiple?, required?, maxSize?, maxFiles?, mimeTypes? }` (absent values omitted). */
+function uploadNode(ctx: Context, upload: UploadData): GenNode {
+  const entries: [string, GenInput][] = []
+  if (upload.field !== undefined) {
+    entries.push(['field', upload.field])
+  }
+  if (upload.multiple) {
+    entries.push(['multiple', true])
+  }
+  if (upload.required) {
+    entries.push(['required', true])
+  }
+  if (upload.maxSize !== undefined) {
+    entries.push(['maxSize', upload.maxSize])
+  }
+  if (upload.maxFiles !== undefined) {
+    entries.push(['maxFiles', upload.maxFiles])
+  }
+  if (upload.mimeTypes !== undefined) {
+    entries.push(['mimeTypes', ctx.lit(upload.mimeTypes)])
   }
   return ctx.obj(entries)
 }
@@ -172,6 +216,13 @@ function argumentNode(ctx: Context, helpers: Helpers, http: GenNode, param: Http
       return param.schema === undefined
         ? ctx.code`${body} as never`
         : validation(ctx, helpers, param.schema, body, 'body')
+    }
+    case 'file':
+    case 'files': {
+      const upload = param.upload as UploadData
+      const helper = UPLOAD_HELPERS[upload.multiple ? 'files' : 'file'][upload.required ? 'required' : 'optional']
+      const call = ctx.call(ctx.member(helpers.uploads(), helper), [http, ctx.lit(upload.field)])
+      return upload.cast ? ctx.code`${call} as never` : call
     }
     case 'headers':
     case 'param':

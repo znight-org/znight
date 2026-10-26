@@ -29,6 +29,7 @@ describe('extension', () => {
       [
         'All',
         'Body',
+        'BodyLimit',
         'Controller',
         'Ctx',
         'Delete',
@@ -45,6 +46,8 @@ describe('extension', () => {
         'Query',
         'Req',
         'Res',
+        'UploadedFile',
+        'UploadedFiles',
         'UseGuard',
         'UseInterceptor',
         'Validate',
@@ -59,6 +62,15 @@ describe('extension', () => {
       rest: 'value',
     })
     expect(http.decorators['@znight/http#Header']).toEqual({ targets: ['method'], params: ['static', 'static'] })
+    expect(http.decorators['@znight/http#UploadedFile']).toEqual({
+      targets: ['parameter'],
+      params: ['static', 'static'],
+    })
+    expect(http.decorators['@znight/http#UploadedFiles']).toEqual({
+      targets: ['parameter'],
+      params: ['static', 'static'],
+    })
+    expect(http.decorators['@znight/http#BodyLimit']).toEqual({ targets: ['class', 'method'], params: ['static'] })
   })
 
   it('is auto-discovered through the manifest of @znight/http', () => {

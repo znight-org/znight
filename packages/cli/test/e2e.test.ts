@@ -26,7 +26,7 @@ import { dirname, join, resolve } from 'node:path'
 
 import { afterAll, beforeAll, describe, expect, test as it } from 'bun:test'
 
-const enabled = process.env.ZNIGHT_CLI_E2E === '1'
+const enabled = process.env['ZNIGHT_CLI_E2E'] === '1'
 
 const CLI_ROOT = resolve(import.meta.dir, '..')
 const REPO = resolve(CLI_ROOT, '../..')
@@ -38,7 +38,7 @@ const TIMEOUT = 180_000
 // not a literal: the type-check of the CLI tests does not depend on the compiler sources
 const COMPILER: string = '@znight/compiler'
 const compiler: Record<string, unknown> = enabled ? await import(COMPILER).catch(() => ({})) : {}
-const hasVitePlugin = typeof compiler.znight === 'function'
+const hasVitePlugin = typeof compiler['znight'] === 'function'
 const hasBunPreload = (() => {
   try {
     createRequire(join(CLI_ROOT, 'package.json')).resolve('@znight/compiler/bun')
@@ -204,7 +204,7 @@ describe.skipIf(!enabled)('scaffolded application (ZNIGHT_CLI_E2E=1)', () => {
   }, TIMEOUT)
 
   afterAll(() => {
-    if (process.env.ZNIGHT_CLI_E2E_KEEP !== '1') rmSync(APP, { recursive: true, force: true })
+    if (process.env['ZNIGHT_CLI_E2E_KEEP'] !== '1') rmSync(APP, { recursive: true, force: true })
   })
 
   it('znight g adds a provider', async () => {

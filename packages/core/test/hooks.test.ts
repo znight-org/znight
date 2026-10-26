@@ -63,12 +63,12 @@ describe('Hooks.on / emit', () => {
     hooks.emit('test:ping', { count: 1 })
     expect(seen).toEqual(['third'])
     await sleep(10)
-    expect(logger.entries.map(entry => (entry.context?.err as Error | undefined)?.message)).toEqual([
+    expect(logger.entries.map(entry => (entry.context?.['err'] as Error | undefined)?.message)).toEqual([
       'sync failure',
       'async failure',
     ])
     expect(logger.entries[0]?.level).toBe('error')
-    expect(logger.entries[0]?.context?.hook).toBe('test:ping')
+    expect(logger.entries[0]?.context?.['hook']).toBe('test:ping')
   })
 
   it('does not call listeners added during an emit until the next one', () => {

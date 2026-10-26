@@ -79,7 +79,7 @@ export function defaultValueOf(cls: ClassInfo, method: MethodInfo, param: Parame
     if (!fn) {
       return undefined
     }
-    const params = children(fn, 'params').filter(node => !(node.type === 'Identifier' && node.name === 'this'))
+    const params = children(fn, 'params').filter(node => !(node.type === 'Identifier' && node['name'] === 'this'))
     let pattern = params[param.index]
     if (pattern?.type === 'TSParameterProperty') {
       pattern = child(pattern, 'parameter')

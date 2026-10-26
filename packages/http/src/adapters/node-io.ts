@@ -7,7 +7,11 @@ import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 
 import { BadRequestException } from '../exceptions.ts'
+import { discardStream, failedStream } from '../stream.ts'
 import { concat, exceedsDeclaredLength, payloadTooLarge } from './shared.ts'
+
+/** Bytes buffered by a request body stream before the request is paused. */
+const BODY_HIGH_WATER_MARK = 64 * 1024
 
 /** Request headers with array values (only `set-cookie` in Node.js) joined with `, `. */
 export function normalizeNodeHeaders(headers: IncomingHttpHeaders): Record<string, string | undefined> {
@@ -74,6 +78,72 @@ export function readNodeBody(request: IncomingMessage, limit: number): Promise<U
   })
 }
 
+/**
+ * A Node.js request body as a Web stream (see `AdapterRequest.streamBody`): the request is paused
+ * while the consumer does not read (backpressure); past `limit` bytes the stream errors with 413 and
+ * the rest of the body is discarded (`request.resume()`), like when the consumer cancels the stream,
+ * so the response can still be written (it carries `connection: close`).
+ */
+export function nodeBodyStream(request: IncomingMessage, limit: number): ReadableStream<Uint8Array> {
+  if (exceedsDeclaredLength(request.headers['content-length'], limit)) {
+    request.resume()
+    return failedStream(payloadTooLarge(limit))
+  }
+  if (request.readableEnded) return new ReadableStream<Uint8Array>({ start: controller => controller.close() })
+  if (request.destroyed) return failedStream(new BadRequestException('The request was aborted'))
+  let size = 0
+  let cleanup = (): void => undefined
+  return new ReadableStream<Uint8Array>(
+    {
+      start(controller) {
+        const onData = (chunk: Uint8Array | string): void => {
+          const bytes = typeof chunk === 'string' ? Buffer.from(chunk) : chunk
+          size += bytes.byteLength
+          if (size > limit) {
+            cleanup()
+            request.resume() // discard the rest; the 413 response closes the connection
+            controller.error(payloadTooLarge(limit))
+            return
+          }
+          controller.enqueue(bytes)
+          if ((controller.desiredSize ?? 0) <= 0) request.pause()
+        }
+        const onEnd = (): void => {
+          cleanup()
+          controller.close()
+        }
+        const onError = (error: Error): void => {
+          cleanup()
+          controller.error(new BadRequestException('Failed to read the request body', undefined, { cause: error }))
+        }
+        const onClose = (): void => {
+          if (request.complete) return
+          cleanup()
+          controller.error(new BadRequestException('The request was aborted'))
+        }
+        cleanup = (): void => {
+          request.off('data', onData)
+          request.off('end', onEnd)
+          request.off('error', onError)
+          request.off('close', onClose)
+        }
+        request.on('data', onData)
+        request.on('end', onEnd)
+        request.on('error', onError)
+        request.on('close', onClose)
+      },
+      pull() {
+        if (request.isPaused()) request.resume()
+      },
+      cancel() {
+        cleanup()
+        request.resume() // discard the rest of the body
+      },
+    },
+    { highWaterMark: BODY_HIGH_WATER_MARK, size: (chunk: Uint8Array | undefined) => chunk?.byteLength ?? 0 },
+  )
+}
+
 /** Options of {@link nodeAdapterRequest}. */
 export interface NodeRequestOptions {
   /** Request target (default: `request.url`). */
@@ -103,6 +173,7 @@ export function nodeAdapterRequest(
       body ??= readNodeBody(request, limit)
       return body
     },
+    streamBody: (limit: number): ReadableStream<Uint8Array> => nodeBodyStream(request, limit),
     rawStatus: (): number => response.statusCode,
   }
 }
@@ -112,9 +183,13 @@ export function nodeAdapterRequest(
  * never rejects (a failing stream destroys the response).
  */
 export async function writeNodeReply(response: ServerResponse, reply: AdapterReply): Promise<void> {
-  if (reply.raw === true) return
-  if (response.headersSent) {
-    if (!response.writableEnded) response.end()
+  if (reply.raw === true) {
+    discardStream(reply.body instanceof ReadableStream ? reply.body : null)
+    return
+  }
+  if (response.headersSent || response.destroyed) {
+    discardStream(reply.body instanceof ReadableStream ? reply.body : null)
+    if (!response.writableEnded && !response.destroyed) response.end()
     return
   }
   try {
@@ -122,6 +197,7 @@ export async function writeNodeReply(response: ServerResponse, reply: AdapterRep
     response.writeHead(reply.status, reply.headers as OutgoingHttpHeaders)
   } catch {
     // invalid header name or value set by user code
+    discardStream(reply.body instanceof ReadableStream ? reply.body : null)
     if (!response.headersSent) {
       for (const name of response.getHeaderNames()) response.removeHeader(name)
       response.statusCode = 500
@@ -139,8 +215,9 @@ export async function writeNodeReply(response: ServerResponse, reply: AdapterRep
     response.end(body)
     return
   }
+  const stream = body instanceof Blob ? body.stream() : body
   try {
-    await pipeline(Readable.fromWeb(body as import('node:stream/web').ReadableStream), response)
+    await pipeline(Readable.fromWeb(stream as import('node:stream/web').ReadableStream), response)
   } catch {
     if (!response.destroyed) response.destroy()
   }

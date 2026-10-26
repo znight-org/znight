@@ -168,7 +168,7 @@ describe('ObservabilityPlugin', () => {
     const methodSpan = exporter.getFinishedSpans().find(span => span.name === 'UserService.find')
     expect(serverSpan?.spanContext().traceId).toBe(TRACE_ID)
     expect(methodSpan?.parentSpanContext?.spanId).toBe(serverSpan?.spanContext().spanId)
-    expect(event.responseHeaders.traceresponse).toContain(TRACE_ID)
+    expect(event.responseHeaders['traceresponse']).toContain(TRACE_ID)
     const ids = { requestId: 'req-9', traceId: TRACE_ID }
     expect(byMessage(entries, 'finding user')).toMatchObject({ ...ids, spanId: methodSpan?.spanContext().spanId })
     expect(byMessage(entries, 'UserService.find() completed')).toMatchObject({ level: 30, ...ids })
@@ -225,7 +225,7 @@ describe('ObservabilityPlugin', () => {
     const event: MessagePublishEventLike = { queue: 'orders', headers: {} }
     await hooks.run('messaging:publish', event, () => Promise.resolve())
     const producer = exporter.getFinishedSpans().find(span => span.kind === SpanKind.PRODUCER)
-    expect(event.headers.traceparent).toContain(producer?.spanContext().spanId as string)
+    expect(event.headers['traceparent']).toContain(producer?.spanContext().spanId as string)
     await app.stop()
     // removed on dispose
     const after: MessagePublishEventLike = { queue: 'orders', headers: {} }
@@ -356,22 +356,22 @@ describe('ObservabilityPlugin', () => {
     await app.hooks.run('messaging:message', messageEvent({ outcome: 'dead-letter' }), async () => undefined)
     await caught(() => app.hooks.run('messaging:message', messageEvent(), () => Promise.reject(new Error('crash'))))
     const requests = entries.filter(entry => 'status' in entry)
-    expect(requests.map(entry => [entry.level, entry.msg, entry.status])).toEqual([
+    expect(requests.map(entry => [entry.level, entry.msg, entry['status']])).toEqual([
       [20, 'request completed', 200],
       [50, 'request failed', 500],
       [40, 'request completed', 404],
     ])
-    expect(requests[1]?.err).toMatchObject({ message: 'kaboom' })
-    expect(typeof requests[0]?.durationMs).toBe('number')
+    expect(requests[1]?.['err']).toMatchObject({ message: 'kaboom' })
+    expect(typeof requests[0]?.['durationMs']).toBe('number')
     const deliveries = entries.filter(entry => 'outcome' in entry)
-    expect(deliveries.map(entry => [entry.level, entry.msg, entry.outcome])).toEqual([
+    expect(deliveries.map(entry => [entry.level, entry.msg, entry['outcome']])).toEqual([
       [40, 'message processed', 'ack'],
       [40, 'message failed, will be retried', 'retry'],
       [50, 'message dead-lettered', 'dead-letter'],
       [50, 'message failed', 'error'],
     ])
-    expect(deliveries[1]?.err).toMatchObject({ message: 'later' })
-    expect(deliveries[3]?.err).toMatchObject({ message: 'crash' })
+    expect(deliveries[1]?.['err']).toMatchObject({ message: 'later' })
+    expect(deliveries[3]?.['err']).toMatchObject({ message: 'crash' })
     await app.stop()
   })
 

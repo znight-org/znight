@@ -115,16 +115,16 @@ describe('dotenv()', () => {
     const cwd = await project(files)
     const variables: Record<string, string | undefined> = { PORT: '9999', NODE_ENV: 'production' }
     await loadConfigSource([dotenv({ populate: true })], { cwd, env: variables })
-    expect(variables.PORT).toBe('9999')
-    expect(variables.HOST).toBe('local-host')
-    expect(variables.MODE).toBe('prod-local')
+    expect(variables['PORT']).toBe('9999')
+    expect(variables['HOST']).toBe('local-host')
+    expect(variables['MODE']).toBe('prod-local')
   })
 
   it('overrides existing variables with override: true', async () => {
     const cwd = await project(files)
     const variables: Record<string, string | undefined> = { PORT: '9999' }
     const source = await loadConfigSource([dotenv({ override: true }), env()], { cwd, env: variables })
-    expect(variables.PORT).toBe('3000')
+    expect(variables['PORT']).toBe('3000')
     expect(source.get('PORT')).toBe('3000')
   })
 

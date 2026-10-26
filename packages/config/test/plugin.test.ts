@@ -329,9 +329,9 @@ describe('ConfigPlugin through Application.create', () => {
 describe('without ConfigPlugin', () => {
   it('config classes read process.env', async () => {
     const saved = { ...process.env }
-    process.env.DB_PASSWORD = 'env-only'
-    process.env.PUBLIC_URL = 'https://env.example.com'
-    process.env.HTTP_PORT = '4321'
+    process.env['DB_PASSWORD'] = 'env-only'
+    process.env['PUBLIC_URL'] = 'https://env.example.com'
+    process.env['HTTP_PORT'] = '4321'
     try {
       const app = await create([])
       try {
@@ -350,8 +350,8 @@ describe('without ConfigPlugin', () => {
   })
 
   it('a missing value fails the creation of its class (ZNIGHT015 caused by ZNIGHT006)', async () => {
-    const saved = process.env.DB_PASSWORD
-    delete process.env.DB_PASSWORD
+    const saved = process.env['DB_PASSWORD']
+    delete process.env['DB_PASSWORD']
     try {
       const error = await caught(() => create([]))
       expect(error).toBeInstanceOf(InstantiationError)
@@ -360,15 +360,15 @@ describe('without ConfigPlugin', () => {
       expect(cause.problems[0]?.property).toBe('password')
       expect(cause.hints.some(hint => hint.includes('ConfigPlugin.configure()'))).toBe(true)
     } finally {
-      if (saved !== undefined) process.env.DB_PASSWORD = saved
+      if (saved !== undefined) process.env['DB_PASSWORD'] = saved
     }
   })
 
   it('works when the metadata does not declare the ConfigSource external', async () => {
     const { externals: _externals, ...withoutExternals } = metadata
     const saved = { ...process.env }
-    process.env.DB_PASSWORD = 'no-external'
-    process.env.PUBLIC_URL = 'https://no-external.dev'
+    process.env['DB_PASSWORD'] = 'no-external'
+    process.env['PUBLIC_URL'] = 'https://no-external.dev'
     try {
       const app = await create([], withoutExternals)
       try {
@@ -407,7 +407,7 @@ describe('dotenv() + ConfigPlugin in a full flow', () => {
       ])
       try {
         expect(app.get(HttpConfig).port).toBe(5555)
-        expect(variables.HTTP_PORT).toBe('5555')
+        expect(variables['HTTP_PORT']).toBe('5555')
       } finally {
         await app.stop()
       }

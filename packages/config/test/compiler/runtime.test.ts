@@ -168,9 +168,9 @@ function scenarios(load: MetadataFactory, classes: () => Record<string, new () =
   })
 
   it('reads process.env without ConfigPlugin (the ConfigSource dependency is optional)', async () => {
-    const saved = { DB_PASSWORD: process.env.DB_PASSWORD, PUBLIC_URL: process.env.PUBLIC_URL }
-    process.env.DB_PASSWORD = 'from-env'
-    process.env.PUBLIC_URL = 'https://env.dev'
+    const saved = { DB_PASSWORD: process.env['DB_PASSWORD'], PUBLIC_URL: process.env['PUBLIC_URL'] }
+    process.env['DB_PASSWORD'] = 'from-env'
+    process.env['PUBLIC_URL'] = 'https://env.dev'
     try {
       const app = await create(await load())
       try {
@@ -179,7 +179,7 @@ function scenarios(load: MetadataFactory, classes: () => Record<string, new () =
       } finally {
         await app.stop()
       }
-      delete process.env.DB_PASSWORD
+      delete process.env['DB_PASSWORD']
       const error = await create(await load()).then(
         () => undefined,
         (caught: unknown) => caught,
@@ -252,7 +252,7 @@ type Compile = (options: ZnightOptions) => Promise<{
   readonly diagnostics: readonly Diagnostic[]
 }>
 
-const compile = (compiler as Record<string, unknown>).compile as Compile | undefined
+const compile = (compiler as Record<string, unknown>)['compile'] as Compile | undefined
 
 describe.skipIf(typeof compile !== 'function')('end to end (compile())', () => {
   let app: TempApp

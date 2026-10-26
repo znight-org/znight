@@ -188,7 +188,7 @@ export function viaInject(http: HttpPlugin): Send {
 /** Network transport (`fetch` against the listening server, redirects not followed). */
 export function viaFetch(http: HttpPlugin): Send {
   return async request => {
-    const normalized = normalizeInject(request)
+    const normalized = await normalizeInject(request)
     const init: RequestInit = { method: normalized.method, headers: normalized.headers, redirect: 'manual' }
     if (normalized.payload !== undefined) init.body = normalized.payload
     const response = await fetch(`${String(http.address)}${normalized.url}`, init)
@@ -196,8 +196,9 @@ export function viaFetch(http: HttpPlugin): Send {
     for (const [name, value] of response.headers) if (name !== 'set-cookie') headers[name] = value
     const cookies = response.headers.getSetCookie()
     if (cookies.length > 0) headers['set-cookie'] = cookies.join(', ')
-    const body = await response.text()
-    return { status: response.status, headers, body, json: <T>() => JSON.parse(body) as T }
+    const bytes = new Uint8Array(await response.arrayBuffer())
+    const body = new TextDecoder().decode(bytes)
+    return { status: response.status, headers, body, bytes, json: <T>() => JSON.parse(body) as T }
   }
 }
 

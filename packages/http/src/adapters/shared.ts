@@ -1,7 +1,8 @@
 /** Helpers shared by the adapters (internal). */
 import type { HttpServerAddress, InjectRequest, InjectResponse } from '../adapter.ts'
 
-import { PayloadTooLargeException } from '../exceptions.ts'
+import { BadRequestException, PayloadTooLargeException } from '../exceptions.ts'
+import { failedStream } from '../stream.ts'
 
 /** An inject request normalised for the underlying tools. */
 export interface NormalizedInject {
@@ -11,8 +12,11 @@ export interface NormalizedInject {
   readonly payload: string | Uint8Array | undefined
 }
 
-/** Applies the defaults of {@link InjectRequest}: query merged in the URL, body encoding and content type. */
-export function normalizeInject(request: InjectRequest): NormalizedInject {
+/**
+ * Applies the defaults of {@link InjectRequest}: query merged in the URL, body encoding and content
+ * type (`FormData` → `multipart/form-data`, `Blob` → its type).
+ */
+export async function normalizeInject(request: InjectRequest): Promise<NormalizedInject> {
   if (request === null || typeof request !== 'object') throw new TypeError('inject() expects a request object')
   if (typeof request.url !== 'string' || !request.url.startsWith('/')) {
     throw new TypeError(`inject() expects a url starting with "/" (received ${JSON.stringify(request.url)})`)
@@ -40,6 +44,16 @@ export function normalizeInject(request: InjectRequest): NormalizedInject {
   } else if (body instanceof Uint8Array || body instanceof ArrayBuffer) {
     payload = body instanceof Uint8Array ? body : new Uint8Array(body)
     headers['content-type'] ??= 'application/octet-stream'
+  } else if (body instanceof FormData) {
+    // the Fetch API encodes forms (the boundary of the generated content type must be used)
+    const encoded = new Response(body)
+    // read the generated content type (with its boundary) before consuming the body (Bun sets it lazily)
+    const type = encoded.headers.get('content-type')
+    payload = new Uint8Array(await encoded.arrayBuffer())
+    headers['content-type'] = type ?? encoded.headers.get('content-type') ?? 'multipart/form-data'
+  } else if (body instanceof Blob) {
+    payload = new Uint8Array(await body.arrayBuffer())
+    headers['content-type'] ??= body.type === '' ? 'application/octet-stream' : body.type
   } else {
     payload = JSON.stringify(body)
     headers['content-type'] ??= 'application/json'
@@ -47,21 +61,25 @@ export function normalizeInject(request: InjectRequest): NormalizedInject {
   return { method, url, headers, payload }
 }
 
+const DECODER = new TextDecoder()
+
 /** Builds an {@link InjectResponse}. Header values are joined with `, `. */
 export function injectResponse(
   status: number,
   headers: Readonly<Record<string, string | number | readonly string[] | undefined>>,
-  body: string,
+  bytes: Uint8Array,
 ): InjectResponse {
   const normalized: Record<string, string> = {}
   for (const [name, value] of Object.entries(headers)) {
     if (value === undefined) continue
     normalized[name.toLowerCase()] = typeof value === 'object' ? value.join(', ') : String(value)
   }
+  const body = DECODER.decode(bytes)
   return {
     status,
     headers: normalized,
     body,
+    bytes,
     json: <T = unknown>(): T => JSON.parse(body) as T,
   }
 }
@@ -96,28 +114,96 @@ export function exceedsDeclaredLength(contentLength: string | undefined, limit: 
   return Number.isFinite(length) && length > limit
 }
 
-/** Reads a Web stream fully, enforcing `limit`. */
+/** Bytes read (and discarded) from an abandoned Web request body before it is cancelled. */
+const MAX_DISCARD_BYTES = 64 * 1024 * 1024
+
+/**
+ * The body of a Web request as a pull-based stream enforcing `limit` (see
+ * `AdapterRequest.streamBody`). `body` is only read when needed (a Node.js-backed request body
+ * starts buffering once accessed). On overflow or cancellation the rest of the body is read and
+ * discarded in the background (up to 64 MiB, then cancelled), so the server can write the response
+ * and keep the connection usable instead of resetting it.
+ */
+export function webBodyStream(
+  body: () => ReadableStream<Uint8Array> | null,
+  limit: number,
+  contentLength: string | undefined,
+): ReadableStream<Uint8Array> {
+  if (exceedsDeclaredLength(contentLength, limit)) return failedStream(payloadTooLarge(limit))
+  const source = body()
+  if (source === null) return new ReadableStream<Uint8Array>({ start: controller => controller.close() })
+  const reader = source.getReader()
+  let size = 0
+  let abandoned = false
+  const abandon = (): void => {
+    if (abandoned) return
+    abandoned = true
+    discardReader(reader)
+  }
+  return new ReadableStream<Uint8Array>(
+    {
+      async pull(controller) {
+        let result: Awaited<ReturnType<typeof reader.read>>
+        try {
+          result = await reader.read()
+        } catch (error) {
+          abandoned = true
+          throw new BadRequestException('Failed to read the request body', undefined, { cause: error })
+        }
+        if (result.done) {
+          abandoned = true
+          controller.close()
+          return
+        }
+        size += result.value.byteLength
+        if (size > limit) {
+          abandon()
+          throw payloadTooLarge(limit)
+        }
+        controller.enqueue(result.value)
+      },
+      cancel: abandon,
+    },
+    { highWaterMark: 0 },
+  )
+}
+
+/** The part of a stream reader used to discard a body. */
+interface BodyReader {
+  read(): Promise<{ readonly done: boolean; readonly value?: Uint8Array | undefined }>
+  cancel(): Promise<void>
+}
+
+/** Reads and drops the rest of a request body in the background, cancelling it past 64 MiB. */
+function discardReader(reader: BodyReader): void {
+  let discarded = 0
+  const next = (): void => {
+    reader.read().then(
+      result => {
+        if (result.done) return
+        discarded += result.value?.byteLength ?? 0
+        if (discarded > MAX_DISCARD_BYTES) reader.cancel().catch(() => undefined)
+        else next()
+      },
+      () => undefined,
+    )
+  }
+  next()
+}
+
+/** Reads a Web request body fully, enforcing `limit` (see {@link webBodyStream}). */
 export async function readWebStream(
-  stream: ReadableStream<Uint8Array> | null,
+  body: () => ReadableStream<Uint8Array> | null,
   limit: number,
   contentLength: string | undefined,
 ): Promise<Uint8Array> {
-  if (exceedsDeclaredLength(contentLength, limit)) {
-    await stream?.cancel().catch(() => undefined)
-    throw payloadTooLarge(limit)
-  }
-  if (stream === null) return new Uint8Array(0)
-  const reader = stream.getReader()
+  const reader = webBodyStream(body, limit, contentLength).getReader()
   const chunks: Uint8Array[] = []
   let size = 0
   for (;;) {
     const { done, value } = await reader.read()
     if (done) break
     size += value.byteLength
-    if (size > limit) {
-      await reader.cancel().catch(() => undefined)
-      throw payloadTooLarge(limit)
-    }
     chunks.push(value)
   }
   return concat(chunks, size)
@@ -149,7 +235,7 @@ export interface LightMyRequest {
   ): PromiseLike<{
     statusCode: number
     headers: Record<string, string | number | string[] | undefined>
-    payload: string
+    rawPayload: Uint8Array
   }>
 }
 
@@ -180,7 +266,7 @@ export async function injectNode(
   dispatch: (req: never, res: never) => void,
   request: InjectRequest,
 ): Promise<InjectResponse> {
-  const normalized = normalizeInject(request)
+  const normalized = await normalizeInject(request)
   const { inject } = await loadLightMyRequest(adapter)
   const response = await inject(dispatch, {
     method: normalized.method,
@@ -189,7 +275,7 @@ export async function injectNode(
     remoteAddress: '127.0.0.1',
     ...(normalized.payload === undefined ? {} : { payload: toBuffer(normalized.payload) }),
   })
-  return injectResponse(response.statusCode, response.headers, response.payload)
+  return injectResponse(response.statusCode, response.headers, response.rawPayload)
 }
 
 /** A `Buffer` view of bytes (tools such as light-my-request JSON-encode other objects). */
@@ -202,7 +288,7 @@ export async function injectFetch(
   fetch: (request: Request) => Response | Promise<Response>,
   request: InjectRequest,
 ): Promise<InjectResponse> {
-  const normalized = normalizeInject(request)
+  const normalized = await normalizeInject(request)
   const init: RequestInit = { method: normalized.method, headers: normalized.headers }
   if (normalized.payload !== undefined && normalized.method !== 'GET' && normalized.method !== 'HEAD') {
     init.body = normalized.payload
@@ -212,5 +298,5 @@ export async function injectFetch(
   for (const [name, value] of response.headers) if (name !== 'set-cookie') headers[name] = value
   const cookies = response.headers.getSetCookie()
   if (cookies.length > 0) headers['set-cookie'] = cookies
-  return injectResponse(response.status, headers, await response.text())
+  return injectResponse(response.status, headers, new Uint8Array(await response.arrayBuffer()))
 }

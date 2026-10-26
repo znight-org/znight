@@ -254,7 +254,8 @@ function hasNullish(type: TypeInfo): boolean {
   return type.kind === 'union' && type.types.some(isNullish)
 }
 
-function acceptsUndefined(type: TypeInfo): boolean {
+/** Whether a union accepts `undefined` (`T | undefined`, `T | void`). */
+export function acceptsUndefined(type: TypeInfo): boolean {
   return (
     type.kind === 'union' &&
     type.types.some(member => member.kind === 'primitive' && (member.name === 'undefined' || member.name === 'void'))

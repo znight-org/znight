@@ -9,21 +9,53 @@ import type { HttpContext } from './context.ts'
 /** Route methods. `ALL` registers the route for GET, HEAD, POST, PUT, PATCH, DELETE and OPTIONS. */
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | 'OPTIONS' | 'ALL'
 
-/** Where a handler parameter comes from. */
-export type HttpParamSource = 'param' | 'query' | 'body' | 'headers' | 'request' | 'response' | 'context'
+/**
+ * Where a handler parameter comes from (`file` / `files`: `@UploadedFile` / `@UploadedFiles`, the
+ * `name` being the multipart field).
+ */
+export type HttpParamSource =
+  | 'param'
+  | 'query'
+  | 'body'
+  | 'headers'
+  | 'request'
+  | 'response'
+  | 'context'
+  | 'file'
+  | 'files'
 
 /** A handler parameter (informational: extraction, coercion and validation happen in `invoke`). */
 export interface HttpParamDefinition {
   /** Position in the handler signature. */
   readonly index: number
   readonly source: HttpParamSource
-  /** Parameter / query key / header name (lower case). Absent: the whole object. */
+  /** Parameter / query key / header name (lower case) / multipart field. Absent: the whole object (every field). */
   readonly name?: string
   /** Serialised declared type (`number`, `string[]`, `'asc' | 'desc'`...). */
   readonly type?: string
   readonly optional?: boolean
   /** `true` when the value is validated with a schema. */
   readonly schema?: boolean
+}
+
+/**
+ * Files accepted by an upload parameter (`@UploadedFile` / `@UploadedFiles`). The plugin enforces
+ * these rules while the multipart body is read; the presence of required files is checked by
+ * `invoke` (the `uploads` helpers).
+ */
+export interface HttpUploadDefinition {
+  /** Multipart field. Absent: files of any field. */
+  readonly field?: string
+  /** `true` for `@UploadedFiles` (several files). */
+  readonly multiple?: boolean
+  /** `true` when a file must be sent (informational, checked by `invoke`). */
+  readonly required?: boolean
+  /** Maximum size of each file in bytes (`Infinity`: no limit). Default: plugin `uploads.maxFileSize`. */
+  readonly maxSize?: number
+  /** Maximum number of files (`@UploadedFiles`). Default: plugin `uploads.maxFiles` (1 for `@UploadedFile`). */
+  readonly maxFiles?: number
+  /** Accepted media types (`image/png`, `image/*`), compared with the type declared by the client. */
+  readonly mimeTypes?: readonly string[]
 }
 
 /** A route: one decorated method of a controller. */
@@ -46,6 +78,16 @@ export interface HttpRouteDefinition {
   /** Route interceptors (provider tokens), innermost. */
   readonly interceptors: readonly Token[]
   readonly params: readonly HttpParamDefinition[]
+  /**
+   * `@BodyLimit` (route or controller): maximum body size in bytes (`Infinity`: no limit). Default:
+   * the plugin `bodyLimit`, or for upload routes the sum of the file limits plus `bodyLimit`.
+   */
+  readonly bodyLimit?: number
+  /**
+   * Upload rules (one per `@UploadedFile` / `@UploadedFiles` parameter). Routes with uploads parse
+   * `multipart/form-data` bodies before the interceptors and answer 415 to other non-empty bodies.
+   */
+  readonly uploads?: readonly HttpUploadDefinition[]
   /** `true` when the handler takes `@Res()` and writes the response itself. */
   readonly rawResponse?: boolean
   /**

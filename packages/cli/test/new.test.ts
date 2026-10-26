@@ -87,12 +87,12 @@ describe('project templates', () => {
     expect(manifest.dependencies['@znight/config']).toBe('^1.2.3')
     expect(manifest.dependencies['@znight/observability']).toBe('^1.2.3')
     expect(manifest.dependencies['@znight/messaging']).toBeUndefined()
-    expect(manifest.dependencies.zod).toStartWith('^4')
+    expect(manifest.dependencies['zod']).toStartWith('^4')
     expect(manifest.devDependencies['@znight/compiler']).toBe('^1.2.3')
     expect(manifest.devDependencies['@znight/cli']).toBe('^1.2.3')
     expect(manifest.devDependencies['@znight/testing']).toBe('^1.2.3')
-    expect(manifest.devDependencies.vite).toStartWith('^8')
-    expect(manifest.devDependencies.typescript).toStartWith('^7')
+    expect(manifest.devDependencies['vite']).toStartWith('^8')
+    expect(manifest.devDependencies['typescript']).toStartWith('^7')
     expect(manifest.devDependencies['light-my-request']).toBeDefined()
   })
 
@@ -112,19 +112,19 @@ describe('project templates', () => {
 
   it('bun projects test with bun:test and preload the compiler', () => {
     const project = files({ packageManager: 'bun' })
-    expect(packageJson(project).scripts.test).toBe('bun test')
+    expect(packageJson(project).scripts['test']).toBe('bun test')
     expect(packageJson(project).devDependencies['@types/bun']).toBeDefined()
-    expect(packageJson(project).devDependencies.vitest).toBeUndefined()
+    expect(packageJson(project).devDependencies['vitest']).toBeUndefined()
     expect(file(project, 'bunfig.toml')).toContain('preload = ["@znight/compiler/bun"]')
     expect(file(project, 'test/greeting.service.test.ts')).toContain("from 'bun:test'")
-    expect(tsconfig(project).compilerOptions.types).toEqual(['bun'])
+    expect(tsconfig(project).compilerOptions['types']).toEqual(['bun'])
   })
 
   it('other package managers test with Vitest (the znight() plugin regenerates the container)', () => {
     for (const packageManager of ['npm', 'pnpm', 'yarn'] as const) {
       const project = files({ packageManager })
       expect(project.has('bunfig.toml')).toBe(false)
-      expect(packageJson(project).devDependencies.vitest).toBeDefined()
+      expect(packageJson(project).devDependencies['vitest']).toBeDefined()
       expect(file(project, 'test/greeting.controller.test.ts')).toContain("from 'vitest'")
     }
     expect(files({ packageManager: 'yarn' }).get('.yarnrc.yml')).toBe('nodeLinker: node-modules\n')
@@ -140,7 +140,7 @@ describe('project templates', () => {
       noEmit: true,
       verbatimModuleSyntax: true,
     })
-    expect(config.compilerOptions.emitDecoratorMetadata).toBeUndefined()
+    expect(config.compilerOptions['emitDecoratorMetadata']).toBeUndefined()
     expect(config.include).toEqual(['src', 'test', 'vite.config.ts'])
   })
 

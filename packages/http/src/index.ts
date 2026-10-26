@@ -33,7 +33,10 @@ export type {
   HttpParamDefinition,
   HttpParamSource,
   HttpRouteDefinition,
+  HttpUploadDefinition,
 } from './metadata.ts'
+export type { ByteSize } from './size.ts'
+export type { StreamSource } from './stream.ts'
 
 export { type NodeAdapter, type NodeAdapterOptions, nodeAdapter } from './adapters/node.ts'
 export { isJsonType, type MediaType, parseBody, parseMediaType } from './body.ts'
@@ -41,6 +44,7 @@ export { type Coercer, type Coercers, coerce } from './coerce.ts'
 export {
   All,
   Body,
+  BodyLimit,
   Controller,
   type ControllerOptions,
   Ctx,
@@ -61,6 +65,8 @@ export {
   Res,
   type RouteDecorator,
   type RouteDecoratorArgs,
+  UploadedFile,
+  UploadedFiles,
   UseGuard,
   UseInterceptor,
   Validate,
@@ -92,6 +98,15 @@ export {
   type ValidationIssueDetail,
 } from './exceptions.ts'
 export {
+  type ByteRange,
+  type ContentDispositionType,
+  contentDisposition,
+  type FileBody,
+  type FileResponseOptions,
+  parseRange,
+} from './files.ts'
+export { contentTypeFor, matchesMediaType } from './mime.ts'
+export {
   type ExceptionMapperRef,
   type GuardRef,
   HttpPlugin,
@@ -101,7 +116,14 @@ export {
   type TrailingSlashPolicy,
 } from './plugin.ts'
 export { parseQuery, type QueryRecord } from './query.ts'
-export { HttpResponse, type HttpResponseInit, isHttpResponse, type RedirectStatus } from './response.ts'
+export {
+  HttpResponse,
+  type HttpResponseInit,
+  isHttpResponse,
+  type RedirectStatus,
+  type StreamResponseOptions,
+} from './response.ts'
+export { formatByteSize, parseByteSize } from './size.ts'
 export {
   type InferSchemaInput,
   type InferSchemaOutput,
@@ -118,4 +140,11 @@ export {
 } from './standard-schema.ts'
 export { isValidStatus, statusText } from './status.ts'
 export { HttpTokens } from './tokens.ts'
+export {
+  type UploadedFileOptions,
+  type UploadedFilesOptions,
+  type UploadLimits,
+  type Uploads,
+  uploads,
+} from './uploads.ts'
 export { validate } from './validate.ts'

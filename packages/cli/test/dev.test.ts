@@ -49,7 +49,7 @@ describe('znight dev', () => {
     expect(child?.args).toEqual(['--enable-source-maps', join(project.path, 'dist/main.js')])
     expect(child?.options.cwd).toBe(project.path)
     expect(child?.options.detached).toBe(true)
-    expect(child?.options.env.NODE_ENV).toBe('development')
+    expect(child?.options.env['NODE_ENV']).toBe('development')
 
     signals.emit('SIGINT')
     const run = await running
@@ -172,7 +172,7 @@ describe('znight dev', () => {
       '--verbose',
       'x',
     ])
-    expect(processes.children[0]?.options.env.NODE_ENV).toBe('staging')
+    expect(processes.children[0]?.options.env['NODE_ENV']).toBe('staging')
     signals.emit('SIGINT')
     await running
   })

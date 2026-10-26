@@ -81,12 +81,16 @@ Bun types, decorators allowed). `typecheck` runs both.
   devDependencies for tests) unless the package cannot work without them. Adapters and drivers live
   in subpath exports, so their clients are only loaded when used; optional peers needed by a root
   entry (`yaml`, the AWS SDK, `prom-client`, `pino-pretty`) are loaded lazily (non-literal dynamic
-  import, or `createRequire` for CommonJS peers), so bundlers never require an absent peer. Runtime
-  `dependencies`/`peerDependencies` use caret ranges.
+  import, or `createRequire` for CommonJS peers), so bundlers never require an absent peer.
+  Third-party `dependencies`/`peerDependencies` use caret ranges; `@znight/core` is a
+  `workspace:*` dependency (an exact version once packed: lockstep) and the optional
+  `@znight/compiler` peer a `workspace:^` range.
 - Boundaries (enforced by the packages' own tests):
   - `<pkg>/compiler` entries only `import type` from `@znight/compiler` and never import the
-    package's runtime entry (so building never loads fastify, amqplib...); constants they share with
-    the runtime are duplicated in an import-free module and kept equal by a test;
+    package's runtime entry (so building never loads fastify, amqplib...). Code they share with the
+    runtime lives in import-free modules (`@znight/config` `conventions.ts`/`coerce.ts`,
+    `@znight/http` `path.ts`) or is duplicated in one and kept equal by a test (`@znight/messaging`
+    retry constants);
   - runtime entries never import `./compiler`;
   - `@znight/compiler` is at most an optional peer of feature packages and of the CLI.
 
@@ -526,6 +530,9 @@ returns the same shared no-op function.
 | `@Validate(schema)`                                                                  | method — sugar for `@Body(schema)`; using both is ZNIGHT005                                    |
 | `createRouteDecorator<T>(key)`                                                       | user-defined metadata decorators (`@Roles('admin')`, `@Public()`) → `route.meta[key]`          |
 
+**Impl.** routes are not inherited: route decorators on a class without `@Controller` (e.g. a base
+class) are ZNIGHT005; a route decorator created in a `.d.ts` (its key is not readable) is ZNIGHT005.
+
 ### `@znight/messaging`
 
 | Decorator                                                                             | Target                                                                                       |
@@ -867,7 +874,9 @@ type ProviderKey<T> = TypedToken<T> | ProviderClass<T> | ClassKey<T> // ClassKey
   ZNIGHT002, ZNIGHT003 and ZNIGHT014 are re-checked on the merged graph (runtime definitions bypass
   the compiler). Each singleton factory starts as soon as its dependencies settle (independent async
   singletons run concurrently). `only` instantiates the dependency closure of the given keys; other
-  synchronous singletons are created on first use, async ones outside the closure are refused.
+  synchronous singletons (and the target of a `Lazy.get()` called during `init()`) are created on
+  first use, async ones outside the closure are refused (ZNIGHT015) and a re-entrant creation is
+  ZNIGHT002.
   Missing externals are reported together (ZNIGHT001 naming `providedBy`). Factory errors are
   wrapped in ZNIGHT015 (`InstantiationError`: token, dependency path, source, `cause`). On failure,
   already created instances are disposed in reverse creation order, then the error is rethrown
@@ -1040,9 +1049,11 @@ intercepted. The top-most decorator is the outermost interceptor. Interceptors M
 
 ## 9. Feature runtime contracts
 
-Common rules: each feature plugin is created with `XxxPlugin.configure(options | (container) =>
-options)`, has a fixed `name` (`http`, `messaging`, `config`, `observability`), and provides the
-externals declared in its manifest (§7) during `register`.
+Common rules: each feature plugin is created with `XxxPlugin.configure(options)`, has a fixed `name`
+(`http`, `messaging`, `config`, `observability`), and provides the externals declared in its manifest
+(§7) during `register`. `HttpPlugin`, `MessagingPlugin` and `ObservabilityPlugin` also accept a
+function of the container (§8.2); `ConfigPlugin` only takes an object, since it loads the
+configuration in `register`, before any provider exists.
 
 ### 9.1 HTTP (`@znight/http`)
 
@@ -1178,9 +1189,9 @@ m.payload)` (the arrow becomes `async`), `@Headers()` → `m.headers`, `@Headers
 Delivery state machine (at-least-once; handlers must be idempotent and may deduplicate on
 `message.id`):
 
-- each delivery waits for a concurrency slot, then runs in its own scope (`InboundMessage`
-  request-scoped external) through `hooks.run('messaging:message')`: decode → select handler →
-  invoke;
+- each delivery waits for a concurrency slot (released at once when stopping), the handler is
+  selected and the body decoded, then it runs in its own scope (`InboundMessage` request-scoped
+  external) through `hooks.run('messaging:message')` → invoke → settlement;
 - handler selected by `message.type` (exact match first, then patterns); a handler without type is
   the default; no match → terminal failure (reason `no-handler`);
 - success → ack; `NonRetryableError` (recognised across package copies), schema failure
@@ -1191,7 +1202,8 @@ Delivery state machine (at-least-once; handlers must be idempotent and may dedup
   `maxInProcessDelayMs` (the message stays locked) and the message is then **redelivered through the
   broker** (never re-invoked locally); longer delays use the driver-native delayed redelivery. The
   attempt count comes from the broker (SQS `ApproximateReceiveCount`, RabbitMQ `x-delivery-count`)
-  or the `x-znight-attempt` header. Boot fails (ZNIGHT011) if a `@Retry` cannot be honoured;
+  or the `x-znight-attempt` header. When the driver cannot schedule the retry, the message is
+  released after `defaults.requeueDelay`. Boot fails (ZNIGHT011) if a `@Retry` cannot be honoured;
 - terminal failure (last attempt, non-retryable, validation, decode, no handler) → `@OnError`:
   returning `'ack'` acks, otherwise (or on throw) dead-letter. `@OnError` is **not** called for a
   redelivery beyond `maxAttempts` (dead-lettered with `max-attempts` without running the handler)
@@ -1205,11 +1217,13 @@ Delivery state machine (at-least-once; handlers must be idempotent and may dedup
 - nothing is dropped: every path ends with the broker owning the message (acked, republished,
   dead-lettered or released).
 
-Defaults: `concurrency` 1; handlers without `@Retry` use 3 attempts, exponential from 1 s capped at
-30 s (`attempts` counts the first delivery).
+Defaults: `concurrency` 1; handlers without `@Retry` use `defaults.retry`, by default 3 attempts,
+exponential from 1 s capped at 30 s (`attempts` counts the first delivery; `retry: false` = a single
+attempt).
 
 `MessagingPlugin.configure({ driver, defaults?: { retry?, concurrency?, deadLetter?, requeueDelay? },
-codec?, consume? })` (default codec JSON; `consume: false` for publish-only processes):
+codec?, consume? })` (`defaults.deadLetter`: `(queue) => string` or `false`; default codec JSON;
+`consume: false` for publish-only processes):
 `register` provides `MessageBroker` (value) and declares `InboundMessage` (request external);
 `onBootstrap` validates consumers and retry policies against the driver capabilities, then
 connects; `onStart` subscribes (all or nothing); `onStop` stops receiving, aborts in-process retry
@@ -1253,12 +1267,12 @@ interface MessagingDriver {
 Drivers verify their topology (and native DLQ configuration) at subscribe time. **Impl.** driver
 specifics:
 
-| Driver                         | Attempts                                | Native delay                                        | In-process budget | Dead letters                        | Notes                                                                                                                                        |
-| ------------------------------ | --------------------------------------- | --------------------------------------------------- | ----------------- | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/memory`                      | native                                  | timers                                              | 1 s               | `<q>.dlq`                           | deterministic test broker (`send`, `idle`, `settlements`, `deadLetters`, `published`, `fail`...)                                             |
-| `/rabbitmq` (amqplib)          | `x-znight-attempt` + `x-delivery-count` | delay queues `<q>.delay.<ms>` (TTL + DLX)           | 5 s               | `<q>.dlq`, publish confirmed + ack  | confirm channel + `mandatory`, `prefetch = concurrency`, default exchange only, topology declared or verified, reconnects                    |
-| `/sqs` (client-sqs ^3.600)     | `ApproximateReceiveCount`               | visibility timeout (≤ 12 h)                         | 1 s               | `<q>-dlq` or `RedrivePolicy` target | queues never created; `maxReceiveCount` ≥ attempts checked; lease extension; FIFO groups by `key`                                            |
-| `/kafka` (@platformatic/kafka) | `x-znight-attempt`                      | retry topic `<group>.retry` (`x-znight-not-before`) | 0                 | `<topic>.dlq`                       | one consumer group per `@Consumer` (`<groupId>.<topic>`, override with `groupId`), manual commits, partitions sequential, no delayed publish |
+| Driver                         | Attempts                                                                                  | Native delay                                                                     | In-process budget | Dead letters                        | Notes                                                                                                                                                             |
+| ------------------------------ | ----------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- | ----------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/memory`                      | native                                                                                    | timers                                                                           | 1 s               | `<q>.dlq`                           | deterministic test broker (`send`, `idle`, `settlements`, `deadLetters`, `published`, `fail`...)                                                                  |
+| `/rabbitmq` (amqplib)          | `x-znight-attempt` + redeliveries (quorum `x-delivery-count`, classic `redelivered` flag) | delay queues `<q>.delay.<ms>` (TTL + DLX)                                        | 5 s               | `<q>.dlq`, publish confirmed + ack  | quorum queues by default (`queueType`), confirm channel + `mandatory`, `prefetch = concurrency`, default exchange only, topology declared or verified, reconnects |
+| `/sqs` (client-sqs ^3.600)     | `ApproximateReceiveCount`                                                                 | visibility timeout (≤ 12 h)                                                      | 1 s               | `<q>-dlq` or `RedrivePolicy` target | queues never created; `maxReceiveCount` ≥ attempts checked; lease extension; FIFO groups by `key`                                                                 |
+| `/kafka` (@platformatic/kafka) | `x-znight-attempt`                                                                        | retry topic `<group>.retry` (`x-znight-not-before`, ≤ 15 min: `maxRetryDelayMs`) | 0                 | `<topic>.dlq`                       | one consumer group per `@Consumer` (`<groupId>.<topic>`, override with `groupId`), manual commits, partitions sequential, no delayed publish                      |
 
 ### 9.3 Config (`@znight/config`)
 
@@ -1338,8 +1352,11 @@ messages; the property itself keeps the real value. A `ConfigSource` never print
 `MetricInterceptor`, replaces the core logger (`app.setLogger`, `component: 'znight'`, unless
 `logging.replaceCoreLogger: false`) and wraps `http:request` / `messaging:message` (request logs, RED
 metrics, spans with W3C trace-context) and `messaging:publish` (producer span, trace context
-injected into the message headers). `onStart`/`onStop` start and stop the `/metrics` server
-(default port 9464); `onDispose` removes the wrappers, flushes the tracer provider and the logger.
+injected into the message headers). Each part can be turned off: `metrics: false`, `tracing: false`,
+`logging.requests` / `logging.messages: false`, and per hook (`tracing.http`, `metrics.messaging`...).
+`onStart`/`onStop` start and stop the `/metrics` server (`node:http`, default port 9464, only when
+metrics are enabled; `metrics.server: false` disables it); `onDispose` removes the wrappers, closes
+the server, flushes the tracer provider and the logger.
 
 - **Externals registration** (normative for this plugin): the six externals are registered with
   `container.register()` as **transient definitions returning the plugin's single instance** (not
@@ -1384,19 +1401,21 @@ res.json()
 ```
 
 - Metadata freshness: the `@znight/compiler/bun` preload (and the Vite plugin under Vitest)
-  regenerate before tests (§6.3).
+  regenerate before tests (§6.3; until they ship, run `znight generate` first).
+  `@znight/testing` itself never compiles: it reads the metadata structurally (providers, aliases,
+  externals, `extensions.config` / `http` / `messaging`) and does not depend on the feature packages.
 - `TestBed.create(target, { metadata, provide?, overrides?, config?, mockFn?, deep?, aop? })` →
   `{ instance, mocks, container }`. The target (class, token, `TypedToken`, alias or unique display
   name) is built with its real generated factory (async factories awaited; factory errors →
   ZNIGHT015) and its **direct** dependencies are resolved by kind:
 
-  | Dependency                                                        | Injected                                                                                              |
-  | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-  | class / interface / `@Provides` value / external                  | deep auto-mock                                                                                        |
-  | config class (`extensions.config`, read structurally)             | real instance: `new C()`, then defaults, then `config` values (unknown class or property → ZNIGHT012) |
-  | qualified value without class (`@Provides({ name })`, primitives) | the `provide` value, else ZNIGHT001                                                                   |
-  | optional / multi / `Lazy<T>`                                      | `undefined` / `[]` (plus provided members) / `{ get: () => mock }` (same mock as `mocks.get(T)`)      |
-  | interceptor dependencies                                          | not created, interceptors not applied — unless `aop: 'real'`                                          |
+  | Dependency                                                        | Injected                                                                                                                                                                                       |
+  | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | class / interface / `@Provides` value / external                  | deep auto-mock                                                                                                                                                                                 |
+  | config class (`extensions.config`, read structurally)             | real instance: `new C()`, then `@Default` values (converted to the field type and winning over initializers, as in `loadConfig`), then `config` values (unknown class or property → ZNIGHT012) |
+  | qualified value without class (`@Provides({ name })`, primitives) | the `provide` value, else ZNIGHT001                                                                                                                                                            |
+  | optional / multi / `Lazy<T>`                                      | `undefined` / `[]` (plus provided members) / `{ get: () => mock }` (same mock as `mocks.get(T)`)                                                                                               |
+  | interceptor dependencies                                          | not created, interceptors not applied — unless `aop: 'real'`                                                                                                                                   |
 
   `overrides` take values or provider definitions (built, their own deps resolved by the same
   rules) and win over `provide`. `mocks.get(key)` accepts classes, tokens, aliases and display names
@@ -1423,14 +1442,14 @@ res.json()
 
 ## 11. CLI (`@znight/cli`)
 
-| Command                       | Behaviour                                                                                                                                                                                                                                                                                               |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `znight new [name]`           | Scaffold a project, interactively or from `--yes`, `--pm <bun\|npm\|pnpm\|yarn>`, `--adapter <node\|fastify\|express\|hono>`, `--features <config,observability,messaging\|all\|none>`, `--no-install`, `--no-git`, `--dir`, `--force`. Bun projects test with `bun test` + preload, others with Vitest |
-| `znight generate`             | Write the generated container (compiler `generate`); `--check` (exit 1 when stale, never writes), `-w/--watch` (incremental), `--root`, `--config`, `--config-loader`. Compiler options are read from the `znight()` plugin of the Vite config when it exposes them                                     |
-| `znight g <schematic> <name>` | `service`, `controller`, `consumer`, `config`, `guard`, `interceptor` (`--aop` for a method interceptor), `factory`; `--path`, `--flat`, `-f/--force`, `-d/--dry-run`, `--root`. Aliases `generate <schematic>` and `generate:<schematic>`                                                              |
-| `znight dev`                  | `vite build --watch` (no Vite dev server) and a full process restart after every successful rebuild — no partial HMR of providers: SIGTERM, `--kill-timeout` then SIGKILL, `--debounce`d and never overlapping restarts; a failed build keeps the last good process; a second Ctrl+C kills (130)        |
-| `znight build`                | `vite build` with the Vite config; compiler errors fail the build                                                                                                                                                                                                                                       |
-| `znight start`                | Run the build (`--entry`, `--runtime <auto\|node\|bun>`) with `NODE_ENV=production`; on Linux/macOS the CLI `execve`s into the runtime (same PID, signals, exit code), elsewhere it forwards signals and returns the child's code (`128 + n` on signal)                                                 |
+| Command                       | Behaviour                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `znight new [name]`           | Scaffold a project, interactively or from `-y/--yes`, `--pm <bun\|npm\|pnpm\|yarn>` (default: the package manager running the CLI, else `bun` under Bun, else `npm`), `--adapter <node\|fastify\|express\|hono>` (default `node`), `--features <config,observability,messaging\|all\|none>` (default `config,observability`), `--no-install`, `--no-git`, `--dir`, `--force`; `.` scaffolds into the current directory. Bun projects test with `bun test` + preload, others with Vitest                                                                                    |
+| `znight generate`             | Write the generated container (compiler `generate`); `--check` (exit 1 when stale, never writes), `-w/--watch` (incremental), `--root`, `--config`, `--config-loader <bundle\|runner\|native>`. Compiler options are read from the `znight()` plugin of the Vite config when it exposes them (`plugin.api.options` or `api.getOptions()`), else the defaults                                                                                                                                                                                                               |
+| `znight g <schematic> <name>` | `service`, `controller`, `consumer`, `config`, `guard`, `interceptor` (`--aop` for a method interceptor), `factory`; `--path`, `--flat`, `-f/--force`, `-d/--dry-run`, `--root`. Aliases `generate <schematic>` and `generate:<schematic>`                                                                                                                                                                                                                                                                                                                                 |
+| `znight dev`                  | `vite build --watch` (no Vite dev server) and a full process restart after every successful rebuild — no partial HMR of providers: SIGTERM, `--kill-timeout` (5 000 ms) then SIGKILL, `--debounce`d (100 ms) and never overlapping restarts; a failed build keeps the last good process; a second Ctrl+C kills (130). Also `--runtime <auto\|node\|bun>`, `--entry` (default: the entry chunk of the build), `--inspect`, `--clear`, `--mode` (`development`), `--log-level` (`warn`), `--root`, `--config`, `--config-loader`; arguments after `--` go to the application |
+| `znight build`                | `vite build` with the Vite config (`--mode` default `production`, `--log-level`, `--root`, `--config`, `--config-loader`); compiler errors fail the build                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `znight start`                | Run the build (`--entry`, default `dist/main.js` then `dist/main.mjs`; `--runtime <auto\|node\|bun>`; arguments after `--` go to the application) with `NODE_ENV` defaulting to `production`; when the runtime running the CLI provides `process.execve` (POSIX), the CLI `execve`s into the application runtime (same PID, signals, exit code), otherwise it forwards signals and returns the child's code (`128 + n` on signal)                                                                                                                                          |
 
 Global: `--help`, `--version`, `--color`/`--no-color` (`NO_COLOR`, `FORCE_COLOR`), `--debug`
 (`ZNIGHT_DEBUG=1`). Exit codes: 0 success, 1 failure, 2 usage error (with a suggestion), 130

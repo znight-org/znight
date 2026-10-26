@@ -3,6 +3,7 @@ import type { AdapterReply, AdapterRequest } from './adapter.ts'
 import type { CanActivate, ExceptionMapper, HttpInterceptor } from './interfaces.ts'
 import type { HttpRouteDefinition } from './metadata.ts'
 import type { RouteTable } from './router.ts'
+import type { BodyPlan } from './uploads.ts'
 
 import { displayName } from '@znight/core'
 
@@ -16,10 +17,20 @@ import {
   MethodNotAllowedException,
   NotFoundException,
 } from './exceptions.ts'
+import { isFileBody, resolveFile } from './files.ts'
 import { decodePathValue, matchRoutePath, type RoutePath } from './path.ts'
 import { splitUrl } from './query.ts'
 import { HttpResponse, isHttpResponse } from './response.ts'
-import { addMissingHeaders, assignHeaders, type SerializedReply, serializeError, serializeResult } from './serialize.ts'
+import {
+  addMissingHeaders,
+  assignHeaders,
+  type SerializedReply,
+  type SerializeOptions,
+  serializeError,
+  serializeFileReply,
+  serializeResult,
+} from './serialize.ts'
+import { type ContextRunner, captureContext, trackStream } from './stream.ts'
 import { HttpTokens } from './tokens.ts'
 import { emptyRecord, errorMessage } from './utils.ts'
 
@@ -35,8 +46,10 @@ export interface RoutePlan {
   readonly controller: Resolvable<object>
   readonly guards: readonly Resolvable<CanActivate>[]
   readonly interceptors: readonly Resolvable<HttpInterceptor>[]
-  /** Parse the body before the interceptors (`@Body()` parameter). */
+  /** Parse the body before the interceptors (`@Body()` or upload parameters). */
   readonly parseBody: boolean
+  /** Body limit and multipart rules of the route. */
+  readonly body: BodyPlan
   /** Trailing-slash variant answered with a redirect to the path without its trailing slash. */
   readonly redirect?: boolean
 }
@@ -44,7 +57,8 @@ export interface RoutePlan {
 /** Pipeline settings (resolved plugin options). */
 export interface PipelineOptions {
   readonly adapter: string
-  readonly bodyLimit: number
+  /** Body plan of unmatched requests (plugin `bodyLimit`, generic multipart rules). */
+  readonly body: BodyPlan
   readonly exposeErrors: boolean
   readonly requestIdHeader: string | undefined
   readonly generateRequestId: () => string
@@ -59,6 +73,12 @@ type Target =
 
 const RAW = Symbol('raw response')
 type Outcome = SerializedReply | typeof RAW
+
+/** A reply, and a promise settled once the request is over (response stream sent or abandoned, scope closed). */
+interface Served {
+  readonly reply: AdapterReply
+  readonly done: Promise<void>
+}
 
 const REQUEST_ID = /^[\w\-.:@/+=]{1,128}$/
 const MAX_PATH_IN_MESSAGE = 200
@@ -104,51 +124,64 @@ export class Pipeline {
     return new Promise(resolve => this.#idle.push(resolve))
   }
 
-  /** Handles a request routed to `plan` by the adapter. */
+  /**
+   * Handles a request routed to `plan` by the adapter. The request stays in flight (and its scope
+   * open) until a streamed response body has been fully read or cancelled by the adapter.
+   */
   async handle(plan: RoutePlan, request: AdapterRequest): Promise<AdapterReply> {
     const startTime = performance.now()
     this.#enter()
+    let served: Served | undefined
     try {
-      const { path, query } = splitUrl(request.url)
-      const raw = matchRoutePath(plan.path, path)
-      // the native router matched a path the Znight grammar rejects (e.g. an empty `:param` in Fastify)
-      if (raw === undefined) return await this.#fallback(request, undefined, startTime)
-      if (plan.redirect === true) {
-        const canonical = path.slice(0, -1)
-        const location = query === '' ? canonical : `${canonical}?${query}`
-        return await this.#serve(request, undefined, emptyRecord(), { kind: 'redirect', location }, startTime)
-      }
-      const params = emptyRecord<string>()
-      let malformed: string | undefined
-      for (const name of Object.keys(raw)) {
-        const decoded = decodePathValue(raw[name] as string)
-        if (decoded === undefined) malformed ??= name
-        else params[name] = decoded
-      }
-      const target: Target =
-        malformed === undefined
-          ? { kind: 'route', plan }
-          : { kind: 'error', error: new BadRequestException(`Malformed URL parameter "${malformed}"`) }
-      return await this.#serve(request, plan.info, params, target, startTime)
+      served = await this.#route(plan, request, startTime)
+      return served.reply
     } finally {
-      this.#leave()
+      this.#leaveWhen(served)
     }
+  }
+
+  #route(plan: RoutePlan, request: AdapterRequest, startTime: number): Promise<Served> {
+    const { path, query } = splitUrl(request.url)
+    const raw = matchRoutePath(plan.path, path)
+    // the native router matched a path the Znight grammar rejects (e.g. an empty `:param` in Fastify)
+    if (raw === undefined) return this.#fallback(request, undefined, startTime)
+    if (plan.redirect === true) {
+      const canonical = path.slice(0, -1)
+      const location = query === '' ? canonical : `${canonical}?${query}`
+      return this.#serve(request, undefined, emptyRecord(), { kind: 'redirect', location }, startTime, plan.body)
+    }
+    const params = emptyRecord<string>()
+    let malformed: string | undefined
+    for (const name of Object.keys(raw)) {
+      const decoded = decodePathValue(raw[name] as string)
+      if (decoded === undefined) malformed ??= name
+      else params[name] = decoded
+    }
+    const target: Target =
+      malformed === undefined
+        ? { kind: 'route', plan }
+        : { kind: 'error', error: new BadRequestException(`Malformed URL parameter "${malformed}"`) }
+    return this.#serve(request, plan.info, params, target, startTime, plan.body)
   }
 
   /** Handles an unmatched request (404, 405, automatic OPTIONS) or a framework error. */
   async fallback(request: AdapterRequest, error?: unknown): Promise<AdapterReply> {
     const startTime = performance.now()
     this.#enter()
+    let served: Served | undefined
     try {
-      return await this.#fallback(request, error, startTime)
+      served = await this.#fallback(request, error, startTime)
+      return served.reply
     } finally {
-      this.#leave()
+      this.#leaveWhen(served)
     }
   }
 
-  #fallback(request: AdapterRequest, error: unknown, startTime: number): Promise<AdapterReply> {
+  #fallback(request: AdapterRequest, error: unknown, startTime: number): Promise<Served> {
+    const body = this.#options.body
     if (error !== undefined) {
-      return this.#serve(request, undefined, emptyRecord(), { kind: 'error', error: frameworkError(error) }, startTime)
+      const target: Target = { kind: 'error', error: frameworkError(error) }
+      return this.#serve(request, undefined, emptyRecord(), target, startTime, body)
     }
     const { path } = splitUrl(request.url)
     const allowed = this.#table.allowedMethods(path)
@@ -169,7 +202,7 @@ export class Pipeline {
         ),
       }
     }
-    return this.#serve(request, undefined, emptyRecord(), target, startTime)
+    return this.#serve(request, undefined, emptyRecord(), target, startTime, body)
   }
 
   async #serve(
@@ -178,14 +211,15 @@ export class Pipeline {
     params: Record<string, string>,
     target: Target,
     startTime: number,
-  ): Promise<AdapterReply> {
+    body: BodyPlan,
+  ): Promise<Served> {
     const requestId = this.#requestId(request)
     const ctx = new RequestContext(request, {
       requestId,
       adapter: this.#options.adapter,
       route,
       params,
-      bodyLimit: this.#options.bodyLimit,
+      body,
     })
     const event: HttpRequestEvent = {
       method: request.method,
@@ -198,13 +232,20 @@ export class Pipeline {
       responseHeaders: {},
     }
     let outcome: Outcome | undefined
-    try {
-      await this.#container.runInScope(async () => {
+    let replied: () => void = () => undefined
+    const ready = new Promise<void>(resolve => {
+      replied = resolve
+    })
+    // the scope (request-scoped instances) stays open until a streamed body has been sent or abandoned
+    const done = this.#container
+      .runInScope(async () => {
         let hookError: unknown
         let failed = false
+        let run: ContextRunner | undefined
         try {
           await this.#hooks.run('http:request', event, async () => {
             outcome = await this.#process(ctx, target, event)
+            run = captureContext() // stream producers run in the context of the handler (scope, hooks)
             return outcome
           })
         } catch (error) {
@@ -223,31 +264,47 @@ export class Pipeline {
             requestId,
           })
         }
+        if (outcome === RAW || !(outcome.body instanceof ReadableStream)) {
+          replied()
+          return
+        }
+        const tracked = trackStream(outcome.body, run ?? captureContext())
+        outcome = { ...outcome, body: tracked.stream }
+        replied()
+        const failure = await tracked.done
+        if (failure !== undefined) {
+          this.#logger.error('The response stream failed', { err: failure, requestId, path: ctx.path })
+        }
       }, [
         [HttpTokens.Context, ctx],
         [HttpTokens.RequestId, requestId],
       ])
-    } catch (error) {
-      // the callback above never throws: only the disposal of request-scoped instances can fail
-      this.#logger.error('Failed to dispose request-scoped providers', { err: error, requestId })
-    }
+      .then(
+        () => undefined,
+        (error: unknown) => {
+          // the callback above never throws: only the disposal of request-scoped instances can fail
+          this.#logger.error('Failed to dispose request-scoped providers', { err: error, requestId })
+        },
+      )
+    await Promise.race([ready, done])
     if (outcome === undefined) {
       outcome = serializeError(500, this.#internalBody(new Error('Request not handled')), ctx.method)
       event.status = 500
     }
-    if (outcome === RAW) {
+    const reply: Outcome = outcome
+    if (reply === RAW) {
       const status = request.rawStatus?.() ?? 200
       event.status ??= status
       this.#emit(event)
-      return { status, headers: {}, body: null, raw: true }
+      return { reply: { status, headers: {}, body: null, raw: true }, done }
     }
     this.#emit(event)
-    const headers = outcome.headers
+    const headers = reply.headers
     addMissingHeaders(headers, event.responseHeaders)
     const header = this.#options.requestIdHeader
     if (header !== undefined && headers[header] === undefined) headers[header] = requestId
-    if (this.draining) headers.connection = 'close'
-    return outcome
+    if (this.draining) headers['connection'] = 'close'
+    return { reply, done }
   }
 
   async #process(ctx: RequestContext, target: Target, event: HttpRequestEvent): Promise<Outcome> {
@@ -303,7 +360,7 @@ export class Pipeline {
       result = await chain(0)
     }
     if (definition.rawResponse === true && !(result instanceof Response)) return RAW
-    const reply = serializeResult(result, {
+    const reply = await serialize(result, ctx, {
       method: ctx.method,
       routeMethod: definition.method,
       status: definition.status,
@@ -338,7 +395,7 @@ export class Pipeline {
           })
         }
         if (mapped instanceof Response || isHttpResponse(mapped)) {
-          return serializeResult(mapped, {
+          return await serialize(mapped, ctx, {
             method: ctx.method,
             routeMethod: ctx.method,
             status: undefined,
@@ -437,6 +494,12 @@ export class Pipeline {
     this.#inflight++
   }
 
+  /** Leaves once the request is over (immediately when it failed before being served). */
+  #leaveWhen(served: Served | undefined): void {
+    if (served === undefined) this.#leave()
+    else void served.done.then(() => this.#leave())
+  }
+
   #leave(): void {
     this.#inflight--
     if (this.#inflight === 0 && this.#idle.length > 0) {
@@ -445,6 +508,14 @@ export class Pipeline {
       for (const resolve of waiting) resolve()
     }
   }
+}
+
+/** Serialises a handler (or exception mapper) result; file bodies are resolved for the request. */
+async function serialize(result: unknown, ctx: RequestContext, options: SerializeOptions): Promise<SerializedReply> {
+  if (isHttpResponse(result) && isFileBody(result.body)) {
+    return serializeFileReply(await resolveFile(result.body, ctx), result, options)
+  }
+  return serializeResult(result, options)
 }
 
 function withContextHeaders(headers: Record<string, HeaderValue>, ctx: RequestContext): Record<string, HeaderValue> {

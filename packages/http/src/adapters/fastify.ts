@@ -25,7 +25,8 @@ import Fastify, {
 } from 'fastify'
 
 import { toFastifyPath } from '../path.ts'
-import { ConnectionTracker, normalizeNodeHeaders, readNodeBody } from './node-io.ts'
+import { discardStream } from '../stream.ts'
+import { ConnectionTracker, nodeBodyStream, normalizeNodeHeaders, readNodeBody } from './node-io.ts'
 import { injectResponse, normalizeInject, serverAddress, toBuffer } from './shared.ts'
 
 /** Options of {@link fastifyAdapter}. */
@@ -143,13 +144,17 @@ class FastifyHttpAdapter implements FastifyAdapter {
         body: new TextEncoder().encode('{"statusCode":500,"error":"Internal Server Error"}'),
       }
     }
-    if (result.raw === true || reply.sent) return reply
+    if (result.raw === true || reply.sent || reply.raw.destroyed) {
+      discardStream(result.body instanceof ReadableStream ? result.body : null)
+      return reply
+    }
     reply.code(result.status)
     for (const name of Object.keys(result.headers)) reply.header(name, result.headers[name])
     const body = result.body
     if (body === null) return reply.send()
     if (body instanceof Uint8Array) return reply.send(Buffer.from(body.buffer, body.byteOffset, body.byteLength))
-    return reply.send(Readable.fromWeb(body as import('node:stream/web').ReadableStream))
+    const stream = body instanceof Blob ? body.stream() : body
+    return reply.send(Readable.fromWeb(stream as import('node:stream/web').ReadableStream))
   }
 
   async listen(port: number, host: string): Promise<HttpServerAddress> {
@@ -175,7 +180,7 @@ class FastifyHttpAdapter implements FastifyAdapter {
 
   async inject(request: InjectRequest): Promise<InjectResponse> {
     await this.#prepare()
-    const normalized = normalizeInject(request)
+    const normalized = await normalizeInject(request)
     const response = await this.instance.inject({
       method: normalized.method as 'GET',
       url: normalized.url,
@@ -183,7 +188,7 @@ class FastifyHttpAdapter implements FastifyAdapter {
       remoteAddress: '127.0.0.1',
       ...(normalized.payload === undefined ? {} : { payload: toBuffer(normalized.payload) }),
     })
-    return injectResponse(response.statusCode, response.headers, response.body)
+    return injectResponse(response.statusCode, response.headers, response.rawPayload)
   }
 }
 
@@ -200,6 +205,7 @@ function adapterRequest(request: FastifyRequest, reply: FastifyReply | undefined
       body ??= readNodeBody(request.raw, limit)
       return body
     },
+    streamBody: (limit: number): ReadableStream<Uint8Array> => nodeBodyStream(request.raw, limit),
     rawStatus: (): number | undefined => reply?.statusCode,
   }
 }

@@ -68,9 +68,10 @@ export function normalizeConfigValues(
 }
 
 /**
- * Builds a real configuration instance: `new ConfigClass()` (field initializers run), then declared
- * defaults for fields still `undefined`, then `values`. Required fields without value stay
- * `undefined`.
+ * Builds a real configuration instance like `@znight/config` without any source would:
+ * `new ConfigClass()` (field initializers run), then the declared `@Default` values (which win over
+ * initializers, as at runtime, converted to the field type, see {@link convertDefault}), then
+ * `values` (as given). Required fields without value stay `undefined`.
  */
 export function buildConfigInstance(
   info: ConfigClassInfo,
@@ -87,8 +88,8 @@ export function buildConfigInstance(
   for (const field of info.fields) {
     if (values !== undefined && Object.hasOwn(values, field.property)) {
       instance[field.property] = values[field.property]
-    } else if (field.hasDefault && instance[field.property] === undefined) {
-      instance[field.property] = copy(field.default)
+    } else if (field.hasDefault) {
+      instance[field.property] = convertDefault(field.default, field.type)
     }
   }
   return instance
@@ -103,6 +104,103 @@ function findByPrefix(key: unknown, configs: ReadonlyMap<Token, ConfigClassInfo>
 function describeConfig(info: ConfigClassInfo): string {
   const name = displayName(info.token)
   return info.prefix === undefined ? name : `${name} (prefix "${info.prefix}")`
+}
+
+const INVALID: unique symbol = Symbol('invalid')
+/** Strict decimal numbers, as accepted by `@znight/config` (`42`, `-1.5`, `1e3`; not `0x10`). */
+const DECIMAL = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/
+const TRUE = new Set(['true', '1', 'yes', 'on'])
+const FALSE = new Set(['false', '0', 'no', 'off'])
+
+/**
+ * A declared default converted to the field type the way `@znight/config` converts it at runtime
+ * (`loadConfig`), so the instance has the same shape in tests as in the application: `'8080'` → `8080`
+ * (`number`), `'yes'` → `true`, `'a, b'` → `['a', 'b']` (lists), an absolute URL string → a `URL`
+ * (`url`), a JSON string → its value (`json`). `@znight/testing` does not depend on `@znight/config`,
+ * hence this small mirror of its coercion rules. A value that does not convert (the compiler already
+ * rejects invalid defaults) or an unknown type is kept as is (copied).
+ */
+export function convertDefault(value: unknown, type: string | undefined): unknown {
+  const converted = convert(value, type)
+  return converted === INVALID ? copy(value) : converted
+}
+
+function convert(value: unknown, type: string | undefined): unknown {
+  switch (type) {
+    case 'string':
+      return toText(value)
+    case 'number':
+      return toNumber(value)
+    case 'boolean':
+      return toBoolean(value)
+    case 'string[]':
+      return toList(value, toText)
+    case 'number[]':
+      return toList(value, toNumber)
+    case 'url':
+      return toUrl(value)
+    case 'json':
+      return toJson(value)
+    default:
+      return INVALID
+  }
+}
+
+function toText(value: unknown): unknown {
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') return String(value)
+  return INVALID
+}
+
+function toNumber(value: unknown): unknown {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : INVALID
+  if (typeof value !== 'string' || !DECIMAL.test(value.trim())) return INVALID
+  const number = Number(value.trim())
+  return Number.isFinite(number) ? number : INVALID
+}
+
+function toBoolean(value: unknown): unknown {
+  if (typeof value === 'boolean') return value
+  if (value === 1 || value === 0) return value === 1
+  if (typeof value !== 'string') return INVALID
+  const text = value.trim().toLowerCase()
+  if (TRUE.has(text)) return true
+  return FALSE.has(text) ? false : INVALID
+}
+
+function toList(value: unknown, item: (value: unknown) => unknown): unknown {
+  let items: readonly unknown[]
+  if (Array.isArray(value)) {
+    items = value
+  } else if (typeof value === 'string') {
+    items = value
+      .split(',')
+      .map(part => part.trim())
+      .filter(part => part !== '')
+  } else {
+    return INVALID
+  }
+  const result: unknown[] = []
+  for (const entry of items) {
+    const converted = item(entry)
+    if (converted === INVALID) return INVALID
+    result.push(converted)
+  }
+  return result
+}
+
+function toUrl(value: unknown): unknown {
+  if (value instanceof URL) return new URL(value.href)
+  return typeof value === 'string' && URL.canParse(value.trim()) ? new URL(value.trim()) : INVALID
+}
+
+function toJson(value: unknown): unknown {
+  if (typeof value !== 'string') return copy(value)
+  try {
+    return JSON.parse(value) as unknown
+  } catch {
+    return INVALID
+  }
 }
 
 /** Defaults are static values: copy them so that tests never share mutable defaults. */

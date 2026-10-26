@@ -1,7 +1,9 @@
 /**
  * `@znight/compiler`: compile-time dependency injection for Znight applications.
  *
- * This entry exposes the programmatic API (`compile`, `generate`, `createCompiler`,
+ * This entry exposes the Vite plugin (`znight`, also the default export), the Bun API
+ * (`createPreload`, `znightBunPlugin`, `loadZnightConfig`; the ready-made preload is
+ * `@znight/compiler/bun`), the programmatic API (`compile`, `generate`, `createCompiler`,
  * `formatDiagnostics`, `renderErrorModule`), the options, the analysis API (analysis → binding →
  * validation → application graph) and the public compiler extension API (§6.5).
  *
@@ -14,6 +16,16 @@ export type {
   AnalysisStats,
   AnalyzeOptions,
 } from './analyze.ts'
+export type {
+  BunLoader,
+  BunOnLoadArgs,
+  BunOnLoadResult,
+  BunPluginBuild,
+  LoadedZnightConfig,
+  PreloadOptions,
+  ZnightBunPlugin,
+  ZnightBunPluginOptions,
+} from './bun-plugin.ts'
 export type { RenderErrorModuleOptions } from './codegen/error-module.ts'
 export type {
   CompileMode,
@@ -143,8 +155,10 @@ export type {
   TypeParameterType,
   UnionType,
 } from './project/index.ts'
+export type { ZnightPluginApi } from './vite.ts'
 
 export { analyze, analyzeProject } from './analyze.ts'
+export { createPreload, loadZnightConfig, ZNIGHT_CONFIG_FILES, znightBunPlugin } from './bun-plugin.ts'
 export { renderErrorModule } from './codegen/error-module.ts'
 export { compile, createCompiler, generate } from './compiler.ts'
 export { formatDiagnostics } from './diagnostics/format.ts'
@@ -164,3 +178,4 @@ export {
 } from './options.ts'
 export { Project, ValueRef } from './project/index.ts'
 export { COMPILER_VERSION } from './version.ts'
+export { znight as default, znight } from './vite.ts'

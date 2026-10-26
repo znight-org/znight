@@ -16,7 +16,9 @@ export interface ConfigClassInfo {
 export interface ConfigFieldInfo {
   readonly property: string
   readonly env: string | undefined
-  /** Whether the field declares a default value (`@Default` or a literal initializer). */
+  /** Config type (`'string'`, `'number'`, `'url'`...), `undefined` when absent from the metadata. */
+  readonly type: string | undefined
+  /** Whether the field declares a default value (`@Default`; initializers are not in the metadata). */
   readonly hasDefault: boolean
   readonly default: unknown
   readonly required: boolean
@@ -55,6 +57,7 @@ export function readConfigClasses(metadata: ZnightMetadata): Map<Token, ConfigCl
       fields.push({
         property: field['property'],
         env: typeof field['env'] === 'string' ? field['env'] : undefined,
+        type: typeof field['type'] === 'string' ? field['type'] : undefined,
         hasDefault: Object.hasOwn(field, 'default') && field['default'] !== undefined,
         default: field['default'],
         required: field['required'] === true,

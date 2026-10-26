@@ -88,7 +88,7 @@ describe('LoggedInterceptor', () => {
       class: 'UserService',
       method: 'find',
     })
-    expect(typeof entries[0]?.durationMs).toBe('number')
+    expect(typeof entries[0]?.['durationMs']).toBe('number')
     expect(entries[0]).not.toHaveProperty('args')
     expect(entries[0]).not.toHaveProperty('result')
   })
@@ -152,7 +152,7 @@ describe('LoggedInterceptor', () => {
   it('intercepts self-invocations', () => {
     const { logger, entries } = setup()
     intercepted(new LoggedInterceptor(logger)).outer()
-    expect(entries.map(entry => entry.method)).toEqual(['find', 'outer'])
+    expect(entries.map(entry => entry['method'])).toEqual(['find', 'outer'])
   })
 
   it('rejects invalid levels with ZNIGHT005', () => {
@@ -191,7 +191,7 @@ describe('TracedInterceptor', () => {
     const outer = exporter.getFinishedSpans().find(span => span.name === 'users.outer')
     expect(outer?.attributes[Attr.CODE_FUNCTION_NAME]).toBe('UserService.outer')
     expect(outer?.kind).toBe(SpanKind.INTERNAL)
-    expect(entries[0]?.spanId).toBe(outer?.spanContext().spanId)
+    expect(entries[0]?.['spanId']).toBe(outer?.spanContext().spanId)
   })
 
   it('ends async spans when the promise settles and records errors', async () => {

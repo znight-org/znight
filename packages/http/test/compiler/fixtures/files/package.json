@@ -1,0 +1,10 @@
+{
+  "name": "http-files-fixture-app",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@znight/core": "0.1.0",
+    "@znight/http": "0.1.0",
+    "zod": "4.6.7"
+  }
+}

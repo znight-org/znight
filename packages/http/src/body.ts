@@ -1,4 +1,5 @@
 import { BadRequestException, UnsupportedMediaTypeException } from './exceptions.ts'
+import { parseMultipart, toFormData } from './multipart.ts'
 import { parseQuery } from './query.ts'
 import { errorMessage } from './utils.ts'
 
@@ -45,8 +46,28 @@ export function isJsonType(type: string): boolean {
   return type === 'application/json' || type.endsWith('+json')
 }
 
+/** Rejects a `content-encoding` other than `identity` with 415 (decompression is not supported). */
+export function checkContentEncoding(contentEncoding: string | undefined): void {
+  if (contentEncoding === undefined) return
+  const encoding = contentEncoding.trim().toLowerCase()
+  if (encoding !== '' && encoding !== 'identity') {
+    throw new UnsupportedMediaTypeException(`Unsupported content encoding "${encoding}"`)
+  }
+}
+
 /**
- * Parses a request body according to its `content-type`:
+ * Whether request headers announce a body (RFC 9112 §6.3: `transfer-encoding`, or a non-zero
+ * `content-length`).
+ */
+export function hasBody(headers: Readonly<Record<string, string | undefined>>): boolean {
+  if (headers['transfer-encoding'] !== undefined) return true
+  const length = headers['content-length']
+  return length !== undefined && length.trim() !== '0' && length.trim() !== ''
+}
+
+/**
+ * Parses a buffered request body according to its `content-type` (low-level helper; the request
+ * context parses bodies itself, multipart bodies as they arrive):
  *
  * | Content type                          | Result                               |
  * | ------------------------------------- | ------------------------------------ |
@@ -54,23 +75,26 @@ export function isJsonType(type: string): boolean {
  * | `application/json`, `*\/*+json`        | parsed JSON (400 when malformed)     |
  * | `text/*`                              | string (charset honoured)            |
  * | `application/x-www-form-urlencoded`   | record (repeated keys → arrays)      |
- * | `multipart/form-data`                 | `FormData` (files as `File`)         |
+ * | `multipart/form-data`                 | `FormData` (every field and file)    |
  * | anything else, or no content type     | `Uint8Array`                         |
  *
  * A `content-encoding` other than `identity` is rejected with 415 (decompression is not supported).
  */
-export async function parseBody(
+export function parseBody(
   bytes: Uint8Array,
   contentType: string | undefined,
   contentEncoding?: string | undefined,
 ): Promise<unknown> {
-  if (bytes.byteLength === 0) return undefined
-  if (contentEncoding !== undefined) {
-    const encoding = contentEncoding.trim().toLowerCase()
-    if (encoding !== '' && encoding !== 'identity') {
-      throw new UnsupportedMediaTypeException(`Unsupported content encoding "${encoding}"`)
-    }
+  try {
+    return Promise.resolve(parseBytes(bytes, contentType, contentEncoding))
+  } catch (error) {
+    return Promise.reject(error)
   }
+}
+
+function parseBytes(bytes: Uint8Array, contentType: string | undefined, contentEncoding: string | undefined): unknown {
+  if (bytes.byteLength === 0) return undefined
+  checkContentEncoding(contentEncoding)
   const media = parseMediaType(contentType)
   if (media === undefined) return bytes
   if (isJsonType(media.type)) {
@@ -87,11 +111,8 @@ export async function parseBody(
   if (media.type.startsWith('text/')) return decode(bytes, decoderFor(media.charset), 'text')
   if (media.type === 'application/x-www-form-urlencoded') return parseQuery(decode(bytes, UTF8, 'form'))
   if (media.type === 'multipart/form-data') {
-    try {
-      return await new Response(bytes, { headers: { 'content-type': contentType as string } }).formData()
-    } catch (error) {
-      throw new BadRequestException(`Invalid multipart body: ${errorMessage(error)}`)
-    }
+    const policy = { rules: [], maxParts: Number.POSITIVE_INFINITY, maxFieldSize: Number.POSITIVE_INFINITY }
+    return toFormData(parseMultipart(bytes, contentType as string, policy))
   }
   return bytes
 }

@@ -20,9 +20,10 @@ import type {
 import { type Context, Hono, type Next } from 'hono'
 
 import { toHonoPath } from '../path.ts'
+import { discardStream } from '../stream.ts'
 import { isBun } from '../utils.ts'
 import { ConnectionTracker, closeServer } from './node-io.ts'
-import { injectFetch, readWebStream, serverAddress } from './shared.ts'
+import { injectFetch, readWebStream, serverAddress, webBodyStream } from './shared.ts'
 
 /** Options of {@link honoAdapter}. */
 export interface HonoAdapterOptions {
@@ -198,9 +199,12 @@ function adapterRequest(c: Context): AdapterRequest {
     raw: request,
     rawResponse: c,
     readBody: (limit: number): Promise<Uint8Array> => {
-      body ??= readWebStream(request.body, limit, headers['content-length'])
+      body ??= readWebStream(() => request.body, limit, headers['content-length'])
       return body
     },
+    streamBody: (limit: number): ReadableStream<Uint8Array> =>
+      webBodyStream(() => request.body, limit, headers['content-length']),
+    hasBody: (): boolean => request.body !== null,
   }
 }
 
@@ -220,7 +224,10 @@ function remoteAddress(c: Context): string | undefined {
 }
 
 function toResponse(c: Context, reply: AdapterReply): Response {
-  if (reply.raw === true) return c.res
+  if (reply.raw === true) {
+    discardStream(reply.body instanceof ReadableStream ? reply.body : null)
+    return c.res
+  }
   const headers = new Headers()
   for (const name of Object.keys(reply.headers)) {
     const value = reply.headers[name]

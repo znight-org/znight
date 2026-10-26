@@ -259,7 +259,7 @@ type Compile = (options: compiler.ZnightOptions) => Promise<{
   readonly diagnostics: readonly compiler.Diagnostic[]
 }>
 
-const compile = (compiler as Record<string, unknown>).compile as Compile | undefined
+const compile = (compiler as Record<string, unknown>)['compile'] as Compile | undefined
 
 describe('@znight/compiler compile()', () => {
   it.skipIf(typeof compile !== 'function')(

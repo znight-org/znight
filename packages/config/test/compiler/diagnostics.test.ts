@@ -247,7 +247,7 @@ describe('diagnostics', () => {
   })
 
   it('keeps the valid fields of a class with invalid ones', () => {
-    expect(storedConfigs(result).TypesConfig?.fields).toEqual([
+    expect(storedConfigs(result)['TypesConfig']?.fields).toEqual([
       { property: 'num', env: 'T_NUM', key: 't.num', type: 'number', enum: [0, 1], required: true, secret: false },
     ])
   })
@@ -343,7 +343,7 @@ describe('diagnostics', () => {
         hint('eighteen'),
       ].join('\n'),
     ])
-    const fields = storedConfigs(result).DefaultsConfig?.fields ?? []
+    const fields = storedConfigs(result)['DefaultsConfig']?.fields ?? []
     expect(fields.find(field => field.property === 'blank')).toMatchObject({ default: '', required: false })
     expect(fields.find(field => field.property === 'numeric')).toMatchObject({ default: '42', required: false })
     expect(fields.find(field => field.property === 'thirteen')).toMatchObject({ required: true })
@@ -372,7 +372,7 @@ describe('diagnostics', () => {
         "  = hint: Write @Key('database.host')",
       ].join('\n'),
     ])
-    const fields = storedConfigs(result).ArgumentsConfig?.fields ?? []
+    const fields = storedConfigs(result)['ArgumentsConfig']?.fields ?? []
     expect(fields.find(field => field.property === 'a')?.env).toBe('A')
     expect(fields.find(field => field.property === 'd')?.env).toBe('A1')
     expect(fields.find(field => field.property === 'i')).toMatchObject({ env: 'I', secret: true })
@@ -449,7 +449,7 @@ describe('diagnostics', () => {
   })
 
   it('accepts property decorators in a base class of a config class', () => {
-    expect(storedConfigs(result).EmptyPrefix?.fields.map(field => field.env)).toEqual(['Y'])
+    expect(storedConfigs(result)['EmptyPrefix']?.fields.map(field => field.env)).toEqual(['Y'])
     expect(result.diagnostics.some(diagnostic => diagnostic.message.includes('UsedBase'))).toBe(false)
   })
 

@@ -10,19 +10,19 @@ describe('env()', () => {
   it('snapshots the context environment', async () => {
     const variables: Record<string, string | undefined> = { PORT: '3000', UNSET: undefined }
     const source = await loadConfigSource([env()], { env: variables })
-    variables.PORT = '4000'
+    variables['PORT'] = '4000'
     expect(source.get('PORT')).toBe('3000')
     expect(source.has('UNSET')).toBe(false)
     expect(source.origin('PORT')).toBe('process.env')
   })
 
   it('reads process.env by default', async () => {
-    process.env.ZNIGHT_ENV_LOADER_TEST = 'from-process'
+    process.env['ZNIGHT_ENV_LOADER_TEST'] = 'from-process'
     try {
       const source = await loadConfigSource([env()])
       expect(source.get('ZNIGHT_ENV_LOADER_TEST')).toBe('from-process')
     } finally {
-      delete process.env.ZNIGHT_ENV_LOADER_TEST
+      delete process.env['ZNIGHT_ENV_LOADER_TEST']
     }
   })
 
@@ -83,7 +83,7 @@ describe('loadConfigSource', () => {
     const probe: ConfigLoader = {
       name: 'probe',
       load({ source, cwd, env: variables }) {
-        seen.push(source.get('A'), cwd, variables.X)
+        seen.push(source.get('A'), cwd, variables['X'])
         return [
           { origin: 'probe-1', values: { B: 'b1' } },
           { origin: 'probe-2', values: { B: 'b2' } },
