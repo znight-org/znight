@@ -1,0 +1,191 @@
+/**
+ * Znight brand theme for the VitePress default theme.
+ *
+ * Palette (from the knight logo):
+ * - accent gradient: #3E7BFA → #8B5CF6
+ * - night tile: #0B1020 / #1A2350
+ * - silver: #F4F6FC / #A9B4D6
+ */
+
+:root {
+  --zn-blue: #3e7bfa;
+  --zn-violet: #8b5cf6;
+  --zn-night-1: #0b1020;
+  --zn-night-2: #1a2350;
+  --zn-silver-1: #f4f6fc;
+  --zn-silver-2: #a9b4d6;
+  --zn-gradient: linear-gradient(120deg, var(--zn-blue) 10%, var(--zn-violet) 90%);
+  /* darker stops: white text on top keeps a contrast ratio above 4.5:1 */
+  --zn-gradient-strong: linear-gradient(135deg, #2f6ae8 0%, #7c4def 100%);
+
+  /* Brand (light mode). brand-1 is used for text, brand-3 for solid backgrounds with white text. */
+  --vp-c-brand-1: #2557cc;
+  --vp-c-brand-2: #3e7bfa;
+  --vp-c-brand-3: #2f6ae8;
+  --vp-c-brand-soft: rgba(62, 123, 250, 0.14);
+
+  --vp-c-purple-1: #6d3fd9;
+  --vp-c-purple-2: #7c4def;
+  --vp-c-purple-3: #8b5cf6;
+  --vp-c-purple-soft: rgba(139, 92, 246, 0.14);
+
+  --vp-c-bg-alt: #f4f6fc;
+  --vp-c-bg-soft: #eef1fa;
+  --vp-c-divider: #e3e7f3;
+  --vp-c-gutter: #e3e7f3;
+  --vp-c-text-1: #10162d;
+  --vp-c-text-2: #4d5677;
+  --vp-c-text-3: #7d86a6;
+
+  --vp-button-brand-bg: var(--vp-c-brand-3);
+  --vp-button-brand-hover-bg: #2557cc;
+  --vp-button-brand-active-bg: #1f4ab0;
+
+  /* Home hero */
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: var(--zn-gradient);
+  --vp-home-hero-image-background-image: linear-gradient(-45deg, var(--zn-blue) 50%, var(--zn-violet) 50%);
+  --vp-home-hero-image-filter: blur(56px);
+
+  --vp-code-block-bg: #f4f6fc;
+}
+
+.dark {
+  /* Night palette */
+  --vp-c-bg: #0b1020;
+  --vp-c-bg-alt: #080c19;
+  --vp-c-bg-elv: #131a36;
+  --vp-c-bg-soft: #111832;
+
+  --vp-c-border: #2c3660;
+  --vp-c-divider: #1d2546;
+  --vp-c-gutter: #05080f;
+
+  --vp-c-text-1: #f4f6fc;
+  --vp-c-text-2: #a9b4d6;
+  --vp-c-text-3: #6f7ba3;
+
+  --vp-c-gray-1: #3a4572;
+  --vp-c-gray-2: #2c3660;
+  --vp-c-gray-3: #1f2847;
+  --vp-c-gray-soft: rgba(169, 180, 214, 0.12);
+
+  --vp-c-brand-1: #8aaeff;
+  --vp-c-brand-2: #5c8ffc;
+  --vp-c-brand-3: #2f6ae8;
+  --vp-c-brand-soft: rgba(62, 123, 250, 0.18);
+
+  --vp-c-purple-1: #c4a8ff;
+  --vp-c-purple-2: #a27cf8;
+  --vp-c-purple-3: #7c4def;
+  --vp-c-purple-soft: rgba(139, 92, 246, 0.18);
+
+  --vp-button-brand-bg: var(--vp-c-brand-3);
+  --vp-button-brand-hover-bg: #3e7bfa;
+  --vp-button-brand-active-bg: #2557cc;
+
+  --vp-home-hero-image-filter: blur(72px);
+
+  --vp-code-block-bg: #0e1430;
+  --vp-code-copy-code-bg: #172045;
+  --vp-code-copy-code-hover-bg: #1d2853;
+  --vp-code-tab-divider: var(--vp-c-divider);
+  --vp-code-tab-bg: #0e1430;
+
+  --vp-local-search-bg: var(--vp-c-bg-elv);
+  --vp-local-search-result-bg: var(--vp-c-bg-soft);
+  --vp-local-search-result-selected-bg: var(--vp-c-bg-elv);
+}
+
+/* Brand buttons: the accent gradient */
+.VPButton.brand {
+  background-image: var(--zn-gradient-strong);
+  border-color: transparent;
+}
+
+.VPButton.brand:hover {
+  background-image: linear-gradient(135deg, #3e7bfa 0%, #8b5cf6 100%);
+}
+
+/* Hero: the knight mark sits on a soft glow */
+.VPHero .image-src {
+  max-width: 200px;
+  max-height: 200px;
+  border-radius: 28%;
+  filter: drop-shadow(0 18px 40px rgba(26, 35, 80, 0.35));
+}
+
+@media (min-width: 640px) {
+  .VPHero .image-src {
+    max-width: 256px;
+    max-height: 256px;
+  }
+}
+
+@media (min-width: 960px) {
+  .VPHero .image-src {
+    max-width: 320px;
+    max-height: 320px;
+  }
+}
+
+.VPHero .tagline {
+  font-weight: 500;
+}
+
+/* Home features: brand-colored line icons, gradient outline on hover */
+.VPFeature .icon {
+  color: var(--vp-c-brand-1);
+  background-color: var(--vp-c-brand-soft);
+}
+
+.VPFeature .icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+.VPFeatures .item .VPFeature {
+  transition:
+    border-color 0.25s,
+    box-shadow 0.25s;
+}
+
+.VPFeatures .item .VPFeature:hover {
+  border-color: var(--vp-c-brand-2);
+  box-shadow: 0 8px 28px rgba(62, 123, 250, 0.12);
+}
+
+/* Logo in the navbar */
+.VPNavBarTitle .logo {
+  border-radius: 22%;
+}
+
+/* Small helpers used in pages */
+.zn-gradient-text {
+  background: var(--zn-gradient);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+}
+
+.vp-doc table code {
+  white-space: nowrap;
+}
+
+/* Status badges on package pages */
+.vp-doc .VPBadge {
+  vertical-align: middle;
+}
+
+/* Home call to action */
+.vp-doc .zn-home-cta {
+  margin-top: 48px;
+  padding: 20px 24px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 12px;
+  background-color: var(--vp-c-bg-soft);
+}
+
+.vp-doc .zn-home-cta p {
+  margin: 0;
+}

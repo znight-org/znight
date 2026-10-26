@@ -697,10 +697,10 @@ Sequence:
    Signal listeners are removed. Only the signal path sets `process.exitCode` (1 on failure) and a
    second signal forces exit (130). `import.meta.hot?.dispose(() => app.stop())` when available.
    `app.state`: `'created' | 'starting' | 'ready' | 'stopping' | 'stopped' | 'failed'`.
-Implementation notes: signal handlers are installed when `start()` begins (Ctrl+C during a slow
-boot shuts down gracefully); only providers whose `onStart` ran receive `onStop` (disposal always
-runs); `hookTimeoutMs` defaults to 5 s; HMR: pass `hot: import.meta.hot`; tests can inject
-`shutdown.process`. `hooks.run()` resolves with `fn`'s result.
+   Implementation notes: signal handlers are installed when `start()` begins (Ctrl+C during a slow
+   boot shuts down gracefully); only providers whose `onStart` ran receive `onStop` (disposal always
+   runs); `hookTimeoutMs` defaults to 5 s; HMR: pass `hot: import.meta.hot`; tests can inject
+   `shutdown.process`. `hooks.run()` resolves with `fn`'s result.
 
 ### 8.3 Hooks
 

@@ -1,0 +1,11 @@
+{
+  "name": "analysis-app",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@znight/core": "0.1.0",
+    "@znight/fake-http": "0.0.0",
+    "@znight/observability": "0.0.0",
+    "pg-lite": "1.0.0"
+  }
+}

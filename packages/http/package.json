@@ -11,7 +11,21 @@
     "directory": "packages/http"
   },
   "bugs": "https://github.com/ugho49/Znight/issues",
-  "keywords": ["znight", "http", "fastify", "express", "hono", "controllers", "rest"],
+  "keywords": [
+    "znight",
+    "http",
+    "rest",
+    "controllers",
+    "routing",
+    "guards",
+    "interceptors",
+    "validation",
+    "standard-schema",
+    "fastify",
+    "express",
+    "hono",
+    "bun"
+  ],
   "type": "module",
   "sideEffects": false,
   "engines": {
@@ -22,6 +36,31 @@
       "@znight/source": "./src/index.ts",
       "types": "./dist/index.d.mts",
       "default": "./dist/index.mjs"
+    },
+    "./path": {
+      "@znight/source": "./src/path.ts",
+      "types": "./dist/path.d.mts",
+      "default": "./dist/path.mjs"
+    },
+    "./node": {
+      "@znight/source": "./src/adapters/node.ts",
+      "types": "./dist/node.d.mts",
+      "default": "./dist/node.mjs"
+    },
+    "./fastify": {
+      "@znight/source": "./src/adapters/fastify.ts",
+      "types": "./dist/fastify.d.mts",
+      "default": "./dist/fastify.mjs"
+    },
+    "./express": {
+      "@znight/source": "./src/adapters/express.ts",
+      "types": "./dist/express.d.mts",
+      "default": "./dist/express.mjs"
+    },
+    "./hono": {
+      "@znight/source": "./src/adapters/hono.ts",
+      "types": "./dist/hono.d.mts",
+      "default": "./dist/hono.mjs"
     },
     "./package.json": "./package.json"
   },
@@ -37,6 +76,30 @@
   "dependencies": {
     "@znight/core": "workspace:*"
   },
+  "peerDependencies": {
+    "@hono/node-server": "^2.1.5",
+    "express": "^5.3.0",
+    "fastify": "^5.12.7",
+    "hono": "^4.13.14",
+    "light-my-request": "^6.8.0"
+  },
+  "peerDependenciesMeta": {
+    "@hono/node-server": {
+      "optional": true
+    },
+    "express": {
+      "optional": true
+    },
+    "fastify": {
+      "optional": true
+    },
+    "hono": {
+      "optional": true
+    },
+    "light-my-request": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@hono/node-server": "2.1.5",
     "@types/express": "5.0.6",
@@ -46,5 +109,26 @@
     "valibot": "1.5.0",
     "zod": "catalog:",
     "light-my-request": "6.8.0"
+  },
+  "znight": {
+    "apiVersion": 1,
+    "compiler": "@znight/http/compiler",
+    "provides": [
+      {
+        "export": "HttpContext",
+        "plugin": "HttpPlugin",
+        "scope": "request"
+      },
+      {
+        "export": "RequestId",
+        "plugin": "HttpPlugin",
+        "scope": "request"
+      },
+      {
+        "export": "HttpPlugin",
+        "plugin": "HttpPlugin",
+        "scope": "singleton"
+      }
+    ]
   }
 }

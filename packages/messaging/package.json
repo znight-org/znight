@@ -11,7 +11,18 @@
     "directory": "packages/messaging"
   },
   "bugs": "https://github.com/ugho49/Znight/issues",
-  "keywords": ["znight", "messaging", "rabbitmq", "sqs", "kafka", "consumer", "queue"],
+  "keywords": [
+    "znight",
+    "messaging",
+    "rabbitmq",
+    "amqp",
+    "sqs",
+    "kafka",
+    "consumer",
+    "queue",
+    "dead-letter-queue",
+    "retry"
+  ],
   "type": "module",
   "sideEffects": false,
   "engines": {
@@ -23,19 +34,57 @@
       "types": "./dist/index.d.mts",
       "default": "./dist/index.mjs"
     },
+    "./memory": {
+      "@znight/source": "./src/drivers/memory.ts",
+      "types": "./dist/memory.d.mts",
+      "default": "./dist/memory.mjs"
+    },
+    "./rabbitmq": {
+      "@znight/source": "./src/drivers/rabbitmq.ts",
+      "types": "./dist/rabbitmq.d.mts",
+      "default": "./dist/rabbitmq.mjs"
+    },
+    "./sqs": {
+      "@znight/source": "./src/drivers/sqs.ts",
+      "types": "./dist/sqs.d.mts",
+      "default": "./dist/sqs.mjs"
+    },
+    "./kafka": {
+      "@znight/source": "./src/drivers/kafka.ts",
+      "types": "./dist/kafka.d.mts",
+      "default": "./dist/kafka.mjs"
+    },
     "./package.json": "./package.json"
   },
   "types": "./dist/index.d.mts",
   "files": ["dist", "src"],
   "scripts": {
     "build": "tsdown",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p test"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p test",
+    "test": "bun test --conditions=@znight/source test",
+    "test:integration": "ZNIGHT_INTEGRATION=1 bun test --conditions=@znight/source --timeout 180000 test/integration"
   },
   "publishConfig": {
     "access": "public"
   },
   "dependencies": {
     "@znight/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "@aws-sdk/client-sqs": "^3.600.0",
+    "@platformatic/kafka": "^2.0.0",
+    "amqplib": "^2.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@aws-sdk/client-sqs": {
+      "optional": true
+    },
+    "@platformatic/kafka": {
+      "optional": true
+    },
+    "amqplib": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@aws-sdk/client-sqs": "3.1156.0",
@@ -46,5 +95,21 @@
     "amqplib": "2.2.0",
     "testcontainers": "12.2.1",
     "zod": "catalog:"
+  },
+  "znight": {
+    "apiVersion": 1,
+    "compiler": "@znight/messaging/compiler",
+    "provides": [
+      {
+        "export": "MessageBroker",
+        "plugin": "MessagingPlugin",
+        "scope": "singleton"
+      },
+      {
+        "export": "InboundMessage",
+        "plugin": "MessagingPlugin",
+        "scope": "request"
+      }
+    ]
   }
 }

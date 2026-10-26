@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "target": "ES2024",
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "experimentalDecorators": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "customConditions": ["@znight/source"]
+  },
+  "include": ["src"]
+}

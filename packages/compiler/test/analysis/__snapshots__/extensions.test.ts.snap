@@ -1,0 +1,33 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`extension loading loads trusted extensions and reports every problem as ZNIGHT018 1`] = `
+"warning ZNIGHT018 node_modules/@acme/ext/package.json:9:32: @acme/ext declares a compiler extension (@acme/ext/compiler) but is not trusted: it is not loaded and its decorators are not analysed
+  = hint: Add '@acme/ext' to the "trustedExtensions" option to load it
+error ZNIGHT018 node_modules/@znight/bad-version/package.json:9:32: Invalid compiler extension 'bad' exported by '@znight/bad-version/compiler' (@znight/bad-version): apiVersion 2 is not supported by this compiler (supported: 1)
+  = hint: Use versions of @znight/bad-version and @znight/compiler built for the same extension API
+error ZNIGHT018 node_modules/@znight/broken-ext/package.json:9:32: Cannot load the compiler extension '@znight/broken-ext/compiler' of @znight/broken-ext: boom at import
+error ZNIGHT018 node_modules/@znight/dup-b/package.json:9:32: Two compiler extensions are named 'dup': @znight/dup-a/compiler (node_modules/@znight/dup-a/compiler.mjs) and @znight/dup-b/compiler (node_modules/@znight/dup-b/compiler.mjs); the second one is ignored
+  = hint: Several versions or copies of the same package are installed: deduplicate them (a single version of each @znight/* package)
+error ZNIGHT018 node_modules/@znight/invalid-ext/package.json:9:32: Invalid compiler extension exported by '@znight/invalid-ext/compiler' (@znight/invalid-ext): not an object
+  = hint: The module must default-export a CompilerExtension or an array of them
+error ZNIGHT018 node_modules/@znight/missing-ext/package.json:9:32: Cannot resolve the compiler extension '@znight/missing-ext/nope' of @znight/missing-ext
+  = hint: Check the "znight.compiler" field and the "exports" of @znight/missing-ext
+  = hint: "./nope" is not exported under the conditions ["node", "import", "default"] from package @znight/missing-ext (see exports field in @znight/missing-ext/package.json)"
+`;
+
+exports[`extension API analyses every class carrying one of its decorators, with evaluated arguments 1`] = `
+"error ZNIGHT003 src/routes.ts:5:1: Scope mismatch: singleton WebController depends on request-scoped Request (WebController -> Request)
+  = hint: Inject Lazy<Request> and call .get() while a request is being handled
+  = hint: Or make WebController request-scoped: @Injectable({ scope: 'request' })
+  - WebController -> Request (request access) (src/routes.ts:5:1)
+error ZNIGHT005 src/routes.ts:5:21: 'notAClass' is not a class: the guard must be a class
+error ZNIGHT005 src/routes.ts:5:32: expected a reference to the guard class, got 'text'
+  = hint: Pass the class itself: MyClass
+error ZNIGHT005 src/routes.ts:9:3: @Route cannot be applied to a method (allowed on a class)
+error ZNIGHT005 src/routes.ts:13:1: Invalid scope "eternal" for Broken (extension 'web')
+error ZNIGHT005 src/routes.ts:14:14: Broken is broken
+error ZNIGHT003 src/routes.ts:16:1: Scope mismatch: singleton ScopedController depends on request-scoped Request (ScopedController -> Request)
+  = hint: Inject Lazy<Request> and call .get() while a request is being handled
+  = hint: Or make ScopedController request-scoped: @Injectable({ scope: 'request' })
+  - ScopedController -> Request (request access) (src/routes.ts:16:1)"
+`;

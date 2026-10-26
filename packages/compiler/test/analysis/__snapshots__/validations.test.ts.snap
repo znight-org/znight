@@ -1,0 +1,137 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`ZNIGHT004 / ZNIGHT008: duplicates and ambiguities distinguishes duplicates of the exact same type from ambiguous candidates 1`] = `
+"error ZNIGHT004 src/pool.ts:51:20: Duplicate providers for 'Pool' required by Consumer: Pools.backup (src/pool.ts:13), Pools.main (src/pool.ts:8)
+  = hint: Mark the provider to inject by default with @Primary()
+  = hint: Or name the providers with @Named('...') and choose one with @Inject('...')
+  - candidate Pools.backup (src/pool.ts:13:3)
+  - candidate Pools.main (src/pool.ts:8:3)
+error ZNIGHT008 src/pool.ts:52:24: Ambiguous injection of 'Notifier' required by Consumer: 2 candidates (EmailNotifier (src/pool.ts:23), SmsNotifier (src/pool.ts:28))
+  = hint: Mark the provider to inject by default with @Primary()
+  = hint: Or name the providers with @Named('...') and choose one with @Inject('...')
+  = hint: Or inject a more specific type
+  - candidate EmailNotifier (src/pool.ts:23:14)
+  - candidate SmsNotifier (src/pool.ts:28:14)
+error ZNIGHT008 src/pool.ts:53:21: Ambiguous injection of 'Store' required by Consumer: 2 candidates (MemoryStore (src/pool.ts:44), RedisStore (src/pool.ts:38)), several of them @Primary
+  = hint: Keep a single @Primary() among MemoryStore, RedisStore
+  = hint: Or name the providers with @Named('...') and choose one with @Inject('...')
+  = hint: Or inject a more specific type
+  - candidate MemoryStore (src/pool.ts:44:14)
+  - candidate RedisStore (src/pool.ts:38:14)"
+`;
+
+exports[`ZNIGHT005: invalid decorator usage reports every listed case 1`] = `
+"error ZNIGHT005 src/anonymous.ts:3:1: The anonymous class exported by default from src/anonymous.ts must be importable by the generated module to be a provider: The default export of src/anonymous.ts has no name
+  = hint: Give it a name and export it: \`export default class MyClass {}\` or \`export class MyClass {}\`
+warning ZNIGHT005 src/composite.ts:9:1: @Service is a composite decorator: the Znight decorator @Injectable it applies is not visible to the compiler
+  = hint: Apply @Injectable(...) directly instead of through @Service
+  - Service is declared in src/composite.ts (src/composite.ts:3:17)
+warning ZNIGHT005 src/composite.ts:12:1: @Repository is a composite decorator: the Znight decorator @Injectable it applies is not visible to the compiler
+  = hint: Apply @Injectable(...) directly instead of through @Repository
+  - Repository is declared in src/composite.ts (src/composite.ts:7:14)
+error ZNIGHT005 src/factory.ts:7:3: @Provides can only be used in a @Factory class (NotAFactory.thing)
+  = hint: Add @Factory() to NotAFactory
+error ZNIGHT005 src/factory.ts:15:3: @Provides method BadFactory.make must be a public instance method (it is static)
+  = hint: Make it a public, non-static method with a plain name
+error ZNIGHT005 src/factory.ts:20:3: @Provides method BadFactory.hidden must be a public instance method (it is private)
+  = hint: Make it a public, non-static method with a plain name
+error ZNIGHT005 src/factory.ts:25:3: @Provides method BadFactory.untyped must declare its return type: it is the provided type
+  = hint: Annotate it: \`untyped(...): MyType\`
+error ZNIGHT005 src/factory.ts:30:3: @Provides method BadFactory.nothing must return a concrete type (it returns void)
+  = hint: Annotate the method with the type of the value it creates
+error ZNIGHT005 src/factory.ts:33:3: @Provides method BadFactory.count returns 'number', which has no identity: it needs a qualifier
+  = hint: Name it with @Provides({ name: 'count' }) or @Named('count') and inject it with @Inject('count')
+error ZNIGHT005 src/factory.ts:38:13: Option 'dispose' of @Provides must be a non-empty string
+error ZNIGHT005 src/intercept.ts:17:14: Invalid argument 1 of @Intercept: 'PrivateInterceptor' cannot be imported by the generated module ('PrivateInterceptor' is not exported by src/intercept.ts)
+  = hint: Export it: \`export class PrivateInterceptor ...\`
+error ZNIGHT005 src/intercept.ts:20:43: Invalid argument 2 of @Intercept: A function is not statically evaluable
+  = hint: Extract the value to \`export const X = ...\` with a statically evaluable initializer
+error ZNIGHT005 src/intercept.ts:23:3: Static method Intercepted.staticMethod cannot be intercepted
+  = hint: Interceptors apply to instance methods
+error ZNIGHT005 src/intercept.ts:26:3: #private method Intercepted.#secret cannot be intercepted
+  = hint: Use a TypeScript \`private\` method instead of a #private name
+error ZNIGHT005 src/intercept.ts:29:14: @Intercept: expected a reference to the interceptor class, got 'PublicInterceptor'
+  = hint: Pass the class itself: @Intercept(MyClass)
+error ZNIGHT005 src/intercept.ts:34:3: @Intercept has no effect: NotRegistered is not a provider
+  = hint: Register NotRegistered as a provider (@Injectable()) or remove @Intercept
+error ZNIGHT005 src/providers.ts:3:1: @Injectable cannot register the abstract class AbstractService
+  = hint: Register a concrete subclass, or provide the value with a @Provides method
+error ZNIGHT005 src/providers.ts:6:1: @Injectable cannot register the generic class GenericService<T>: its type parameters are unbound
+  = hint: Subclass it with concrete type arguments (\`class UserRepository extends GenericService<User> {}\`)
+  = hint: Or provide it with a @Provides method returning a concrete type
+error ZNIGHT005 src/providers.ts:11:1: HiddenService must be importable by the generated module to be a provider: 'HiddenService' is not exported by src/providers.ts
+  = hint: Export it: \`export class HiddenService ...\`
+error ZNIGHT005 src/providers.ts:15:1: TwoKinds is registered by several provider decorators (@Injectable and @Factory)
+  = hint: A class is a provider of one kind only: keep a single provider decorator
+  - first registered with @Injectable (src/providers.ts:14:1)
+error ZNIGHT005 src/providers.ts:18:1: @Injectable must be called: @Injectable()
+  = hint: Write @Injectable(...)
+error ZNIGHT005 src/providers.ts:21:13: Option 'scope' of @Injectable must be 'singleton', 'request' or 'transient'
+error ZNIGHT005 src/providers.ts:21:13: Unknown option 'lazy' of @Injectable (allowed: scope, name, primary)
+error ZNIGHT005 src/providers.ts:25:1: @Injectable is applied several times
+  = hint: Keep a single @Injectable
+error ZNIGHT005 src/providers.ts:28:1: @Inject cannot be applied to a class (allowed on a constructor parameter, a method parameter)
+error ZNIGHT005 src/providers.ts:33:25: @Optional takes no arguments
+  = hint: Remove the extra arguments
+error ZNIGHT005 src/providers.ts:42:23: Invalid argument 1 of @Inject: it must be statically evaluable (A function call is not statically evaluable)
+  = hint: Extract the value to \`export const X = ...\` with a statically evaluable initializer
+error ZNIGHT005 src/providers.ts:47:3: @Named on a method requires @Provides (NotAProvidesMethod.method)
+error ZNIGHT005 src/providers.ts:48:10: @Inject can only be used on constructor parameters and @Provides method parameters (NotAProvidesMethod.method)
+error ZNIGHT005 src/providers.ts:51:1: @Named has no effect: NotAProvider is not a provider
+  = hint: Register NotAProvider as a provider (@Injectable()) or remove @Named
+error ZNIGHT005 src/providers.ts:56:11: The constructor of PrivateConstructor is private: the generated module cannot instantiate it
+  = hint: Make the constructor public"
+`;
+
+exports[`ZNIGHT010 / ZNIGHT014: unresolvable injections and async scopes reports every unresolvable injection type 1`] = `
+"error ZNIGHT014 src/types.ts:21:3: @Provides method Values.perRequest is async but request-scoped: async factories are only allowed for singletons
+  = hint: Make it a singleton, or return the value synchronously
+error ZNIGHT010 src/types.ts:31:5: Parameter 'untyped' of Unresolvable has no type annotation
+  = hint: Annotate it with the type to inject
+  = hint: Qualify it with @Inject('name') and provide it with @Provides({ name: 'name' }) or @Named('name')
+error ZNIGHT010 src/types.ts:32:25: Parameter 'primitive' of Unresolvable: a value of type 'string' cannot be injected without a qualifier
+  = hint: Qualify it with @Inject('name') and provide it with @Provides({ name: 'name' }) or @Named('name')
+error ZNIGHT010 src/types.ts:33:23: Parameter 'literal' of Unresolvable: the type '{ readonly a: number }' cannot be injected (object literal types are not analysed)
+  = hint: Declare an interface or a class and use it as the type
+  = hint: Qualify it with @Inject('name') and provide it with @Provides({ name: 'name' }) or @Named('name')
+error ZNIGHT010 src/types.ts:34:29: Parameter 'unknownImport' of Unresolvable: the type 'Missing' cannot be resolved
+  = hint: Check the import of the type (module path, exported name)
+error ZNIGHT010 src/types.ts:35:23: Parameter 'promise' of Unresolvable: Promise<Service> cannot be injected
+  = hint: Inject Service: async singletons are resolved before they are injected
+  = hint: Use Lazy<T> to resolve a provider at call time
+error ZNIGHT010 src/types.ts:36:25: Parameter 'lazyMulti' of Unresolvable: Lazy<Service[]> is not supported
+  = hint: Inject Service[] (every provider) or Lazy<Service> (one provider)
+error ZNIGHT010 src/types.ts:37:41: Parameter 'wrongKind' of Unresolvable: the qualifier 'port' matches Values.port named 'port' (src/types.ts:17), which provides 'number' instead of 'string'
+  = hint: Fix the parameter type or the qualifier
+error ZNIGHT010 src/types.ts:38:21: Parameter 'union' of Unresolvable: the union type 'Base | Service' cannot be injected without a qualifier
+  = hint: Inject a single class or interface type
+  = hint: Qualify it with @Inject('name') and provide it with @Provides({ name: 'name' }) or @Named('name')
+error ZNIGHT010 src/types.ts:39:14: Parameter 'rest' of Unresolvable is a rest parameter: rest parameters cannot be injected
+  = hint: Inject an array type (\`items: Item[]\`) to receive every provider of a type
+error ZNIGHT010 src/types.ts:46:32: The constructor inherited by FromMixin from 'Mixin(Base)' cannot be analysed (Only identifiers and static member accesses can be resolved)
+  = hint: Declare an explicit constructor in FromMixin: \`constructor(...) { super(...) }\`"
+`;
+
+exports[`ZNIGHT001: missing providers and near-miss analysis explains every near miss 1`] = `
+"error ZNIGHT001 src/consumer.ts:13:21: Missing provider for 'EmailService' required by Consumer
+  = hint: Another 'EmailService' (a provider) is declared in src/mail/email.service.ts:4, but this injection refers to the one in src/legacy/email.service.ts:1: check the import
+  = hint: EmailService (src/legacy/email.service.ts:1) is not a provider: add @Injectable()
+  - 'EmailService' declared here (src/mail/email.service.ts:4:14)
+error ZNIGHT001 src/consumer.ts:14:24: Missing provider for 'Notifier' required by Consumer
+  = hint: SmsNotifier (src/notify/notifier.ts:5) implements Notifier but is not a provider: add @Injectable()
+error ZNIGHT001 src/consumer.ts:15:21: Missing provider for 'CacheService' required by Consumer
+  = hint: CacheService is declared in src/excluded/cache.ts, which is not analysed: the file is excluded by the "include"/"exclude" options
+error ZNIGHT001 src/consumer.ts:16:23: Missing provider for 'PaymentGateway' required by Consumer
+  = hint: StripePaymentGateway (src/pay/payment.ts:8) looks like an implementation of PaymentGateway but does not declare \`implements PaymentGateway\`
+error ZNIGHT001 src/consumer.ts:17:25: Missing provider for 'Repo<Customer>' required by Consumer
+  = hint: OrderRepo (src/orders/repo.ts:14) implements Repo<Order>, not Repo<Customer>
+error ZNIGHT001 src/consumer.ts:18:40: Missing provider for 'Clock' (qualifier 'missing') required by Consumer
+  = hint: 1 provider of Clock exists but none is named 'missing': SystemClock named 'system' (src/core/clock.ts:8)
+error ZNIGHT001 src/consumer.ts:20:22: Missing provider for 'Mailer' required by Consumer
+  = hint: 'Mailer' is not imported where it is injected (it resolves to a global); Mailer is declared in src/core/clock.ts:14: import it
+  - 'Mailer' declared here (src/core/clock.ts:14:14)
+error ZNIGHT001 src/consumer.ts:21:36: Missing provider for 'port' (number) required by Consumer
+  = hint: Provide it from a @Factory class: \`@Provides({ name: 'port' }) port(): number\`
+error ZNIGHT001 src/consumer.ts:22:20: Missing provider for 'Pool' required by Consumer
+  = hint: Pool is declared in the package pg-lite, which is not analysed from source: provide it with a @Factory/@Provides method, add the package to the "libraries" option, or declare 'pg-lite#Pool' in "externals" if a plugin provides it at runtime"
+`;

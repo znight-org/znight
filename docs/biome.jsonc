@@ -1,0 +1,7 @@
+{
+  "$schema": "../node_modules/@biomejs/biome/configuration_schema.json",
+  "root": false,
+  "extends": "//",
+  // VitePress pages start with a YAML frontmatter block
+  "markdown": { "parser": { "frontmatter": true } }
+}

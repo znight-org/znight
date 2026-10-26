@@ -11,7 +11,18 @@
     "directory": "packages/testing"
   },
   "bugs": "https://github.com/ugho49/Znight/issues",
-  "keywords": ["znight", "testing", "mock", "testbed", "e2e"],
+  "keywords": [
+    "znight",
+    "testing",
+    "mock",
+    "auto-mock",
+    "testbed",
+    "e2e",
+    "dependency-injection",
+    "bun",
+    "vitest",
+    "jest"
+  ],
   "type": "module",
   "sideEffects": false,
   "engines": {
