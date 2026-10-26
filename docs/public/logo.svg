@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1446 512" width="1446" height="512">
+  <title>Znight</title>
+  <defs>
+    <linearGradient id="zl-bg" x1="0" y1="0" x2="0.6" y2="1">
+      <stop offset="0" stop-color="#272F88"/>
+      <stop offset="1" stop-color="#0E1332"/>
+    </linearGradient>
+    <linearGradient id="zl-lit" x1="0.2" y1="0" x2="0.8" y2="1">
+      <stop offset="0" stop-color="#FFE38F"/>
+      <stop offset="1" stop-color="#FF9F2E"/>
+    </linearGradient>
+    <linearGradient id="zl-shade" x1="0.2" y1="0" x2="0.8" y2="1">
+      <stop offset="0" stop-color="#5246DA"/>
+      <stop offset="1" stop-color="#2F2892"/>
+    </linearGradient>
+  </defs>
+    <rect width="512" height="512" rx="116" fill="url(#zl-bg)"/>
+    <path d="M115.09,144L352,144L352,192L227.07,320L424.24,320A180 180 0 0 0 115.09,144Z" fill="url(#zl-shade)"/>
+    <path d="M396.91,368L160,368L160,320L284.93,192L87.76,192A180 180 0 0 0 396.91,368Z" fill="url(#zl-lit)"/>
+  <g transform="translate(596 25.6) scale(0.9)" fill="#7360FF" stroke="#7360FF" stroke-linecap="butt" stroke-linejoin="miter"><path d="M0,136L182,136L182,176L59.24,336L182,336L182,376L0,376L0,336L122.76,176L0,176Z" stroke="none"/><path d="M224,376V206M224,282A56 56 0 0 1 336,282V376" fill="none" stroke-width="44"/><path d="M414,376V206" fill="none" stroke-width="44"/><circle cx="414" cy="156" r="26" stroke="none"/><circle cx="549" cy="291" r="63" fill="none" stroke-width="44"/><path d="M590,206H634V380A85 85 0 0 1 527,462.1V414.6A41 41 0 0 0 590,380Z" stroke="none"/><path d="M688,376V136M688,282A56 56 0 0 1 800,282V376" fill="none" stroke-width="44"/><path d="M892,150V376" fill="none" stroke-width="44"/><path d="M844,226H940" fill="none" stroke-width="40"/></g>
+</svg>

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./docs/assets/logo.png" alt="Znight Logo" width="200" />
+  <img src="./docs/public/logo.svg" alt="Znight" width="420" />
 </p>
 
 <h1 align="center">Znight</h1>
