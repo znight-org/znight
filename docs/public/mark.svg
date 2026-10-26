@@ -1,20 +1,59 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
   <title>Znight</title>
   <defs>
-    <linearGradient id="zm-bg" x1="0" y1="0" x2="0.6" y2="1">
-      <stop offset="0" stop-color="#272F88"/>
-      <stop offset="1" stop-color="#0E1332"/>
+    <linearGradient id="zn-tile" x1="256" y1="24" x2="256" y2="488" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1A2350"/>
+      <stop offset="1" stop-color="#0B1020"/>
     </linearGradient>
-    <linearGradient id="zm-lit" x1="0.2" y1="0" x2="0.8" y2="1">
-      <stop offset="0" stop-color="#FFE38F"/>
-      <stop offset="1" stop-color="#FF9F2E"/>
+    <linearGradient id="zn-rim" x1="256" y1="24" x2="256" y2="488" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#5B6BB8" stop-opacity="0.4"/>
+      <stop offset="0.5" stop-color="#5B6BB8" stop-opacity="0.12"/>
+      <stop offset="1" stop-color="#5B6BB8" stop-opacity="0.05"/>
     </linearGradient>
-    <linearGradient id="zm-shade" x1="0.2" y1="0" x2="0.8" y2="1">
-      <stop offset="0" stop-color="#5246DA"/>
-      <stop offset="1" stop-color="#2F2892"/>
+    <linearGradient id="zn-mane" x1="330" y1="110" x2="370" y2="330" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#3E7BFA"/>
+      <stop offset="1" stop-color="#8B5CF6"/>
+    </linearGradient>
+    <linearGradient id="zn-base" x1="146" y1="0" x2="392" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#3E7BFA"/>
+      <stop offset="1" stop-color="#8B5CF6"/>
     </linearGradient>
   </defs>
-    <rect width="512" height="512" rx="116" fill="url(#zm-bg)"/>
-    <path d="M115.09,144L352,144L352,192L227.07,320L424.24,320A180 180 0 0 0 115.09,144Z" fill="url(#zm-shade)"/>
-    <path d="M396.91,368L160,368L160,320L284.93,192L87.76,192A180 180 0 0 0 396.91,368Z" fill="url(#zm-lit)"/>
+  <rect x="24" y="24" width="464" height="464" rx="112" fill="url(#zn-tile)"/>
+  <rect x="26" y="26" width="460" height="460" rx="110" fill="none" stroke="url(#zn-rim)" stroke-width="4"/>
+  
+  <g>
+    <polygon points="288,72 308,120 322,112 382,208 388,294 362,372 176,372 196,320 240,262 208,288 176,270 136,280 116,250 134,210 198,148 256,124" fill="#A9B4D6"/>
+    <polygon points="288,72 308,120 256,124" fill="#D6DCEE"/>
+    <polygon points="256,124 308,120 298,172" fill="#F4F6FC"/>
+    <polygon points="308,120 322,112 298,172" fill="#D6DCEE"/>
+    <polygon points="322,112 354,146 298,172" fill="#D6DCEE"/>
+    <polygon points="256,124 198,148 298,172" fill="#F4F6FC"/>
+    <polygon points="198,148 298,172 236,196" fill="#D6DCEE"/>
+    <polygon points="198,148 236,196 134,210" fill="#F4F6FC"/>
+    <polygon points="134,210 236,196 196,232" fill="#D6DCEE"/>
+    <polygon points="134,210 196,232 116,250" fill="#F4F6FC"/>
+    <polygon points="116,250 196,232 136,280" fill="#D6DCEE"/>
+    <polygon points="196,232 176,270 136,280" fill="#A9B4D6"/>
+    <polygon points="236,196 298,172 240,262" fill="#D6DCEE"/>
+    <polygon points="196,232 236,196 240,262" fill="#A9B4D6"/>
+    <polygon points="196,232 240,262 208,288" fill="#7F8CB8"/>
+    <polygon points="196,232 208,288 176,270" fill="#A9B4D6"/>
+    <polygon points="298,172 354,146 382,208" fill="#A9B4D6"/>
+    <polygon points="298,172 382,208 308,240" fill="#D6DCEE"/>
+    <polygon points="298,172 308,240 240,262" fill="#F4F6FC"/>
+    <polygon points="240,262 308,240 292,300" fill="#F4F6FC"/>
+    <polygon points="240,262 292,300 196,320" fill="#D6DCEE"/>
+    <polygon points="196,320 292,300 176,372" fill="#F4F6FC"/>
+    <polygon points="176,372 292,300 362,372" fill="#D6DCEE"/>
+    <polygon points="308,240 382,208 388,294" fill="#A9B4D6"/>
+    <polygon points="308,240 388,294 292,300" fill="#A9B4D6"/>
+    <polygon points="292,300 388,294 362,372" fill="#7F8CB8"/>
+    <polygon points="322,112 354,146 314,176" fill="url(#zn-mane)"/>
+    <polygon points="354,146 382,208 338,240" fill="url(#zn-mane)"/>
+    <polygon points="382,208 388,294 354,322" fill="url(#zn-mane)"/>
+    <polygon points="230,176 258,178 240,190" fill="#0B1020"/>
+  </g>
+  <rect x="166" y="384" width="206" height="20" rx="3" fill="#D6DCEE"/>
+  <rect x="146" y="414" width="246" height="26" rx="3" fill="url(#zn-base)"/>
 </svg>
