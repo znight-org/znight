@@ -32,6 +32,7 @@ and the runtime (`ZnightError`). Messages link here: each code has its own ancho
 | [ZNIGHT019](#znight019) | Unused provider                                     | warning (with `reportUnused`)           | build             |
 | [ZNIGHT020](#znight020) | Generated module imported by a provider module      | error                                   | build             |
 | [ZNIGHT021](#znight021) | Lifecycle hook or shutdown step failed or timed out | error                                   | startup, shutdown |
+| [ZNIGHT022](#znight022) | Syntax error in a source file                       | error                                   | build             |
 
 ## Reading an error
 
@@ -579,3 +580,17 @@ ZNIGHT021: The application stopped with 2 error(s)
 **How to fix**: inspect `error.errors` (and each `cause`). For timeouts, make hooks finish faster or
 raise `shutdown.hookTimeoutMs` / `shutdown.timeoutMs`, keeping them below your platform's grace period
 ([Deployment](/guide/deployment#graceful-shutdown-in-orchestrators)).
+
+## ZNIGHT022: Syntax error in a source file {#znight022}
+
+A file matched by `include` (or a provider library file) could not be parsed. The compiler reports
+it before any other diagnostic and skips the file, so its providers are missing from the graph —
+which usually causes ZNIGHT001 errors elsewhere. Fix the syntax error first.
+
+```txt
+✗ ZNIGHT022: Unexpected token, expected ";"
+  --> src/users/user.service.ts:14:12
+```
+
+**How to fix**: correct the syntax error (your editor or `tsc --noEmit` shows the same location),
+or exclude the file with the compiler `exclude` option if it is not application code.

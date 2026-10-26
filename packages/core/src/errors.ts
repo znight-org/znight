@@ -45,6 +45,8 @@ export const ErrorCode = {
   GeneratedModuleCycle: 'ZNIGHT020',
   /** A lifecycle hook or shutdown step failed or timed out. */
   LifecycleFailed: 'ZNIGHT021',
+  /** A source file could not be parsed. */
+  SyntaxError: 'ZNIGHT022',
 } as const
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode]
@@ -72,6 +74,7 @@ export const ERROR_DESCRIPTIONS: Readonly<Record<ErrorCode, string>> = {
   ZNIGHT019: 'Unused provider: unreachable from any root',
   ZNIGHT020: 'The generated module is imported by a provider module (ESM cycle)',
   ZNIGHT021: 'Lifecycle hook or shutdown step failed or timed out',
+  ZNIGHT022: 'Syntax error: a source file could not be parsed',
 }
 
 export interface ZnightErrorOptions extends ErrorOptions {

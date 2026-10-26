@@ -183,8 +183,8 @@ export function traceMessages(tracer: Tracer, options: MessagingTracingOptions =
 }
 
 /**
- * Structural shape of the `messaging:publish` hook event of `@znight/messaging` (declared there;
- * duck-typed here so that this package does not depend on it).
+ * Minimal shape of the `messaging:publish` hook event used here; `MessagePublishEvent` from
+ * `@znight/core` satisfies it.
  */
 export interface MessagePublishEventLike {
   readonly queue: string

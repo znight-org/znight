@@ -18,6 +18,8 @@ export interface ZnightHooks {
   'http:request': HttpRequestEvent
   /** One message delivery handled by `@znight/messaging` (wrapped with `hooks.run`). */
   'messaging:message': MessageDeliveryEvent
+  /** One message published through `MessageBroker` of `@znight/messaging` (wrapped with `hooks.run`). */
+  'messaging:publish': MessagePublishEvent
 }
 
 /**
@@ -44,6 +46,22 @@ export interface HttpRequestEvent {
   error?: unknown
   /** Response headers to add (e.g. trace context). */
   readonly responseHeaders: Record<string, string>
+}
+
+/**
+ * Instrumentation event of the `messaging:publish` hook. Wrappers may add headers (e.g. W3C trace
+ * context) before calling `next()`: they are sent with the message.
+ */
+export interface MessagePublishEvent {
+  readonly queue: string
+  readonly type: string | undefined
+  readonly messageId: string
+  /** Headers sent with the message (mutable until `next()` is called). */
+  readonly headers: Record<string, string>
+  /** `performance.now()` when the publication started. */
+  readonly startTime: number
+  /** Publication error, set before `next()` rejects in the wrappers. */
+  error?: unknown
 }
 
 /** Instrumentation event of the `messaging:message` hook. */

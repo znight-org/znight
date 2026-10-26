@@ -2,7 +2,6 @@ import type { Plugin, PluginContext, PluginOptions, ProviderDefinition, Token } 
 import type { Logger } from '../logging/logger.ts'
 import type { MetricsRegistry } from '../metrics/registry.ts'
 import type { MetricsServer } from '../metrics/server.ts'
-import type { MessagePublishWrapper } from '../tracing/hooks.ts'
 import type { Tracer } from '../tracing/tracer.ts'
 import type { ObservabilityOptions } from './options.ts'
 
@@ -133,8 +132,7 @@ class ObservabilityPluginImpl implements ObservabilityPluginInstance {
         const wrapper = this.#kit?.messaging
         return wrapper === undefined ? next() : wrapper(event, next)
       }),
-      // declared by @znight/messaging (module augmentation): registered by name, event duck-typed
-      (ctx.hooks as unknown as UntypedHooks).wrap('messaging:publish', (event, next) => {
+      ctx.hooks.wrap('messaging:publish', (event, next) => {
         const wrapper = this.#kit?.publish
         return wrapper === undefined ? next() : wrapper(event, next)
       }),
@@ -171,11 +169,6 @@ class ObservabilityPluginImpl implements ObservabilityPluginInstance {
     this.#kit ??= buildKit(resolveOptions(this.#options, ctx.container), ctx)
     return this.#kit
   }
-}
-
-/** `Hooks.wrap` for a hook declared by another package. */
-interface UntypedHooks {
-  wrap(name: string, wrapper: MessagePublishWrapper): () => void
 }
 
 /**
