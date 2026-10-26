@@ -123,7 +123,7 @@ added, removed }`).
 
 - [The compiler guide](/guide/compiler): pipeline, options and `znight.config.ts`, generated module,
   Vite plugin, Git/CI, Bun preload.
-- [Package README](https://github.com/ugho49/Znight/tree/main/packages/compiler#readme): every
+- [Package README](https://github.com/znight-org/znight/tree/main/packages/compiler#readme): every
   option, diagnostic and API in detail.
 - [Architecture specification](/contributing/architecture): identities, import routes, binding
   algorithm, extension API.

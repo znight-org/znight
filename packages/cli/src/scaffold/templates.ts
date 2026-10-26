@@ -170,7 +170,7 @@ function znightConfig(flags: Flags): string {
   return `import type { ZnightOptions } from '@znight/compiler'
 
 ${readers}
-// https://github.com/ugho49/Znight/tree/main/packages/compiler#options
+// https://github.com/znight-org/znight/tree/main/packages/compiler#options
 export default {
   // reportUnused: true, // warn about providers nothing uses (ZNIGHT019)
 } satisfies ZnightOptions
@@ -610,7 +610,7 @@ problem listed.${
     : 'the `znight()` Vite plugin (builds and Vitest) and `znight generate`'
   return `# ${options.name}
 
-A [Znight](https://github.com/ugho49/Znight) application: dependency injection resolved at **build
+A [Znight](https://github.com/znight-org/znight) application: dependency injection resolved at **build
 time** — no \`reflect-metadata\`, errors reported by the compiler with their location.
 
 ${features.join('\n')}
@@ -654,6 +654,6 @@ ${testNote}
 
 ## Learn more
 
-- [Znight documentation](https://github.com/ugho49/Znight#readme)
+- [Znight documentation](https://github.com/znight-org/znight#readme)
 `
 }

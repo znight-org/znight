@@ -19,7 +19,7 @@ coverage
   "README.md": 
 "# my-service
 
-A [Znight](https://github.com/ugho49/Znight) application: dependency injection resolved at **build
+A [Znight](https://github.com/znight-org/znight) application: dependency injection resolved at **build
 time** — no \`reflect-metadata\`, errors reported by the compiler with their location.
 
 - **HTTP** with \`@znight/http\` (built-in node:http server)
@@ -82,7 +82,7 @@ Vitest uses \`vite.config.ts\`, so the \`znight()\` plugin regenerates the conta
 
 ## Learn more
 
-- [Znight documentation](https://github.com/ugho49/Znight#readme)
+- [Znight documentation](https://github.com/znight-org/znight#readme)
 "
 ,
   "package.json": 
@@ -355,7 +355,7 @@ export default defineConfig({
 
 // Options of the Znight compiler. The znight() Vite plugin (vite.config.ts, also used by Vitest)
 // and \`znight generate\` read them, so they all generate the same container.
-// https://github.com/ugho49/Znight/tree/main/packages/compiler#options
+// https://github.com/znight-org/znight/tree/main/packages/compiler#options
 export default {
   // reportUnused: true, // warn about providers nothing uses (ZNIGHT019)
 } satisfies ZnightOptions
@@ -383,7 +383,7 @@ coverage
   "README.md": 
 "# my-service
 
-A [Znight](https://github.com/ugho49/Znight) application: dependency injection resolved at **build
+A [Znight](https://github.com/znight-org/znight) application: dependency injection resolved at **build
 time** — no \`reflect-metadata\`, errors reported by the compiler with their location.
 
 - **HTTP** with \`@znight/http\` (fastify adapter)
@@ -451,7 +451,7 @@ problem listed.
 
 ## Learn more
 
-- [Znight documentation](https://github.com/ugho49/Znight#readme)
+- [Znight documentation](https://github.com/znight-org/znight#readme)
 "
 ,
   "bunfig.toml": 
@@ -782,7 +782,7 @@ export default defineConfig({
 
 // Options of the Znight compiler. The znight() Vite plugin (vite.config.ts), the Bun preload of the
 // tests (bunfig.toml) and \`znight generate\` read them, so they all generate the same container.
-// https://github.com/ugho49/Znight/tree/main/packages/compiler#options
+// https://github.com/znight-org/znight/tree/main/packages/compiler#options
 export default {
   // reportUnused: true, // warn about providers nothing uses (ZNIGHT019)
 } satisfies ZnightOptions
@@ -814,7 +814,7 @@ coverage
   "README.md": 
 "# my-service
 
-A [Znight](https://github.com/ugho49/Znight) application: dependency injection resolved at **build
+A [Znight](https://github.com/znight-org/znight) application: dependency injection resolved at **build
 time** — no \`reflect-metadata\`, errors reported by the compiler with their location.
 
 - **HTTP** with \`@znight/http\` (express adapter)
@@ -868,7 +868,7 @@ Vitest uses \`vite.config.ts\`, so the \`znight()\` plugin regenerates the conta
 
 ## Learn more
 
-- [Znight documentation](https://github.com/ugho49/Znight#readme)
+- [Znight documentation](https://github.com/znight-org/znight#readme)
 "
 ,
   "package.json": 
@@ -1089,7 +1089,7 @@ export default defineConfig({
 
 // Options of the Znight compiler. The znight() Vite plugin (vite.config.ts, also used by Vitest)
 // and \`znight generate\` read them, so they all generate the same container.
-// https://github.com/ugho49/Znight/tree/main/packages/compiler#options
+// https://github.com/znight-org/znight/tree/main/packages/compiler#options
 export default {
   // reportUnused: true, // warn about providers nothing uses (ZNIGHT019)
 } satisfies ZnightOptions
@@ -1117,7 +1117,7 @@ coverage
   "README.md": 
 "# my-service
 
-A [Znight](https://github.com/ugho49/Znight) application: dependency injection resolved at **build
+A [Znight](https://github.com/znight-org/znight) application: dependency injection resolved at **build
 time** — no \`reflect-metadata\`, errors reported by the compiler with their location.
 
 - **HTTP** with \`@znight/http\` (hono adapter)
@@ -1173,7 +1173,7 @@ Vitest uses \`vite.config.ts\`, so the \`znight()\` plugin regenerates the conta
 
 ## Learn more
 
-- [Znight documentation](https://github.com/ugho49/Znight#readme)
+- [Znight documentation](https://github.com/znight-org/znight#readme)
 "
 ,
   "package.json": 
@@ -1437,7 +1437,7 @@ export default defineConfig({
 
 // Options of the Znight compiler. The znight() Vite plugin (vite.config.ts, also used by Vitest)
 // and \`znight generate\` read them, so they all generate the same container.
-// https://github.com/ugho49/Znight/tree/main/packages/compiler#options
+// https://github.com/znight-org/znight/tree/main/packages/compiler#options
 export default {
   // reportUnused: true, // warn about providers nothing uses (ZNIGHT019)
 } satisfies ZnightOptions

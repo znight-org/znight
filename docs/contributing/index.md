@@ -5,14 +5,14 @@ description: How to contribute to Znight - repository layout, tooling (Bun, Type
 # Contributing
 
 Thanks for your interest in Znight! Issues, discussions and pull requests are welcome on
-[GitHub](https://github.com/ugho49/Znight).
+[GitHub](https://github.com/znight-org/znight).
 
 ## Setup
 
 The repository is a [Bun](https://bun.sh) workspace. You need Bun 1.3+ and Node.js 24+.
 
 ```sh
-git clone https://github.com/ugho49/Znight.git
+git clone https://github.com/znight-org/znight.git
 cd Znight
 bun install
 ```

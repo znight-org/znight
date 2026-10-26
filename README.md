@@ -382,7 +382,7 @@ Issues, discussions and pull requests are welcome. Read the
 The repository is a [Bun](https://bun.sh) workspace (Bun 1.3+ and Node.js 24+):
 
 ```sh
-git clone https://github.com/ugho49/Znight.git
+git clone https://github.com/znight-org/znight.git
 cd Znight
 bun install
 

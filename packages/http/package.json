@@ -4,13 +4,13 @@
   "description": "Znight HTTP plugin: controllers, routing, guards, interceptors, validation with Fastify, Express or Hono",
   "license": "MIT",
   "author": "Ugho STEPHAN",
-  "homepage": "https://github.com/ugho49/Znight/tree/main/packages/http#readme",
+  "homepage": "https://github.com/znight-org/znight/tree/main/packages/http#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ugho49/Znight.git",
+    "url": "git+https://github.com/znight-org/znight.git",
     "directory": "packages/http"
   },
-  "bugs": "https://github.com/ugho49/Znight/issues",
+  "bugs": "https://github.com/znight-org/znight/issues",
   "keywords": [
     "znight",
     "http",

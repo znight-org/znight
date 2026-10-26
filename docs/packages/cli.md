@@ -126,4 +126,4 @@ npx znight build
 ```
 
 Every flag is documented in the
-[package README](https://github.com/ugho49/Znight/tree/main/packages/cli#readme).
+[package README](https://github.com/znight-org/znight/tree/main/packages/cli#readme).

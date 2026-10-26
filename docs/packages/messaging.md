@@ -145,7 +145,7 @@ alive: a worker whose only ingress is a consumer does not exit after `app.start(
 driver (the in-memory one holds no socket), and stops through `app.stop()` or a signal.
 
 Driver highlights (details in the
-[package README](https://github.com/ugho49/Znight/tree/main/packages/messaging#drivers)):
+[package README](https://github.com/znight-org/znight/tree/main/packages/messaging#drivers)):
 
 - **RabbitMQ**: delayed publications go through 32 delay levels shared by every queue of the
   virtual host (`znight.delays.0` to `.31`, option `delayLevelPrefix`), never a queue per delay;

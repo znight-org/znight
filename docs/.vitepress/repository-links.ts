@@ -9,7 +9,7 @@ export interface RepositoryLinksOptions {
   readonly docsDir: string
   /** Absolute path of the repository root. */
   readonly repoRoot: string
-  /** Repository URL, e.g. `https://github.com/ugho49/Znight`. */
+  /** Repository URL, e.g. `https://github.com/znight-org/znight`. */
   readonly githubUrl: string
   /** Branch the links point to. Default: `main`. */
   readonly branch?: string

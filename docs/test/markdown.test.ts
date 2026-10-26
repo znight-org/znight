@@ -332,10 +332,10 @@ describe('README.md', () => {
     expect(calls.length).toBeGreaterThan(1)
   })
 
-  it('documents the repository workflow (Bun, ugho49/Znight)', () => {
+  it('documents the repository workflow (Bun, znight-org/znight)', () => {
     expect(readme.match(/\bpnpm (?:install|build|test|dev)\b.*/g) ?? []).toEqual([])
-    expect(readme.match(/.*github\.com\/(?!ugho49\/Znight\b).*/g) ?? []).toEqual([])
-    expect(readme).toContain('git clone https://github.com/ugho49/Znight.git')
+    expect(readme.match(/.*github\.com\/(?!znight-org\/znight\b).*/g) ?? []).toEqual([])
+    expect(readme).toContain('git clone https://github.com/znight-org/znight.git')
     expect(readme).toContain('bun install')
   })
 })

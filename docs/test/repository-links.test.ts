@@ -8,7 +8,7 @@ import { beforeAll, describe, expect, test as it } from 'bun:test'
 
 const docsDir = resolve(import.meta.dir, '..')
 const repoRoot = resolve(docsDir, '..')
-const GITHUB = 'https://github.com/ugho49/Znight'
+const GITHUB = 'https://github.com/znight-org/znight'
 
 let md: MarkdownRenderer
 

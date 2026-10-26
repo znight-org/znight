@@ -7,7 +7,7 @@ import { type DefaultTheme, defineConfig } from 'vitepress'
 
 import { repositoryLinks } from './repository-links.ts'
 
-const GITHUB_URL = 'https://github.com/ugho49/Znight'
+const GITHUB_URL = 'https://github.com/znight-org/znight'
 const TITLE = 'Znight'
 const TAGLINE = 'Compile-time dependency injection for TypeScript'
 const DESCRIPTION =

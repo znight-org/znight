@@ -108,7 +108,7 @@ Znight is preparing its first release (`v0.1`). Every package is implemented and
 24 and Bun: the runtime, the compiler (Vite plugin, Bun preload, CLI), HTTP, messaging,
 configuration, observability and the testing utilities, with runnable example applications in the
 repository. Until 1.0, minor versions may still change APIs. Feedback and contributions are welcome
-on [GitHub](https://github.com/ugho49/Znight).
+on [GitHub](https://github.com/znight-org/znight).
 :::
 
 ## Next steps
