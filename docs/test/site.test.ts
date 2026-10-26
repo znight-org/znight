@@ -97,8 +97,8 @@ describe('error reference', () => {
   const text = readFileSync(join(docsDir, 'reference/error-codes.md'), 'utf8')
   const codes = Object.values(ErrorCode)
 
-  it('covers ZNIGHT001 to ZNIGHT021', () => {
-    expect(codes).toHaveLength(21)
+  it('codes are contiguous from ZNIGHT001', () => {
+    expect(codes).toEqual(codes.map((_, index) => `ZNIGHT${String(index + 1).padStart(3, '0')}`))
   })
 
   it.each(codes)('%s has a section with a stable anchor', code => {
