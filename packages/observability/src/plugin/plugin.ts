@@ -42,8 +42,9 @@ export interface ObservabilityPluginInstance extends Plugin {
  * ```
  *
  * - `register`: provides `Logger`, `Tracer`, `MetricsRegistry` and the `@Logged` / `@Traced` /
- *   `@Metric` interceptors, wraps the `http:request` and `messaging:message` hooks (spans → RED
- *   metrics → request logs) and routes the framework logs through the logger;
+ *   `@Metric` interceptors, wraps the `http:request`, `messaging:message` and `schedule:run` hooks
+ *   (spans → RED metrics → logs), listens to `schedule:run` (run counters) and routes the framework
+ *   logs through the logger;
  * - `onStart`: starts the `/metrics` server; `onStop`: closes it;
  * - `onDispose`: flushes the tracer provider and the logger transports; entries logged afterwards
  *   (the application's final `Application stopped`) are flushed as soon as they are written.
@@ -137,6 +138,13 @@ class ObservabilityPluginImpl implements ObservabilityPluginInstance {
       ctx.hooks.wrap('messaging:publish', (event, next) => {
         const wrapper = this.#kit?.publish
         return wrapper === undefined ? next() : wrapper(event, next)
+      }),
+      ctx.hooks.wrap('schedule:run', (event, next) => {
+        const wrapper = this.#kit?.schedule
+        return wrapper === undefined ? next() : wrapper(event, next)
+      }),
+      ctx.hooks.on('schedule:run', event => {
+        this.#kit?.scheduleListener?.(event)
       }),
     )
   }

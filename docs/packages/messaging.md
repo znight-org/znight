@@ -78,6 +78,8 @@ by a single `@Consumer` class. A `@Message()` parameter without schema is
 
 Delivery is **at least once**: handlers must be idempotent.
 
+![Message delivery: receive, request scope with the InboundMessage, decode, select the handler by type, invoke (validate, then the handler). Success: ack. A failure with attempts left: retry, waiting in process or delayed by the broker, then redelivered. A terminal failure (last attempt, NonRetryableError, invalid payload, undecodable body, no matching handler): @OnError returning 'ack' drops the message, otherwise it is dead-lettered (copy published and confirmed, then ack; released and redelivered if the publish fails)](/diagrams/messaging-delivery.svg)
+
 1. Each delivery runs in its own [request scope](/guide/scopes#request-scopes) (`InboundMessage` is a
    request-scoped external) through the `messaging:message` hook.
 2. The handler is selected by `message.type`: exact match, then patterns, then the default handler.

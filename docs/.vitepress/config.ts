@@ -158,6 +158,7 @@ function sidebarGuide(): DefaultTheme.SidebarItem[] {
       text: 'Going further',
       items: [
         { text: 'Testing', link: '/guide/testing' },
+        { text: 'Security', link: '/guide/security' },
         { text: 'Deployment', link: '/guide/deployment' },
         { text: 'Migrating from NestJS', link: '/guide/migrating-from-nestjs' },
       ],
@@ -190,7 +191,9 @@ function sidebarPackages(): DefaultTheme.SidebarItem[] {
       text: 'Features',
       items: [
         { text: '@znight/http', link: '/packages/http' },
+        { text: '@znight/openapi', link: '/packages/openapi' },
         { text: '@znight/messaging', link: '/packages/messaging' },
+        { text: '@znight/schedule', link: '/packages/schedule' },
         { text: '@znight/config', link: '/packages/config' },
         { text: '@znight/observability', link: '/packages/observability' },
       ],

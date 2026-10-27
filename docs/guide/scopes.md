@@ -12,6 +12,8 @@ A provider's **scope** decides how long its instances live.
 | `request`             | One per request scope (HTTP request, message delivery)      | Current user, per-request caches, unit of work |
 | `transient`           | A new one for every injection (and every `container.get()`) | Stateful helpers owned by their consumer       |
 
+![Provider scopes over the life of the application: one singleton instance from create() to stop(); one request-scoped instance per request scope (HTTP request or message delivery), concurrent scopes being isolated; a new transient instance for every injection, owned by the singleton or request-scoped instance it is injected into](/diagrams/scopes.svg)
+
 ```ts
 @Injectable({ scope: 'request' })
 export class CurrentUser {

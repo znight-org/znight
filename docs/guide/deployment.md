@@ -143,6 +143,23 @@ On Kubernetes, endpoints are removed asynchronously: a short `preStop` sleep (a 
 When a signal-triggered shutdown fails, the process exits with code `1`; a second signal forces exit
 code `130`.
 
+Event streams and scheduled jobs never finish by themselves, so they are stopped actively:
+`HttpPlugin` closes the open [Server-Sent Events](/packages/http#server-sent-events) streams first
+(their sources get `sse.shutdownGraceMs`, 1 s, to send final events, then the clients receive a
+jittered `retry` and reconnect to another instance), and `SchedulePlugin` aborts the `ctx.signal` of
+the running [jobs](/packages/schedule) and waits for them up to its `drainTimeoutMs`. Keep
+`sse.shutdownGraceMs` < `drainTimeoutMs` (4 s) < `shutdown.hookTimeoutMs` (5 s), and list
+`SchedulePlugin` before `HttpPlugin`: plugins stop in reverse order, so HTTP stops taking requests
+before the jobs drain.
+
+### Event streams behind a proxy
+
+Server-Sent Events go through proxies without special configuration: the plugin flushes the headers
+at once, sends `x-accel-buffering: no` (nginx) and `cache-control: no-cache, no-transform`
+(caches and compression), and a heartbeat comment every 8 s, below the idle timeouts of
+`Bun.serve()` (10 s), nginx and AWS load balancers (60 s) and Cloudflare (100 s). Browsers open at
+most 6 HTTP/1.1 connections per origin: serve HTTP/2 at the edge when pages open several streams.
+
 ## Configuration and secrets
 
 Configuration classes from [`@znight/config`](/packages/config) are validated when the application

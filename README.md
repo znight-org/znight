@@ -57,13 +57,21 @@ to TypeScript. Znight runs on Node.js 24+ and Bun 1.3+ (ESM only).
 - **Errors at build time**: missing providers, cycles, scope mismatches, ambiguous injections...
   fail the build with a `ZNIGHTxxx` code, a code frame and a hint.
 - **HTTP**: controllers, Standard Schema validation (Zod, Valibot...), guards, interceptors, uploads
-  and streams, on the built-in `node:http` server, Fastify, Express or Hono.
+  and streams, cookies (signed, with secure defaults) and Server-Sent Events, on the built-in
+  `node:http` server, Fastify, Express or Hono.
+- **Security**: access decisions on every route, checked at build time and at boot, CORS, security
+  headers on by default and trusted proxies; recipes for JWT, API keys, rate limiting and more in
+  the [security guide](./docs/guide/security.md).
+- **OpenAPI**: an OpenAPI 3.1 document generated from your controllers at build time, served with
+  Scalar or Swagger UI, or emitted as `openapi.json` for CI.
+- **Scheduling**: `@Cron`, `@Interval` and `@Timeout` jobs validated at build time, with time zones
+  and one runner across instances.
 - **Messaging**: consumers with retries and dead-letter queues on RabbitMQ, Amazon SQS, Kafka or in
   memory.
 - **Configuration**: typed config classes loaded from environment variables, `.env`, JSON/YAML
   files, Vault or AWS Secrets Manager, validated at boot.
 - **Observability**: Pino logging, Prometheus metrics and OpenTelemetry tracing, wired into every
-  HTTP request and message delivery.
+  HTTP request, message delivery and scheduled run.
 - **Testing**: `TestBed` with auto-mocked dependencies, `TestApp` for in-memory end-to-end tests
   (Vitest, Jest or `bun:test`).
 - **CLI**: `znight new`, code generators, `znight dev` / `build` / `start`.
@@ -313,18 +321,18 @@ export class OrderConsumer {
 
 All `@znight/*` packages are versioned together. Install only what you use.
 
-| Package                                             | What it gives you                                                                            | Install as    |
-| --------------------------------------------------- | -------------------------------------------------------------------------------------------- | ------------- |
-| [`@znight/core`](./packages/core)                   | Container, application lifecycle, plugins, hooks, AOP, marker decorators                     | dependency    |
-| [`@znight/compiler`](./packages/compiler)           | Vite plugin, CLI/Bun integration: analysis, validation, code generation                      | devDependency |
-| [`@znight/http`](./packages/http)                   | Controllers, routing, validation, guards, interceptors; Fastify, Express, Hono               | dependency    |
-| [`@znight/messaging`](./packages/messaging)         | Consumers, retries, dead-letter queues; RabbitMQ, SQS, Kafka, in-memory                      | dependency    |
-| [`@znight/config`](./packages/config)               | Typed config classes from env, `.env`, JSON/YAML, Vault, AWS Secrets Manager                 | dependency    |
-| [`@znight/observability`](./packages/observability) | Pino logger, Prometheus metrics, OpenTelemetry tracing                                       | dependency    |
-| [`@znight/testing`](./packages/testing)             | `TestBed` with auto-mocks, `TestApp` for in-memory end-to-end tests                          | devDependency |
-| [`@znight/cli`](./packages/cli)                     | `znight new`, `generate`, `dev`, `build`, `start`, code generators                           | devDependency |
-| [`@znight/openapi`](./packages/openapi)             | OpenAPI 3.1 document generated at build time, served with Scalar or Swagger UI (in progress) | dependency    |
-| [`@znight/schedule`](./packages/schedule)           | `@Cron`, `@Interval`, `@Timeout` jobs validated at build time (in progress)                  | dependency    |
+| Package                                             | What it gives you                                                                          | Install as    |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------ | ------------- |
+| [`@znight/core`](./packages/core)                   | Container, application lifecycle, plugins, hooks, AOP, marker decorators                   | dependency    |
+| [`@znight/compiler`](./packages/compiler)           | Vite plugin, CLI/Bun integration: analysis, validation, code generation                    | devDependency |
+| [`@znight/http`](./packages/http)                   | Controllers, validation, guards, cookies, Server-Sent Events, CORS; Fastify, Express, Hono | dependency    |
+| [`@znight/messaging`](./packages/messaging)         | Consumers, retries, dead-letter queues; RabbitMQ, SQS, Kafka, in-memory                    | dependency    |
+| [`@znight/config`](./packages/config)               | Typed config classes from env, `.env`, JSON/YAML, Vault, AWS Secrets Manager               | dependency    |
+| [`@znight/observability`](./packages/observability) | Pino logger, Prometheus metrics, OpenTelemetry tracing                                     | dependency    |
+| [`@znight/testing`](./packages/testing)             | `TestBed` with auto-mocks, `TestApp` for in-memory end-to-end tests                        | devDependency |
+| [`@znight/cli`](./packages/cli)                     | `znight new`, `generate`, `dev`, `build`, `start`, `openapi`, code generators              | devDependency |
+| [`@znight/openapi`](./packages/openapi)             | OpenAPI 3.1 document generated at build time, served with Scalar or Swagger UI             | dependency    |
+| [`@znight/schedule`](./packages/schedule)           | `@Cron`, `@Interval`, `@Timeout` jobs validated at build time, distributed locks           | dependency    |
 
 ## How it fits together
 
@@ -369,8 +377,8 @@ The documentation site lives in [`docs/`](./docs) (`bun run docs:dev` to browse 
 - [Introduction](./docs/guide/introduction.md) and [Getting started](./docs/guide/getting-started.md)
 - Guides: [dependency injection](./docs/guide/dependency-injection.md), [scopes](./docs/guide/scopes.md),
   [lifecycle](./docs/guide/lifecycle.md), [the compiler](./docs/guide/compiler.md),
-  [testing](./docs/guide/testing.md), [deployment](./docs/guide/deployment.md),
-  [migrating from NestJS](./docs/guide/migrating-from-nestjs.md)
+  [testing](./docs/guide/testing.md), [security](./docs/guide/security.md),
+  [deployment](./docs/guide/deployment.md), [migrating from NestJS](./docs/guide/migrating-from-nestjs.md)
 - Reference: [packages](./docs/packages/index.md), [decorators](./docs/reference/decorators.md),
   [error codes](./docs/reference/error-codes.md)
 - Specification: [architecture](./docs/internals/architecture.md), the contract between the compiler

@@ -1,16 +1,16 @@
 ---
-description: Write Znight plugins - lifecycle hooks, supplying runtime values to the container, options computed from the container, and the typed hooks bus (http:request, messaging:message).
+description: Write Znight plugins - lifecycle hooks, supplying runtime values to the container, options computed from the container, HTTP routes served for a plugin, and the typed hooks bus (http:request, messaging:message, schedule:run).
 ---
 
 # Plugins & hooks
 
 Every runtime feature of Znight (HTTP server, message consumers, configuration, observability) is a
-**plugin**. Your own infrastructure can be one too: a scheduler, a gRPC server, a tenant resolver...
+**plugin**. Your own infrastructure can be one too: a heartbeat, a gRPC server, a tenant resolver...
 
 ```ts
 const app = await Application.create({
   metadata: __ZNIGHT_METADATA__,
-  plugins: [ConfigPlugin.configure(), HttpPlugin.configure({ port: 3000 }), SchedulerPlugin.configure()],
+  plugins: [ConfigPlugin.configure(), HttpPlugin.configure({ port: 3000 }), HeartbeatPlugin.configure()],
 })
 ```
 
@@ -22,11 +22,11 @@ A plugin is a plain object with a unique `name` and optional hooks. By conventio
 ```ts
 import type { Plugin } from '@znight/core'
 
-export const SchedulerPlugin = {
+export const HeartbeatPlugin = {
   configure(options: { tickMs?: number } = {}): Plugin {
     let timer: NodeJS.Timeout | undefined
     return {
-      name: 'scheduler',
+      name: 'heartbeat',
       onStart(ctx) {
         timer = setInterval(() => ctx.logger.debug('tick'), options.tickMs ?? 1_000)
       },
@@ -183,11 +183,11 @@ Options often depend on configuration that only exists once the container is ini
 ```ts
 import { type Plugin, type PluginOptions, resolveOptions } from '@znight/core'
 
-export const SchedulerPlugin = {
+export const HeartbeatPlugin = {
   configure(options: PluginOptions<{ tickMs: number }>): Plugin {
     let tickMs = 1_000
     return {
-      name: 'scheduler',
+      name: 'heartbeat',
       onBootstrap(ctx) {
         tickMs = resolveOptions(options, ctx.container).tickMs
       },
@@ -197,17 +197,42 @@ export const SchedulerPlugin = {
 }
 
 // usage
-SchedulerPlugin.configure(container => ({ tickMs: container.get(SchedulerConfig).tickMs }))
+HeartbeatPlugin.configure(container => ({ tickMs: container.get(HeartbeatConfig).tickMs }))
 ```
 
 This replaces NestJS's `forRootAsync({ useFactory, inject })`: the function receives the container,
 fully initialised, and can `get()` any provider.
 
 When your options name provider classes that the plugin resolves in `onBootstrap` (like the global
-`guards` of `HttpPlugin`), list them in an optional `initRoots()` method returning those classes
-(`[]` when the options are a function of the container). [`TestApp`](/guide/testing) creates them at
-boot with their dependencies, even when a test restricts the boot to the controllers; it must not
-throw (report invalid options in `onBootstrap`).
+`guards` of `HttpPlugin`), list them in an optional `initRoots({ metadata })` method returning those
+classes (`[]` when the options are a function of the container); a plugin can also derive them from
+its own section of the metadata. [`TestApp`](/guide/testing) creates them at boot with their
+dependencies, even when a test restricts the boot to the controllers; it must not throw (report
+invalid options in `onBootstrap`).
+
+## Serving HTTP routes
+
+A plugin that exposes an endpoint (a status page, a document) does not need its own server: it
+implements `PluginHttpRoutes` from `@znight/http`, and `HttpPlugin` serves the routes on its adapter,
+in the same pipeline as the controllers (hooks, global guards, exception mappers):
+
+```ts
+import type { Plugin } from '@znight/core'
+import type { PluginHttpRoutes, PluginRoute } from '@znight/http'
+
+import { Public } from './auth/access.js'
+
+export class StatusPlugin implements Plugin, PluginHttpRoutes {
+  readonly name = 'status'
+
+  httpRoutes(): readonly PluginRoute[] {
+    return [{ method: 'GET', path: '/status', name: 'status', handler: () => ({ up: true }), meta: [Public.meta()] }]
+  }
+}
+```
+
+Paths are relative to the HTTP `prefix`; `meta` carries the route decisions guards read (see
+[Security](./security#route-decisions)). See [plugin routes](/packages/http#plugin-routes).
 
 ## Hooks
 
@@ -218,6 +243,8 @@ other plugins do, without depending on each other. Feature packages emit:
 | ------------------- | ---------------------- | ------------------- |
 | `http:request`      | `HttpRequestEvent`     | `@znight/http`      |
 | `messaging:message` | `MessageDeliveryEvent` | `@znight/messaging` |
+| `messaging:publish` | `MessagePublishEvent`  | `@znight/messaging` |
+| `schedule:run`      | `ScheduledRunEvent`    | `@znight/schedule`  |
 
 ### Observe: `on`
 
@@ -277,7 +304,27 @@ interface MessageDeliveryEvent {
   outcome?: 'ack' | 'retry' | 'dead-letter'
   error?: unknown
 }
+
+interface ScheduledRunEvent {
+  readonly job: string // 'digest.daily'
+  readonly kind: 'cron' | 'interval' | 'timeout'
+  readonly host: string | undefined // host class; undefined for dynamic jobs
+  readonly method: string | undefined
+  readonly runId: string
+  readonly trigger: 'schedule' | 'start' | 'manual' | 'queued'
+  readonly scheduledAt: number // epoch ms of the occurrence
+  readonly context: unknown // JobContext; undefined when the run did not execute
+  readonly startTime: number
+  outcome?: 'completed' | 'failed' | 'skipped' | 'not-acquired'
+  error?: unknown
+  aborted?: 'timeout' | 'lock-lost' | 'removed' | 'shutdown'
+}
 ```
+
+Executed runs go through `hooks.run('schedule:run', ...)`, and every occurrence is then emitted,
+including those that did not run (`skipped` by the overlap policy, `not-acquired` because another
+instance holds the lock). A `schedule:run` wrapper that does not call `next()` vetoes the run
+(outcome `skipped`): a feature flag or a maintenance window.
 
 ### Declaring your own hooks
 
@@ -286,12 +333,12 @@ Augment `ZnightHooks` to add typed hooks, then `emit` or `run` them:
 ```ts
 declare module '@znight/core' {
   interface ZnightHooks {
-    'scheduler:tick': { readonly at: number }
+    'heartbeat:tick': { readonly at: number }
   }
 }
 
-hooks.emit('scheduler:tick', { at: Date.now() })
-const result = await hooks.run('scheduler:tick', { at: Date.now() }, () => runJobs())
+hooks.emit('heartbeat:tick', { at: Date.now() })
+const result = await hooks.run('heartbeat:tick', { at: Date.now() }, () => beat())
 ```
 
 `run(name, event, fn)` calls `fn` through the wrappers and resolves with its result. Use

@@ -42,7 +42,7 @@ export function scopes(): string {
     body.push(rect(24, r.y, 640, r.h, { fill: '#F4F6FC', opacity: 0.03, rx: 10 }))
     const cy = r.y + r.h / 2
     body.push(text(38, cy - 12, r.name, { size: 13.5, mono: true, weight: 600 }))
-    r.sub.forEach((s, i) => body.push(text(38, cy + 5 + i * 15, s, { size: 12, fill: C.text3 })))
+    for (const [i, s] of r.sub.entries()) body.push(text(38, cy + 5 + i * 15, s, { size: 12, fill: C.text3 }))
     body.push(line([t0 - 8, r.y + 10], [t0 - 8, r.y + r.h - 10], { color: '#34407A' }))
   }
 

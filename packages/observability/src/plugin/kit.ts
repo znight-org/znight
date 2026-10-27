@@ -1,4 +1,4 @@
-import type { HookWrapper, PluginContext } from '@znight/core'
+import type { HookListener, HookWrapper, PluginContext } from '@znight/core'
 import type { MetricsOptions, ObservabilityOptions, TracingOptions } from './options.ts'
 
 import { ErrorCode, ZnightError } from '@znight/core'
@@ -13,6 +13,7 @@ import { logHttpRequests, logMessages } from '../logging/requests.ts'
 import { measureHttpRequests, measureMessages } from '../metrics/hooks.ts'
 import { MetricsRegistry } from '../metrics/registry.ts'
 import { MetricsServer } from '../metrics/server.ts'
+import { logJobs, measureJobs, traceJobs } from '../schedule/jobs.ts'
 import { type MessagePublishWrapper, traceHttpRequests, traceMessagePublish, traceMessages } from '../tracing/hooks.ts'
 import { Tracer } from '../tracing/tracer.ts'
 
@@ -33,15 +34,25 @@ export interface ObservabilityKit {
   readonly messaging: HookWrapper<'messaging:message'> | undefined
   /** `messaging:publish` wrapper (producer span + trace context injection), if enabled. */
   readonly publish: MessagePublishWrapper | undefined
+  /** Combined `schedule:run` wrapper for executed runs (tracing → metrics → logs), if any feature is enabled. */
+  readonly schedule: HookWrapper<'schedule:run'> | undefined
+  /** `schedule:run` listener for every occurrence (counters, logs of occurrences that did not run). */
+  readonly scheduleListener: HookListener<'schedule:run'> | undefined
 }
 
 /** Builds the logger, tracer, registry, interceptors and hook wrappers from resolved options. */
 export function buildKit(options: ObservabilityOptions, ctx: PluginContext): ObservabilityKit {
-  const { requests, messages, replaceCoreLogger, ...loggerOptions } = options.logging ?? {}
+  const { requests, messages, jobs, replaceCoreLogger, ...loggerOptions } = options.logging ?? {}
   const logger = new Logger({ ...loggerOptions, scope: ctx.container })
 
   const tracing = sectionOf<TracingOptions>(options.tracing)
-  const { http: httpTracing, messaging: messagingTracing, publish: publishTracing, ...tracerOptions } = tracing ?? {}
+  const {
+    http: httpTracing,
+    messaging: messagingTracing,
+    publish: publishTracing,
+    schedule: scheduleTracing,
+    ...tracerOptions
+  } = tracing ?? {}
   const tracer = new Tracer(tracerOptions)
 
   const metricsSection = metricsSectionOf(options.metrics)
@@ -49,6 +60,7 @@ export function buildKit(options: ObservabilityOptions, ctx: PluginContext): Obs
     server: serverOptions,
     http: httpMetrics,
     messaging: messagingMetrics,
+    schedule: scheduleMetrics,
     ...registryOptions
   } = metricsSection.options ?? {}
   const metrics = metricsSection.options === undefined ? undefined : new MetricsRegistry(registryOptions)
@@ -58,6 +70,9 @@ export function buildKit(options: ObservabilityOptions, ctx: PluginContext): Obs
       : new MetricsServer(metrics, serverOptions === true ? {} : serverOptions)
 
   const coreLogger = logger.child({ component: 'znight' })
+  const jobLogs = jobs === false ? undefined : logJobs(logger, objectOf(jobs))
+  const jobMetrics =
+    metrics !== undefined && scheduleMetrics !== false ? measureJobs(metrics, objectOf(scheduleMetrics)) : undefined
   const kit: ObservabilityKit = {
     logger,
     tracer,
@@ -87,6 +102,12 @@ export function buildKit(options: ObservabilityOptions, ctx: PluginContext): Obs
       tracing !== undefined && publishTracing !== false
         ? traceMessagePublish(tracer, objectOf(publishTracing))
         : undefined,
+    schedule: composeWrappers<'schedule:run'>([
+      tracing !== undefined && scheduleTracing !== false ? traceJobs(tracer, objectOf(scheduleTracing)) : undefined,
+      jobMetrics?.wrap,
+      jobLogs?.wrap,
+    ]),
+    scheduleListener: composeListeners([jobMetrics?.listen, jobLogs?.listen]),
   }
   if (replaceCoreLogger !== false) ctx.app.setLogger(toCoreLogger(coreLogger))
   if (metricsSection.reason !== undefined && metricsSection.options === undefined && options.metrics === undefined) {
@@ -128,4 +149,15 @@ function metricsSectionOf(value: boolean | MetricsOptions | undefined): {
     }
   }
   return { options: value === undefined || value === true ? {} : value, reason: undefined }
+}
+
+/** Calls every listener in order; `undefined` when there is none. */
+function composeListeners(
+  listeners: readonly (HookListener<'schedule:run'> | undefined)[],
+): HookListener<'schedule:run'> | undefined {
+  const active = listeners.filter((listener): listener is HookListener<'schedule:run'> => listener !== undefined)
+  if (active.length === 0) return undefined
+  return event => {
+    for (const listener of active) listener(event)
+  }
 }

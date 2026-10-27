@@ -31,3 +31,9 @@ export const ObservabilityTokens: {
  * without depending on `@znight/http`) to add `requestId` to every log entry.
  */
 export const REQUEST_ID_TOKEN = '@znight/http#RequestId'
+
+/**
+ * Scope token under which `@znight/schedule` stores the `JobContext` of the current run. Read
+ * (duck-typed, without depending on `@znight/schedule`) to add `job` and `runId` to every log entry.
+ */
+export const JOB_CONTEXT_TOKEN = '@znight/schedule#JobContext'

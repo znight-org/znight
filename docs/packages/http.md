@@ -1,5 +1,5 @@
 ---
-description: "@znight/http - controllers, routing, parameter coercion, schema validation, file uploads and downloads, streaming, guards, interceptors and error handling on Node.js, Fastify, Express or Hono."
+description: "@znight/http - controllers, routing, parameter coercion, schema validation, file uploads and downloads, streaming, cookies, Server-Sent Events, guards, access decisions, CORS and error handling on Node.js, Fastify, Express or Hono."
 ---
 
 # @znight/http <Badge type="tip" text="available" />
@@ -99,6 +99,8 @@ export class UserController {
 | `@Query(name?, schema?)`     | A query parameter (or the whole query object)                 |
 | `@Body(schema?)`             | The parsed request body                                       |
 | `@Headers(name?)`            | A header (lower-cased name) or all headers                    |
+| `@Cookie(name?, schema?)`    | A request cookie (or all of them), coerced like a header      |
+| `@SignedCookie(name, s?)`    | The verified value of a [signed cookie](#cookies)             |
 | `@UploadedFile(field?, o?)`  | An uploaded `File` of a multipart body ([Files](#files))      |
 | `@UploadedFiles(field?, o?)` | The uploaded files of a field (`File[]`)                      |
 | `@Ctx()`                     | The adapter-neutral `HttpContext`                             |
@@ -304,8 +306,9 @@ async store(@Param('id', FileId) id: string, @Ctx() ctx: HttpContext) {
   numbers) when it matters.
 - Always pass `root` to `HttpResponse.file()` when the path comes from the request.
 - Store uploads outside of the web root, and serve user content as an `attachment` (or from another
-  domain) with `X-Content-Type-Options: nosniff`: an uploaded HTML or SVG file served inline runs
-  scripts in your origin.
+  domain): an uploaded HTML or SVG file served inline runs scripts in your origin. The default
+  [security headers](#security-headers) (`nosniff` and a `default-src 'none'` CSP) are a second line
+  of defence: keep them on.
 - Keep limits tight (`maxSize`, `maxFiles`, `@BodyLimit`, plugin `uploads`): uploaded files live in
   memory.
   :::
@@ -353,9 +356,11 @@ export class AdminController {}
 ```
 
 Order: global guards → controller guards → route guards. Guards are injected like any provider, and
-the [scope rules](/guide/scopes#rules-between-scopes) apply to them.
+the [scope rules](/guide/scopes#rules-between-scopes) apply to them. A guard that enforces
+[route decisions](#route-metadata-and-decisions) declares them in a static `enforces` array, checked
+when the plugin boots.
 
-## Route metadata
+## Route metadata and decisions
 
 Create metadata decorators with `createRouteDecorator`; values land in the generated route definition
 (`route.meta[key]`), readable by guards and interceptors without reflection:
@@ -363,16 +368,34 @@ Create metadata decorators with `createRouteDecorator`; values land in the gener
 ```ts
 import { createRouteDecorator } from '@znight/http'
 
-export const Roles = createRouteDecorator<readonly string[]>('roles')
-export const Public = createRouteDecorator('public') // flag: @Public()
+export const Public = createRouteDecorator('public', { group: 'access', required: true }) // flag: @Public()
+export const Roles = createRouteDecorator<readonly string[]>('roles', { group: 'access', required: true })
 
-@Get('/stats')
-@Roles(['admin'])
-stats() {}
+@Controller('/stats')
+@Roles(['analyst']) // default decision of the controller's routes
+export class StatsController {
+  @Get('/summary')
+  @Roles(['admin']) // the nearest decision wins
+  summary() {}
+}
 
 // in a guard
-const roles = Roles.get(ctx) ?? []
+const roles = Roles.get(ctx) // the effective value: ['admin'] on /stats/summary
 ```
+
+- Decorators sharing a `group` are **alternatives** for one decision: a route (or controller) takes
+  one of them ([`ZNIGHT005`](/reference/error-codes#znight005) otherwise), and the route's decision
+  replaces the controller's. Without `group`, each decorator is its own group.
+- With `required: true`, every route must carry a decision of the group, its own or its
+  controller's: a route without one fails the build
+  ([`ZNIGHT023`](/reference/error-codes#znight023)).
+- A guard lists the decorators it enforces (`static enforces = [Public, Roles]`): at boot, every
+  route deciding a required (or enforced) group must have such a guard in its chain, otherwise the
+  application does not start (`ZNIGHT023`, or one warning per group with `enforcement: 'warn'`).
+- `HttpPlugin.routes` lists the effective `meta` and the guard chain of every route: snapshot it to
+  review access changes.
+
+The [Security guide](/guide/security) builds authentication and authorization on these rules.
 
 ## Interceptors
 
@@ -380,13 +403,294 @@ const roles = Roles.get(ctx) ?? []
 outermost), seeing the context and the result: response mapping, caching, timing. For
 business-level interception of any provider method, use [`@Intercept()`](/guide/aop).
 
+## CORS
+
+```ts
+HttpPlugin.configure({
+  cors: {
+    origin: ['https://app.example.com', /^https:\/\/[a-z0-9-]+\.preview\.example\.com$/],
+    credentials: true,
+  },
+})
+```
+
+CORS is handled by the plugin, the same way on every adapter (the built-in node server included):
+
+- **Preflights** are answered inside the `http:request` hook, **before** routing and guards, even
+  when an `@Options` or `@All` route matches: `204` with the CORS headers, `403` for a denied origin,
+  `404` for a path without route. A preflight never gets the `401` of an authentication guard.
+- **Other replies to an allowed origin** (errors, `404`, `405` and redirects included) get
+  `access-control-allow-origin`, `access-control-allow-credentials` and
+  `access-control-expose-headers` (the request id header by default); `vary: origin` is merged into
+  every reply.
+- A denied origin is served normally, without CORS headers: CORS decides what a page may read, it is
+  not access control.
+
+`origin` is `'*'`, an origin, an anchored `RegExp`, a list of them or a function. Options are checked
+at boot ([`ZNIGHT005`](/reference/error-codes#znight005)): an origin written with a path or a
+trailing slash, an unanchored `RegExp`, `'*'` or `allowHeaders: '*'` with `credentials`. Other
+options: `methods`, `allowHeaders`, `exposeHeaders`, `maxAge` (600 s). With Fastify, Express or
+Hono, use either this option or their CORS middleware, not both.
+
+## Security headers
+
+On by default, added to every reply that does not set them (`@Res()` raw replies excepted):
+`content-security-policy: default-src 'none'; frame-ancestors 'none'`, `x-frame-options: DENY`,
+`x-content-type-options: nosniff` and `referrer-policy: no-referrer`. HSTS,
+`cross-origin-resource-policy` and `cache-control` are opt-in:
+
+```ts
+HttpPlugin.configure({ securityHeaders: { hsts: true, cacheControl: 'no-store' } }) // merged over the defaults
+HttpPlugin.configure({ securityHeaders: false }) // none
+```
+
+Every header loses to one set by the handler (`@Header`, `ctx.setHeader()`, `HttpResponse`), an
+interceptor, an exception or a hook: a route serving an HTML page sets its own
+`content-security-policy`.
+
+## Behind a proxy
+
+```ts
+HttpPlugin.configure({ trustProxy: 1 }) // one load balancer in front of the server
+HttpPlugin.configure({ trustProxy: ['loopback', '10.0.0.0/8'] }) // the addresses of the proxies
+```
+
+`trustProxy` (default `false`) gives the real client address in `ctx.ip` and the original protocol
+in `ctx.protocol` (`'http'` or `'https'`), read from `x-forwarded-for` and `x-forwarded-proto` only
+when they come from a trusted proxy. It works the same way on every adapter: a number of hops, or
+IPv4 / IPv6 addresses, CIDR ranges and the aliases `'loopback'`, `'private'` and `'linklocal'`.
+`true` is refused at boot: trusting every hop lets any client choose its `ctx.ip`.
+
+## Cookies
+
+Cookies are handled by the plugin itself, identically on every adapter: no `cookie-parser`,
+`@fastify/cookie` or `hono/cookie`, secure defaults, strict validation and optional signing.
+
+### Reading cookies
+
+```ts
+import { Body, Controller, Cookie, Ctx, Get, type HttpContext, HttpResponse, Post } from '@znight/http'
+import { z } from 'zod'
+
+export const ThemeInput = z.object({ theme: z.enum(['light', 'dark']) })
+export type ThemeInput = z.output<typeof ThemeInput>
+// a stale or forged value falls back instead of answering 400 until the cookie expires
+export const ThemeCookie = z.enum(['light', 'dark']).catch('light')
+
+@Controller('/prefs')
+export class PrefsController {
+  @Get()
+  read(@Cookie('theme', ThemeCookie) theme: 'light' | 'dark', @Cookie('visits') visits = 0) {
+    return { theme, visits }
+  }
+
+  @Post('/theme')
+  setTheme(@Body(ThemeInput) input: ThemeInput, @Ctx() ctx: HttpContext) {
+    ctx.setCookie('theme', input.theme, { maxAge: 365 * 86_400, httpOnly: false }) // readable by the front-end
+    return HttpResponse.noContent()
+  }
+}
+```
+
+| Decorator / member          | Injects                                                                                      |
+| --------------------------- | -------------------------------------------------------------------------------------------- |
+| `@Cookie('name') v: T`      | The decoded cookie, coerced to `T` like a header; absent and required: 400 `Missing cookie`  |
+| `@Cookie('name', schema)`   | The decoded value (or `undefined`) validated with a Standard Schema (its output is injected) |
+| `@Cookie()` / `@Cookie(S)`  | Every cookie (`Record<string, string>`), validated by `S` when given                         |
+| `@SignedCookie('name', S?)` | The verified value of a [signed cookie](#signed-cookies): tampered or unsigned means absent  |
+| `ctx.cookies`               | Every request cookie (a frozen record without prototype, parsed on first access)             |
+| `ctx.signedCookie(name)`    | The verified value, or `undefined`                                                           |
+
+When a name repeats, the first cookie wins (browsers send the most specific path first). An
+invalid value answers 400 (`Invalid cookie "visits": expected a number`) and the message never
+echoes the value: cookies outlive deployments, so give the ones that may go stale a schema with a
+fallback, as above.
+
+### Setting cookies
+
+```ts
+ctx.setCookie('theme', 'dark', { maxAge: 365 * 86_400, httpOnly: false })
+ctx.clearCookie('__Host-uid') // Max-Age=0 with the same Path and Secure
+
+return HttpResponse.ok({ id: user.id }).withCookie('__Host-uid', user.id, { signed: true, maxAge: 8 * 3600 })
+return HttpResponse.noContent().withoutCookie('session')
+```
+
+| Option                    | Default | Description                                                           |
+| ------------------------- | ------- | --------------------------------------------------------------------- |
+| `maxAge`, `expires`       | —       | Lifetime in seconds, or an absolute `Date`. Default: a session cookie |
+| `domain`, `path`          | —, `/`  | Default: a host-only cookie for the whole site                        |
+| `secure`                  | `true`  | Sent over HTTPS only (and `http://localhost`)                         |
+| `httpOnly`                | `true`  | Not readable from JavaScript                                          |
+| `sameSite`                | `'lax'` | `'strict'`, `'lax'` or `'none'` (requires `secure`)                   |
+| `partitioned`, `priority` | —       | CHIPS partitioned cookie (requires `secure`), Chromium `Priority`     |
+| `signed`                  | `false` | Signs the value with the first secret of `cookies.secrets`            |
+
+What the plugin guarantees:
+
+- **Secure defaults**: `Path=/; Secure; HttpOnly; SameSite=Lax`, host-only. Change them for the
+  whole application with the plugin option `cookies.defaults`, and per cookie with the options.
+- **Strict serialisation**: a cookie browsers would drop silently (a name that is not a token,
+  more than 4096 bytes, `SameSite=None` or `partitioned` without `secure`, an invalid `__Secure-`,
+  `__Host-`, `__Http-` or `__Host-Http-` cookie) throws where it is set. `ctx.setCookie()` checks
+  everything at call time; `withCookie()` checks what depends on the plugin (defaults, signing)
+  when the response is sent, and a violation answers a logged 500.
+- **Which cookies are sent**: the cookies of `ctx.setCookie()` / `ctx.clearCookie()` go with every
+  response of the request, errors and redirects included (a guard can clear a cookie, then throw a
+  401); those of the `HttpResponse` replace them for the same name, domain and path. Each cookie is
+  its own `set-cookie` line on every adapter. A `@Res()` handler writes its own response: no cookie
+  is added. Setting a cookie once an event stream has started throws.
+- `serializeCookie()`, `serializeClearCookie()`, `parseCookieHeader()` and `parseSetCookie()` are
+  exported for gateways and tests.
+
+### Signed cookies
+
+```ts
+HttpPlugin.configure(c => ({ cookies: { secrets: c.get(AppConfig).cookieSecrets } })) // the first signs, all verify
+```
+
+`{ signed: true }`, `@SignedCookie` and `ctx.signedCookie()` use an HMAC-SHA256 bound to the cookie
+name, checked in constant time; a tampered value, or one signed with a retired key, is treated as
+absent (no "bad signature" error to probe). Each secret is at least 32 bytes
+(`crypto.randomBytes(32).toString('base64url')`, loaded with `@Secret`); short secrets and
+duplicates fail the boot with [`ZNIGHT005`](/reference/error-codes#znight005), and a route reading
+`@SignedCookie` without `cookies.secrets` with [`ZNIGHT006`](/reference/error-codes#znight006).
+Rotate keys by deploying `[next, current]`, then `[next]` once the longest cookie lifetime has
+passed. Signing gives integrity, not confidentiality. `plugin.signCookie(name, value)` returns the
+signed value.
+
+Sessions and encrypted cookies are not included. Use `__Host-` names for authentication cookies,
+and see the [CSRF recipe](/guide/security#csrf) for cookie authentication.
+
+### Testing cookies
+
+`inject()` (and [`TestApp.inject()`](/guide/testing#testapp-end-to-end-tests)) sends request
+cookies with `cookies`, signs `signedCookies` with the current secret, and returns the parsed
+`set-cookie` lines by name in `response.cookies` (`{ name, value, maxAge, path, secure, httpOnly,
+sameSite... }`). Values round-trip, signed ones included:
+
+```ts
+const login = await app.inject({ method: 'POST', url: '/auth/login', body: { email, password } })
+expect(login.cookies['__Host-uid']).toMatchObject({ httpOnly: true, secure: true, sameSite: 'lax' })
+
+const me = await app.inject({
+  method: 'GET',
+  url: '/auth/me',
+  cookies: { '__Host-uid': login.cookies['__Host-uid'].value },
+})
+const signed = await app.inject({ method: 'GET', url: '/auth/me', signedCookies: { '__Host-uid': 'u-1' } })
+```
+
+## Server-Sent Events
+
+`@Sse(path?, options?)` declares a `GET` route serving an event stream. No dependency, identical
+on every adapter, Node.js and Bun.
+
+```ts
+import {
+  Controller,
+  Ctx,
+  Headers,
+  type HttpContext,
+  HttpResponse,
+  NotFoundException,
+  Param,
+  Sse,
+  type SseEvent,
+} from '@znight/http'
+
+@Controller('/orders')
+export class OrderEventsController {
+  constructor(
+    private readonly orders: OrderService,
+    private readonly hub: OrderHub,
+  ) {}
+
+  /** An async method checks first, then returns the source of events. */
+  @Sse('/:id/events', { retry: 5_000, maxDuration: 30 * 60_000 })
+  async events(
+    @Param('id') id: string,
+    @Headers('last-event-id') lastEventId: string | undefined, // sent by EventSource when it reconnects
+    @Ctx() ctx: HttpContext,
+  ): Promise<AsyncIterable<SseEvent<OrderEvent>> | HttpResponse> {
+    const order = await this.orders.find(id)
+    if (order === undefined) throw new NotFoundException(`Order ${id} not found`) // EventSource stops
+    if (order.closed) return HttpResponse.noContent() // 204: EventSource stops reconnecting
+    return this.hub.subscribe(id, { after: lastEventId, signal: ctx.signal })
+  }
+}
+```
+
+- The handler returns an `AsyncIterable`, an `Iterable` or a `ReadableStream` of `SseEvent`
+  (`{ data, event, id, retry, comment }`; non-string `data` is sent as JSON, user content can never
+  inject fields). `Uint8Array` chunks are written as is, to proxy an upstream event stream.
+  Any other `HttpResponse`, a thrown exception or a Web `Response` is sent as usual.
+- Prefer an `async` method that returns the source over an `async *` generator: the body of a
+  generator only runs once the 200 is sent, too late to answer 404 or 204.
+- `HttpResponse.sse(source, options?)` serves an event stream from any route and method (`POST`
+  streaming for `fetch()` clients, 200 by default).
+- `encodeSseEvent()` and `parseSseStream()` (a `ReadableStream` to its events) are exported.
+
+| Option        | Default                           | Description                                                                   |
+| ------------- | --------------------------------- | ----------------------------------------------------------------------------- |
+| `heartbeat`   | plugin `sse.heartbeat` (8 000 ms) | Keep-alive comment after this many ms without an event (≥ 1 000), or `false`  |
+| `retry`       | plugin `sse.retry` (none)         | Client reconnection delay, sent first                                         |
+| `maxDuration` | none                              | Ends the stream gracefully after this many ms (≥ 1 000): rebalancing, re-auth |
+
+### Stream lifecycle
+
+- **Open**: the status, the headers (`content-type: text/event-stream`,
+  `cache-control: no-cache, no-transform`, `x-accel-buffering: no`) and a first chunk are sent at
+  once, on every adapter. Guards run before, once: use `maxDuration` to force re-authentication.
+- **Backpressure**: events are pulled one at a time, nothing is read ahead. `EventChannel` bridges
+  push sources (a bus, an `EventEmitter`) with a bounded buffer per client (`capacity`, `overflow`:
+  `'drop-oldest'`, `'drop-newest'` or `'close'`).
+- **Client disconnect**: `ctx.signal` aborts (a `RequestAbortedError` with `kind: 'client'`) and
+  the source is stopped. Pass `ctx.signal` to the source: the request scope waits for it to stop
+  (5 s at most, with a warning).
+- **Errors**: a source that throws ends the stream cleanly, logged; the client reconnects.
+- **`maxDuration` and shutdown**: `ctx.signal` aborts (`'expired'` / `'shutdown'`), the source gets
+  `sse.shutdownGraceMs` to send final events, then the client receives a jittered `retry` and
+  reconnects, to another instance during a rolling deployment. `onStop` closes the streams before
+  the drain; keep `sse.shutdownGraceMs` < `drainTimeoutMs`.
+- **Observability**: `http:request` resolves when the stream opens; `plugin.streams` counts the
+  open streams.
+
+`ctx.signal` exists on every route: it aborts when the client leaves before the response was
+written, never after a normal completion. `EventSource` cannot send an `Authorization` header:
+authenticate browser streams with a cookie. Proxies and timeouts (nginx, Cloudflare, `Bun.serve()`
+`idleTimeout`) are covered by the heartbeat and the headers above; the
+[README](../../packages/http/README.md) has the details.
+
+### Testing event streams
+
+`inject()` rejects an event stream instead of waiting for its end. `injectSse()` (on the plugin and
+on [`TestApp`](/guide/testing#testapp-end-to-end-tests)) reads it in memory like `EventSource`;
+`injectStream()` gives the raw `ReadableStream`:
+
+```ts
+await using stream = await app.injectSse({ url: '/orders/o-1/events' })
+expect(stream.status).toBe(200)
+
+hub.publish({ orderId: 'o-1', sequence: 42, type: 'status', status: 'paid' })
+const event = await stream.next() // rejects after 2 000 ms by default
+expect(event).toMatchObject({ event: 'status', id: '42' })
+expect(event.json()).toMatchObject({ status: 'paid' })
+
+const resumed = await stream.reconnect() // sends last-event-id: 42, like EventSource
+```
+
+Events are read only when asked for (`next()`, `take(n)`, `for await`), so the test sets the pace
+of the client; `close()` (or the end of the `await using` block) is a client disconnect.
+
 ## Request context
 
 Each request runs in its own [request scope](/guide/scopes#request-scopes) seeded with request-scoped
 externals:
 
 - `HttpContext`: the adapter-neutral request/response context (`params`, `query`, `headers`, `body`,
-  `files`, `route`, `state`, `setHeader()`, `parseBody()`, `rawBody()`, `bodyStream()`...);
+  `files`, `cookies`, `route`, `state`, `ip`, `protocol`, `signal`, `setHeader()`, `setCookie()`,
+  `parseBody()`, `rawBody()`, `bodyStream()`...);
 - `RequestId`: the request identifier (the incoming `x-request-id` when valid, else a UUID).
 
 Inject them in request-scoped providers, or through `Lazy<HttpContext>` in singletons. Request-scoped
@@ -395,17 +699,7 @@ request-scoped provider may own a temporary file it deletes when disposed).
 
 ## The request pipeline
 
-```txt
-container.runInScope({ HttpContext, RequestId })
-└─ hooks.run('http:request', event)
-   ├─ global guards → controller guards → route guards
-   ├─ body parsing (routes with @Body / uploads)
-   ├─ global → controller → route interceptors
-   │  └─ invoke: extract → coerce → validate → handler
-   ├─ serialise the result (files: preconditions, ranges)
-   └─ map exceptions to a response (event.status / event.error are set)
-└─ the scope closes once the response body has been sent
-```
+![HTTP request pipeline: in a request scope (HttpContext, RequestId) and inside the http:request hook, a CORS preflight is answered directly (204, 403, 404); otherwise guards, body parsing, interceptors around the invocation (extract, coerce, validate, handler) and serialisation run, anything thrown becoming an error response; then cookies, request id, CORS and security headers are added and the scope closes once the body has been sent](/diagrams/http-pipeline.svg)
 
 Observers such as `@znight/observability` wrap `http:request` to log, measure and trace every
 request.
@@ -414,20 +708,36 @@ request.
 
 `HttpPlugin.configure(options)`, or `HttpPlugin.configure(container => options)`:
 
-| Option             | Default               | Description                                                            |
-| ------------------ | --------------------- | ---------------------------------------------------------------------- |
-| `adapter`          | `nodeAdapter()`       | `fastifyAdapter()`, `expressAdapter()`, `honoAdapter()`...             |
-| `port`, `host`     | `3000`, `0.0.0.0`     | Listening address (`port: 0`: a free port)                             |
-| `prefix`           | —                     | Path prefix for every route (`/api`)                                   |
-| `guards`           | `[]`                  | Global guards (classes or instances)                                   |
-| `interceptors`     | `[]`                  | Global interceptors                                                    |
-| `exceptionMappers` | `[]`                  | Map error types to responses                                           |
-| `trailingSlash`    | `'strict'`            | `'strict'`, `'ignore'` or `'redirect'`                                 |
-| `exposeErrors`     | `false`               | Include messages of unexpected errors in `500` responses               |
-| `bodyLimit`        | 1 MiB                 | Maximum request body size (bytes or `'10mb'`)                          |
-| `uploads`          | see [Files](#uploads) | `{ maxFileSize, maxFiles, maxParts, maxFieldSize }`                    |
-| `requestIdHeader`  | `x-request-id`        | Header read and echoed (`false`: always generate)                      |
-| `drainTimeoutMs`   | `4000`                | Maximum wait for in-flight requests on shutdown (`Infinity`: no limit) |
+| Option             | Default               | Description                                                                                 |
+| ------------------ | --------------------- | ------------------------------------------------------------------------------------------- |
+| `adapter`          | `nodeAdapter()`       | `fastifyAdapter()`, `expressAdapter()`, `honoAdapter()`...                                  |
+| `port`, `host`     | `3000`, `0.0.0.0`     | Listening address (`port: 0`: a free port)                                                  |
+| `prefix`           | —                     | Path prefix for every route (`/api`)                                                        |
+| `guards`           | `[]`                  | Global guards (classes or instances)                                                        |
+| `interceptors`     | `[]`                  | Global interceptors                                                                         |
+| `exceptionMappers` | `[]`                  | Map error types to responses                                                                |
+| `trailingSlash`    | `'strict'`            | `'strict'`, `'ignore'` or `'redirect'`                                                      |
+| `exposeErrors`     | `false`               | Include messages of unexpected errors in `500` responses                                    |
+| `bodyLimit`        | 1 MiB                 | Maximum request body size (bytes or `'10mb'`)                                               |
+| `uploads`          | see [Files](#uploads) | `{ maxFileSize, maxFiles, maxParts, maxFieldSize }`                                         |
+| `requestIdHeader`  | `x-request-id`        | Header read and echoed (`false`: always generate)                                           |
+| `drainTimeoutMs`   | `4000`                | Maximum wait for in-flight requests on shutdown (`Infinity`: no limit)                      |
+| `cors`             | off                   | [CORS](#cors) policy: `{ origin, credentials?, methods?, ... }`                             |
+| `securityHeaders`  | `true`                | [Security headers](#security-headers): `true`, `false` or settings                          |
+| `trustProxy`       | `false`               | [Trusted proxies](#behind-a-proxy): a hop count or addresses / CIDRs                        |
+| `enforcement`      | `'error'`             | Unenforced [route decisions](#route-metadata-and-decisions): fail or warn                   |
+| `cookies`          | —                     | `{ secrets?, defaults? }`: [signing keys](#signed-cookies) and [defaults](#setting-cookies) |
+| `sse`              | —                     | `{ heartbeat?, retry?, shutdownGraceMs? }` of [event streams](#server-sent-events)          |
+
+## Plugin routes
+
+Other plugins can serve routes through `HttpPlugin` (the OpenAPI document, status endpoints) by
+implementing `PluginHttpRoutes`: `httpRoutes({ prefix, container })` returns
+`{ method, path, name, handler, meta?, guards? }` entries. They are registered on every adapter in
+the same pipeline as the controllers (the `http:request` hook, the global guards, then their own),
+take their route decisions from `meta` (`[Public.meta()]`), and are listed in `HttpPlugin.routes`
+with the plugin name as `source`. A path collision is [`ZNIGHT007`](/reference/error-codes#znight007)
+naming the plugin.
 
 ## Adapters
 

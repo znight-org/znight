@@ -214,12 +214,14 @@ await using app = await TestApp.create({
 })
 ```
 
-| Member              | Description                                                                                                              |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `inject(request)`   | In-memory request through the HTTP plugin: `{ method = 'GET', url, headers?, body?, query?, cookies?, signedCookies? }`. |
-| `get(key)`          | `app.container.get(key)` (class, token, alias or display name).                                                          |
-| `close()`           | Stops the application (idempotent). Also `await using app = await TestApp.create(...)`.                                  |
-| `app` / `container` | The `Application` and its `Container`.                                                                                   |
+| Member                  | Description                                                                                                              |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `inject(request)`       | In-memory request through the HTTP plugin: `{ method = 'GET', url, headers?, body?, query?, cookies?, signedCookies? }`. |
+| `injectSse(request)`    | An event stream (Server-Sent Events) read in memory like `EventSource` (see below).                                      |
+| `injectStream(request)` | In-memory request resolving at the response headers, its `body` a `ReadableStream` read as it is produced.               |
+| `get(key)`              | `app.container.get(key)` (class, token, alias or display name).                                                          |
+| `close()`               | Stops the application (idempotent). Also `await using app = await TestApp.create(...)`.                                  |
+| `app` / `container`     | The `Application` and its `Container`.                                                                                   |
 
 `inject()` resolves with `{ status, headers, body, bytes, cookies, json() }` (`body` decoded as
 UTF-8, `bytes` the raw body, for downloads, `cookies` the `set-cookie` headers parsed by name); it
@@ -240,6 +242,33 @@ expect(login.cookies['session']).toMatchObject({ httpOnly: true, secure: true, s
 const me = await app.inject({ url: '/auth/me', cookies: { session: login.cookies['session']?.value ?? '' } })
 const forged = await app.inject({ url: '/auth/me', signedCookies: { session: 'u-1' } })
 ```
+
+Event streams (`@Sse` routes, `HttpResponse.sse()`) never end, so `inject()` rejects them; read
+them with `injectSse()`. Events are read only when asked for, and leaving the `await using` block
+(or `close()`) disconnects: the server sees `ctx.signal` abort.
+
+```ts
+test('order events', async () => {
+  await using stream = await app.injectSse({ url: '/orders/o-1/events' })
+  expect(stream.status).toBe(200)
+  expect(stream.retry).toBe(5_000)
+
+  app.get(OrderHub).publish({ orderId: 'o-1', sequence: 42, type: 'status', status: 'paid' })
+  const event = await stream.next() // rejects after 2 000 ms by default
+  expect(event).toMatchObject({ event: 'status', id: '42' })
+  expect(event.json()).toMatchObject({ status: 'paid' })
+
+  const resumed = await stream.reconnect() // the same request plus `last-event-id: 42`, like EventSource
+  await resumed.close()
+})
+```
+
+`injectSse()` resolves with `{ status, headers, cookies, body, json(), next({ timeoutMs? }),
+take(count), comments, lastEventId, retry, done, close(), reconnect() }`, an async iterable of
+`{ event, data, id, json() }` messages; `body` is the whole body when the answer is not an event
+stream (a 404, a 204). `injectStream()` resolves with `{ status, headers, cookies, body }` (cancel
+`body`, or abort `signal`, to disconnect). Both reject with `ZNIGHT001` (hint: `@znight/http` ≥ 0.2)
+when the HTTP plugin does not implement them, and with `ZNIGHT021` once closed.
 
 ```ts
 import { readFile } from 'node:fs/promises'
@@ -383,6 +412,10 @@ Runtime contract with `@znight/http`: the plugin named `'http'` exposes
 (`HttpInjector`, `HttpInjectResult`), dispatching in memory. `TestApp` forwards every request field
 as is (signing `signedCookies` is the plugin's job), returns the plugin's response as is when it has
 `bytes` and `cookies`, and otherwise derives `bytes` from `body` and returns no cookies (`{}`).
+`TestApp.injectStream()` / `injectSse()` delegate the same way to the optional
+`injectStream(request)` / `injectSse(request)` members of that plugin (`HttpStreamInjector`:
+`HttpPlugin` of `@znight/http` ≥ 0.2), the method defaulting to `GET`; the response shapes are
+`InjectStreamResponse` and `InjectSseResponse` (structural copies of the `@znight/http` types).
 
 Runtime contract with every plugin: the optional `initRoots(context: { metadata }): readonly ProviderKey[]`
 member of `Plugin` (`@znight/core`; `PluginInitRoots` names a plugin implementing it) returns the

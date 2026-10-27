@@ -369,13 +369,16 @@ Providers can inject the container itself (`Container` from `@znight/core`), as 
 For each injection point of type `T` (with an optional qualifier), the compiler applies the same
 algorithm:
 
+![How a dependency is bound: collect the candidates (providers of T and of its subtypes, only those named q with a qualifier). T[]: all of them, ordered by token. No candidate: a runtime-provided type binds to the external, an optional dependency to undefined, otherwise ZNIGHT001. One or more: the unique exact candidate, else the unique @Primary(), else the single candidate is bound; otherwise ZNIGHT004 (duplicate) or ZNIGHT008 (ambiguous)](/diagrams/binding.svg)
+
 1. **Candidates**: providers providing exactly `T`, plus providers whose `extends`/`implements`
    closure contains `T`.
 2. **Qualifier**: with `@Inject('q')`, keep only candidates named `q`.
 3. **Array** (`T[]`): inject every candidate, ordered by token.
-4. **Single**: one exact candidate → bound; otherwise the unique `@Primary()` → bound; otherwise
-   several providers of the same type → [`ZNIGHT004`](/reference/error-codes#znight004), several
-   implementations → [`ZNIGHT008`](/reference/error-codes#znight008).
+4. **Single**: one exact candidate → bound; otherwise the unique `@Primary()` → bound; otherwise a
+   single candidate → bound; otherwise several providers of the same type →
+   [`ZNIGHT004`](/reference/error-codes#znight004), several implementations →
+   [`ZNIGHT008`](/reference/error-codes#znight008).
 5. **No candidate**: a type declared as runtime-provided by a package → external; an optional
    dependency → `undefined`; otherwise [`ZNIGHT001`](/reference/error-codes#znight001), with hints
    about near misses (same name in another file, missing `@Injectable()`, excluded file, missing

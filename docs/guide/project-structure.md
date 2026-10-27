@@ -37,9 +37,9 @@ my-service/
 ├─ test/
 │  ├─ users/user.service.test.ts
 │  └─ e2e/users.e2e.test.ts
-├─ vite.config.ts                   # plugins: [znight(options)]
-├─ znight.config.ts                 # compiler options (Vite plugin, Bun preload, znight generate)
-├─ bunfig.toml                      # Bun: preloads @znight/compiler/bun for bun test
+├─ vite.config.ts                  # plugins: [znight(options)]
+├─ znight.config.ts                # compiler options (Vite plugin, Bun preload, znight generate)
+├─ bunfig.toml                     # Bun: preloads @znight/compiler/bun for bun test
 ├─ tsconfig.json
 └─ package.json
 ```

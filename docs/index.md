@@ -30,7 +30,7 @@ features:
     linkText: How the compiler works
   - icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>
     title: Errors at build time
-    details: Missing providers, cycles, scope mismatches and ambiguous injections fail the build with a ZNIGHT code, a code frame and a hint, before anything is deployed.
+    details: Missing providers, cycles, scope mismatches, ambiguous injections and routes without an access decision fail the build with a ZNIGHT code, a code frame and a hint, before anything is deployed.
     link: /reference/error-codes
     linkText: Browse error codes
   - icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="18" r="3"/><path d="M9 6h6M7.5 8.6l3 6.8M16.5 8.6l-3 6.8"/></svg>
@@ -45,7 +45,7 @@ features:
     linkText: See the generated code
   - icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M17.5 14v7M14 17.5h7"/></svg>
     title: Composable plugins
-    details: HTTP (Fastify, Express, Hono), messaging (RabbitMQ, SQS, Kafka), typed config and observability (Pino, Prometheus, OpenTelemetry) are independent packages.
+    details: HTTP (Fastify, Express, Hono), OpenAPI, messaging (RabbitMQ, SQS, Kafka), scheduled jobs, typed config and observability (Pino, Prometheus, OpenTelemetry) are independent packages.
     link: /packages/
     linkText: Explore the packages
   - icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2c3 2.5 4.5 6 4.5 10.5L14 17h-4l-2.5-4.5C7.5 8 9 4.5 12 2z"/><circle cx="12" cy="9" r="1.5"/><path d="m10 17-1 4 3-2 3 2-1-4"/></svg>

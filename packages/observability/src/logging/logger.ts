@@ -11,10 +11,10 @@ import type { PrettyOptions } from './pretty.ts'
 import { isSpanContextValid, context as otelContext, trace } from '@opentelemetry/api'
 import pino from 'pino'
 
-import { REQUEST_ID_TOKEN } from '../tokens.ts'
+import { JOB_CONTEXT_TOKEN, REQUEST_ID_TOKEN } from '../tokens.ts'
 import { parseLevel } from './levels.ts'
 import { prettyTransport } from './pretty.ts'
-import { consoleTransport, type LogTransport } from './transport.ts'
+import { consoleTransport, drainSonicBoom, type LogTransport } from './transport.ts'
 
 /** Something exposing the active request scope: the Znight `Container` (duck-typed). */
 export interface ScopeSource {
@@ -62,6 +62,11 @@ export interface LoggerOptions {
    * `undefined` or `null` are skipped. Default: `{ requestId: '@znight/http#RequestId' }`.
    */
   readonly scopeFields?: Readonly<Record<string, string>>
+  /**
+   * Add `job` and `runId` of the current scheduled run (`JobContext` of `@znight/schedule`, read from
+   * the active scope). Default: `true`.
+   */
+  readonly jobContext?: boolean
   /** Add `traceId` and `spanId` of the active OpenTelemetry span. Default: `true`. */
   readonly traceContext?: boolean
   /** Raw pino options, applied last (escape hatch). */
@@ -100,8 +105,8 @@ type PinoMethod = (this: PinoLogger, ...args: unknown[]) => void
  * Structured logger backed by [pino](https://getpino.io): newline-delimited JSON, very low overhead,
  * redaction, child loggers. Injectable in any provider (`constructor(private logger: Logger)`).
  *
- * Every entry is enriched with the active context: `requestId` (from the current request scope)
- * and `traceId` / `spanId` (from the active OpenTelemetry span).
+ * Every entry is enriched with the active context: `requestId` (from the current request scope),
+ * `job` / `runId` (inside a scheduled run) and `traceId` / `spanId` (from the active OpenTelemetry span).
  *
  * ```ts
  * logger.info('User created', { userId })
@@ -292,15 +297,19 @@ function destinationTransport(stream: DestinationStream): LogTransport {
   return {
     name: 'destination',
     stream,
+    // a SonicBoom destination (pino.destination()) first finishes its writes in flight, in order
     flush: () =>
-      new Promise<void>(resolve => {
-        if (typeof flushable.flush !== 'function') return resolve()
-        try {
-          flushable.flush(() => resolve())
-        } catch {
-          resolve()
-        }
-      }),
+      drainSonicBoom(stream).then(
+        () =>
+          new Promise<void>(resolve => {
+            if (typeof flushable.flush !== 'function') return resolve()
+            try {
+              flushable.flush(() => resolve())
+            } catch {
+              resolve()
+            }
+          }),
+      ),
   }
 }
 
@@ -356,19 +365,21 @@ function redactOf(redact: readonly string[] | RedactOptions): string[] | PinoRed
 function mixinOf(options: LoggerOptions): (() => Record<string, unknown>) | undefined {
   const scope = options.scope
   const fields = scope === undefined ? [] : Object.entries(options.scopeFields ?? DEFAULT_SCOPE_FIELDS)
+  const jobContext = scope !== undefined && options.jobContext !== false
   const traceContext = options.traceContext ?? true
   const user = options.mixin
-  if (fields.length === 0 && !traceContext && user === undefined) return undefined
+  if (fields.length === 0 && !jobContext && !traceContext && user === undefined) return undefined
   return () => {
     // pino's merge strategy mutates the returned object: always a fresh one
     const context: Record<string, unknown> = {}
-    if (fields.length > 0) {
+    if (fields.length > 0 || jobContext) {
       const current = scope?.currentScope()
       if (current !== undefined) {
         for (const [field, token] of fields) {
           const value = current.get(token)
           if (value !== undefined && value !== null) context[field] = value
         }
+        if (jobContext) addJobFields(context, current.get(JOB_CONTEXT_TOKEN))
       }
     }
     if (traceContext) {
@@ -381,4 +392,13 @@ function mixinOf(options: LoggerOptions): (() => Record<string, unknown>) | unde
     if (user !== undefined) Object.assign(context, user())
     return context
   }
+}
+
+/** `job` and `runId` of a `JobContext` (`@znight/schedule`), read structurally. */
+function addJobFields(context: Record<string, unknown>, value: unknown): void {
+  if (value === null || typeof value !== 'object') return
+  const job = (value as { readonly job?: unknown }).job
+  const runId = (value as { readonly runId?: unknown }).runId
+  if (typeof job === 'string') context['job'] = job
+  if (typeof runId === 'string') context['runId'] = runId
 }

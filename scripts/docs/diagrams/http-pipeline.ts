@@ -163,9 +163,14 @@ export function httpPipeline(): string {
   body.push(
     text(ecx, ey + eh / 2 - 30, 'error response', { size: 13.5, weight: 600, anchor: 'middle', fill: V.err.text }),
   )
-  ;['guard denies: 403', 'invalid input: 400', 'exception mappers', 'sets `event.status`, `.error`'].forEach((l, i) =>
-    body.push(text(ecx, ey + eh / 2 - 8 + i * 18, l, { size: 12, anchor: 'middle', fill: V.err.sub })),
-  )
+  for (const [i, l] of [
+    'guard denies: 403',
+    'invalid input: 400',
+    'exception mappers',
+    'sets `event.status`, `.error`',
+  ].entries()) {
+    body.push(text(ecx, ey + eh / 2 - 8 + i * 18, l, { size: 12, anchor: 'middle', fill: V.err.sub }))
+  }
   for (const yy of [r2 + nh / 2, r3 + nh / 2, r4 + 50 + nh / 2, r5 + nh / 2]) {
     body.push(
       arrow(
@@ -192,7 +197,13 @@ export function httpPipeline(): string {
       subSize: 12,
     }),
   )
-  body.push(text(rx, baseline(r6 + nh / 2, 12.5), 'on every reply, unless already set', { size: 12.5, fill: C.text3 }))
+  for (const [i, line] of [
+    'cookies appended, one line each',
+    'the others only when not set yet',
+    'none on raw `@Res()` replies',
+  ].entries()) {
+    body.push(text(rx, baseline(r6 + nh / 2, 12) + (i - 1) * 15, line, { size: 12, fill: C.text3 }))
+  }
   body.push(
     node({
       x: lx,
@@ -209,7 +220,7 @@ export function httpPipeline(): string {
   return svg({
     h: outerBottom + 24,
     title: 'HTTP request pipeline',
-    desc: 'Each request routed by the adapter runs in a request scope (container.runInScope with HttpContext and RequestId), inside the http:request hook whose wrappers log, measure and trace. A CORS preflight is answered there (204, 403 or 404) without guards. Otherwise: guards (global, controller, route), body parsing for routes with @Body or uploads, interceptors (global, controller, route) around the invocation (extract, coerce, validate, handler), then serialisation of the result. Anything thrown becomes an error response (403 for a guard, 400 for invalid input, exception mappers) and sets event.status and event.error. Cookies, the request id, CORS and security headers are then added to every reply unless already set, and the scope closes once the body has been sent, disposing request-scoped instances.',
+    desc: 'Each request routed by the adapter runs in a request scope (container.runInScope with HttpContext and RequestId), inside the http:request hook whose wrappers log, measure and trace. A CORS preflight is answered there (204, 403 or 404) without guards. Otherwise: guards (global, controller, route), body parsing for routes with @Body or uploads, interceptors (global, controller, route) around the invocation (extract, coerce, validate, handler), then serialisation of the result. Anything thrown becomes an error response (403 for a guard, 400 for invalid input, exception mappers) and sets event.status and event.error. Then the cookies are appended to set-cookie (one line each) and the request id, CORS and security headers are added when not already set (raw @Res() replies get none), and the scope closes once the body has been sent (for an event stream, once it ends), disposing request-scoped instances.',
     body,
   })
 }

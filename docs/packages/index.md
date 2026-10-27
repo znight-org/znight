@@ -1,5 +1,5 @@
 ---
-description: The Znight packages - core runtime, compiler, HTTP, messaging, config, observability, testing and CLI - and how they fit together.
+description: The Znight packages - core runtime, compiler, HTTP, OpenAPI, messaging, scheduling, config, observability, testing and CLI - and how they fit together.
 ---
 
 # Packages
@@ -12,7 +12,9 @@ version). Install only what you use.
 | [`@znight/core`](./core)                   | Container, application lifecycle, plugins, hooks, AOP, marker decorators       | dependency    | <Badge type="tip" text="available" /> |
 | [`@znight/compiler`](./compiler)           | Vite plugin, CLI/Bun integration: analysis, validation, code generation        | devDependency | <Badge type="tip" text="available" /> |
 | [`@znight/http`](./http)                   | Controllers, routing, validation, guards, interceptors; Fastify, Express, Hono | dependency    | <Badge type="tip" text="available" /> |
+| [`@znight/openapi`](./openapi)             | OpenAPI 3.1 documents generated at build time; Scalar or Swagger UI            | dependency    | <Badge type="tip" text="available" /> |
 | [`@znight/messaging`](./messaging)         | Consumers, retries, dead-letter queues; RabbitMQ, SQS, Kafka, in-memory        | dependency    | <Badge type="tip" text="available" /> |
+| [`@znight/schedule`](./schedule)           | Cron, interval and timeout jobs checked at build time; locks across instances  | dependency    | <Badge type="tip" text="available" /> |
 | [`@znight/config`](./config)               | Typed config classes from env, `.env`, JSON/YAML, Vault, AWS Secrets Manager   | dependency    | <Badge type="tip" text="available" /> |
 | [`@znight/observability`](./observability) | Pino logger, Prometheus metrics, OpenTelemetry tracing                         | dependency    | <Badge type="tip" text="available" /> |
 | [`@znight/testing`](./testing)             | `TestBed` with auto-mocks, `TestApp` for in-memory end-to-end tests            | devDependency | <Badge type="tip" text="available" /> |
@@ -20,14 +22,9 @@ version). Install only what you use.
 
 ## How a feature package is built
 
-Every feature package follows the same three-part shape:
+Every feature package follows the same three-part shape, here `@znight/http`:
 
-```txt
-@znight/http
-├─ decorators          @Controller, @Get, @Body...   markers read by the compiler, no-ops at runtime
-├─ compiler extension  @znight/http/compiler          analyses controllers, emits extensions.http
-└─ runtime plugin      HttpPlugin.configure()         reads extensions.http, serves requests
-```
+![Anatomy of a feature package: the decorators (@Controller, @Get, @Body) are markers in your code; the compiler extension @znight/http/compiler analyses the controllers at build time and emits extensions.http in the generated metadata; the runtime plugin HttpPlugin.configure() reads it and serves the requests](/diagrams/feature-package.svg)
 
 - The **decorators** are imported by your code. They do nothing at runtime and are stripped from the
   bundle.

@@ -38,7 +38,7 @@ export function featurePackage(): string {
     body.push(rect(x, top, w, h, { fill: v.fill, stroke: v.stroke, sw: c.variant === 'outline' ? 1.5 : 1.25 }))
     body.push(text(x + 14, top + 26, c.title, { size: 14, weight: 600 }))
     body.push(text(x + 14, top + 47, c.code, { size: 12, mono: true, fill: C.text2 }))
-    c.lines.forEach((l, j) => body.push(text(x + 14, top + 74 + j * 19, l, { size: 12.5, fill: C.text3 })))
+    for (const [j, l] of c.lines.entries()) body.push(text(x + 14, top + 74 + j * 19, l, { size: 12.5, fill: C.text3 }))
     if (i < 2)
       body.push(
         arrow([

@@ -3,12 +3,15 @@
 Logging, metrics and tracing for [Znight](../../README.md) applications:
 
 - **Logging**: a structured [pino](https://getpino.io) `Logger`, automatically enriched with the
-  current `requestId`, `traceId` and `spanId`; redaction; transports for stdout JSON, pretty output,
-  Datadog and CloudWatch / AWS Lambda; one log entry per HTTP request and per message.
+  current `requestId`, `traceId` and `spanId` (and `job` / `runId` inside a scheduled run);
+  redaction; transports for stdout JSON, pretty output, Datadog and CloudWatch / AWS Lambda; one log
+  entry per HTTP request, per message and per scheduled run.
 - **Metrics**: a Prometheus `MetricsRegistry` ([prom-client](https://github.com/siimon/prom-client)),
-  HTTP RED metrics, consumer metrics, process metrics, a dedicated `/metrics` server.
-- **Tracing**: an OpenTelemetry `Tracer`, a `SERVER` span per HTTP request and a `CONSUMER` span per
-  message with W3C trace context propagation. Works with any OpenTelemetry SDK.
+  HTTP RED metrics, consumer metrics, scheduled job metrics, process metrics, a dedicated `/metrics`
+  server.
+- **Tracing**: an OpenTelemetry `Tracer`, a `SERVER` span per HTTP request, a `CONSUMER` span per
+  message with W3C trace context propagation, and an `INTERNAL` span per scheduled run. Works with
+  any OpenTelemetry SDK.
 - **Decorators**: `@Logged()`, `@Traced()` and `@Metric()` on any provider method.
 
 Everything is wired by one plugin, and like the rest of Znight, it is resolved at compile time: no
@@ -90,7 +93,7 @@ const verbose = logger.child({ component: 'sync' }, { level: 'debug', msgPrefix:
 
 if (logger.isLevelEnabled('debug')) logger.debug('Costly', { dump: expensive() })
 logger.level = 'warn' // change at runtime
-await logger.flush() // write out what transports buffered
+await logger.flush() // resolves once the transports wrote out what they buffered
 logger.pino // the underlying pino logger (escape hatch)
 ```
 
@@ -104,6 +107,7 @@ Every entry is enriched automatically:
 | Field              | Source                                                                                                           |
 | ------------------ | ---------------------------------------------------------------------------------------------------------------- |
 | `requestId`        | the active request scope (`@znight/http#RequestId`, set by the HTTP plugin for each request)                     |
+| `job`/`runId`      | the `JobContext` of the current scheduled run (`@znight/schedule#JobContext`, seeded in each run's scope)        |
 | `traceId`/`spanId` | the active OpenTelemetry span (HTTP server span, consumer span, `@Traced()` span...)                             |
 | custom fields      | `scopeFields: { tenant: 'src/tenant.ts#TenantId' }` reads more values from the scope; `mixin` adds computed ones |
 
@@ -128,6 +132,7 @@ options of the next section.
 | `serializers`  | `err`, `error`                            | Per-key serializers                                                                           |
 | `mixin`        | —                                         | `() => fields` added to every entry                                                           |
 | `scopeFields`  | `{ requestId: '@znight/http#RequestId' }` | Log field → scope token                                                                       |
+| `jobContext`   | `true`                                    | Add `job` / `runId` inside a scheduled run (`@znight/schedule`)                               |
 | `traceContext` | `true`                                    | Add `traceId` / `spanId`                                                                      |
 | `pino`         | —                                         | Raw pino options, applied last                                                                |
 
@@ -158,6 +163,10 @@ ObservabilityPlugin.configure({
 
 A transport is a plain object (`{ name, stream, level?, loggerOptions?, flush?, close? }`): write your
 own by implementing `LogTransport`. The `level` of a transport only raises the logger level.
+
+Asynchronous writes to stdout (the console default) stay in order, even when the output is slow (a
+pipe, a busy CI runner, a log collector): `flush()` waits for the writes in flight instead of forcing
+the queued entries out ahead of them, and the process does not exit before they are written.
 
 #### CloudWatch and AWS Lambda
 
@@ -220,22 +229,29 @@ final `Application stopped` or `The application stopped with errors`) is flushed
 written: the pending request keeps the process alive until it is delivered. Standalone, call
 `await logger.close()` (or `transport.close()`) before exiting.
 
-### Request and message logs
+### Request, message and job logs
 
-The plugin writes one entry per HTTP request (`request completed` / `request failed`) and per message
-delivery (`message processed`, `message failed, will be retried`, `message dead-lettered`):
+The plugin writes one entry per HTTP request (`request completed` / `request failed`), per message
+delivery (`message processed`, `message failed, will be retried`, `message dead-lettered`) and per
+scheduled run of `@znight/schedule` (`job completed`, `job failed`, `job skipped`, `job not
+acquired`):
 
-| Option              | Default | Description                                                                                    |
-| ------------------- | ------- | ---------------------------------------------------------------------------------------------- |
-| `requests`          | `true`  | `false`, or `{ level?, ignore?(event) }`. 4xx are `warn`, 5xx `error` (with `err`).            |
-| `messages`          | `true`  | `false`, or `{ level?, ignore?(event) }`. Retries are `warn`, dead letters `error`.            |
-| `replaceCoreLogger` | `true`  | Route the framework's own logs (core, plugins) through the logger, with `component: 'znight'`. |
+| Option              | Default | Description                                                                                                                                             |
+| ------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `requests`          | `true`  | `false`, or `{ level?, ignore?(event) }`. 4xx are `warn`, 5xx `error` (with `err`).                                                                     |
+| `messages`          | `true`  | `false`, or `{ level?, ignore?(event) }`. Retries are `warn`, dead letters `error`.                                                                     |
+| `jobs`              | `true`  | `false`, or `{ level?, ignore?(event) }`. Failed runs are `error` (with `err`), skipped `warn`, not acquired (another instance holds the lock) `debug`. |
+| `replaceCoreLogger` | `true`  | Route the framework's own logs (core, plugins) through the logger, with `component: 'znight'`.                                                          |
 
 ```ts
 ObservabilityPlugin.configure({
   logging: { requests: { ignore: event => event.path === '/health' } },
 })
 ```
+
+Job entries carry `job`, `runId`, `trigger`, `scheduledAt`, plus `durationMs` and `lateMs` (start
+minus occurrence) for executed runs and `aborted` when the run's signal was aborted. Executed runs
+are logged inside their span (the entry carries `traceId`).
 
 ## Metrics
 
@@ -296,6 +312,26 @@ delivery: producers choose it); a handler records at most `maxTypesPerHandler` (
 later ones are labelled `_OTHER` (a pattern or default `@OnMessage()` handler receives whatever types
 producers send). Label cardinality stays bounded.
 
+### Scheduled job metrics
+
+| Metric                                    | Type      | Labels                                       |
+| ----------------------------------------- | --------- | -------------------------------------------- |
+| `schedule_runs_total`                     | counter   | `job`, `outcome` (every occurrence)          |
+| `schedule_run_duration_seconds`           | histogram | `job`, `outcome` (executed runs)             |
+| `schedule_run_lateness_seconds`           | histogram | `job` (start minus occurrence)               |
+| `schedule_active_runs`                    | gauge     | `job`                                        |
+| `schedule_last_success_timestamp_seconds` | gauge     | `job` (for "has not succeeded since" alerts) |
+
+`outcome` is `completed`, `failed`, `skipped` or `not-acquired`. Dynamic job names can be unbounded
+(one job per monitor...): at most `maxJobs` (100) distinct names are labelled, later ones are
+`_OTHER`.
+
+```yaml
+# Prometheus alert: the daily digest has not succeeded for 26 hours
+- alert: DigestStale
+  expr: time() - znight_schedule_last_success_timestamp_seconds{job="digest.daily"} > 26 * 3600
+```
+
 ### Metrics options
 
 | Option           | Default        | Description                                                                                                               |
@@ -306,6 +342,7 @@ producers send). Label cardinality stays bounded.
 | `server`         | `true`         | `false`, or `{ port: 9464, host?, path: '/metrics' }` (`port: 0` picks a free port)                                       |
 | `http`           | `true`         | `false`, or `{ buckets?, ignore?(event) }`                                                                                |
 | `messaging`      | `true`         | `false`, or `{ buckets?, ignore?(event), maxTypesPerHandler? }`                                                           |
+| `schedule`       | `true`         | `false`, or `{ buckets?, latenessBuckets?, ignore?(event), maxJobs? }`                                                    |
 | `registry`       | a new registry | An existing `prom-client` registry (e.g. `client.register`, the global one)                                               |
 | `client`         | loaded lazily  | The `prom-client` module, for exotic bundling setups                                                                      |
 
@@ -369,6 +406,15 @@ consumer span continues the same trace across services.
 For other outgoing calls (HTTP clients, custom brokers), inject the context into their headers
 yourself: `tracer.inject(headers)`.
 
+### Scheduled run spans
+
+One `INTERNAL` span per executed run of `@znight/schedule`, named `schedule <job>`: the root of a new
+trace (a scheduled run is its own unit of work), except for manual runs (`registry.trigger()`), which
+are children of the caller (an admin request, for example). Attributes: `znight.schedule.job`,
+`.kind`, `.trigger`, `.run_id`, `.scheduled_at`, `.outcome`, `.aborted`, `code.function.name`
+(`DigestJobs.sendDaily`). A failed run sets the status to `ERROR` and records the exception.
+Occurrences that did not run (skipped, not acquired) get no span.
+
 ### The `Tracer`
 
 ```ts
@@ -406,6 +452,7 @@ export class PaymentService {
 | `http`           | `true`                    | `false`, or `{ ignore?(event), responseHeader? }` |
 | `messaging`      | `true`                    | `false`, or `{ ignore?(event), system? }`         |
 | `publish`        | `true`                    | `false`, or `{ ignore?(event), system? }`         |
+| `schedule`       | `true`                    | `false`, or `{ ignore?(event) }`                  |
 
 `tracing: false` disables the automatic spans; the injectable `Tracer` and `@Traced()` keep working.
 
@@ -459,13 +506,13 @@ conflicting metric definition is reported once through the logger and the method
 
 `ObservabilityPlugin.configure(options)` (name `observability`):
 
-| Hook          | What happens                                                                                                                                                                                                                                            |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `register`    | Validates decorator options, creates the logger, tracer and registry (object options), replaces the core logger, provides the externals, wraps `http:request` and `messaging:message` (spans → metrics → logs) and `messaging:publish` (producer spans) |
-| `onBootstrap` | Evaluates function options if nothing did yet                                                                                                                                                                                                           |
-| `onStart`     | Starts the `/metrics` server                                                                                                                                                                                                                            |
-| `onStop`      | Closes the `/metrics` server                                                                                                                                                                                                                            |
-| `onDispose`   | Removes the hook wrappers, flushes the tracer provider (`forceFlush`) and the logger transports; entries logged afterwards are flushed as soon as they are written                                                                                      |
+| Hook          | What happens                                                                                                                                                                                                                                                                                                                                         |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `register`    | Validates decorator options, creates the logger, tracer and registry (object options), replaces the core logger, provides the externals, wraps `http:request`, `messaging:message` and `schedule:run` (spans → metrics → logs) and `messaging:publish` (producer spans), listens to `schedule:run` (run counters, logs of runs that did not execute) |
+| `onBootstrap` | Evaluates function options if nothing did yet                                                                                                                                                                                                                                                                                                        |
+| `onStart`     | Starts the `/metrics` server                                                                                                                                                                                                                                                                                                                         |
+| `onStop`      | Closes the `/metrics` server                                                                                                                                                                                                                                                                                                                         |
+| `onDispose`   | Removes the hook wrappers, flushes the tracer provider (`forceFlush`) and the logger transports; entries logged afterwards are flushed as soon as they are written                                                                                                                                                                                   |
 
 Options may be computed from the container, e.g. from a config class:
 
@@ -498,7 +545,15 @@ await new MetricsServer(metrics, { port: 9464 }).listen()
 ```
 
 `traceMessages`, `measureMessages` and `logMessages` do the same for `messaging:message`, and
-`traceMessagePublish` for `messaging:publish`.
+`traceMessagePublish` for `messaging:publish`. For `schedule:run`, `traceJobs(tracer)` is a wrapper,
+while `measureJobs(metrics)` and `logJobs(logger)` return `{ wrap, listen }`: install both (`listen`
+sees the occurrences that did not run).
+
+```ts
+const jobs = logJobs(logger)
+if (jobs.wrap) app.hooks.wrap('schedule:run', jobs.wrap)
+if (jobs.listen) app.hooks.on('schedule:run', jobs.listen)
+```
 
 ## Testing
 

@@ -148,7 +148,7 @@ export function node(o: NodeOpts): string {
   const v = V[o.variant ?? 'default']
   const size = o.size ?? 14
   const subSize = o.subSize ?? 12.5
-  const subs = o.sub === undefined ? [] : Array.isArray(o.sub) ? o.sub : [o.sub]
+  const subs = o.sub === undefined ? [] : ([] as string[]).concat(o.sub)
   const out = [rect(o.x, o.y, o.w, o.h, { fill: v.fill, stroke: v.stroke, rx: o.rx ?? 10, dash: v.dash, sw: 1.25 })]
   const gap = 5
   const lineH = subSize + 4
@@ -189,7 +189,8 @@ export function chip(
   const size = o.size ?? 12.5
   const w = measure(label, size, { mono: o.mono }) * 1.04 + 2 * (o.padX ?? 10)
   const h = o.h ?? size + 11
-  const x0 = o.anchor === 'middle' ? x - w / 2 : o.anchor === 'end' ? x - w : x
+  const shift = { middle: w / 2, end: w, start: 0 } as const
+  const x0 = x - shift[o.anchor ?? 'start']
   const v = V[o.variant ?? 'default']
   return [
     [

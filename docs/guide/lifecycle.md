@@ -14,6 +14,10 @@ await app.start() // accept traffic
 await app.stop() // graceful shutdown (also triggered by SIGINT / SIGTERM)
 ```
 
+Each call runs the plugin and provider hooks in a fixed order:
+
+![Lifecycle hooks in order. Application.create(): plugins' register(), container.init() creates the singletons, plugins' onBootstrap(). app.start(): providers' onStart(), plugins' onStart(), providers' onReady(), plugins' onReady(). app.stop(), in reverse order: plugins' onStop(), providers' onStop() and disposal, plugins' onDispose()](/diagrams/lifecycle-sequence.svg)
+
 ## Provider hooks
 
 Singletons are **duck-typed**: implement a method and it is called, no registration needed. The
@@ -184,13 +188,9 @@ Run Node.js or Bun as PID 1 with the exec form (`CMD ["node", "dist/main.js"]`) 
 
 ## Application states
 
-`app.state` is one of:
+`app.state` is one of `created`, `starting`, `ready`, `stopping`, `stopped` and `failed`:
 
-```txt
-created ──start()──▶ starting ──▶ ready ──stop()──▶ stopping ──▶ stopped
-                        │
-                        └── failure ──▶ failed
-```
+![Application states: created, start() to starting, then ready; stop() or a signal to stopping, then stopped; a stop() called from a start hook goes from starting to stopping; a failing start hook goes from starting to failed; stopped and failed are final](/diagrams/lifecycle-states.svg)
 
 ## Partial initialisation
 

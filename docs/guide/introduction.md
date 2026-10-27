@@ -68,24 +68,7 @@ plugins, guards and interceptors, testing utilities with auto-mocking.
 
 ## How it fits together
 
-```txt
- your code (src/**/*.ts)                      build time
- ─────────────────────────────────────────────────────────────────────────
-  @Injectable() classes       ┌──────────────────────────────────────┐
-  @Controller() classes  ───▶ │ @znight/compiler (Vite plugin / CLI) │
-  @Consumer(), @Config()...   │  scan → analyse → bind → validate    │
-                              └──────────────────┬───────────────────┘
-                                                 │ generates
-                                                 ▼
-                              src/.znight/container.generated.ts
-                                (__ZNIGHT_METADATA__)
- ─────────────────────────────────────────────────────────────────────────
-                                                 │ imported by main.ts   run time
-                                                 ▼
-                              Application.create({ metadata, plugins })
-                                @znight/core container + lifecycle
-                                + HttpPlugin, MessagingPlugin, ConfigPlugin...
-```
+![Build time: @znight/compiler (Vite plugin, CLI or Bun preload) reads your decorated classes and generates the metadata module src/.znight/container.generated.ts; ZNIGHT errors fail the build. Run time: main.ts passes it to Application.create({ metadata, plugins }), where the @znight/core container runs the generated factories in order and plugins such as HttpPlugin add the runtime features](/diagrams/overview.svg)
 
 - [`@znight/compiler`](/packages/compiler) analyses the code and generates `__ZNIGHT_METADATA__`.
 - [`@znight/core`](/packages/core) executes it: container, scopes, lifecycle, plugins, hooks, AOP.

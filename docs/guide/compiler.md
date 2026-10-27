@@ -11,12 +11,7 @@ preload**, or programmatically.
 
 ## How it works
 
-```txt
-scan ─▶ parse ─▶ per-file facts ─▶ resolve identities ─▶ analyse classes ─▶ bind ─▶ validate ─▶ emit
- │        │            │                                   (core + extensions)
- │        └────────────┴─ cached by content hash
- └─ include / exclude globs + provider libraries
-```
+![Compiler pipeline: 1 scan, 2 parse (cached per file), 3 resolve identities, 4 analyse classes, 5 bind, 6 validate (ZNIGHT diagnostics), 7 emit container.generated.ts, written only if its content changed](/diagrams/compiler-pipeline.svg)
 
 1. **Scan** the files matched by `include` / `exclude`, plus provider libraries.
 2. **Parse** them with [oxc](https://oxc.rs) (a native parser) and extract per-file facts: imports,

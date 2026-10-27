@@ -42,12 +42,17 @@ packages/
   messaging/      decorators, compiler extension, MessagingPlugin, drivers (memory, rabbitmq, sqs, kafka)
   config/         decorators, compiler extension, ConfigPlugin, loaders (env, dotenv, json, yaml, vault, aws, inline)
   observability/  Logger (pino), metrics (prom-client), tracing (OpenTelemetry), interceptors, ObservabilityPlugin
+  openapi/        decorators, compiler extension, OpenApiPlugin, OpenAPI 3.1 assembly (buildOpenApiDocument),
+                  emission (/emit, /vite: `znight openapi`), validateResponse (/testing) (RFC 0002)
+  schedule/       decorators, compiler extension, SchedulePlugin, SchedulerRegistry, cron engine, lock
+                  stores, test clock and lock store scenarios (/testing) (RFC 0004)
   testing/        TestBed (auto-mocking), TestApp (e2e), mocks and spies
   cli/            `znight` binary: new, generate, g, dev, build, start
 examples/         runnable example applications: rest-api, microservice, worker, monorepo (services + a
                   source provider library); each has its own tests (`bun run test:examples`)
 tests/            repository-wide tests: boundaries (§2), golden test of the examples (§4.1)
 docs/             VitePress documentation site (this file is rendered under /contributing/)
+rfcs/             design documents of significant changes, with their status and the error code allocation
 ```
 
 Tooling: bun workspaces (+ catalogs), TypeScript 7 (`tsc --noEmit`), tsdown (build), Biome (lint +
@@ -99,9 +104,13 @@ Bun types, decorators allowed). `typecheck` runs both.
   `tests/boundaries.test.ts`, which follows the value imports of each `package.json#exports` entry):
   - `<pkg>/compiler` entries only `import type` from `@znight/compiler` and never import the
     package's runtime entry (so building never loads fastify, amqplib...). Code they share with the
-    runtime lives in import-free modules (`@znight/config` `conventions.ts`/`coerce.ts`,
-    `@znight/http` `path.ts`) or is duplicated in one and kept equal by a test (`@znight/messaging`
-    retry constants);
+    runtime lives in import-free modules (`@znight/config` `conventions.ts`/`coerce.ts`;
+    `@znight/http` `path.ts`, `mime.ts`, `size.ts`; `@znight/openapi` `shared.ts`, the grammars of
+    operation ids, header names and media types; `@znight/schedule` `cron/*` (parser, fields, time
+    zones, never-fires analysis: one cron engine for the build and the process), `duration.ts` and
+    `names.ts`) or is duplicated in one and kept equal by a test (`@znight/messaging` retry
+    constants). Other import-free runtime modules (`@znight/http` `cookies.ts`, `sse-parse.ts`) are
+    safe to import anywhere;
   - runtime entries never import `./compiler`;
   - `@znight/compiler` is at most an optional peer of feature packages and of the CLI.
 
@@ -495,54 +504,62 @@ application provider, e.g. `class AppLogger implements CoreLogger`) nor package-
 
 ### 4.8 Validations
 
-| Code      | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Severity                                |
-| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
-| ZNIGHT001 | Missing provider for a required dependency (a warning for library dependencies in library mode)                                                                                                                                                                                                                                                                                                                                                                  | error                                   |
-| ZNIGHT002 | Circular dependency (over the full edge set except `Lazy` and extension edges, prints the cycle, hints at `Lazy<T>`)                                                                                                                                                                                                                                                                                                                                             | error                                   |
-| ZNIGHT003 | Scope mismatch: a singleton depends (directly, through transients, multi, guards, interceptors, extension edges or externals) on a request-scoped provider                                                                                                                                                                                                                                                                                                       | error                                   |
-| ZNIGHT004 | Duplicate provider for the exact same type without qualifier/`@Primary`                                                                                                                                                                                                                                                                                                                                                                                          | error                                   |
-| ZNIGHT005 | Invalid decorator usage (target, arguments, unexported reference, non-public/`#private`/static handler or `@Provides`, abstract or unbound generic provider, provider exported as a type only, class registered by several provider decorators, decorator applied twice, `@Provides` outside `@Factory` or without concrete return type, parameter decorator imported from another feature package; warnings: composite decorator, `const` alias of a decorator) | error / warning                         |
-| ZNIGHT006 | Missing or invalid required configuration value, failing config loader (runtime)                                                                                                                                                                                                                                                                                                                                                                                 | error                                   |
-| ZNIGHT007 | Invalid route (path grammar, duplicate method+path, `:param` without `@Param` and vice versa, non-coercible param type)                                                                                                                                                                                                                                                                                                                                          | error                                   |
-| ZNIGHT008 | Ambiguous injection (several candidates for an interface / base type, ambiguous display name at runtime)                                                                                                                                                                                                                                                                                                                                                         | error                                   |
-| ZNIGHT009 | Invalid lifecycle hook (required params, static; on a non-singleton → warning; dispose hooks or `@Provides({ dispose })` on a transient → warning)                                                                                                                                                                                                                                                                                                               | error / warning                         |
-| ZNIGHT010 | Unresolvable injection type (missing/opaque annotation, primitive without qualifier, unresolvable import, unanalysable inherited constructor); import casing mismatch, unresolvable library (warnings)                                                                                                                                                                                                                                                           | error / warning                         |
-| ZNIGHT011 | Invalid message consumer (no handler, several default handlers, duplicate types, shadowed `*` patterns, invalid retry or consumer options, undecorated parameter, invalid `@OnError`, several consumer classes for one queue; at boot: a retry policy the driver cannot honour, invalid `MessagingPlugin` options)                                                                                                                                               | error                                   |
-| ZNIGHT012 | Invalid config class (unsupported property type, config decorator outside `@Config`, duplicate env names or key paths, invalid name/key/prefix, `@Default` not matching the type, constructor with required parameters; invalid `ConfigPlugin` options or config metadata at runtime)                                                                                                                                                                            | error                                   |
-| ZNIGHT013 | Request-scoped provider resolved outside of a request scope (runtime)                                                                                                                                                                                                                                                                                                                                                                                            | error                                   |
-| ZNIGHT014 | Async factory on a non-singleton provider                                                                                                                                                                                                                                                                                                                                                                                                                        | error                                   |
-| ZNIGHT015 | Provider instantiation failed (runtime; carries dependency path, source, cause)                                                                                                                                                                                                                                                                                                                                                                                  | error                                   |
-| ZNIGHT016 | Container sealed: register/override after `init()` (runtime)                                                                                                                                                                                                                                                                                                                                                                                                     | error                                   |
-| ZNIGHT017 | Unvalidated input: non-primitive `@Body`/`@Query`/`@Message` without schema                                                                                                                                                                                                                                                                                                                                                                                      | warning (error with `strictValidation`) |
-| ZNIGHT018 | Version mismatch or broken contract: metadata version, `@znight/*` release-line skew, extension `apiVersion`, malformed `package.json#znight` or compiled-library entry (skipped), untrusted (warning), failing or misbehaving compiler extension, generated-code syntax error                                                                                                                                                                                   | error / warning                         |
-| ZNIGHT019 | Unused provider (unreachable from roots, see `prune`)                                                                                                                                                                                                                                                                                                                                                                                                            | warning (only with `reportUnused`)      |
-| ZNIGHT020 | The generated module is imported (transitively) by a provider module (ESM cycle → TDZ crash), also through a path alias before the file exists                                                                                                                                                                                                                                                                                                                   | error                                   |
-| ZNIGHT021 | Lifecycle hook, plugin hook or shutdown step failed or timed out (runtime)                                                                                                                                                                                                                                                                                                                                                                                       | error                                   |
-| ZNIGHT022 | Syntax error: a scanned source file could not be parsed (reported first; the file is skipped, analysis continues)                                                                                                                                                                                                                                                                                                                                                | error                                   |
-| ZNIGHT023 | Missing route decision: a route has no decision of a required group (build), or no guard enforces it (boot) — RFC 0001                                                                                                                                                                                                                                                                                                                                           | error                                   |
-| ZNIGHT030 | `@znight/openapi`: invalid OpenAPI definition — RFC 0002                                                                                                                                                                                                                                                                                                                                                                                                         | error                                   |
-| ZNIGHT031 | `@znight/openapi`: undocumented response — RFC 0002                                                                                                                                                                                                                                                                                                                                                                                                              | warning                                 |
-| ZNIGHT032 | `@znight/openapi`: unrepresentable type — RFC 0002                                                                                                                                                                                                                                                                                                                                                                                                               | error / warning                         |
-| ZNIGHT033 | `@znight/openapi`: duplicate operation id — RFC 0002                                                                                                                                                                                                                                                                                                                                                                                                             | error                                   |
-| ZNIGHT034 | `@znight/openapi`: schema name conflict — RFC 0002                                                                                                                                                                                                                                                                                                                                                                                                               | error                                   |
-| ZNIGHT035 | `@znight/openapi`: inconsistent operation — RFC 0002                                                                                                                                                                                                                                                                                                                                                                                                             | error                                   |
-| ZNIGHT036 | `@znight/openapi`: invalid security requirement — RFC 0002                                                                                                                                                                                                                                                                                                                                                                                                       | error                                   |
-| ZNIGHT037 | `@znight/openapi`: schema conversion failed — RFC 0002                                                                                                                                                                                                                                                                                                                                                                                                           | error                                   |
-| ZNIGHT040 | `@znight/schedule`: invalid schedule (cron, duration, zone, options, signature) — RFC 0004                                                                                                                                                                                                                                                                                                                                                                       | error                                   |
-| ZNIGHT041 | `@znight/schedule`: duplicate job name — RFC 0004                                                                                                                                                                                                                                                                                                                                                                                                                | error                                   |
-| ZNIGHT042 | `@znight/schedule`: unknown job (runtime) — RFC 0004                                                                                                                                                                                                                                                                                                                                                                                                             | error                                   |
-| ZNIGHT043 | `@znight/schedule`: missing lock store — RFC 0004                                                                                                                                                                                                                                                                                                                                                                                                                | error                                   |
-| ZNIGHT044 | `@znight/schedule`: job aborted (runtime) — RFC 0004                                                                                                                                                                                                                                                                                                                                                                                                             | error                                   |
+| Code      | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | Severity                                       |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| ZNIGHT001 | Missing provider for a required dependency (a warning for library dependencies in library mode)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | error                                          |
+| ZNIGHT002 | Circular dependency (over the full edge set except `Lazy` and extension edges, prints the cycle, hints at `Lazy<T>`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | error                                          |
+| ZNIGHT003 | Scope mismatch: a singleton depends (directly, through transients, multi, guards, interceptors, extension edges or externals) on a request-scoped provider                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | error                                          |
+| ZNIGHT004 | Duplicate provider for the exact same type without qualifier/`@Primary`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | error                                          |
+| ZNIGHT005 | Invalid decorator usage (target, arguments, unexported reference, non-public/`#private`/static handler or `@Provides`, abstract or unbound generic provider, provider exported as a type only, class registered by several provider decorators, decorator applied twice, `@Provides` outside `@Factory` or without concrete return type, parameter decorator imported from another feature package; warnings: composite decorator, `const` alias of a decorator; route decorators: two decisions of one group on a target, definitions of a key or of a group that disagree on their options; `@Cookie` / `@SignedCookie`: invalid cookie name, nameless `@SignedCookie`; `@Sse`: invalid options, applied twice or with another route decorator, with `@HttpCode`, `@Header('content-type')` or `@Res()`, a primitive return type, warning for a request body; job decorators: method shape, abstract or generic host, a route that is also a job; at boot: invalid `cookies` (secrets shorter than 32 bytes, duplicates, unknown keys) and `sse` options) | error / warning                                |
+| ZNIGHT006 | Missing or invalid required configuration value, failing config loader (runtime); a route reading `@SignedCookie` without `cookies.secrets` (boot)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | error                                          |
+| ZNIGHT007 | Invalid route (path grammar, duplicate method+path, `:param` without `@Param` and vice versa, non-coercible param or cookie type; at boot: malformed metadata, `groups` and `sse` included, and invalid or colliding plugin routes)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | error                                          |
+| ZNIGHT008 | Ambiguous injection (several candidates for an interface / base type, ambiguous display name at runtime)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | error                                          |
+| ZNIGHT009 | Invalid lifecycle hook (required params, static; on a non-singleton → warning; dispose hooks or `@Provides({ dispose })` on a transient → warning)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | error / warning                                |
+| ZNIGHT010 | Unresolvable injection type (missing/opaque annotation, primitive without qualifier, unresolvable import, unanalysable inherited constructor); import casing mismatch, unresolvable library (warnings)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | error / warning                                |
+| ZNIGHT011 | Invalid message consumer (no handler, several default handlers, duplicate types, shadowed `*` patterns, invalid retry or consumer options, undecorated parameter, invalid `@OnError`, several consumer classes for one queue; at boot: a retry policy the driver cannot honour, invalid `MessagingPlugin` options)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | error                                          |
+| ZNIGHT012 | Invalid config class (unsupported property type, config decorator outside `@Config`, duplicate env names or key paths, invalid name/key/prefix, `@Default` not matching the type, constructor with required parameters; invalid `ConfigPlugin` options or config metadata at runtime)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | error                                          |
+| ZNIGHT013 | Request-scoped provider resolved outside of a request scope (runtime)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | error                                          |
+| ZNIGHT014 | Async factory on a non-singleton provider                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | error                                          |
+| ZNIGHT015 | Provider instantiation failed (runtime; carries dependency path, source, cause)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | error                                          |
+| ZNIGHT016 | Container sealed: register/override after `init()` (runtime)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | error                                          |
+| ZNIGHT017 | Unvalidated input: non-primitive `@Body`/`@Query`/`@Message`, or a whole `@Cookie()` record typed otherwise, without schema                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | warning (error with `strictValidation`)        |
+| ZNIGHT018 | Version mismatch or broken contract: metadata version, `@znight/*` release-line skew, extension `apiVersion`, malformed `package.json#znight` or compiled-library entry (skipped), untrusted (warning), failing or misbehaving compiler extension, generated-code syntax error                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | error / warning                                |
+| ZNIGHT019 | Unused provider (unreachable from roots, see `prune`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | warning (only with `reportUnused`)             |
+| ZNIGHT020 | The generated module is imported (transitively) by a provider module (ESM cycle → TDZ crash), also through a path alias before the file exists                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | error                                          |
+| ZNIGHT021 | Lifecycle hook, plugin hook or shutdown step failed or timed out (runtime)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | error                                          |
+| ZNIGHT022 | Syntax error: a scanned source file could not be parsed (reported first; the file is skipped, analysis continues)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | error                                          |
+| ZNIGHT023 | Missing route decision: a route has no effective decision of a required route decorator group (build), or a decision that no guard of its chain enforces (boot, every route in one error; one warning per group with `enforcement: 'warn'`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | error / warning                                |
+| ZNIGHT030 | Invalid OpenAPI definition (`@OpenApiDocument` options or a second one, `@Api*` outside a controller or route handler, invalid static values, malformed `securityScheme()`; at boot: invalid `OpenApiPlugin` options, missing `extensions.openapi`, no `http` plugin; warnings: servers not reflecting the prefix, stale prebuilt file)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | error / warning                                |
+| ZNIGHT031 | Undocumented response: the success response of a route cannot be documented and no `@ApiResponse` covers it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | warning (error with `strict`)                  |
+| ZNIGHT032 | Unrepresentable type: no JSON Schema, or not serialised as declared (`bigint` in a JSON response is always an error)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | warning / error (error with `strict`)          |
+| ZNIGHT033 | Duplicate OpenAPI operation id                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | error                                          |
+| ZNIGHT034 | Schema name conflict: two declarations or schemas for one component name (compile time, or at assembly for hoisted `$defs`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | error                                          |
+| ZNIGHT035 | Inconsistent operation: the documentation contradicts the route (a body on 204/304, another success status, `@ApiQuery`/`@ApiBody` duplicating the signature; warnings: `@ApiBody` on GET/HEAD, `@ApiExclude` with other `@Api*`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | error / warning                                |
+| ZNIGHT036 | Invalid security requirement (not a `securityScheme()`, scopes on a scheme without scopes, undeclared OAuth2 scopes, one scheme name for two definitions, invalid `decisions[].when` / `scopes: 'value'`; warning: a decision never applied)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | error / warning                                |
+| ZNIGHT037 | Schema conversion failed while the document is assembled (boot, emission, tests): no converter, a converter throwing or returning a non-object, a whole-object `@Query(S)`/`@Param(S)`/`@Headers(S)` schema that is not an object                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | error (warning with `unrepresentable: 'warn'`) |
+| ZNIGHT040 | Invalid schedule: cron expression (syntax, range, never fires, `@reboot`), duration, time zone, job options, job method signature; at boot: `SchedulePlugin` options, `jobs` overrides, metadata, a zone unknown to the runtime's `Intl`; at runtime: `parseCron`, `parseDuration`, `registry.add*`, `reschedule`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | error / warning                                |
+| ZNIGHT041 | Duplicate job name (application and its libraries; `registry.add*` at runtime)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | error                                          |
+| ZNIGHT042 | Unknown job name (`jobs` override, with a did-you-mean hint; `registry.trigger` / `remove`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | error                                          |
+| ZNIGHT043 | Missing lock store: a job requires a lock (`lock: true`) but `SchedulePlugin` has no store (boot; `registry.add*` at runtime)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | error                                          |
+| ZNIGHT044 | Job aborted: the reason of an aborted run's `ctx.signal` (`JobAbortedError`; `reason`: `timeout`, `lock-lost`, `removed`, `shutdown`); never thrown by the framework                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | error (a value)                                |
 
-Code ranges: `ZNIGHT001`–`029` core, compiler and first-party HTTP rules; from `ZNIGHT030` each first-party package owns a block of ten (`030`–`039` openapi, `040`–`049` schedule, `050`–`059` websocket and `060`–`069` graphql, reserved for v0.2). See `rfcs/README.md`.
+Codes are allocated by range (`rfcs/README.md`): `ZNIGHT001`–`029` belong to the core, the
+compiler and the features shipped in 0.1 (http, messaging, config, observability); from
+`ZNIGHT030`, each first-party package reserves a block of ten in the `@znight/core` catalogue
+(`030`–`039` `@znight/openapi`, `040`–`049` `@znight/schedule`, `050`–`059` `@znight/websocket` and
+`060`–`069` `@znight/graphql`, reserved for v0.2). Codes are allocated in order inside a block and
+never change meaning. A package uses its block for its own failure modes, with one catch-all code
+for invalid usage and options, and reuses a lower code when the meaning is the same (a decorator on
+the wrong target is always ZNIGHT005). Third-party packages get no `ZNIGHT` code.
 
 Singleton → transient is allowed (the singleton owns its instance). Error codes and descriptions
 live in `@znight/core` (`ErrorCode`, `ERROR_DESCRIPTIONS`), shared by compiler and runtime.
 
-ZNIGHT019 roots: extension providers, providers with `onStart`/`onReady`/`onStop`, and classes
-referenced as values in application code (outside types, imports, decorators and `extends`); a
-reference to an alias key counts for the aliased provider. **Impl.** string lookups
-(`container.get('X')`) are not seen.
+ZNIGHT019 roots: extension providers, providers with `onStart`/`onReady`/`onStop`, classes
+declared with `AnalyzeContext.addRoot` (§6.5: scheduled job hosts), also by compiled libraries
+(`roots` of their fragment, §6.4), and classes referenced as values in application code (outside
+types, imports, decorators and `extends`); a reference to an alias key counts for the aliased
+provider. **Impl.** string lookups (`container.get('X')`) are not seen.
 
 ZNIGHT020 never depends on the disk copy (a fresh checkout has none): when an import does not
 resolve, a relative specifier is compared by path with the outFile, and an aliased one (tsconfig
@@ -580,18 +597,20 @@ returns the same shared no-op function.
 
 ### `@znight/http`
 
-| Decorator                                                                            | Target                                                                                         |
-| ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
-| `@Controller(path? \| { path?, scope? })`                                            | class (provider, default singleton)                                                            |
-| `@Get/@Post/@Put/@Patch/@Delete/@Head/@Options/@All(path?)`                          | method (several per method allowed)                                                            |
-| `@Param(name?, schema?)` `@Query(name?, schema?)` `@Body(schema?)` `@Headers(name?)` | param                                                                                          |
-| `@Req()` `@Res()` `@Ctx()`                                                           | param (raw request, raw response — adapter-specific escape hatch, warning — and `HttpContext`) |
-| `@HttpCode(status)` `@Header(name, value)`                                           | method                                                                                         |
-| `@UseGuard(...guards)` `@UseInterceptor(...interceptors)`                            | class / method (value refs, variadic)                                                          |
-| `@Validate(schema)`                                                                  | method — sugar for `@Body(schema)`; using both is ZNIGHT005                                    |
-| `@UploadedFile(field?, opts?)` `@UploadedFiles(field?, opts?)`                       | param — static (below)                                                                         |
-| `@BodyLimit(size)`                                                                   | class / method — static `ByteSize` (bytes, `'10mb'`, `Infinity`); the method wins              |
-| `createRouteDecorator<T>(key)`                                                       | user-defined metadata decorators (`@Roles('admin')`, `@Public()`) → `route.meta[key]`          |
+| Decorator                                                                            | Target                                                                                                                       |
+| ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| `@Controller(path? \| { path?, scope? })`                                            | class (provider, default singleton)                                                                                          |
+| `@Get/@Post/@Put/@Patch/@Delete/@Head/@Options/@All(path?)`                          | method (several per method allowed)                                                                                          |
+| `@Param(name?, schema?)` `@Query(name?, schema?)` `@Body(schema?)` `@Headers(name?)` | param                                                                                                                        |
+| `@Cookie(name?, schema?)` `@SignedCookie(name, schema?)`                             | param — `name` static (an RFC 9110 token), `schema` value (RFC 0006, below)                                                  |
+| `@Sse(path?, options?)` / `@Sse(options)`                                            | method — a `GET` route serving an event stream; options static `{ heartbeat?, retry?, maxDuration? }` (below)                |
+| `@Req()` `@Res()` `@Ctx()`                                                           | param (raw request, raw response — adapter-specific escape hatch, warning — and `HttpContext`)                               |
+| `@HttpCode(status)` `@Header(name, value)`                                           | method                                                                                                                       |
+| `@UseGuard(...guards)` `@UseInterceptor(...interceptors)`                            | class / method (value refs, variadic)                                                                                        |
+| `@Validate(schema)`                                                                  | method — sugar for `@Body(schema)`; using both is ZNIGHT005                                                                  |
+| `@UploadedFile(field?, opts?)` `@UploadedFiles(field?, opts?)`                       | param — static (below)                                                                                                       |
+| `@BodyLimit(size)`                                                                   | class / method — static `ByteSize` (bytes, `'10mb'`, `Infinity`); the method wins                                            |
+| `createRouteDecorator<T>(key, { group?, required? }?)`                               | user-defined metadata decorators (`@Roles(['admin'])`, `@Public()`) → `meta[key]` of the controller or route; options static |
 
 Upload parameters: `field` (static string, absent = files of every field) and options (static
 `{ required?, maxSize?, mimeTypes? }`, plus `maxFiles?` for `@UploadedFiles`; `maxSize` is a
@@ -602,8 +621,72 @@ field cannot be combined with other upload parameters (ZNIGHT005); upload parame
 `HEAD`, `DELETE` or `OPTIONS` route are a ZNIGHT005 warning. `@Body()` on an upload route receives
 the text fields.
 
+Cookies (RFC 0006): `@Cookie('name') v: T` is coerced like `@Headers` (label `cookie "name"`, whose
+messages never echo the value) or validated with `schema`; `@Cookie()` / `@Cookie(S)` injects every
+cookie (`Record<string, string>`: another declared type without schema is ZNIGHT017).
+`@SignedCookie('name', S?)` requires a name (ZNIGHT005) and injects the verified value of a signed
+cookie with the same rules. Parameter sources `cookie` / `signedCookie` (§9.1).
+
+`@Sse` (RFC 0006): `@Sse(path?, options?)` or `@Sse(options)` declares a `GET` route (`sse` in its
+metadata, `{}` without options; `heartbeat: false` is stored as `0`). Options are integers:
+`heartbeat` ≥ 1 000 or `false`, `retry` ≥ 0, `maxDuration` ≥ 1 000; anything else, an unknown key or a
+second argument after options is ZNIGHT005. `@Sse` cannot be combined with another route decorator
+on the same method, `@HttpCode` (an event stream answers 200), `@Header('content-type')` or `@Res()`,
+and a handler whose (awaited) return type is a string, number, boolean or literal is an error
+(ZNIGHT005); generators, iterables, `ReadableStream`, `HttpResponse` unions and opaque types are
+accepted. A request body (`@Body`, uploads) on an `@Sse` route is a ZNIGHT005 warning (`EventSource`
+sends `GET` without body; `fetch()` clients streaming a `POST` use `@Post()` and
+`HttpResponse.sse()`).
+
+Route decorators (RFC 0001): `createRouteDecorator(key, options?)` takes a non-empty key and static
+options `{ group?, required? }` (`group` matches `/^[A-Za-z][\w.-]*$/`, default the key; `required`
+default `false`); invalid values throw a `TypeError` when the module loads, and the compiler reports
+them as ZNIGHT005. The decorator carries `key`, `group`, `required` (`RouteDecoratorInfo`), `get(ctx)`
+(the effective value of the current route) and `meta(value?)` (the same metadata as data, `{ key,
+value, group, required }`, for plugin routes, §9.1). Decorators of a group are alternatives: one
+decision per group and target (ZNIGHT005), every definition of a key uses the same options, and the
+decorators of a group agree on `required` (ZNIGHT005). For each route and each **required** group
+seen during the compile (applied somewhere, or only defined: `definitionsOf`, §6.5), the compiler
+looks for the effective decision (the route's, else the controller's) and reports ZNIGHT023 at the
+route decorator when there is none, related to the group definition and the controller. Guards
+declare the decisions they enforce with a static `enforces: readonly RouteDecoratorInfo[]`
+(`GuardEnforcement`), read at boot (§9.1).
+
 **Impl.** routes are not inherited: route decorators on a class without `@Controller` (e.g. a base
 class) are ZNIGHT005; a route decorator created in a `.d.ts` (its key is not readable) is ZNIGHT005.
+
+### `@znight/openapi`
+
+| Decorator / function                                                                               | Target                                                                                                                  |
+| -------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `@OpenApiDocument(options?)`                                                                       | class (one per application, never instantiated) — static `OpenApiDocumentOptions` (`security`, `decisions`: value refs) |
+| `@ApiOperation({ summary?, description?, operationId?, deprecated?, externalDocs?, extensions? })` | method — static                                                                                                         |
+| `@ApiTags(...names)`                                                                               | class / method — static strings                                                                                         |
+| `@ApiResponse<T>(status, options?)`                                                                | method, repeatable — status static (`404`, `'4XX'`, `'default'`), options static except `schema` (value); `T` read      |
+| `@ApiBody<T>(options?)` `@ApiQuery<T>(name, options?)`                                             | method — what a handler reads outside its signature; options static except `schema` (value); `T` read                   |
+| `@ApiHeader<T>(name, options?)`                                                                    | class / method — a header read by a guard or an interceptor                                                             |
+| `@ApiSecurity(...requirements)`                                                                    | class / method — value refs to `securityScheme()` constants, arrays of them (AND) or `{ scheme, scopes }`; none: public |
+| `@ApiExclude()`                                                                                    | class / method — not documented                                                                                         |
+| `securityScheme(name, definition)`                                                                 | a top-level `const` (static arguments): an OpenAPI Security Scheme Object referenced by value                           |
+
+Type arguments are read by the compiler (§6.5 `typeArgs`), never at runtime. `@Api*` outside a
+controller or route handler, invalid static values and a second `@OpenApiDocument` are ZNIGHT030.
+
+### `@znight/schedule`
+
+| Decorator                     | Target                                                                                                                                                                |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@Cron(expression, options?)` | method — static expression (5 or 6 fields, names, `L`, `5L`, `MON#2`, nicknames); static `{ name?, enabled?, lock?, maxDuration?, overlap?, runOnStart?, timeZone? }` |
+| `@Interval(every, options?)`  | method — static `Duration` (ms or `'30s'`, epoch-aligned); options as `@Cron` without `timeZone`                                                                      |
+| `@Timeout(delay, options?)`   | method — static `Duration` after the scheduler started; `{ name?, enabled?, lock?, maxDuration? }`                                                                    |
+
+A job is a public instance method declared by its class (not inherited), taking no parameter or one
+`ctx: JobContext`; the host is any provider, or becomes a singleton provider through
+`AnalyzeContext.addRoot` (§6.5). Several triggers on one method each need a `name`; a method cannot
+be a job and a route or message handler (ZNIGHT005). Names match `^[\w$][\w.:$-]{0,127}$`, default
+`<Class>.<method>`, and are unique across the application and its libraries (ZNIGHT041). Every
+invalid expression, duration, time zone or option is ZNIGHT040, located in the faulty field of a
+literal.
 
 ### `@znight/messaging`
 
@@ -884,7 +967,10 @@ package root:
   providers with token, kind (`class` / `provides`), class identity and import route, provided type,
   heritage closure, scope, name/primary, async/dispose, lifecycle members, injection points (encoded
   `TypeInfo` + qualifier + optional), interceptor chains with options, extension edges and
-  `bindInjection` requests, and the data stored by extensions. Identities are translated to the
+  `bindInjection` requests, the data stored by extensions and, optionally, `roots` (the sorted tokens
+  of the providers declared with `AnalyzeContext.addRoot`, absent when there is none, so the output of
+  a library without roots is unchanged; the application keeps them under `prune` and never reports
+  them as unused). Identities are translated to the
   package's public exports; values JSON cannot represent are tagged (`{ "$znight": "bigint", ... }`).
   Referenced by `"znight": { "providers": "./dist/znight.providers.json" }`; the application
   compiler merges fragments before binding and validates their dependencies against its own
@@ -938,10 +1024,17 @@ interface DecoratorSpec {
   kind, visibility, `privateName`, `computed`, static, abstract, async, generator, optional,
   decorators, params, return type, type parameters), `properties` (name, visibility, readonly,
   optional, declare, accessor, decorators, type, `initializer: ArgInfo`), `superClass`, `heritage`
-  closure, `lifecycle`, `decorated`, `declaration`.
-- `DecoratorInfo`: `{ identity, name, owner, args: ArgInfo[], called, target, location, node }`;
-  `ParameterInfo`: `{ name, index, type, optional, hasDefault, rest, decorators, location,
-  typeLocation, property }`.
+  closure, `lifecycle`, `decorated`, `declaration`. Classes, methods, properties and parameters also
+  carry `doc: DocComment | undefined`: the JSDoc block before the declaration, found through
+  decorators and `export` / `default` / `declare` modifiers: `{ text, summary, description, tags:
+  { name, text, location }[], location }`, where `summary` is the first paragraph of `text` (its
+  lines joined) and `description` the rest; `@example` blocks keep their line breaks.
+- `DecoratorInfo`: `{ identity, name, owner, args: ArgInfo[], typeArgs: TypeInfo[], called, target,
+  location, node }` (`typeArgs`: the resolved type arguments of the call, `@ApiResponse<Book[]>(200)`,
+  erased at runtime); `ParameterInfo`: `{ name, index, type, optional, hasDefault, initializer, rest,
+  decorators, location, typeLocation, property, doc }`, where `initializer` is the default value
+  evaluated like a `value` argument (`limit = 20`), never reported, `undefined` without default
+  (and for compiled libraries: declaration files do not keep default values).
 - `ArgInfo`: `{ kind, evaluated, value?: StaticValue, ref?: ValueRef, error?, location, text, node }`
   (`evaluated` distinguishes an evaluated `undefined` from a non-evaluable argument).
 - `AnalyzeContext`: `extension`, `project`, `options`, `types` (`format`, `serialize`, `equals`,
@@ -950,7 +1043,23 @@ interface DecoratorSpec {
   role? }) → ClassRef | undefined` (auto-registers injectable helper classes such as guards),
   `bindInjection(request, { from? }) → BindingHandle` (read back with `binding(handle)`),
   `addDependency(from, to, { location?, reason? })`, `classInfo(identity)`, `report(diagnostic)`,
-  `store(data)` (appended, read back as `stored`).
+  `store(data)` (appended, read back as `stored`), `addRoot(cls, { reason?, location? }) → Token` and
+  `definitionsOf(callee) → DefinitionInfo[]` (below).
+- **Roots** (`addRoot`): declares a class the extension's plugin uses at runtime although no binding
+  reaches it (a class whose only entry point is a `@Cron` method). Its provider is a root of
+  ZNIGHT019 and `prune` (§4.8), also through compiled libraries (§6.4). When no provider decorator
+  (core or extension) registers the class by the end of the analysis, it is registered as a
+  singleton with constructor injection (`registeredBy: 'auto'`, like the helper classes of
+  `resolveClassRef`), so a host already registered as `@Injectable`, `@Controller` or `@Consumer`
+  keeps its registration. Idempotent. `ApplicationGraph.roots: RootNode[]` (`{ token, origin, reason,
+  location }`, sorted by token then origin) lists them; it is always computed, also without
+  `reportUnused` or `prune`.
+- **Definitions** (`definitionsOf(callee)`, also in `ValidateContext`): the top-level `const`
+  declarations of the scanned files (application and source libraries) initialised with a call to
+  the function of canonical identity `callee` (`'@znight/http#createRouteDecorator'`), applied
+  anywhere or not, sorted by identity: `{ identity, name, displayName, file, location, call, args,
+  typeArgs, doc, exported }` (`args` evaluated as `value` arguments, nothing reported). Computed once
+  per compile and callee. **Impl.** compiled libraries and constants inside namespaces are not seen.
 - **Extension edges** (`addDependency`, `resolveClassRef({ from })`, `bindInjection({ from })`)
   count for ZNIGHT003 and ZNIGHT019/`prune`, never for ZNIGHT002 nor `resolutionOrder`: the plugin
   resolves them at runtime. **Impl.** consequence: a singleton controller using a request-scoped
@@ -958,7 +1067,37 @@ interface DecoratorSpec {
 - `CustomFactory`: `{ deps: InjectionRequest[]; async?: boolean; generate(ctx, { cls, deps }):
   GenNode }` — `deps` are bound with §4.7 and passed as nodes (`d[i]`).
 - `ValidateContext`: `extension`, `project`, `options`, `types`, `graph` (`ApplicationGraph`),
-  `stored`, `provider(token)`, `classInfo(identity)`, `binding(handle)`, `report(diagnostic)`.
+  `stored`, `provider(token)`, `classInfo(identity)`, `binding(handle)`, `report(diagnostic)`,
+  `definitionsOf(callee)`.
+- **Type shapes** (`types.shape(target, options?) → ShapeResult`, in the analyze, validate and
+  generate contexts): the structural view of a type annotation, what a value of that type looks like
+  once serialised as JSON, computed from declarations (sources and `.d.ts` alike, no type checker)
+  for schema generators such as `@znight/openapi`.
+  - Targets: `{ returnOf: MethodInfo }` (a top-level `Promise<T>` unwrapped), `{ parameter }`,
+    `{ property }`, `{ decorator, typeArgument }` (a type argument of a decorator call) and
+    `{ type: TypeInfo }` (aliases already expanded: less precise).
+  - `Shape`: keywords (`string`, `number`, `boolean`, `null`, `undefined`, `unknown`, `never`,
+    `date`, `bigint`, `binary`, `url`), `literal`, `array`, `tuple`, `object` (`properties` with
+    `optional`, `readonly` and `doc`, `additional` for index signatures and records), `union` /
+    `intersection` (normalised like `TypeInfo` unions), `named` (`key` of an interface, class, alias
+    or enum: recursion goes through named shapes), `schema` (`{ ref, io }`: a Standard Schema behind
+    one of `schemaAliases`, `z.output<typeof S>`), `reference` (a type listed in `keep`, not
+    expanded, with its `typeArgs` and `explicitTypeArgs`) and `opaque` (`{ text, reason }`).
+  - Interfaces are flattened with their `extends` and merged declarations; classes are their
+    serialised fields (parameter properties first; no methods, accessors, static, `#private` nor
+    TypeScript `private` members; a `toJSON()` method gives the shape of its annotated return type);
+    generics, the usual utility types (`Partial`, `Required`, `Readonly`, `Pick`, `Omit`, `Record`,
+    `NonNullable`, `Exclude`, `Extract`, `Awaited`), `keyof`, indexed access and mapped types over
+    literal keys are applied structurally.
+  - Options: `schemaAliases` (identity → `'input' | 'output'`, matched before alias expansion, also
+    through aliases of them), `schemaMembers` (members meaning the type of a schema value, ArkType
+    `typeof S.infer`), `keep` (identities kept as `reference`), `jsdoc` (default `true`).
+  - `ShapeResult`: `root`, `named` (every named shape reached, transitively, by key, sorted; a
+    declaration only used structurally is not listed) and `issues` (every `opaque` part and every
+    `bigint`, with a path, the key of the named shape declaring it and a location). Results are
+    cached per compile and options; named shapes and issues are shared objects (de-duplicate issues
+    by identity); the files read are part of `watchFiles`. The extension decides the severity of
+    issues.
 - `GenerateContext`: pure builders `lit`, `obj`, `arr`, `ref`, `member`, `call`, `construct`,
   `arrow` (typed parameters), `code` (tagged template escaping every interpolation) — also available
   as `createGenBuilders()` — plus `importValue` / `importType(ValueRef | ArgInfo | ClassInfo |
@@ -997,11 +1136,14 @@ Manifests of the `@znight/*` packages:
 | `@znight/messaging`     | `@znight/messaging/compiler` | `MessageBroker` (singleton), `InboundMessage` (request) → `MessagingPlugin`                                                              | —                                                                                              |
 | `@znight/config`        | `@znight/config/compiler`    | `ConfigSource` → `ConfigPlugin` (singleton)                                                                                              | —                                                                                              |
 | `@znight/observability` | —                            | `Logger`, `MetricsRegistry`, `Tracer`, `LoggedInterceptor`, `TracedInterceptor`, `MetricInterceptor` → `ObservabilityPlugin` (singleton) | `Logged` → `LoggedInterceptor`, `Traced` → `TracedInterceptor`, `Metric` → `MetricInterceptor` |
+| `@znight/openapi`       | `@znight/openapi/compiler`   | `OpenApi` → `OpenApiPlugin` (singleton)                                                                                                  | —                                                                                              |
+| `@znight/schedule`      | `@znight/schedule/compiler`  | `SchedulerRegistry` (singleton), `JobContext` (request) → `SchedulePlugin`                                                               | —                                                                                              |
 
 `@znight/compiler`, `@znight/testing` and `@znight/cli` have no manifest. Subpath exports:
 `@znight/http` (`/node`, `/fastify`, `/express`, `/hono`, `/path`, `/compiler`), `@znight/messaging`
-(`/memory`, `/rabbitmq`, `/sqs`, `/kafka`, `/compiler`), `@znight/config` (`/compiler`); the CLI has
-the `znight` bin.
+(`/memory`, `/rabbitmq`, `/sqs`, `/kafka`, `/compiler`), `@znight/config` (`/compiler`),
+`@znight/openapi` (`/compiler`, `/emit`, `/vite`, `/testing`; RFC 0002), `@znight/schedule`
+(`/compiler`, `/testing`; RFC 0004); the CLI has the `znight` bin.
 
 ## 8. Core runtime (`@znight/core`)
 
@@ -1126,6 +1268,10 @@ interface Plugin {
   onReady?(ctx: PluginContext): void | Promise<void>
   onStop?(ctx: PluginContext): void | Promise<void> // stop ingress and drain in-flight work
   onDispose?(ctx: PluginContext): void | Promise<void> // release infrastructure (connections, flush)
+  initRoots?(context: PluginRootsContext): readonly ProviderKey[] // boot roots of restricted boots (§10)
+}
+interface PluginRootsContext {
+  readonly metadata: ZnightMetadata // the metadata the application will be created with
 }
 interface PluginContext {
   readonly app: Application
@@ -1140,6 +1286,16 @@ interface PluginContext {
 Plugin options MAY be a function of the container (`PluginOptions<O> = O | ((c: Container) => O)`,
 resolved with `resolveOptions`), e.g. `HttpPlugin.configure(c => ({ port: c.get(AppConfig).port }))`;
 by convention it is evaluated in `onBootstrap` (exception: `ObservabilityPlugin`, §9.4).
+
+`initRoots(context)` lists the providers (classes or tokens) a plugin needs at boot although the
+metadata does not make them entry points: classes given in its options (`HttpPlugin`'s global
+`guards`, `interceptors`, `exceptionMappers`, `OpenApiPlugin`'s `guards`), or providers it derives
+from its own metadata section. It is read by tools that restrict the boot (`init: { only }`), such as
+`TestApp` (§10), which create these providers at boot with their dependencies, since an async
+factory cannot run on demand. The application never calls it. It is called before the application
+is created (before `register`), possibly several times: it MUST be cheap and side-effect free, and
+SHOULD NOT throw (invalid options are reported by `onBootstrap`). Options given as a function of
+the container cannot be read yet: it returns what is known (`[]`).
 
 Sequence:
 
@@ -1185,6 +1341,7 @@ interface ZnightHooks {
   'http:request': HttpRequestEvent // produced by @znight/http
   'messaging:message': MessageDeliveryEvent // produced by @znight/messaging (one delivery)
   'messaging:publish': MessagePublishEvent // produced by @znight/messaging (MessageBroker.publish)
+  'schedule:run': ScheduledRunEvent // produced by @znight/schedule (one occurrence of a job)
 } // augmentable by third-party packages
 class Hooks {
   on<K>(name: K, listener: (event) => unknown): () => void
@@ -1196,7 +1353,7 @@ class Hooks {
 }
 ```
 
-- The three hooks and their event types live in `@znight/core`, so producers and observers share
+- The four hooks and their event types live in `@znight/core`, so producers and observers share
   them without depending on each other. Event shapes:
   - `HttpRequestEvent`: `method`, `path`, `route` (pattern, `undefined` when unmatched),
     `requestId`, `headers`, `context` (`HttpContext`), `startTime`, `responseHeaders` (mutable),
@@ -1205,12 +1362,20 @@ class Hooks {
     `handler`, `message` (`InboundMessage`), `startTime`, `outcome?` (`ack` / `retry` /
     `dead-letter`), `error?`;
   - `MessagePublishEvent`: `queue`, `type`, `messageId`, `headers` (mutable until `next()`: wrappers
-    add trace context), `startTime`, `error?`.
+    add trace context), `startTime`, `error?`;
+  - `ScheduledRunEvent`: `job`, `kind` (`cron` / `interval` / `timeout`), `host` and `method`
+    (`undefined` for dynamic jobs), `runId`, `trigger` (`schedule` / `start` / `manual` / `queued`),
+    `scheduledAt` (epoch ms of the occurrence, scheduler clock), `context` (the `JobContext`,
+    `undefined` when the run did not execute), `startTime`, `outcome?` (`completed` / `failed` /
+    `skipped` / `not-acquired`), `error?`, `aborted?` (`timeout` / `lock-lost` / `removed` /
+    `shutdown`). Executed runs are wrapped with `run`, then emitted; occurrences that do not execute
+    (skipped, lock not acquired, lock store failure) are only emitted.
 - Listeners are called synchronously in registration order; a failing listener is logged and never
   affects the emitter. Producers call `run` when there are wrappers and `emit` after it when there
   are listeners.
 - `run()` resolves with `fn`'s result; values returned by wrappers are ignored; when a wrapper does
-  not call `next()`, the operation does not run and `run()` resolves `undefined`.
+  not call `next()`, the operation does not run and `run()` resolves `undefined` (a `schedule:run`
+  wrapper vetoes the run that way: outcome `skipped`).
 - Registration is copy-on-write: emitting allocates nothing.
 
 ### 8.4 AOP
@@ -1250,23 +1415,27 @@ intercepted. The top-most decorator is the outermost interceptor. Interceptors M
 ## 9. Feature runtime contracts
 
 Common rules: each feature plugin is created with `XxxPlugin.configure(options)`, has a fixed `name`
-(`http`, `messaging`, `config`, `observability`), and provides the externals declared in its manifest
-(§7) during `register`. `HttpPlugin`, `MessagingPlugin` and `ObservabilityPlugin` also accept a
-function of the container (§8.2); `ConfigPlugin` only takes an object, since it loads the
-configuration in `register`, before any provider exists.
+(`http`, `messaging`, `config`, `observability`, `openapi`, `schedule`), and provides the externals
+declared in its manifest (§7) during `register`. `HttpPlugin`, `MessagingPlugin`,
+`ObservabilityPlugin`, `OpenApiPlugin` and `SchedulePlugin` also accept a function of the container
+(§8.2); `ConfigPlugin` only takes an object, since it loads the configuration in `register`, before
+any provider exists.
 
 ### 9.1 HTTP (`@znight/http`)
 
 ```ts
 interface HttpMetadata {
   controllers: HttpControllerDefinition[]
+  // route decorator groups (RFC 0001), only when some group needs it: required, several keys, or a
+  // name different from its key; groups and keys sorted. A key listed nowhere is its own group.
+  groups?: Record<string, { keys: string[]; required: boolean }>
 }
 interface HttpControllerDefinition {
   token
   basePath // normalised, '/' when absent
   guards: Token[]
   interceptors: Token[]
-  meta: Record<string, unknown> // createRouteDecorator on the class
+  meta: Record<string, unknown> // createRouteDecorator on the class: the default decision of each group
   routes: HttpRouteDefinition[]
 }
 interface HttpRouteDefinition {
@@ -1276,13 +1445,24 @@ interface HttpRouteDefinition {
   handler: string
   status?: number // @HttpCode
   headers?: Record<string, string> // @Header, lower-case names
-  meta: Record<string, unknown> // merged over the controller meta at runtime
+  meta: Record<string, unknown> // merged over the controller meta at runtime, one decision per group (the route's wins)
   guards: Token[]
   interceptors: Token[]
   params: {
     index
-    source: 'param' | 'query' | 'body' | 'headers' | 'request' | 'response' | 'context' | 'file' | 'files'
-    name? // param / query key / header name / multipart field (file, files)
+    source:
+      | 'param'
+      | 'query'
+      | 'body'
+      | 'headers'
+      | 'request'
+      | 'response'
+      | 'context'
+      | 'file'
+      | 'files'
+      | 'cookie'
+      | 'signedCookie'
+    name? // param / query key / header name / multipart field (file, files) / cookie name
     type? // readable form, only for coerced values
     optional?
     schema?: boolean
@@ -1298,6 +1478,7 @@ interface HttpRouteDefinition {
     mimeTypes?: string[] // 'image/png', 'image/*'
   }[]
   rawResponse?: boolean // @Res()
+  sse?: { heartbeat?: number; retry?: number; maxDuration?: number } // @Sse (GET); heartbeat 0: none
   invoke: (controller: any, ctx: HttpContext) => unknown
 }
 ```
@@ -1313,15 +1494,23 @@ await ctx.parseBody(), 'body')`. Upload parameters read `ctx.files` through the 
 imported by the generated module only when a route uses it: `@UploadedFile('avatar') avatar: File` →
 `uploads.file(ctx, 'avatar')` (400 `Missing file "avatar"` when absent; `optionalFile` for an
 optional parameter, `files` / `optionalFiles` for `@UploadedFiles`; `undefined` field = every
-field). `@Body()` on an upload route receives the text fields. Unused `ctx` is omitted.
+field). `@Body()` on an upload route receives the text fields. Cookie parameters read
+`ctx.cookies['name']` (`@Cookie`) or `ctx.signedCookie('name')` (`@SignedCookie`) with the label
+`cookie "name"` (`coerce.X`, `coerce.optional` or `await validate(S, ..., 'cookie "name"')`), the
+whole record `ctx.cookies` (`validate(S, ctx.cookies, 'cookies')` with a schema). Unused `ctx` is
+omitted.
 
 Pipeline (normative), per request — matched or not:
 `container.runInScope({ HttpContext, RequestId }) → hooks.run('http:request', event, () =>
-global guards → controller guards → route guards → body parsing (routes with a @Body() or upload
+[CORS preflight: answered here] → global guards → controller guards → route guards → body parsing (routes with a @Body() or upload
 parameter; multipart bodies are parsed as they stream in, upload rules enforced on the fly) →
 global/controller/route interceptors (outermost first) → invoke (extract → coerce → validate →
-handler) → serialise)`. `@Validate(S)` alone parses the body in `invoke`. Exceptions are mapped to
-a response inside `hooks.run` and `event.status` / `event.error` are set before it resolves. The
+handler) → serialise (files, event streams opened))`. `@Validate(S)` alone parses the body in
+`invoke`. Exceptions are mapped to a response inside `hooks.run` and `event.status` /
+`event.error` are set before it resolves. The response is completed last: `event.responseHeaders`
+(each only when absent), the cookies appended to `set-cookie` (below), then the request id, the
+CORS headers and the security headers, each only when absent (below); `@Res()` raw replies get
+none of them. The
 request scope (request-scoped instances) and the in-flight count last until a streamed response
 body (a file or `Blob` included) has been fully read or cancelled by the adapter; stream sources are
 read in the async context of the handler (request-scoped providers and tracing keep working).
@@ -1395,22 +1584,174 @@ read in the async context of the handler (request-scoped providers and tracing k
 - Request ids: the `requestIdHeader` (default `x-request-id`) is reused when the client sends a
   valid one (≤ 128 characters of `[A-Za-z0-9_\-.:@/+=]`) and echoed on every response; `false` always
   generates (`generateRequestId`, default `crypto.randomUUID()`) and never echoes.
+- **Route decisions** (RFC 0001). The effective metadata of a route is the controller's entries whose
+  group the route does not decide, then the route's entries (`groupOf(key)` = the group listing the
+  key in `groups`, else the key itself; without groups this is the former key-by-key merge). It is
+  computed once at boot and frozen; `ctx.route.meta`, `decorator.get(ctx)` and `HttpPlugin.routes`
+  read it. `httpMetadata()` validates `groups` (an object of `{ keys, required }`: non-empty unique
+  string keys, a boolean, a key in at most one group) and hand-written metadata with two keys of one
+  group on the same target: ZNIGHT007.
+- **Boot check of decisions** (normative). In `onBootstrap`, once the routes are registered, every
+  controller route (HEAD and trailing-slash variants ignored) and every plugin route is checked:
+  - its **chain classes** are the classes of its guards: a global guard given as a class, or the
+    `constructor` of a global guard instance; controller and route guards through
+    `metadata.providers[token].class` (the compiled class: a guard replaced through `overrides` keeps
+    its declaration); a guard without class (built by a factory) enforces nothing. The static
+    `enforces` of each chain class MUST be an array of `{ key: string, group: string, required:
+    boolean }` (ZNIGHT005 naming the guard), consistent with `groups` (ZNIGHT005);
+  - `enforced(route)` = the groups listed by its chain classes; `known` = the groups enforced by any
+    chain; `required` = the required groups of `groups`, plus the groups of `enforces` entries and of
+    plugin route `meta` entries with `required: true` (a group can be known at boot only, e.g. an
+    auth package shared between services); `decided(route)` = the groups of its effective metadata;
+  - problems: `required − decided(route)` (no decision) and `(decided(route) ∩ (required ∪ known)) −
+    enforced(route)` (a decision no guard enforces). With `enforcement: 'error'` (default) every
+    problem goes into **one** ZNIGHT023 `ZnightError` listing the routes by group, with hints (the
+    plugin of a plugin route, `enforcement: 'warn'` for tests); with `'warn'`, one `logger.warn` per
+    group.
+- **CORS** (option `cors`, off by default; policy in `cors.ts`, identical on every adapter). Options
+  `{ origin, credentials?, methods?, allowHeaders?, exposeHeaders?, maxAge? }` are validated at boot
+  (ZNIGHT005): `origin` is required (`'*'`, an origin, a `RegExp`, a list of them, or a possibly
+  async function); a string other than `'*'` MUST equal `new URL(value).origin` with `http:` or
+  `https:` (no path, trailing slash or default port); `'null'` is refused; a `RegExp` is anchored
+  with `^` and `$` around every alternative and has no `g` / `y` flag; `credentials: true` is refused
+  with `'*'` and with `allowHeaders: '*'`; methods and header names are HTTP tokens; `maxAge` is an
+  integer in 0..86400 (default 600); `exposeHeaders` defaults to the request id header.
+  - The origin decision is made once per request carrying `origin`, before the hook runs: exact
+    match, anchored `RegExp` test, or the awaited function (a throw or rejection denies, logged at
+    `error`).
+  - A **preflight** (`OPTIONS` with `origin` and `access-control-request-method`) is answered inside
+    `hooks.run('http:request')` and never runs guards, interceptors or handlers, even when an
+    `@Options` or `@All` route matches: a path without route → 404 and a denied origin → 403 `CORS
+    origin not allowed` (both without CORS headers); otherwise 204 with
+    `access-control-allow-origin` (`*` for the wildcard, else the request origin),
+    `access-control-allow-credentials` (with `credentials`), `access-control-allow-methods`
+    (`methods`, else the methods of `allow`), `access-control-allow-headers` (`allowHeaders`, else
+    the requested list when it is a valid token list), `access-control-max-age`, `allow` and
+    `vary: origin, access-control-request-method, access-control-request-headers`. `event.route`
+    is `undefined` for a preflight.
+  - Every other reply to an allowed origin (2xx, guard 401/403, 404, 405, 413, 500, automatic
+    `OPTIONS`, redirects) gets `access-control-allow-origin`, `access-control-allow-credentials` and
+    `access-control-expose-headers` unless already set; `vary: origin` is merged, token by token,
+    into every reply unless `origin` is exactly `'*'`. A denied origin on a request that is not a
+    preflight is served normally, without CORS headers. `@Res()` raw replies are not touched.
+- **Security headers** (option `securityHeaders`, default `true`): `content-security-policy:
+  default-src 'none'; frame-ancestors 'none'`, `x-frame-options: DENY`, `x-content-type-options:
+  nosniff`, `referrer-policy: no-referrer`; opt-in `strict-transport-security` (`true`:
+  `max-age=31536000; includeSubDomains`; `preload` needs `includeSubDomains` and a `maxAge` of at
+  least a year), `cross-origin-resource-policy` and `cache-control`. An object merges over the
+  defaults, `false` disables them. Values are validated at boot (ZNIGHT005; `referrerPolicy` against
+  the standard tokens) and computed once into a frozen record, added last to every reply that does
+  not set them (`@Res()` raw replies excepted), so they lose to the handler, an interceptor, an
+  exception or a hook wrapper.
+- **Trusted proxies** (option `trustProxy`, default `false`). `false`: `ctx.ip` is the adapter's
+  `request.ip` (Fastify and Express apply their own proxy settings) and `ctx.protocol` comes from
+  `request.encrypted`. A number (an integer ≥ 1) or a list of IPv4 / IPv6 addresses, CIDR ranges and
+  the aliases `loopback` (127.0.0.0/8, ::1/128), `private` (10.0.0.0/8, 172.16.0.0/12,
+  192.168.0.0/16, fc00::/7) and `linklocal` (169.254.0.0/16, fe80::/10) walk the list
+  `[remoteAddress ?? ip, ...x-forwarded-for from right to left]`: with a number, the client is the
+  entry at that index (the leftmost when the list is shorter); with a list, the walk continues while
+  addresses are trusted, and the first untrusted one is the client (the leftmost when all are
+  trusted). IPv4-mapped IPv6 addresses are normalised; a malformed entry (`ip:port` included) stops
+  the walk at the last valid address. When the socket peer is trusted, `ctx.protocol` is the
+  leftmost `x-forwarded-proto` value when it is `http` or `https`; otherwise the protocol of the
+  connection. `true`, a negative or fractional number and an invalid CIDR are ZNIGHT005. The
+  `Forwarded` header is not read.
+- **Plugin routes** (`PluginHttpRoutes`). A plugin implementing `httpRoutes({ prefix, container }):
+  readonly PluginRoute[]` has it called once in `HttpPlugin.onBootstrap`, after `container.init()`
+  and after the compiled routes, whatever the plugin order. A `PluginRoute` is `{ method, path,
+  name, handler: (ctx) => unknown, meta?: RouteMetaEntry[], guards?: GuardRef[] }`: `path` follows
+  the controller grammar, relative to the prefix; `meta` entries (`decorator.meta(value)`, one per
+  group) are the route metadata. The routes are registered through `adapter.registerRoute` in the
+  same pipeline: hook, request scope, global guards, then the route's `guards`, the handler and the
+  exception mappers; global interceptors do not wrap them; the body is read lazily; `GET` answers
+  `HEAD`. An invalid route or a collision with another route is ZNIGHT007 naming the plugin. The
+  plugin name is `ctx.route.controller` and the `source` of the route summary.
+- **Cookies** (RFC 0006; `cookies.ts` is import-free). Request: the `cookie` header is split on `;`
+  only, pairs trimmed, quoted values unquoted, `%` sequences decoded (malformed: kept raw); pairs
+  without `=` or with an empty name are ignored; the first occurrence of a name wins; repeated
+  `cookie` fields are joined with `; `. `ctx.cookies` is a frozen prototype-less record parsed on
+  first access, in linear time. Response: `ctx.setCookie(name, value, options?)` /
+  `ctx.clearCookie(name, options?)` validate everything at call time (`TypeError` / `RangeError`) and
+  feed the context jar, sent with **every** reply of the request (errors, guard rejections, redirects,
+  automatic `OPTIONS`); `HttpResponse.withCookie()` / `withoutCookie()` validate what does not
+  depend on the plugin at call time and the rest when the reply is serialised (a violation: a plain
+  500 logged as `Invalid cookie "x": …`). Serialisation (RFC 6265bis): name an RFC 9110 token, value
+  canonically percent-encoded (`encode(decode(v)) === v`), `name=value` ≤ 4096 bytes after signing,
+  `Domain` / `Path` ≤ 1024 bytes; `SameSite=None` and `Partitioned` require `Secure`; the prefixes
+  `__Secure-`, `__Host-` (`Secure`, `Path=/`, no `Domain`), `__Http-` and `__Host-Http-` (also
+  `HttpOnly`) are enforced, case-insensitively. Defaults `Path=/; Secure; HttpOnly; SameSite=Lax`,
+  host-only, merged with `cookies.defaults`. A reply carries one jar keyed by (name, domain, path):
+  a later cookie of the same key replaces the earlier one in place, the `HttpResponse` jar wins over
+  the context jar, and `set-cookie` holds the raw values first (`@Header`, `ctx.setHeader()` /
+  `appendHeader()`, `HttpResponse` headers, a Web `Response`), then the jar, one field line per
+  cookie on every adapter. Once the headers are sent (a running event stream), `setCookie()` /
+  `clearCookie()` throw. Signed cookies: `<encoded value>.<base64url(HMAC-SHA256(secret,
+  "<name>=<encoded value>"))>`, verified in constant time against every secret of
+  `cookies.secrets` (each ≥ 32 bytes, no duplicate; the first signs); an invalid signature makes the
+  cookie absent. A compiled route reading `@SignedCookie` without secrets fails the boot (ZNIGHT006);
+  `ctx.signedCookie()` and `{ signed: true }` without secrets throw. `plugin.signCookie(name, value)`
+  returns the signed wire value.
+- **Server-Sent Events** (RFC 0006; `sse.ts`). An `@Sse` route's awaited result that is an
+  `AsyncIterable`, a non-string `Iterable` or a `ReadableStream` (of `SseEvent` objects, or
+  `Uint8Array` chunks written as is) is served as an event stream; an `HttpResponse` or a Web
+  `Response` is sent as usual; anything else is a logged 500. `HttpResponse.sse(source, options?)`
+  serves one from any route and method (200 by default, `@HttpCode` / `withStatus()` honoured
+  outside `@Sse`; its options win over the route's). Effective options: the `HttpResponse.sse()`
+  options, then the route's `sse`, then the plugin `sse` (`heartbeat` 8 000, no `retry`).
+  Headers: `cache-control: no-cache, no-transform` and `x-accel-buffering: no` first (overridable),
+  `content-type: text/event-stream; charset=utf-8` last; never `content-length`. Each event is one
+  chunk (WHATWG framing: comment lines, `id`, `event`, `retry`, one `data:` line per line of the
+  data, CR / LF / CRLF split; non-string data through `JSON.stringify`; `event` without `data` gets
+  an empty `data:`; an invalid item is a `TypeError` that stops the source). Lifecycle (normative):
+  the first chunk (`retry: N`, else the comment `:`) is written without reading the source; the
+  source is pulled once per chunk the client reads (no read-ahead); a heartbeat comment is sent after
+  `heartbeat` ms without an event, never inside raw bytes that do not end at an event boundary; a
+  source error ends the response cleanly and is logged; a client disconnect aborts `ctx.signal`
+  (`client`) and stops the source (`return()` / `cancel()`), the scope closing once it stopped or
+  after 5 s with a warning; `maxDuration` and shutdown close gracefully: `ctx.signal` aborts
+  (`expired` / `shutdown`), the source is still read for `sse.shutdownGraceMs` (1 000), then
+  `retry: R` with R drawn in `[r, 2r]` (r = the `retry` option, else 3 000) ends the stream; `HEAD`
+  sends the headers and never reads the source. `http:request` resolves when the stream opens; the
+  request scope and the in-flight count last until it ends. Guards run once, before the stream;
+  exception mappers only apply before it starts. `plugin.streams` counts the open streams.
+  `EventChannel` (bounded `capacity`, `overflow` `drop-oldest` / `drop-newest` / `close`, `signal`)
+  bridges push sources; `encodeSseEvent()` and `parseSseStream()` (WHATWG parsing) are exported.
+- **`ctx.signal`** exists on every route (created on first access): it aborts when the client
+  disconnects before the response was written (`AdapterRequest.onAbort`), when the response body is
+  cancelled, or when the server closes an event stream; never after a normal completion. Its reason
+  is a `RequestAbortedError` (`name: 'AbortError'`, `kind: 'client' | 'shutdown' | 'expired'`).
+  Ordinary in-flight requests are not aborted on shutdown: they drain.
 - `HttpPlugin.configure({ adapter, port, host, prefix, guards, interceptors, exceptionMappers,
   trailingSlash, exposeErrors, bodyLimit, uploads, requestIdHeader, generateRequestId,
-  drainTimeoutMs })` (defaults: built-in `nodeAdapter()`, `3000`, `0.0.0.0`, `strict`, `false`,
-  1 MiB, the upload limits above, `x-request-id`, 4 000 ms); class refs are resolved with
-  `container.tokenOf`. The instance exposes `inject`, `address`, `routes`, `adapter`, `inflight`
-  and `initRoots()` (the classes of its `guards`, `interceptors` and `exceptionMappers` options,
-  `[]` when the options are a function of the container: the `PluginInitRoots` contract of §10).
+  drainTimeoutMs, cors, securityHeaders, trustProxy, enforcement, cookies, sse })` (defaults: built-in
+  `nodeAdapter()`, `3000`, `0.0.0.0`, `strict`, `false`, 1 MiB, the upload limits above,
+  `x-request-id`, 4 000 ms, no CORS, `true`, `false`, `'error'`, no secrets and the secure cookie
+  defaults, `{ heartbeat: 8000, shutdownGraceMs: 1000 }`); `cookies` is `{ secrets?, defaults? }`,
+  `sse` is `{ heartbeat?, retry?, shutdownGraceMs? }` with `shutdownGraceMs` < `drainTimeoutMs`
+  (invalid values and unknown keys: ZNIGHT005); class refs are resolved with `container.tokenOf`.
+  The options are resolved once per application. The instance exposes
+  `inject`, `injectStream`, `injectSse`, `streams`, `signCookie`, `address`, `adapter`, `inflight`,
+  `prefix` (the resolved prefix, `''` or `/api`:
+  readable at any time with object options, from the `onBootstrap` of any plugin with a function of
+  the container), `routes` (frozen `HttpRouteSummary[]`: `{ method, path, controller, handler,
+  source, meta, guards }`, `path` with the prefix, `source` `'controller'` or the name of the plugin,
+  `meta` the effective metadata, `guards` the display names of the chain in order: global,
+  controller, route; HEAD and trailing-slash variants included) and `initRoots()` (the classes of
+  its `guards`, `interceptors` and `exceptionMappers` options, `[]` when the options are a function
+  of the container: §8.2, §10).
   A plugin instance serves one application at a time (it can serve another one once the previous
   application stopped; registering it in a second running application is ZNIGHT004 "Call
   HttpPlugin.configure() once per application"); an adapter instance serves a single application
   (bootstrapping it again is ZNIGHT021: create adapters per application, e.g.
   `HttpPlugin.configure(() => ({ adapter: fastifyAdapter() }))`).
-- Lifecycle: `register` declares the request-scoped externals; `onBootstrap` resolves options and
-  registers routes (ZNIGHT007 / ZNIGHT001 at boot); `onStart` listens; `onStop` drains: stops
-  accepting connections, closes idle ones, answers with `connection: close`, waits for in-flight
-  requests (streamed and file responses included) up to `drainTimeoutMs` (keep it below
+- Lifecycle: `register` declares the request-scoped externals; `onBootstrap` resolves options,
+  registers the compiled routes, then the plugin routes, and runs the decision check (ZNIGHT007 /
+  ZNIGHT001 / ZNIGHT006 / ZNIGHT023 at boot); `onStart` listens; `onStop` drains: marks the pipeline
+  draining, closes the open event streams gracefully (`shutdown`: their sources get
+  `sse.shutdownGraceMs`, then a jittered `retry`; an event stream requested while draining is served
+  with its signal already aborted), stops accepting connections, closes idle ones, answers with
+  `connection: close`, waits for in-flight requests (streamed and file responses included) up to
+  `drainTimeoutMs` (keep `sse.shutdownGraceMs` < `drainTimeoutMs` <
   `hookTimeoutMs`; `Infinity`: no limit of its own, no timer; a finite value is capped at the timer
   range, 2^31 − 1 ms), then force-closes; `onDispose` closes the adapter.
 
@@ -1421,7 +1762,8 @@ interface HttpAdapter {
   setFallbackHandler(handler: FallbackHandler): void // unmatched requests and framework errors
   listen(port: number, host: string): Promise<HttpServerAddress> // port 0 = free port
   close(options?: { force?: boolean }): Promise<void> // graceful drain, or destroy connections
-  inject(request: InjectRequest): Promise<InjectResponse> // in-memory, same pipeline
+  inject(request: InjectRequest): Promise<InjectResponse> // in-memory, same pipeline; rejects an event stream
+  injectStream?(request: InjectStreamRequest): Promise<InjectStreamResponse> // resolves at the headers (the 4 built-in adapters)
 }
 ```
 
@@ -1430,13 +1772,16 @@ interface AdapterRequest {
   method
   url
   headers
-  ip
+  ip // the client address the adapter knows (socket, or its framework's proxy settings)
+  remoteAddress? // the socket peer, never from headers: the start of the trustProxy walk
+  encrypted? // TLS connection: ctx.protocol without a trusted proxy
   raw
   rawResponse
   readBody(limit: number): Promise<Uint8Array> // once; 413 past the limit (content-length first)
   streamBody?(limit: number): ReadableStream<Uint8Array> // pull-based, 413 past the limit, 400 on abort
   hasBody?(): boolean // asked only without content-length / transfer-encoding; false over HTTP/1.1
   rawStatus?(): number | undefined // status written through @Res()
+  onAbort?(listener: () => void): void // client gone before the response was written; never after a complete one
 }
 type ReplyBody = Uint8Array | ReadableStream<Uint8Array> | Blob | null // the plugin sends no Blob
 interface AdapterReply {
@@ -1445,6 +1790,7 @@ interface AdapterReply {
   body: ReplyBody // bytes, a stream (files too) or null
   blob?: Blob // the file `body` streams, for adapters able to send it natively
   raw?: boolean
+  eventStream?: boolean // text/event-stream: no idle timeout, no buffering, no compression
 }
 interface InjectRequest {
   method
@@ -1452,6 +1798,8 @@ interface InjectRequest {
   headers?
   body?
   query?
+  cookies? // name → value, sent in a cookie header after headers.cookie
+  signedCookies? // signed by HttpPlugin (first secret) and merged into cookies; never seen by adapters
 } // body: string | bytes | FormData | Blob | JSON value
 interface InjectResponse {
   status
@@ -1459,6 +1807,16 @@ interface InjectResponse {
   body: string
   bytes: Uint8Array
   json<T>(): T
+  cookies: Record<string, SetCookieInfo> // set-cookie parsed by name (the last one wins)
+}
+interface InjectStreamRequest extends InjectRequest {
+  signal?: AbortSignal // aborting it disconnects the client
+}
+interface InjectStreamResponse {
+  status
+  headers
+  cookies
+  body: ReadableStream<Uint8Array> // cancelling it disconnects the client
 }
 ```
 
@@ -1485,7 +1843,18 @@ optional peer): strings and bytes are sent as is (`text/plain` / `application/oc
 `content-type`), a `FormData` as `multipart/form-data` (boundary from the Fetch API encoding), a
 `Blob` / `File` with its type, other values as JSON; the response has the UTF-8 `body` and the raw
 `bytes` (downloads); `headers` holds lower-case names, repeated headers joined with `, ` except
-`set-cookie`, always an array (one entry per cookie: cookie values may contain `, `). Subpaths:
+`set-cookie`, always an array (one entry per cookie: cookie values may contain `, `), parsed into
+`cookies` (`parseSetCookie`). An event stream (`text/event-stream`) makes `inject` reject with a hint
+instead of waiting for its end. `HttpPlugin.injectStream(request)` (method defaulting to `GET`)
+resolves at the response headers; `HttpPlugin.injectSse(request)` builds on it and reads the stream
+like `EventSource`: `status`, `headers`, `cookies` once the first chunk was read, `body` / `json()`
+for a reply that is not an event stream, events read only when asked for (`next({ timeoutMs })`,
+2 000 ms by default, `take(n)`, async iteration), `comments`, `lastEventId`, `retry`, `done`,
+`close()` (a client disconnect; also `await using`) and `reconnect()` (the same request plus
+`last-event-id`). The adapters that write to a Node.js response (node, express, fastify through
+`reply.hijack()`, Hono on `@hono/node-server`) disable the socket timeout of an event stream
+(`setTimeout(0)`), and `honoAdapter().listen()` lifts `Bun.serve()`'s `idleTimeout` while it is
+sent. Subpaths:
 `@znight/http/node` (built-in, also the root default), `/fastify`, `/express`, `/hono` (`Bun.serve`
 on Bun, `@hono/node-server` on Node), `/path` (path grammar helpers). Request-scoped externals:
 `HttpContext` (and the branded string `RequestId`) are provided per request; `HttpPlugin` itself is
@@ -1745,9 +2114,17 @@ messages; the property itself keeps the real value. A `ConfigSource` never print
 `Logger`, `MetricsRegistry`, `Tracer`, `LoggedInterceptor`, `TracedInterceptor`,
 `MetricInterceptor`, replaces the core logger (`app.setLogger`, `component: 'znight'`, unless
 `logging.replaceCoreLogger: false`) and wraps `http:request` / `messaging:message` (request logs, RED
-metrics, spans with W3C trace-context) and `messaging:publish` (producer span, trace context
-injected into the message headers). Each part can be turned off: `metrics: false`, `tracing: false`,
-`logging.requests` / `logging.messages: false`, and per hook (`tracing.http`, `metrics.messaging`...).
+metrics, spans with W3C trace-context), `messaging:publish` (producer span, trace context
+injected into the message headers) and `schedule:run` (one span `schedule <job>` per executed run,
+the root of a new trace except for manual triggers; the `schedule_*` metrics: runs, duration,
+lateness, active runs, last success, with the `job` label capped at `maxJobs` then `_OTHER`; one log
+entry per run, written inside its span), and listens to `schedule:run` for the occurrences that did
+not execute (counters, `job skipped` / `job not acquired` entries). Inside a run, the logger adds
+`job` and `runId` (from the request-scoped `@znight/schedule#JobContext`; `logging.jobContext`).
+Each part can be turned off: `metrics: false`, `tracing: false`, `logging.requests` /
+`logging.messages` / `logging.jobs: false`, and per hook (`tracing.http`, `metrics.messaging`,
+`metrics.schedule`, `tracing.schedule`...). `@znight/schedule` is not a dependency: the hook events
+are typed by core (§8.3).
 `onStart`/`onStop` start and stop the `/metrics` server (`node:http`, default port 9464, only when
 metrics are enabled; `metrics.server: false` disables it); `onDispose` removes the wrappers, closes
 the server, flushes the tracer provider and the logger, then switches the logger to flushing every
@@ -1792,6 +2169,171 @@ the final `Application stopped` / `The application stopped with errors` entries 
   `register()` (a bad option fails `Application.create`). Instrumentation never changes the outcome
   of a request or method: a recording failure is reported once as a process warning and swallowed.
 
+### 9.5 OpenAPI (`@znight/openapi`)
+
+The compiler extension (`@znight/openapi/compiler`, RFC 0002) reads the data stored by
+`@znight/http/compiler` (`graph.extensions`: routes, parameters with their coercion plans and
+`defaultValue`, uploads, `sse`, effective metadata and groups), the JSDoc (`doc`), the decorator
+type arguments (`typeArgs`) and the type shapes of the compiler (`ctx.types.shape()`, §6.5), and
+generates `metadata.extensions.openapi` (format 1). Everything is JSON except the `schema` values of
+the slots (Standard Schemas imported by the generated module):
+
+```ts
+interface OpenApiMetadata {
+  version: 1
+  fingerprint: string // SHA-256 (base64url) of the section, schema values replaced by their names
+  document: OpenApiDocumentTemplate // openapi '3.1.1', info, servers?, tags?, externalDocs?, security?, x-*
+  operations: { controller: Token; handler; route; method; path; operation: OperationTemplate }[] // by path, then method
+  components: Record<string, SchemaTemplate> // JSON Schemas of TypeScript declarations, sorted
+  securitySchemes: Record<string, SecuritySchemeObject>
+  schemas: { name; schema: StandardSchemaV1; io: ('input' | 'output')[]; source? }[] // converted at assembly
+  errors?: { contentType: string; schema?: string } // absent with errors: false
+  tagDescriptions?: Record<string, string> // JSDoc of the controllers, by default tag
+}
+```
+
+- Where a schema is expected the compiler writes JSON Schema 2020-12 or a placeholder
+  `{ $znight: 'schema', name, io }`; in `parameters`, `{ $znight: 'parameters', in, name, io: 'input' }`
+  stands for one parameter per property of an object schema. The `$znight` key is reserved
+  (ZNIGHT030).
+- Inference (normative summary): one operation per route and method (`@All`: GET, POST, PUT, PATCH,
+  DELETE; automatic HEAD / OPTIONS are not documented); `:id` → `{id}`, `*` → `{wildcard}`; paths
+  never contain the HTTP prefix. Parameters from `@Param` / `@Query` / `@Headers` / `@Cookie` /
+  `@SignedCookie` (`in: cookie`) with the schema of their coercion plan and default value, or the
+  **input** schema of their Standard Schema. Request bodies from `@Body(S)` / `@Validate(S)` (input
+  schema) or the declared type, uploads as `multipart/form-data`. The success status is `@HttpCode`,
+  else 201 for POST, else 200 (204 for `void`); its content comes from the annotated return type
+  (`Promise` unwrapped, `HttpResponse<T>` as `T`, schema output aliases such as `z.output<typeof S>`
+  as the **output** schema, `string` as `text/plain`, bytes and streams as
+  `application/octet-stream`, `@Sse` routes as `text/event-stream` with `x-znight-event-schema`);
+  no annotation, `unknown`, a bare `HttpResponse`, a Web `Response` or `@Res()` is ZNIGHT031 unless
+  `@ApiResponse` documents it. Standard errors: 400 on routes that coerce or validate, 413 on routes
+  reading a body, 415 on upload routes, `HttpErrorBody` for declared 4XX / 5XX responses without
+  schema.
+- Security, first rule that applies: `@ApiSecurity` of the route, of the controller, the first
+  `decisions` entry whose route decorator is in the effective metadata (`scopes: 'value'` turns a
+  static string array value into scopes), else the document `security`.
+- Diagnostics ZNIGHT030–036 (§4.8). The extension never runs application code.
+
+`buildOpenApiDocument(metadata, options?)` (normative, pure, async) assembles the document: (1)
+converts each schema slot with the first converter that answers (the `converters` option, then
+Standard JSON Schema, then the `@valibot/to-json-schema` fallback), input and output separately;
+failures are collected into one ZNIGHT037 (or `{}` and a warning with `unrepresentable: 'warn'`);
+(2) names the converted schemas (`X`, plus `XInput` when input and output differ) and hoists their
+`$defs` into `components.schemas` (a name clash: ZNIGHT034); (3) adds the standard error
+components; (4) replaces the placeholders; (5) builds the operations and applies `filter`, pruning
+unreferenced components; (6) builds the root (`info` merged with the option, `servers`: the option,
+else the declared servers, else `[{ url: prefix }]`, plus `x-znight-fingerprint`) and applies
+`transform`; (7) deep-freezes it and
+serialises `json` (`JSON.stringify(document, null, 2)` plus a newline). It returns `{ document,
+json, warnings, stats }`. The same function runs at boot, in `znight openapi` and in tests, so the
+served document and the emitted file are byte-identical.
+
+`OpenApiPlugin.configure(options | (container) => options)` (name `openapi`):
+
+- `register` provides the `OpenApi` external (singleton: `document()`, `json()`, `yaml()`,
+  `operations`); `initRoots()` returns the classes of the `guards` option.
+- It serves its routes as **plugin routes** of `HttpPlugin` (`httpRoutes`, §9.1; no `http` plugin:
+  ZNIGHT030): `path` (`/openapi.json`), `yaml` (optional peer `yaml`), the UI page at `uiPath`
+  (`/docs`, Scalar or Swagger UI, local assets under `${uiPath}/_assets/` or a pinned CDN with
+  Subresource Integrity, `assets: 'auto' | 'local' | 'cdn'`) with its own
+  `content-security-policy` (inline script allowed by hash). The routes take `meta` (route
+  decisions, checked by the ZNIGHT023 boot check) and `guards`, and are listed with
+  `source: 'openapi'`.
+- The document is built in `onBootstrap` (`build: 'boot'`, a failure fails the boot) or on the first
+  request (`'first-request'`: one shared promise, retried after a failure); with
+  `document: { file }` it serves a prebuilt file instead (its `x-znight-fingerprint` differing from
+  the metadata's is a ZNIGHT030 warning). Bodies are precomputed bytes with a strong ETag
+  (`if-none-match` → 304, `HEAD` included) and `cache-control` (`no-cache`). `enabled: false` serves
+  and builds nothing.
+- Emission (`@znight/openapi/emit`, used by `znight openapi`, `znight build --openapi` and the
+  `openapi()` Vite plugin of `@znight/openapi/vite`): compiles the application like `znight
+  generate`, loads the generated module in a child process (Bun: the compiler preload; Node.js: a
+  Vite server in middleware mode) without instantiating anything (`NODE_ENV` defaults to
+  `production`), runs `buildOpenApiDocument` and writes the outputs atomically, only when they
+  changed (`check`: never writes, reports stale files). `@znight/openapi/testing` exports
+  `validateResponse(document, { method, path, response })` (optional peer `@cfworker/json-schema`).
+
+### 9.6 Schedule (`@znight/schedule`)
+
+The compiler extension (`@znight/schedule/compiler`, RFC 0004) owns `#Cron`, `#Interval` and
+`#Timeout`, validates every literal with the runtime's own cron engine and duration parser
+(import-free modules, §2), declares each host with `AnalyzeContext.addRoot()` (a singleton when
+nothing else registers it; recorded in compiled libraries, §6.4) and generates
+`metadata.extensions.schedule`:
+
+```ts
+interface ScheduleMetadata {
+  jobs: ({
+    name: string
+    token: Token // the host
+    method: string
+    overlap?: 'queue' | 'allow' // absent: 'skip'; never on timeouts
+    lock?: boolean // absent: the plugin rule
+    maxDuration?: number // ms
+    enabled?: false
+    invoke: (host, ctx: JobContext) => unknown // (c: Host, j: JobContext) => c.method(j)
+  } & (
+    | { kind: 'cron'; cron: string; timeZone?: string; runOnStart?: true } // as written, whitespace collapsed
+    | { kind: 'interval'; every: number; runOnStart?: true } // ms
+    | { kind: 'timeout'; delay: number } // ms after the scheduler started
+  ))[] // sorted by name; options equal to their default are omitted
+}
+```
+
+`SchedulePlugin.configure(options | (container) => options)` (name `schedule`; options `enabled`,
+`timeZone` (`'UTC'`), `lock` (a `ScheduleLockStore` or `{ store, keyPrefix?, ttl?, owner? }`), `jobs`
+(overrides by name: `enabled`, `cron`, `timeZone`, `every`, `delay`, `overlap`, `lock`,
+`maxDuration`), `drainTimeoutMs` (4 000), `clock`):
+
+- `register` provides `SchedulerRegistry` (singleton) and `JobContext` (request-scoped);
+  `initRoots(context)` returns the hosts of `context.metadata.extensions.schedule`.
+- `onBootstrap` validates the options and the section (it may be hand-written: shapes, names,
+  expressions, zones with the runtime's `Intl`, host tokens: ZNIGHT001 naming the job), applies the
+  overrides (ZNIGHT040 for another kind, ZNIGHT042 with a suggestion for an unknown name), checks
+  the locks (ZNIGHT043), resolves the singleton hosts and binds the registry, usable from then on
+  (before: ZNIGHT021). An instance serves one running application at a time (ZNIGHT004).
+- `onReady` arms the scheduler when `enabled` (jobs never run against a half-started application),
+  runs the `runOnStart` jobs and logs the next occurrence; its timer keeps the process alive.
+- **Occurrences** (normative): one timer for every job, capped at 60 s and resynchronised with the
+  wall clock, a heap ordered by time then name. A cron job fires at the first matching wall-clock
+  second after the previous occurrence, in its zone (an IANA name, `UTC`, `local` read once at boot,
+  or a fixed offset, kept as written): a local time skipped by a DST gap fires once at the first
+  instant after the gap; a repeated local time fires at its first occurrence only, unless the hour
+  field matches every hour. Day of month and day of week are OR-ed when both are restricted.
+  Intervals fire at the multiples of `every` since the Unix epoch; a timeout fires once, `delay`
+  after the scheduler started. A late wake-up runs a job once, for its latest missed occurrence; an
+  occurrence never runs twice in a process.
+- **A run**: the overlap policy first (`skip`: outcome `skipped`; `queue`: one pending run, the
+  latest occurrence; `allow`: concurrent, implies no lock), then the lock, then a new container scope
+  seeded with its `JobContext` (`job`, `runId`, `trigger`, `scheduledAt`, `startedAt`, `previous`,
+  `signal`), where request-scoped and transient hosts are created and disposed, and
+  `hooks.run('schedule:run', event, invoke)` (§8.3); every occurrence is then emitted.
+  `maxDuration` aborts `ctx.signal` with a `JobAbortedError` (ZNIGHT044, `reason: 'timeout'`)
+  without freeing the slot. `HttpContext`, `RequestId` and `InboundMessage` do not exist in a run.
+- **Locks** (normative): with a store, jobs are locked unless `lock: false` or `overlap: 'allow'`.
+  `acquire(key, { owner, occurrence, ttlMs })` MUST grant a lease only when no lease is live **and**
+  no later-or-equal occurrence of the key was claimed (occurrence fencing: clock skew between
+  instances never runs an occurrence twice); a refusal is the outcome `not-acquired`. The lease is
+  extended every `ttl / 3`; a lost lease aborts the run (`lock-lost`); a store failure fails closed
+  (outcome `failed`, no run); `release()` keeps the occurrence claimed. `memoryLockStore()` serves
+  one process; `lockStoreScenarios` (`@znight/schedule/testing`) is the conformance suite of a store.
+- **Shutdown**: `onStop` disarms the timer, drops queued runs, aborts every running run's signal at
+  once (`shutdown`) and waits up to `drainTimeoutMs`; runs still in flight are abandoned (logged):
+  their leases are neither released nor extended. A `stop()` called from inside a run does not wait
+  for it. `onDispose` clears the timers and unbinds the registry. List `SchedulePlugin` before
+  `HttpPlugin`: plugins stop in reverse order, so HTTP drains first.
+- `SchedulerRegistry`: `jobs()`, `get(name)`, `has(name)`, `addCron` / `addInterval` /
+  `addTimeout(name, schedule, handler, options?)` (validated at once: ZNIGHT040, ZNIGHT041,
+  ZNIGHT043), `remove(name, { abort? })`, `trigger(name)` (the whole pipeline, its own scope, even
+  with `enabled: false`; resolves with the `JobRunResult`, never rejects for a job failure), `idle()`;
+  each `ScheduledJob` has `pause()`, `resume()`, `reschedule()` (same kind), `trigger()`,
+  `nextRun`, `lastRun`, `nextRuns(count)`. Reschedules and dynamic jobs are not persisted.
+- `parseCron(expression, { timeZone? })` (`next`, `nextRuns`, `matches`) and `parseDuration` expose
+  the engine (ZNIGHT040 as `InvalidScheduleError` with `field`, `start`, `end`).
+  `@znight/schedule/testing` exports `createTestClock()` (virtual time: `advance`, `advanceTo`,
+  waiting for the runs it starts), `createJobContext()` and `lockStoreScenarios`.
+
 ## 10. Testing (`@znight/testing`)
 
 ```ts
@@ -1812,7 +2354,8 @@ res.json()
   regenerate the module before the tests import it (§6.3); other runners run `znight generate`
   first.
   `@znight/testing` itself never compiles: it reads the metadata structurally (providers, aliases,
-  externals, `extensions.config` / `http` / `messaging`) and does not depend on the feature packages.
+  externals, `extensions.config` / `http` / `messaging` / `schedule`) and does not depend on the
+  feature packages.
 - `TestBed.create(target, { metadata, provide?, overrides?, config?, mockFn?, deep?, aop? })` →
   `{ instance, mocks, container }`. The target (class, token, `TypedToken`, alias or unique display
   name) is built with its real generated factory (async factories awaited; factory errors →
@@ -1841,24 +2384,33 @@ res.json()
 - `TestApp.create({ metadata, plugins?, providers?, overrides?, only?, start?, logger?, shutdown? })`
   runs `Application.create` with signal handlers disabled, applies `overrides` last and, by default,
   instantiates only the closure of the HTTP controllers (with their guards and interceptors), the
-  message consumers, the override keys and the **plugin roots** (everything when there is no
-  controller nor consumer; `only: 'all' | keys`, keys to which the override keys and plugin roots
-  are added; `'all'` ignores plugin roots). Plugin roots are the providers a plugin resolves in
-  `onBootstrap` although the metadata does not reference them (`HttpPlugin`'s global `guards`,
-  `interceptors`, `exceptionMappers`): contract `PluginInitRoots`, an optional
-  `initRoots(): readonly ProviderKey[]` method of a plugin, called once before `Application.create`
-  (it SHOULD NOT throw: invalid options are reported by `onBootstrap`; a non-array result is a
-  `TypeError` naming the plugin); keys that designate
-  providers of the metadata are added, others are left to the plugin to report. Options computed
+  message consumers, the hosts of scheduled jobs (`extensions.schedule.jobs[].token`, disabled jobs
+  included: they can be triggered), the override keys and the **plugin roots** (everything when
+  there is no controller, consumer nor job; `only: 'all' | keys`, keys to which the override keys
+  and plugin roots are added; `'all'` ignores plugin roots). Plugin roots are the providers a plugin
+  resolves in `onBootstrap` although the metadata does not reference them (`HttpPlugin`'s global
+  `guards`, `interceptors`, `exceptionMappers`): the optional `Plugin.initRoots(context: { metadata })`
+  of core (§8.2; `PluginInitRoots` in testing), called once per `TestApp.create()` before
+  `Application.create` (it SHOULD NOT throw: invalid options are reported by `onBootstrap`; a
+  non-array result is a `TypeError` naming the plugin); keys that designate providers of the
+  metadata are added, others are left to the plugin to report. Plugin roots only complete the entry
+  points: they never restrict the boot. Options computed
   from the container cannot be listed (`HttpPlugin` returns `[]` then): when such a provider has an
   async dependency, the boot fails with ZNIGHT015 ("on demand: its factory is async") and TestApp
   adds the hint to list it in `only` (or pass `only: 'all'`).
   It starts the app unless `start: false` (so pass `port: 0`). Members: `inject(request)` (through
   the plugin named `http`, method defaulting to `GET`; the plugin encodes the body: a `FormData` as
   `multipart/form-data` for uploads, a `Blob` with its type, strings and bytes as is, other values as
-  JSON), `get`, `close()` (idempotent), `[Symbol.asyncDispose]`, `app`, `container`. `inject()`
-  resolves with `{ status, headers, body, bytes, json() }` (`bytes`: the raw body; derived from
-  `body` when the plugin returns none). Default logger: console at `warn`.
+  JSON; `cookies` and `signedCookies` (signed by the plugin with its current secret) are forwarded
+  to the plugin, which validates them), `get`, `close()` (idempotent), `[Symbol.asyncDispose]`,
+  `app`, `container`. `inject()` resolves with `{ status, headers, body, bytes, cookies, json() }`
+  (`bytes`: the raw body, derived from `body` when the plugin returns none; `cookies`: the parsed
+  `set-cookie` headers by name, `SetCookieInfo`, `{}` when the plugin returns none).
+  `injectStream(request)` and `injectSse(request)` (method defaulting to `GET`, plus an optional
+  `signal`) delegate structurally to the `injectStream` / `injectSse` of the plugin named `http`
+  (§9.1: the response at its headers with a `ReadableStream` body; an event stream read in memory
+  like `EventSource`); a plugin without them is ZNIGHT001 with the hint `@znight/http ≥ 0.2`.
+  Default logger: console at `warn`.
 - Metadata helpers for hand-written tests: `createMetadata(record)`, `defineTestMetadata(spec)`
   (class-first, tokens `test#Name`), `testToken`, `override(key, value)`, `overrideFactory(key,
   factory, { deps, scope, async, dispose })`.
@@ -1867,23 +2419,25 @@ res.json()
 
 | Command                       | Behaviour                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `znight new [name]`           | Scaffold a project, interactively or from `-y/--yes`, `--pm <bun\|npm\|pnpm\|yarn>` (default: the package manager running the CLI, else `bun` under Bun, else `npm`), `--adapter <node\|fastify\|express\|hono>` (default `node`), `--features <config,observability,messaging\|all\|none>` (default `config,observability`), `--no-install`, `--no-git`, `--dir`, `--force`; `.` scaffolds into the current directory. Bun projects test with `bun test` + preload, others with Vitest, and run the application on Bun (`dev` / `start` scripts with `--runtime bun`: `bun run` honours the `node` shebang of the binary); the compiler options live in `znight.config.ts`, imported by `vite.config.ts` (`znight(options)`) and read by the preload and `znight generate`; the `TestApp` test configures `ObservabilityPlugin` with `metrics: { server: false }`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `znight new [name]`           | Scaffold a project, interactively or from `-y/--yes`, `--pm <bun\|npm\|pnpm\|yarn>` (default: the package manager running the CLI, else `bun` under Bun, else `npm`), `--adapter <node\|fastify\|express\|hono>` (default `node`), `--features <config,observability,messaging,schedule,openapi\|all\|none>` (default `config,observability`; `schedule` adds `SchedulePlugin` before `HttpPlugin`, a sample job and its test on a virtual clock; `openapi` adds `OpenApiPlugin` after `HttpPlugin`, `src/api.ts` with `@OpenApiDocument` and the `openapi` / `openapi:check` scripts), `--no-install`, `--no-git`, `--dir`, `--force`; `.` scaffolds into the current directory. Bun projects test with `bun test` + preload, others with Vitest, and run the application on Bun (`dev` / `start` scripts with `--runtime bun`: `bun run` honours the `node` shebang of the binary); the compiler options live in `znight.config.ts`, imported by `vite.config.ts` (`znight(options)`) and read by the preload and `znight generate`; the `TestApp` test configures `ObservabilityPlugin` with `metrics: { server: false }`                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `znight generate`             | Write the generated container (compiler `generate`); `--check` (exit 1 when stale, never writes; names every missing or out-of-date file, the module first, then the library manifest in library mode: the compiler's `staleFiles` when it reports them, else a comparison of the outputs with the disk), `-w/--watch` (incremental), `--root`, `--config`, `--config-loader <bundle\|runner\|native>`. Compiler options: `znight.config.*` / `ZNIGHT_CONFIG` (`loadZnightConfig()`, Vite not loaded; skipped with `--config`), else the options the `znight()` plugin compiles with: the Vite config is resolved like `znight build` does (`vite.resolveConfig`, `NODE_ENV` restored afterwards) and the CLI reads `plugin.api.options` (or `api.getOptions()`) with the `root`, `aliases` and `runtimeConditions` of `plugin.api.compiler.options` (without it, the Vite root and the string `resolve.alias` entries), else the defaults. Compiles in `serve` mode. `--watch` watches what the Vite plugin and the Bun preload watch: the `include` directories of the project and of its source libraries, the project root and the directories of `watchFiles`, recomputed after each compile (one watcher per target, real POSIX paths); only changes that can change the result compile (parseable sources, `.js` included; resolution config files; known files), and a directory created, deleted or moved under an include root triggers a rescan (`mv src/users src/accounts` → the old files removed, the new directory added). Stops on `SIGINT`, `SIGTERM`, `SIGHUP` and, on POSIX, `SIGQUIT` |
-| `znight g <schematic> <name>` | `service`, `controller`, `consumer`, `config`, `guard`, `interceptor` (`--aop` for a method interceptor), `factory`; `--path`, `--flat`, `-f/--force`, `-d/--dry-run`, `--root`. Aliases `generate <schematic>` and `generate:<schematic>`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `znight g <schematic> <name>` | `service`, `controller`, `consumer`, `config`, `guard` (with a commented `static enforces` line for route decisions), `interceptor` (`--aop` for a method interceptor), `factory`, `job` (`j`: `<name>.jobs.ts` with a `<Name>Jobs` class and a `@Cron` method); `--path`, `--flat`, `-f/--force`, `-d/--dry-run`, `--root`. Aliases `generate <schematic>` and `generate:<schematic>`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `znight dev`                  | `vite build --watch` (no Vite dev server) and a full process restart after every successful rebuild — no partial HMR of providers: SIGTERM, `--kill-timeout` (5 000 ms) then SIGKILL, `--debounce`d (100 ms) and never overlapping restarts; a failed build keeps the last good process, and so does a failed compilation: the watch build succeeds with the error module, so the CLI reads `plugin.api.result.ok` of `znight()` once the bundle is written, does not restart (a pending restart is cancelled) and reports `Compilation failed` (printing the diagnostics itself with `--log-level silent`). Termination: `SIGINT` (Ctrl+C), `SIGTERM`, `SIGHUP` (terminal closed: nothing more is printed) and, on POSIX, `SIGQUIT` close the watcher and stop the application gracefully (`SIGINT` after Ctrl+C, `SIGTERM` otherwise); a second signal kills it (130). The application runs detached, in its own session and process group, so it receives exactly one signal and never the terminal's. It runs with `NODE_ENV=development` unless the variable was set when the CLI started (the environment is copied before Vite, whose build sets `NODE_ENV`, runs). Also `--runtime <auto\|node\|bun>` (`auto`: the runtime running the CLI, i.e. Node.js under `bun run` / `bunx`, whose `node` shebang Bun honours: pass `--runtime bun`), `--entry` (default: the entry chunk of the build), `--inspect`, `--clear`, `--mode` (`development`), `--log-level` (`warn`), `--root`, `--config`, `--config-loader`; arguments after `--` go to the application                                       |
-| `znight build`                | `vite build` with the Vite config (`--mode` default `production`, `--log-level`, `--root`, `--config`, `--config-loader`); compiler errors fail the build. `build`, `dev` and `generate` resolve the Vite root like the Vite CLI run in the project directory: the `root` of the config file, relative to the project root (`--root`), set by a `config` hook in `order: 'pre'` (an inline `root` would override the config file's), else the project root; the config file is searched in the project root, in Vite's order                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `znight build`                | `vite build` with the Vite config (`--mode` default `production`, `--log-level`, `--root`, `--config`, `--config-loader`); compiler errors fail the build. `--openapi[=<path>]` adds the `openapi()` Vite plugin of `@znight/openapi` when the config registers none: the document is emitted after the bundle, to `dist/openapi.json` or the given path. `build`, `dev` and `generate` resolve the Vite root like the Vite CLI run in the project directory: the `root` of the config file, relative to the project root (`--root`), set by a `config` hook in `order: 'pre'` (an inline `root` would override the config file's), else the project root; the config file is searched in the project root, in Vite's order                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `znight start`                | Run the build (`--entry`, default `dist/main.js` then `dist/main.mjs`; `--runtime <auto\|node\|bun>`; arguments after `--` go to the application) with `NODE_ENV` defaulting to `production`; when the runtime running the CLI provides `process.execve` (POSIX), the CLI `execve`s into the application runtime (same PID, signals, exit code), otherwise it forwards `SIGINT`, `SIGTERM` and `SIGHUP` and returns the child's code (`128 + n` on signal)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `znight openapi`              | Write the OpenAPI document of the application with `@znight/openapi` (`emitOpenApi`, §9.5): `-o/--output <file>` (repeatable, default `openapi.json`; `.yaml` / `.yml` write YAML), `--check` (exit 1 when an output is missing or stale, never writes), `--prefix` (the `servers` default), `--runtime <auto\|node\|bun>` (the runtime loading the application modules in a child process), `--converters <file>` (a module default-exporting `SchemaConverter[]`), `--root`, `--config`, `--config-loader`. Compile errors are printed and exit 1 before any module runs; outputs are written only when they change                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
 Global: `--help`, `--version`, `--color`/`--no-color` (`NO_COLOR`, `FORCE_COLOR`), `--debug`
 (`ZNIGHT_DEBUG=1`). Exit codes: 0 success, 1 failure, 2 usage error (with a suggestion), 130
-cancelled. `vite` and `@znight/compiler` are **optional** peers (so `npx @znight/cli new` installs
-neither); commands needing them fail with a clear error when they are missing. The programmatic API
+cancelled. `vite`, `@znight/compiler` and `@znight/openapi` are **optional** peers (so
+`npx @znight/cli new` installs none of them); commands needing them fail with a clear error when
+they are missing. The programmatic API
 (`main(argv, options)`, `renderProject`, `planSchematic`, `SCHEMATICS`, `AppSupervisor`) takes
 injectable services and never throws.
 
 ## 12. Release
 
-Planned (not set up yet): Changesets with a `fixed` group (lockstep versions). CI packs with
-`bun pm pack` (rewrites `workspace:`/`catalog:`) and publishes the tarballs with
-`npm publish --provenance` (OIDC trusted publishing). A smoke test installs the packed tarballs into
-a clean app and runs it on Node 24 and Bun.
+Being set up in pull request #1 (continuous integration, Changesets and a `RELEASING.md` maintainer
+procedure), not merged into `main` yet: this section will describe the process once it lands. The
+principles do not change: every `@znight/*` package is versioned in lockstep (§2) and packed with
+`bun pm pack`, which rewrites the `workspace:` and `catalog:` ranges.

@@ -34,18 +34,21 @@ bun install
 ## Repository layout
 
 ```txt
-packages/
-  core/           runtime: container, application, plugins, hooks, AOP, scopes, decorators, errors
-  compiler/       Vite plugin + programmatic API + Bun preload: analysis, binding, validation, codegen
-  http/           decorators, compiler extension, HttpPlugin, adapters (node, fastify, express, hono)
-  messaging/      decorators, compiler extension, MessagingPlugin, drivers
-  config/         decorators, compiler extension, ConfigPlugin, loaders
-  observability/  logger (pino), metrics (prom-client), tracing (OpenTelemetry)
-  testing/        TestBed, TestApp, mock helpers
-  cli/            the znight binary
-examples/         runnable example applications (rest-api, microservice, worker, monorepo), with their tests
-tests/            repository-wide tests: package boundaries, golden test of the examples
-docs/             this site (VitePress); docs/internals holds the architecture specification
+znight/
+├─ packages/
+│  ├─ core/           # runtime: container, application, plugins, hooks, AOP, scopes, decorators, errors
+│  ├─ compiler/       # Vite plugin, programmatic API, Bun preload: analysis, binding, validation, codegen
+│  ├─ http/           # decorators, compiler extension, HttpPlugin, adapters (node, fastify, express, hono)
+│  ├─ openapi/        # decorators, compiler extension, OpenApiPlugin (Scalar, Swagger UI), build-time emit
+│  ├─ messaging/      # decorators, compiler extension, MessagingPlugin, drivers
+│  ├─ schedule/       # decorators, compiler extension, SchedulePlugin, distributed locks
+│  ├─ config/         # decorators, compiler extension, ConfigPlugin, loaders
+│  ├─ observability/  # logger (pino), metrics (prom-client), tracing (OpenTelemetry)
+│  ├─ testing/        # TestBed, TestApp, mock helpers
+│  └─ cli/            # the znight binary
+├─ examples/          # runnable example applications (rest-api, microservice, worker, monorepo), with their tests
+├─ tests/             # repository-wide tests: package boundaries, golden test of the examples
+└─ docs/              # this site (VitePress); docs/internals holds the architecture specification
 ```
 
 ## The specification comes first
@@ -104,6 +107,6 @@ bun run docs:build   # production build, fails on dead links
 
 ## Releases
 
-All `@znight/*` packages are versioned in lockstep. The release process is planned, not set up yet:
-Changesets with a fixed group, CI packing every package, installing the tarballs into a clean
-application, running it on Node.js 24 and Bun, then publishing with npm provenance.
+All `@znight/*` packages are versioned in lockstep. Continuous integration, Changesets and the
+release procedure are being set up in pull request #1, not merged into `main` yet; this section
+will link to the maintainer documentation once it lands.
