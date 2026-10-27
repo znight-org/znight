@@ -59,6 +59,7 @@ function buildModel(ctx: ValidateContext<OpenApiStored>): OpenApiModel {
       ? undefined
       : slots.use(document.errors.schema, 'output')
   const { operations, tagDescriptions } = buildOperations({ ctx, document, schemes, schemas, slots })
+  schemas.settle()
   const rootSecurity = document.security === undefined ? undefined : schemes.objects(document.security)
   const securitySchemes: Record<string, SecuritySchemeObject> = {}
   for (const name of [...schemes.used.keys()].sort(compareStrings)) {

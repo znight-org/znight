@@ -49,6 +49,8 @@ export interface OpenApiEmitApi {
 /** Options of the `openapi()` Vite plugin. */
 export interface OpenApiVitePluginOptionsLike {
   readonly output?: string
+  /** HTTP prefix (`servers` default when `@OpenApiDocument` declares none). */
+  readonly prefix?: string
 }
 
 /** `@znight/openapi/vite`. */

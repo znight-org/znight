@@ -66,6 +66,18 @@ describe('parseCookieHeader', () => {
     expect(Object.keys(parseCookieHeader(';'.repeat(20_000)))).toHaveLength(0)
     expect(Object.keys(parseCookieHeader('='.repeat(20_000)))).toHaveLength(0)
   })
+
+  it('stays linear for segments without "=" (hostile headers)', () => {
+    // each `;` segment used to search the next `=` up to the end of the header: O(n²)
+    for (const header of [';'.repeat(262_144), `${';'.repeat(262_144)}a=1`, `${'x;'.repeat(131_072)}=`]) {
+      const started = performance.now()
+      const cookies = parseCookieHeader(header)
+      expect(performance.now() - started).toBeLessThan(50)
+      expect(Object.keys(cookies).length).toBeLessThanOrEqual(1)
+    }
+    expect(parseCookieHeader(`${';'.repeat(1_000)}a=1;b;c=2;;d`)).toEqual({ a: '1', c: '2' })
+    expect(parseCookieHeader('a;b;c=3')).toEqual({ c: '3' })
+  })
 })
 
 describe('encodeCookieValue / decodeCookieValue', () => {
@@ -170,6 +182,30 @@ describe('serializeCookie', () => {
     ['an infinite maxAge', () => serializeCookie('a', 'x', { maxAge: Infinity }), TypeError, 'maxAge'],
     ['an invalid Date', () => serializeCookie('a', 'x', { expires: new Date('x') }), TypeError, 'expires'],
     ['a string expires', () => serializeCookie('a', 'x', { expires: '2030' as never }), TypeError, 'expires'],
+    [
+      'an expires after the year 9999 (the max-Date sentinel)',
+      () => serializeCookie('a', 'x', { expires: new Date(8.64e15) }),
+      TypeError,
+      'expires must be in the years 1601 to 9999 (received +275760-09-13T00:00:00.000Z)',
+    ],
+    [
+      'an expires before the year 1601',
+      () => serializeCookie('a', 'x', { expires: new Date(Date.UTC(1500, 0, 1)) }),
+      TypeError,
+      'expires must be in the years 1601 to 9999',
+    ],
+    [
+      'a negative year',
+      () => serializeCookie('a', 'x', { expires: new Date(-8.64e15) }),
+      TypeError,
+      'expires must be in the years 1601 to 9999',
+    ],
+    [
+      'a domain that is neither a string nor null',
+      () => serializeCookie('a', 'x', { domain: 1 as never }),
+      TypeError,
+      'domain must be a string or null',
+    ],
     ['a domain with a port', () => serializeCookie('a', 'x', { domain: 'a.com:80' }), TypeError, 'invalid domain'],
     ['an IDN domain', () => serializeCookie('a', 'x', { domain: 'exämple.com' }), TypeError, 'punycode'],
     ['an empty label', () => serializeCookie('a', 'x', { domain: 'a..com' }), TypeError, 'invalid domain'],
@@ -303,6 +339,16 @@ describe('serializeCookie', () => {
     })
   }
 
+  it('accepts expires in the years 1601 to 9999 (IMF-fixdate)', () => {
+    expect(serializeCookie('a', 'x', { expires: new Date(Date.UTC(1601, 0, 1)) })).toContain(
+      'Expires=Mon, 01 Jan 1601 00:00:00 GMT',
+    )
+    expect(serializeCookie('a', 'x', { expires: new Date(Date.UTC(9999, 11, 31, 23, 59, 59)) })).toContain(
+      'Expires=Fri, 31 Dec 9999 23:59:59 GMT',
+    )
+    expect(() => checkCookie('a', 'x', { expires: new Date(Date.UTC(10_000, 0, 1)) })).toThrow('expires must be in')
+  })
+
   it('accepts valid prefixed cookies and the size limit exactly', () => {
     expect(serializeCookie('__Host-uid', 'u')).toBe('__Host-uid=u; Path=/; Secure; HttpOnly; SameSite=Lax')
     expect(serializeCookie('__Secure-a', 'x', { domain: 'example.com', path: '/a' })).toContain('Domain=example.com')
@@ -344,6 +390,43 @@ describe('serializeResponseCookie', () => {
   it('checks the prefixes against the defaults', () => {
     expect(() => serializeResponseCookie({ name: '__Host-a', value: 'x', options: {} }, { secure: false })).toThrow(
       '__Host- prefix requires secure',
+    )
+  })
+
+  it('lets a cookie opt out of a default domain with domain: null (host-only)', () => {
+    const defaults = { path: '/', secure: true, httpOnly: true, sameSite: 'lax' as const, domain: 'example.com' }
+    const shared = serializeResponseCookie({ name: 'a', value: 'x', options: {} }, defaults)
+    expect(shared.line).toBe('a=x; Domain=example.com; Path=/; Secure; HttpOnly; SameSite=Lax')
+    const hostOnly = serializeResponseCookie({ name: 'a', value: 'x', options: { domain: null } }, defaults)
+    expect(hostOnly.line).toBe('a=x; Path=/; Secure; HttpOnly; SameSite=Lax')
+    expect(hostOnly.key).not.toBe(shared.key)
+    // `undefined` keeps the default, as for every option
+    expect(serializeResponseCookie({ name: 'a', value: 'x', options: { domain: undefined } }, defaults).line).toBe(
+      shared.line,
+    )
+    expect(serializeResponseCookie({ name: 'a', value: 'x', options: {} }, { ...defaults, domain: null }).line).toBe(
+      hostOnly.line,
+    )
+  })
+
+  it('never applies a default domain or path to __Host- cookies (set and cleared)', () => {
+    const defaults = { path: '/app', secure: true, httpOnly: true, sameSite: 'lax' as const, domain: 'example.com' }
+    expect(serializeResponseCookie({ name: '__Host-sid', value: 'x', options: {} }, defaults).line).toBe(
+      '__Host-sid=x; Path=/; Secure; HttpOnly; SameSite=Lax',
+    )
+    expect(serializeResponseCookie({ name: '__host-Http-sid', value: undefined, options: {} }, defaults).line).toBe(
+      '__host-Http-sid=; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/; Secure; HttpOnly; SameSite=Lax',
+    )
+    // an explicit domain or path is still checked against the prefix
+    expect(() =>
+      serializeResponseCookie({ name: '__Host-sid', value: 'x', options: { domain: 'example.com' } }, defaults),
+    ).toThrow('__Host- prefix forbids a domain')
+    expect(() =>
+      serializeResponseCookie({ name: '__Host-sid', value: 'x', options: { path: '/app' } }, defaults),
+    ).toThrow("__Host- prefix requires path: '/'")
+    // other prefixes take the defaults
+    expect(serializeResponseCookie({ name: '__Secure-a', value: 'x', options: {} }, defaults).line).toBe(
+      '__Secure-a=x; Domain=example.com; Path=/app; Secure; HttpOnly; SameSite=Lax',
     )
   })
 })

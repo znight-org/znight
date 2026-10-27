@@ -22,7 +22,15 @@ import { displayName, ErrorCode, ZnightError } from '@znight/core'
 
 import { BUILT_IN_CONVERTERS, vendorOf } from './converters.ts'
 import { OPENAPI_METADATA_VERSION } from './metadata.ts'
-import { compareStrings, ERROR_COMPONENTS, ERROR_RESPONSES, jsonEquals, reasonPhrase, schemaRef } from './shared.ts'
+import {
+  compareStrings,
+  componentName,
+  ERROR_COMPONENTS,
+  ERROR_RESPONSES,
+  jsonEquals,
+  reasonPhrase,
+  schemaRef,
+} from './shared.ts'
 
 /** A static view of an operation (no schema conversion), used by `filter` and `OpenApi.operations`. */
 export interface OpenApiOperationView {
@@ -181,33 +189,9 @@ export async function buildOpenApiDocument(
   }
   for (const [name, schema] of Object.entries(section.components ?? {}))
     define(name, schema as JsonSchema, 'a TypeScript declaration')
-  const slotNames = new Map<string, { input?: string; output?: string }>()
-  const pending: { name: string; schema: JsonSchema; owner: string }[] = []
-  for (const slot of section.schemas) {
-    const entry = converted.get(slot.name) ?? {}
-    const input = entry.input === undefined ? undefined : clean(entry.input)
-    const output = entry.output === undefined ? undefined : clean(entry.output)
-    const names: { input?: string; output?: string } = {}
-    if (input !== undefined && output !== undefined && !jsonEquals(input, output)) {
-      names.output = slot.name
-      names.input = `${slot.name}Input`
-    } else {
-      if (input !== undefined) names.input = slot.name
-      if (output !== undefined) names.output = slot.name
-    }
-    slotNames.set(slot.name, names)
-    for (const io of ['output', 'input'] as const) {
-      const schema = io === 'input' ? input : output
-      const name = names[io]
-      if (schema === undefined || name === undefined) continue
-      if (io === 'input' && name === names.output) continue
-      const hoisted = hoist(schema, name)
-      pending.push({ name, schema: hoisted.schema, owner: `the schema ${slot.name}` })
-      for (const [defName, defSchema] of hoisted.defs)
-        pending.push({ name: defName, schema: defSchema, owner: `a definition of ${slot.name}` })
-    }
-  }
-  for (const item of pending) define(item.name, item.schema, item.owner)
+  const named = nameConverted(section.schemas, converted)
+  for (const item of named.components) define(item.name, item.schema, item.owner)
+  const slotNames = named.slots
 
   // 3. standard errors
   const errors = section.errors
@@ -234,7 +218,11 @@ export async function buildOpenApiDocument(
   }
 
   // 4. placeholders
-  const resolve = (value: unknown): unknown => replacePlaceholders(value, slotNames, schemas)
+  const duplicates: string[] = []
+  const resolve = (value: unknown, where = ''): unknown =>
+    replacePlaceholders(value, slotNames, schemas, (parameter, slot) =>
+      duplicates.push(`${where}: the ${parameter.in} parameter "${parameter.name}" of the schema ${slot}`),
+    )
   for (const [name, schema] of schemas) schemas.set(name, resolve(schema) as JsonSchema)
 
   // 5. operations, filter
@@ -249,9 +237,16 @@ export async function buildOpenApiDocument(
       item = {}
       paths[definition.path] = item
     }
-    item[definition.method] = resolve(definition.operation)
+    item[definition.method] = resolve(definition.operation, `${definition.method.toUpperCase()} ${definition.path}`)
     operations++
   })
+  if (duplicates.length > 0) {
+    warnings.push({
+      code: ErrorCode.InconsistentOperation,
+      message: `${duplicates.length === 1 ? 'A parameter expanded from a whole-object schema is' : 'Parameters expanded from whole-object schemas are'} already documented (OpenAPI forbids two parameters with one name and location), the duplicate is dropped:\n${duplicates.map(line => `  - ${line}`).join('\n')}`,
+      hints: ["Remove the property from the schema, or the @Query('name') / @ApiQuery('name') that reads it again"],
+    })
+  }
 
   // 6. document
   const template = section.document
@@ -296,6 +291,97 @@ export async function buildOpenApiDocument(
   }
 }
 
+/** Root keys of a document, in the order {@link buildOpenApiDocument} writes them. */
+const ROOT_ORDER = ['openapi', 'info', 'servers', 'security', 'tags', 'externalDocs', 'paths', 'components']
+
+/**
+ * Applies the runtime options of {@link buildOpenApiDocument} to a prebuilt document (`OpenApiPlugin`
+ * with `document: { file }`), so that a file and a build serve the same document: `filter` (the
+ * operations are matched by path and method, unreferenced components and unused tags are pruned),
+ * `info`, `servers`, else the `prefix` rule when the file declares no servers, then `transform`.
+ * `undefined` when there is nothing to apply (the file is served as is).
+ */
+export function applyDocumentOptions(
+  text: string,
+  metadata: ZnightMetadata,
+  options: Pick<BuildOpenApiOptions, 'filter' | 'info' | 'servers' | 'transform' | 'prefix'>,
+): { document: OpenApiObject; json: string } | undefined {
+  const document = JSON.parse(text) as Json
+  const prefixed =
+    document['servers'] === undefined && options.prefix !== undefined && options.prefix !== '' && options.prefix !== '/'
+  if (
+    options.filter === undefined &&
+    options.info === undefined &&
+    options.servers === undefined &&
+    options.transform === undefined &&
+    !prefixed
+  ) {
+    return undefined
+  }
+  if (options.filter !== undefined) filterDocument(document, metadata, options.filter)
+  if (options.info !== undefined) document['info'] = { ...(document['info'] as Json), ...options.info }
+  if (options.servers !== undefined) document['servers'] = options.servers
+  else if (prefixed) document['servers'] = [{ url: options.prefix }]
+  const ordered: Json = {}
+  for (const key of ROOT_ORDER) if (document[key] !== undefined) ordered[key] = document[key]
+  for (const [key, value] of Object.entries(document)) if (!(key in ordered)) ordered[key] = value
+  const transformed =
+    options.transform === undefined
+      ? (ordered as unknown as OpenApiObject)
+      : options.transform(ordered as unknown as OpenApiObject)
+  const json = `${JSON.stringify(transformed, null, 2)}\n`
+  return { document: deepFreeze(JSON.parse(json) as OpenApiObject), json }
+}
+
+/** Removes the operations `filter` rejects, the paths left empty, the unused tags and components. */
+function filterDocument(
+  document: Json,
+  metadata: ZnightMetadata,
+  filter: (operation: OpenApiOperationView) => boolean,
+): void {
+  const section = openApiSection(metadata)
+  const views = new Map<string, OpenApiOperationView>()
+  for (const view of operationViews(metadata, section)) views.set(`${view.method} ${view.path}`, view)
+  const paths: Record<string, Json> = {}
+  for (const [path, item] of Object.entries((document['paths'] ?? {}) as Record<string, Json>)) {
+    const kept: Json = {}
+    let methods = 0
+    for (const [key, value] of Object.entries(item)) {
+      if (METHODS.has(key)) {
+        // an operation unknown to this build (stale file) is kept: the filter cannot judge it
+        const view = views.get(`${key} ${path}`)
+        if (view !== undefined && !filter(view)) continue
+        methods++
+      }
+      kept[key] = value
+    }
+    if (methods > 0) paths[path] = kept
+  }
+  document['paths'] = paths
+  if (Array.isArray(document['tags'])) {
+    const declared = new Set((section.document.tags ?? []).map(tag => tag.name))
+    const used = new Set(tagsOf([], paths, {}).map(tag => tag.name))
+    const tags = (document['tags'] as TagObject[]).filter(tag => declared.has(tag.name) || used.has(tag.name))
+    if (tags.length > 0) document['tags'] = tags
+    else delete document['tags']
+  }
+  const components = (document['components'] ?? {}) as Json
+  delete document['components']
+  const pruned = prune(document, {
+    schemas: (components['schemas'] ?? {}) as Json,
+    responses: (components['responses'] ?? {}) as Json,
+    securitySchemes: (components['securitySchemes'] ?? {}) as Json,
+  })
+  const result: Json = {}
+  for (const [kind, value] of Object.entries(components)) {
+    if (kind !== 'schemas' && kind !== 'responses' && kind !== 'securitySchemes') result[kind] = value
+    else if (pruned[kind] !== undefined) result[kind] = pruned[kind]
+  }
+  if (Object.keys(result).length > 0) document['components'] = result
+}
+
+const METHODS: ReadonlySet<string> = new Set(['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace'])
+
 async function convertSlot(
   slot: OpenApiSchemaSlot,
   io: 'input' | 'output',
@@ -336,12 +422,122 @@ function clean(schema: JsonSchema): JsonSchema {
 }
 
 /**
- * Hoists `$defs` / `definitions` into components and rewrites the references: inside an OpenAPI
- * document `#` is the document, not the schema (`#/$defs/X` → `#/components/schemas/X`,
- * `#` → `#/components/schemas/<name>`).
+ * Definition names a library generates for anonymous sub-schemas (Zod: `__schema0` for a recursive
+ * schema without id). They are local to one conversion, so they are scoped to their slot.
  */
-function hoist(schema: JsonSchema, name: string): { schema: JsonSchema; defs: Map<string, JsonSchema> } {
-  const defs = new Map<string, JsonSchema>()
+const ANONYMOUS_DEFINITION = /^__schema(\d+)$/
+
+/** Marks the references between definitions until the final names are known (`\0<name>\0<rest>`). */
+const MARK = '\u0000'
+
+/** A JSON Schema of one slot and one io, split into its root and its local definitions. */
+interface ConvertedUnit {
+  readonly slot: string
+  readonly io: 'input' | 'output'
+  /** Global names of the bodies (the root is the slot name), references marked. */
+  readonly bodies: { readonly name: string; readonly body: unknown; readonly owner: string }[]
+}
+
+/**
+ * Names the converted schemas (steps 3 and 4 of §7.3): hoists `$defs` / `definitions` into
+ * components, scopes anonymous definitions to their slot (`Tree_schema0`), takes the definition as
+ * the slot component when the root only references it (`.meta({ id })` equal to the export name),
+ * and gives `<Name>Input` to the input variant of every schema — slot or definition — whose input
+ * and output JSON Schemas differ (directly or through the definitions it references). Two different
+ * schemas of one io under one name are ZNIGHT034.
+ */
+function nameConverted(
+  slots: readonly OpenApiSchemaSlot[],
+  converted: ReadonlyMap<string, { input?: JsonSchema; output?: JsonSchema }>,
+): {
+  components: { name: string; schema: JsonSchema; owner: string }[]
+  slots: Map<string, { input?: string; output?: string }>
+} {
+  const units: ConvertedUnit[] = []
+  for (const slot of slots) {
+    const entry = converted.get(slot.name) ?? {}
+    for (const io of ['output', 'input'] as const) {
+      const schema = entry[io]
+      if (schema !== undefined) units.push(splitUnit(slot.name, io, clean(schema)))
+    }
+  }
+  // variants of every global name, by io
+  const variants = new Map<string, { input?: unknown; output?: unknown; owners: Partial<Record<string, string>> }>()
+  for (const unit of units) {
+    for (const { name, body, owner } of unit.bodies) {
+      let entry = variants.get(name)
+      if (entry === undefined) {
+        entry = { owners: {} }
+        variants.set(name, entry)
+      }
+      const existing = entry[unit.io]
+      if (existing === undefined) {
+        entry[unit.io] = body
+        entry.owners[unit.io] = owner
+      } else if (!jsonEquals(existing, body)) {
+        throw new ZnightError(
+          ErrorCode.SchemaNameConflict,
+          `Two different schemas are named "${name}" in the OpenAPI document (${entry.owners[unit.io]} and ${owner})`,
+          { hints: ['Rename one of them (exported schema names and ids of hoisted definitions name the components)'] },
+        )
+      }
+    }
+  }
+  // `<Name>Input` when the input variant differs, directly or through a definition it references
+  const split = new Set<string>()
+  for (const [name, entry] of variants) {
+    if (entry.input !== undefined && entry.output !== undefined && !jsonEquals(entry.input, entry.output)) {
+      split.add(name)
+    }
+  }
+  for (let changed = true; changed; ) {
+    changed = false
+    for (const [name, entry] of variants) {
+      if (split.has(name) || entry.input === undefined || entry.output === undefined) continue
+      if ([...referencedNames(entry.input)].some(target => split.has(target))) {
+        split.add(name)
+        changed = true
+      }
+    }
+  }
+  const nameFor = (name: string, io: 'input' | 'output'): string =>
+    io === 'input' && split.has(name) ? `${name}Input` : name
+  const components: { name: string; schema: JsonSchema; owner: string }[] = []
+  for (const [name, entry] of variants) {
+    if (entry.output !== undefined) {
+      components.push({
+        name,
+        schema: resolveMarks(entry.output, 'output', nameFor) as JsonSchema,
+        owner: entry.owners['output'] as string,
+      })
+    }
+    if (entry.input !== undefined && (entry.output === undefined || split.has(name))) {
+      components.push({
+        name: nameFor(name, 'input'),
+        schema: resolveMarks(entry.input, 'input', nameFor) as JsonSchema,
+        owner: entry.owners['input'] as string,
+      })
+    }
+  }
+  const names = new Map<string, { input?: string; output?: string }>()
+  for (const slot of slots) {
+    const entry = converted.get(slot.name) ?? {}
+    const result: { input?: string; output?: string } = {}
+    if (entry.output !== undefined) result.output = nameFor(slot.name, 'output')
+    if (entry.input !== undefined) result.input = nameFor(slot.name, 'input')
+    names.set(slot.name, result)
+  }
+  return { components, slots: names }
+}
+
+/**
+ * Splits a converted schema into its root and its `$defs` / `definitions` (at every level), with
+ * global names: the slot name for the root, `<slot>_schemaN` for anonymous definitions, the
+ * definition name (a library id) otherwise. Inside an OpenAPI document `#` is the document, not the
+ * schema, so every local reference is rewritten (`#/$defs/X`, `#`, `#/properties/...`).
+ */
+function splitUnit(slot: string, io: 'input' | 'output', schema: JsonSchema): ConvertedUnit {
+  const defs = new Map<string, unknown>()
   const collect = (value: unknown): void => {
     if (typeof value !== 'object' || value === null) return
     if (Array.isArray(value)) {
@@ -351,35 +547,110 @@ function hoist(schema: JsonSchema, name: string): { schema: JsonSchema; defs: Ma
     for (const key of ['$defs', 'definitions']) {
       const block = (value as Json)[key]
       if (typeof block === 'object' && block !== null && !Array.isArray(block)) {
-        for (const [defName, def] of Object.entries(block)) defs.set(defName, def as JsonSchema)
+        for (const [defName, def] of Object.entries(block)) defs.set(defName, def)
       }
     }
     for (const [key, item] of Object.entries(value)) if (key !== '$defs' && key !== 'definitions') collect(item)
   }
   collect(schema)
+  const globals = new Map<string, string>()
+  for (const local of defs.keys()) {
+    const anonymous = ANONYMOUS_DEFINITION.exec(local)
+    globals.set(local, anonymous === null ? componentName(local) : componentName(`${slot}_schema${anonymous[1]}`))
+  }
+  let root: unknown = schema
+  // `{ $ref: '#/$defs/X', $defs: { X } }` (Zod `.meta({ id })` on the root): X is the slot itself
+  const keys = Object.keys(schema).filter(key => key !== '$defs' && key !== 'definitions')
+  const target = keys.length === 1 && typeof schema['$ref'] === 'string' ? localTarget(schema['$ref']) : undefined
+  if (target !== undefined && target.rest === '' && defs.has(target.local)) {
+    const global = globals.get(target.local) as string
+    if (global === slot || ANONYMOUS_DEFINITION.test(target.local)) {
+      root = defs.get(target.local)
+      defs.delete(target.local)
+      globals.set(target.local, slot)
+    }
+  }
   const rewrite = (value: unknown): unknown => {
     if (Array.isArray(value)) return value.map(rewrite)
     if (typeof value !== 'object' || value === null) return value
     const result: Json = {}
     for (const [key, item] of Object.entries(value)) {
       if (key === '$defs' || key === 'definitions') continue
-      if (key === '$ref' && typeof item === 'string') result[key] = rewriteRef(item, name)
+      if (key === '$ref' && typeof item === 'string') result[key] = markRef(item, slot, globals)
       else result[key] = rewrite(item)
     }
     return result
   }
-  const hoisted = new Map<string, JsonSchema>()
-  for (const [defName, def] of defs) hoisted.set(defName, rewrite(def) as JsonSchema)
-  return { schema: rewrite(schema) as JsonSchema, defs: hoisted }
+  const bodies = [{ name: slot, body: rewrite(root), owner: `the schema ${slot}` }]
+  for (const [local, def] of defs) {
+    bodies.push({ name: globals.get(local) as string, body: rewrite(def), owner: `a definition of ${slot}` })
+  }
+  return { slot, io, bodies }
 }
 
-function rewriteRef(ref: string, self: string): string {
+/** The local definition a reference points to (`#/$defs/X/rest`), JSON pointer and URI escapes decoded. */
+function localTarget(ref: string): { local: string; rest: string } | undefined {
   for (const prefix of ['#/$defs/', '#/definitions/']) {
-    if (ref.startsWith(prefix)) return `#/components/schemas/${ref.slice(prefix.length)}`
+    if (!ref.startsWith(prefix)) continue
+    const tail = ref.slice(prefix.length)
+    const slash = tail.indexOf('/')
+    const segment = slash === -1 ? tail : tail.slice(0, slash)
+    let local: string
+    try {
+      local = decodeURIComponent(segment)
+    } catch {
+      local = segment
+    }
+    return { local: local.replaceAll('~1', '/').replaceAll('~0', '~'), rest: slash === -1 ? '' : tail.slice(slash) }
   }
-  if (ref === '#') return schemaRef(self)
-  if (ref.startsWith('#/')) return `${schemaRef(self)}${ref.slice(1)}`
+  return undefined
+}
+
+function markRef(ref: string, slot: string, globals: ReadonlyMap<string, string>): string {
+  const target = localTarget(ref)
+  if (target !== undefined) {
+    return `${MARK}${globals.get(target.local) ?? componentName(target.local)}${MARK}${target.rest}`
+  }
+  if (ref === '#') return `${MARK}${slot}${MARK}`
+  if (ref.startsWith('#/')) return `${MARK}${slot}${MARK}${ref.slice(1)}`
   return ref
+}
+
+function parseMark(ref: string): { name: string; rest: string } | undefined {
+  if (!ref.startsWith(MARK)) return undefined
+  const end = ref.indexOf(MARK, 1)
+  return end === -1 ? undefined : { name: ref.slice(1, end), rest: ref.slice(end + 1) }
+}
+
+/** Global names referenced by a marked body. */
+function referencedNames(value: unknown, found: Set<string> = new Set()): Set<string> {
+  if (Array.isArray(value)) {
+    for (const item of value) referencedNames(item, found)
+  } else if (typeof value === 'object' && value !== null) {
+    for (const [key, item] of Object.entries(value)) {
+      const mark = key === '$ref' && typeof item === 'string' ? parseMark(item) : undefined
+      if (mark === undefined) referencedNames(item, found)
+      else found.add(mark.name)
+    }
+  }
+  return found
+}
+
+/** Replaces the marked references with `#/components/schemas/<final name>`. */
+function resolveMarks(
+  value: unknown,
+  io: 'input' | 'output',
+  nameFor: (name: string, io: 'input' | 'output') => string,
+): unknown {
+  if (Array.isArray(value)) return value.map(item => resolveMarks(item, io, nameFor))
+  if (typeof value !== 'object' || value === null) return value
+  const result: Json = {}
+  for (const [key, item] of Object.entries(value)) {
+    const mark = key === '$ref' && typeof item === 'string' ? parseMark(item) : undefined
+    result[key] =
+      mark === undefined ? resolveMarks(item, io, nameFor) : `${schemaRef(nameFor(mark.name, io))}${mark.rest}`
+  }
+  return result
 }
 
 function isPlaceholder(
@@ -392,12 +663,34 @@ function replacePlaceholders(
   value: unknown,
   names: ReadonlyMap<string, { input?: string; output?: string }>,
   schemas: ReadonlyMap<string, JsonSchema>,
+  duplicate: (parameter: { in: string; name: string }, slot: string) => void,
 ): unknown {
   if (Array.isArray(value)) {
+    if (!value.some(item => isPlaceholder(item) && item.$znight === 'parameters')) {
+      return value.map(item => replacePlaceholders(item, names, schemas, duplicate))
+    }
+    // a parameters array: OpenAPI forbids two parameters with one name and location, explicit ones win
+    const explicit = new Set<string>()
+    for (const item of value) {
+      const key = isPlaceholder(item) ? undefined : parameterKey(item)
+      if (key !== undefined) explicit.add(key)
+    }
+    const expanded = new Set<string>()
     const result: unknown[] = []
     for (const item of value) {
-      if (isPlaceholder(item) && item.$znight === 'parameters') result.push(...expandParameters(item, names, schemas))
-      else result.push(replacePlaceholders(item, names, schemas))
+      if (!isPlaceholder(item) || item.$znight !== 'parameters') {
+        result.push(replacePlaceholders(item, names, schemas, duplicate))
+        continue
+      }
+      for (const parameter of expandParameters(item, names, schemas)) {
+        const key = parameterKey(parameter) as string
+        if (explicit.has(key) || expanded.has(key)) {
+          duplicate(parameter as { in: string; name: string }, item.name)
+          continue
+        }
+        expanded.add(key)
+        result.push(parameter)
+      }
     }
     return result
   }
@@ -407,8 +700,16 @@ function replacePlaceholders(
     return { $ref: schemaRef(name) }
   }
   const result: Json = {}
-  for (const [key, item] of Object.entries(value)) result[key] = replacePlaceholders(item, names, schemas)
+  for (const [key, item] of Object.entries(value)) result[key] = replacePlaceholders(item, names, schemas, duplicate)
   return result
+}
+
+/** `in name` of a Parameter Object (header names are case-insensitive), `undefined` for a `$ref`. */
+function parameterKey(parameter: unknown): string | undefined {
+  if (typeof parameter !== 'object' || parameter === null) return undefined
+  const { in: location, name } = parameter as { in?: unknown; name?: unknown }
+  if (typeof location !== 'string' || typeof name !== 'string') return undefined
+  return `${location} ${location === 'header' ? name.toLowerCase() : name}`
 }
 
 /** One parameter per property of the (input) object schema of a slot. */

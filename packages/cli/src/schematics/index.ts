@@ -3,7 +3,7 @@
  * (`user-profile.service.ts`), PascalCase classes (`UserProfileService`). Pure: {@link planSchematic}
  * computes the file, the command writes it.
  */
-import { isAbsolute, join, normalize } from 'node:path'
+import { dirname, isAbsolute, join, normalize, relative } from 'node:path'
 
 import { camelCase, constantCase, kebabCase, pascalCase } from '../names.ts'
 
@@ -28,6 +28,14 @@ export interface SchematicNames {
   readonly camel: string
   /** `UserProfileService` */
   readonly className: string
+  /**
+   * Dotted name of the element in the application: the directories of its file relative to `src/`
+   * (or to the project root, for a `--path` outside `src/`) and its kebab name, without the directory
+   * named after it (`reports.digest` for `src/reports/digest.jobs.ts`, `digest` for
+   * `src/digest/digest.jobs.ts`). Unlike `kebab`, it tells apart elements of the same name in different
+   * directories: the default name of a job (job names are unique in the application).
+   */
+  readonly qualified: string
 }
 
 /** Project facts that change the generated code. */
@@ -264,7 +272,7 @@ const job: Schematic = {
  */
 export class ${names.className} {
   /** Every day at 03:00 UTC (set timeZone to follow a local clock). A run still running is skipped. */
-  @Cron('0 3 * * *', { name: '${names.kebab}.daily' })
+  @Cron('0 3 * * *', { name: '${names.qualified}.daily' })
   daily(ctx: JobContext): void {
     // checkpoint: throws when the run is aborted (shutdown, maxDuration or a lost lock)
     ctx.signal.throwIfAborted()
@@ -332,8 +340,31 @@ export function parseSchematicName(input: string, schematic: Schematic): ParsedS
       pascal,
       camel: camelCase(words),
       className: `${pascal}${pascalCase(schematic.suffix)}`,
+      qualified: qualifiedName(directories, words),
     },
   }
+}
+
+/** `reports` + `digest` → `reports.digest`; the directory named after the element is left out. */
+function qualifiedName(directories: readonly string[], kebab: string): string {
+  const segments = directories.at(-1) === kebab ? directories.slice(0, -1) : directories
+  return [...segments, kebab].join('.')
+}
+
+/**
+ * Directories of `directory` relative to `<root>/src`, or to `root` outside `src/`, kebab-cased
+ * (`undefined` outside the project).
+ */
+function sourceDirectories(root: string, directory: string): string[] | undefined {
+  for (const base of [join(root, 'src'), root]) {
+    const path = relative(base, directory)
+    if (isAbsolute(path) || path === '..' || /^\.\.[\\/]/.test(path)) continue
+    return path
+      .split(/[\\/]+/)
+      .map(segment => kebabCase(segment))
+      .filter(segment => segment !== '')
+  }
+  return undefined
 }
 
 /** Where and what to generate. */
@@ -377,11 +408,15 @@ export function planSchematic(options: PlanSchematicOptions): SchematicPlan {
   if (directories.length === 0 && options.path === undefined && options.flat !== true)
     directories = [parsed.names.kebab]
   const file = normalize(join(base, ...directories, `${parsed.names.kebab}.${schematic.suffix}.ts`))
+  // --path: the location of the file qualifies the name (src/emails/ → emails.digest)
+  const located = options.path === undefined ? undefined : sourceDirectories(options.root, dirname(file))
+  const names =
+    located === undefined ? parsed.names : { ...parsed.names, qualified: qualifiedName(located, parsed.names.kebab) }
   return {
     schematic,
-    names: parsed.names,
+    names,
     file,
-    content: schematic.render(parsed.names, context),
-    hint: schematic.hint?.(parsed.names, context),
+    content: schematic.render(names, context),
+    hint: schematic.hint?.(names, context),
   }
 }

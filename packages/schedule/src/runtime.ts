@@ -106,6 +106,8 @@ const currentRun = new AsyncLocalStorage<RunRecord>()
 
 export interface PendingRun {
   scheduledAt: number
+  /** A manual `trigger()` waits for it: it runs even if the job is paused meanwhile. */
+  manual: boolean
   readonly waiters: ((result: JobRunResult) => void)[]
 }
 
@@ -165,6 +167,8 @@ export interface RunRecord {
   readonly job: JobRecord
   readonly runId: string
   readonly controller: AbortController
+  /** Started by `trigger()` (directly or queued): runs even when the job is paused. */
+  readonly manual: boolean
   /** Clock time when the run was dispatched. */
   readonly dispatchedAt: number
   promise: Promise<JobRunResult>
@@ -174,6 +178,10 @@ export interface RunRecord {
   settled: boolean
   timeout: unknown
   heartbeat: unknown
+  /** Fires when `ttl` elapsed since the last successful extension of the lease (`lock-lost`). */
+  leaseDeadline: unknown
+  /** Bounds the lock store call in progress (`acquire`, `release`). */
+  storeTimer: unknown
   abort: (reason: JobAbortReason) => void
 }
 
@@ -306,12 +314,16 @@ export class ScheduleRuntime {
     this.#state = 'stopped'
   }
 
-  /** `onDispose`: clears every timer. */
+  /** `onDispose`: clears every timer (lock store calls in flight go on unbounded). */
   dispose(): void {
     this.#disposed = true
     this.#state = 'stopped'
     this.#deactivate()
-    for (const run of this.#inflight) this.#stopTimers(run)
+    for (const run of this.#inflight) {
+      this.#stopTimers(run)
+      if (run.storeTimer !== undefined) this.clock.clearTimer(run.storeTimer)
+      run.storeTimer = undefined
+    }
   }
 
   #deactivate(): void {
@@ -346,8 +358,7 @@ export class ScheduleRuntime {
     const job = this.#jobs.get(name)
     if (job === undefined) throw unknownJobError(name, this.#jobs.keys())
     job.state = 'removed'
-    job.generation++
-    job.deadline = undefined
+    this.#disarm(job)
     this.#jobs.delete(name)
     this.#dropPending(job)
     if (abort) for (const run of job.running) run.abort('removed')
@@ -357,8 +368,9 @@ export class ScheduleRuntime {
     if (job.state === 'removed') throw unknownJobError(job.name, this.#jobs.keys())
     if (job.state !== 'scheduled') return
     job.state = 'paused'
-    job.generation++
-    job.deadline = undefined
+    this.#disarm(job)
+    // a queued occurrence has not started: it is dropped like the next ones
+    this.#dropPending(job)
   }
 
   resume(job: JobRecord): void {
@@ -397,6 +409,8 @@ export class ScheduleRuntime {
           ownZone,
           engine: compileExpression(schedule, zone, `${where}: invalid cron expression`),
         }
+        // a job without further occurrence is armed again with its new expression
+        if (job.state === 'done') job.state = 'scheduled'
         break
       }
       case 'interval':
@@ -407,12 +421,12 @@ export class ScheduleRuntime {
         if (timeZone !== undefined) throw invalid(`${where}: timeouts have no time zone`)
         job.schedule = { kind: 'timeout', delay: durationMs(schedule, `${where}: the delay`, 0) }
         job.fired = false
-        job.timeoutAt = now + job.schedule.delay
+        // a new occurrence, after the one fired (`reschedule(0)` from the run itself, same millisecond)
+        job.timeoutAt = Math.max(now + job.schedule.delay, (job.lastOccurrence ?? Number.NEGATIVE_INFINITY) + 1)
         if (job.state === 'done') job.state = 'scheduled'
         break
     }
-    job.generation++
-    job.deadline = undefined
+    this.#disarm(job)
     if (this.#active && job.state === 'scheduled') {
       this.#arm(job, Math.max(now, job.lastOccurrence ?? now))
       this.#rearm()
@@ -447,10 +461,17 @@ export class ScheduleRuntime {
 
   // ------------------------------------------------------------------------------------ scheduling
 
+  /** Cancels the armed occurrence of `job`, if any (the heap stops referencing the job). */
+  #disarm(job: JobRecord): void {
+    job.generation++
+    job.deadline = undefined
+    this.#heap.delete(job)
+  }
+
   /** Arms the next occurrence of `job` strictly after `after`. */
   #arm(job: JobRecord, after: number): void {
     if (!this.#active || job.state !== 'scheduled') return
-    job.generation++
+    this.#disarm(job)
     const schedule = job.schedule
     let deadline: number | undefined
     switch (schedule.kind) {
@@ -512,15 +533,18 @@ export class ScheduleRuntime {
           { job: job.name, missed, scheduledAt: new Date(latest).toISOString() },
         )
       }
-      if (job.lastOccurrence === undefined || latest > job.lastOccurrence) {
+      const fire = job.lastOccurrence === undefined || latest > job.lastOccurrence
+      if (job.kind === 'timeout') {
+        // done before its run starts: a reschedule() from the run itself (even before its first
+        // await) arms the timeout again
+        job.fired = true
+        job.state = 'done'
+      }
+      if (fire) {
         job.lastOccurrence = latest
-        if (job.kind === 'timeout') job.fired = true
         void this.#dispatch(job, latest, 'schedule')
       }
-      if (job.kind === 'timeout') {
-        if (job.state === 'scheduled') job.state = 'done'
-        continue
-      }
+      if (job.kind === 'timeout') continue
       this.#arm(job, Math.max(now, job.lastOccurrence ?? now))
     }
     this.#armTimer(now)
@@ -562,20 +586,21 @@ export class ScheduleRuntime {
   /** Overlap policy, then the run. Never rejects. */
   #dispatch(job: JobRecord, scheduledAt: number, trigger: RunTrigger): Promise<JobRunResult> {
     if (job.running.size > 0 && job.overlap !== 'allow') {
-      if (job.overlap === 'queue') return this.#enqueue(job, scheduledAt)
+      if (job.overlap === 'queue') return this.#enqueue(job, scheduledAt, trigger === 'manual')
       return Promise.resolve(this.#skip(job, scheduledAt, trigger))
     }
-    return this.#execute(job, scheduledAt, trigger)
+    return this.#execute(job, scheduledAt, trigger, trigger === 'manual')
   }
 
-  #enqueue(job: JobRecord, scheduledAt: number): Promise<JobRunResult> {
+  #enqueue(job: JobRecord, scheduledAt: number, manual: boolean): Promise<JobRunResult> {
     return new Promise(resolve => {
       const pending = job.pending
       if (pending === undefined) {
-        job.pending = { scheduledAt, waiters: [resolve] }
+        job.pending = { scheduledAt, manual, waiters: [resolve] }
       } else {
         // a later occurrence replaces the queued one: one pending run, the latest occurrence
         pending.scheduledAt = Math.max(pending.scheduledAt, scheduledAt)
+        pending.manual ||= manual
         pending.waiters.push(resolve)
       }
     })
@@ -610,18 +635,19 @@ export class ScheduleRuntime {
       return
     }
     job.pending = undefined
-    void this.#execute(job, pending.scheduledAt, 'queued').then(result => {
+    void this.#execute(job, pending.scheduledAt, 'queued', pending.manual).then(result => {
       for (const waiter of pending.waiters) waiter(result)
     })
   }
 
-  #execute(job: JobRecord, scheduledAt: number, trigger: RunTrigger): Promise<JobRunResult> {
+  #execute(job: JobRecord, scheduledAt: number, trigger: RunTrigger, manual: boolean): Promise<JobRunResult> {
     const controller = new AbortController()
     const run: RunRecord = {
       runtime: this,
       job,
       runId: randomUUID(),
       controller,
+      manual,
       dispatchedAt: this.clock.now(),
       promise: undefined as unknown as Promise<JobRunResult>,
       event: undefined,
@@ -630,6 +656,8 @@ export class ScheduleRuntime {
       settled: false,
       timeout: undefined,
       heartbeat: undefined,
+      leaseDeadline: undefined,
+      storeTimer: undefined,
       abort: reason => this.#abort(run, reason),
     }
     job.running.add(run)
@@ -658,13 +686,10 @@ export class ScheduleRuntime {
     const startTime = performance.now()
     const lock = this.settings.lock
     let lease: LockLease | undefined
+    const claimedAt = this.clock.now()
     if (job.locked && lock !== undefined) {
       try {
-        lease = await lock.store.acquire(`${lock.keyPrefix}${job.name}`, {
-          owner: lock.owner,
-          occurrence: scheduledAt,
-          ttlMs: lock.ttlMs,
-        })
+        lease = await this.#acquire(run, lock, scheduledAt)
       } catch (error) {
         logger.error(`Schedule: job '${job.name}' did not run: the ${lock.store.name} lock store failed`, {
           job: job.name,
@@ -681,6 +706,13 @@ export class ScheduleRuntime {
         })
         return this.#notExecuted(job, run.runId, scheduledAt, trigger, 'not-acquired', startTime)
       }
+    }
+    // the lease took time: the job may have been removed or paused, or the scheduler stopped meanwhile
+    const dropped = this.#dropReason(run)
+    if (dropped !== undefined) {
+      // released even for a run abandoned at shutdown: its job never started
+      if (lease !== undefined && lock !== undefined) await this.#release(run, lease, lock.ttlMs)
+      return this.#drop(run, scheduledAt, trigger, startTime, dropped)
     }
 
     const startedAt = this.clock.now()
@@ -721,15 +753,19 @@ export class ScheduleRuntime {
         run.abort('timeout')
       }, limit)
     }
-    if (lease !== undefined && lock !== undefined) this.#heartbeat(run, lease, lock)
+    if (lease !== undefined && lock !== undefined) this.#heartbeat(run, lease, lock, claimedAt)
 
     let executed = false
+    let vetoed: string | undefined
     let after: unknown
     try {
       await currentRun.run(run, () =>
         container.runInScope(
           () =>
             hooks.run('schedule:run', event, async () => {
+              // hook wrappers may wait before calling next(): same check as after the lease
+              vetoed = this.#dropReason(run)
+              if (vetoed !== undefined) return
               executed = true
               try {
                 await job.invoke(context)
@@ -755,16 +791,11 @@ export class ScheduleRuntime {
     if (event.outcome === undefined) event.outcome = 'skipped' // a hook wrapper did not call next()
     this.#stopTimers(run)
     const finishedAt = this.clock.now()
-    if (lease !== undefined && !run.abandoned) {
-      try {
-        await lease.release()
-      } catch (error) {
-        logger.warn(`Schedule: releasing the lock of job '${job.name}' failed (it expires after its ttl)`, {
-          job: job.name,
-          runId: run.runId,
-          err: error,
-        })
-      }
+    if (lease !== undefined && lock !== undefined && (!run.abandoned || !executed)) {
+      await this.#release(run, lease, lock.ttlMs)
+    }
+    if (vetoed !== undefined) {
+      logger.debug(`Schedule: job '${job.name}' did not run: ${vetoed}`, { job: job.name, runId: run.runId })
     }
     const outcome = event.outcome
     const result = this.#result(
@@ -795,7 +826,96 @@ export class ScheduleRuntime {
     return result
   }
 
-  /** An occurrence that did not execute: `skipped` (overlap), `not-acquired`, or a lock store failure. */
+  /**
+   * Why a dispatched run must not start its job (RFC 0004 §7.4), or `undefined`: its signal was
+   * aborted (shutdown, `remove(name, { abort: true })`), the scheduler stops, the job was removed, or
+   * paused (manual runs excepted). Checked once the lease is acquired and when the hook wrappers call
+   * the job, since both may wait.
+   */
+  #dropReason(run: RunRecord): string | undefined {
+    const reason = run.aborted ?? (run.controller.signal.aborted ? 'aborted' : undefined)
+    if (reason !== undefined) return `its run was aborted (${reason}) before it started`
+    if (this.#disposed || this.#state === 'stopping' || this.#state === 'stopped') return 'the scheduler is stopping'
+    if (run.job.state === 'removed') return 'it was removed'
+    if (run.job.state === 'paused' && !run.manual) return 'it was paused'
+    return undefined
+  }
+
+  /** A run dropped before its job started: outcome `skipped` (logged at `debug`, emitted). */
+  #drop(run: RunRecord, scheduledAt: number, trigger: RunTrigger, startTime: number, why: string): JobRunResult {
+    const { job } = run
+    this.#services.logger.debug(`Schedule: job '${job.name}' did not run: ${why}`, { job: job.name, runId: run.runId })
+    return this.#notExecuted(job, run.runId, scheduledAt, trigger, 'skipped', startTime, undefined, run.aborted)
+  }
+
+  /** `store.acquire()`, bounded by the ttl: a store that does not answer fails closed (RFC 0004 §7.6). */
+  async #acquire(run: RunRecord, lock: ResolvedLock, occurrence: number): Promise<LockLease | undefined> {
+    const claim = Promise.resolve(
+      lock.store.acquire(`${lock.keyPrefix}${run.job.name}`, { owner: lock.owner, occurrence, ttlMs: lock.ttlMs }),
+    )
+    const answer = await this.#bounded(run, claim, lock.ttlMs)
+    if (answer.done) return answer.value
+    // the claim may still succeed: its lease is released then, since the run did not start
+    claim.then(
+      late => (late === undefined ? undefined : Promise.resolve(late.release()).catch(() => undefined)),
+      () => undefined,
+    )
+    throw new Error(`the ${lock.store.name} lock store did not answer within the lock ttl (${lock.ttlMs} ms)`)
+  }
+
+  /** `lease.release()`: a failure, or no answer within the ttl, is logged (the lease expires after its ttl). */
+  async #release(run: RunRecord, lease: LockLease, ttl: number): Promise<void> {
+    const { job } = run
+    const { logger } = this.#services
+    try {
+      const call = Promise.resolve(lease.release())
+      // no timer once disposed: the call goes on alone
+      const answer = this.#disposed ? { done: true as const, value: await call } : await this.#bounded(run, call, ttl)
+      if (!answer.done) {
+        logger.warn(
+          `Schedule: releasing the lock of job '${job.name}' did not answer within ${ttl} ms (it expires after its ttl)`,
+          { job: job.name, runId: run.runId },
+        )
+      }
+    } catch (error) {
+      logger.warn(`Schedule: releasing the lock of job '${job.name}' failed (it expires after its ttl)`, {
+        job: job.name,
+        runId: run.runId,
+        err: error,
+      })
+    }
+  }
+
+  /** Waits for a lock store call, at most `ms` on the scheduler clock. Rejections pass through. */
+  #bounded<T>(
+    run: RunRecord,
+    call: Promise<T>,
+    ms: number,
+  ): Promise<{ readonly done: true; readonly value: T } | { readonly done: false }> {
+    return new Promise((resolve, reject) => {
+      const timer = this.clock.setTimer(() => {
+        if (run.storeTimer === timer) run.storeTimer = undefined
+        resolve({ done: false })
+      }, ms)
+      run.storeTimer = timer
+      const clear = (): void => {
+        this.clock.clearTimer(timer)
+        if (run.storeTimer === timer) run.storeTimer = undefined
+      }
+      call.then(
+        value => {
+          clear()
+          resolve({ done: true, value })
+        },
+        (error: unknown) => {
+          clear()
+          reject(error)
+        },
+      )
+    })
+  }
+
+  /** An occurrence that did not execute: `skipped` (overlap, dropped), `not-acquired`, or a lock store failure. */
   #notExecuted(
     job: JobRecord,
     runId: string,
@@ -804,8 +924,9 @@ export class ScheduleRuntime {
     outcome: RunOutcome,
     startTime: number,
     error?: unknown,
+    aborted?: JobAbortReason,
   ): JobRunResult {
-    const result = this.#result(job, runId, scheduledAt, trigger, outcome, undefined, undefined, error)
+    const result = this.#result(job, runId, scheduledAt, trigger, outcome, undefined, undefined, error, aborted)
     job.lastRun = result
     const hooks = this.#services.hooks
     if (hooks.hasListeners('schedule:run')) {
@@ -822,6 +943,7 @@ export class ScheduleRuntime {
         outcome,
       }
       if (error !== undefined) event.error = error
+      if (aborted !== undefined) event.aborted = aborted
       hooks.emit('schedule:run', event)
     }
     return result
@@ -866,53 +988,87 @@ export class ScheduleRuntime {
     run.controller.abort(new JobAbortedError(run.job.name, run.runId, reason))
   }
 
-  /** Extends the lease every `ttl / 3`; aborts the run (`lock-lost`) once it is lost. */
-  #heartbeat(run: RunRecord, lease: LockLease, lock: ResolvedLock): void {
+  /**
+   * Extends the lease every `ttl / 3`; aborts the run (`lock-lost`) once it is lost: `extend()`
+   * answers `false`, or `ttl` elapsed since the last successful extension (counted from the call).
+   * The deadline is a timer of its own, so an `extend()` that never answers (a partitioned store
+   * client queuing commands) still loses the lease on time. A beat skips the store while the
+   * previous extension is pending.
+   */
+  #heartbeat(run: RunRecord, lease: LockLease, lock: ResolvedLock, claimedAt: number): void {
     const { logger } = this.#services
     const ttl = lock.ttlMs
-    let lastExtended = this.clock.now()
-    const beat = (): void => {
-      run.heartbeat = this.clock.setTimer(
+    let extending = false
+    let lost = false
+    const live = (): boolean => !lost && !run.settled && !run.abandoned
+    const lose = (): void => {
+      if (!live()) return
+      lost = true
+      this.#stopLease(run)
+      logger.warn(`Schedule: run ${run.runId} of job '${run.job.name}' lost its lock: aborting it`, {
+        job: run.job.name,
+        runId: run.runId,
+      })
+      run.abort('lock-lost')
+    }
+    /** The lease is lost `ttl` after `since` (a successful claim or extension call). */
+    const deadline = (since: number): void => {
+      if (run.leaseDeadline !== undefined) this.clock.clearTimer(run.leaseDeadline)
+      run.leaseDeadline = this.clock.setTimer(
         () => {
-          run.heartbeat = undefined
-          void tick()
+          run.leaseDeadline = undefined
+          lose()
         },
-        Math.max(1, Math.floor(ttl / 3)),
+        Math.max(0, since + ttl - this.clock.now()),
       )
     }
-    const tick = async (): Promise<void> => {
-      if (run.settled || run.abandoned) return
+    const extend = async (): Promise<void> => {
+      extending = true
+      const calledAt = this.clock.now()
       let extended: boolean | undefined
       try {
         extended = await lease.extend(ttl)
       } catch (error) {
-        logger.warn(`Schedule: extending the lock of job '${run.job.name}' failed, retrying`, {
-          job: run.job.name,
-          runId: run.runId,
-          err: error,
-        })
+        if (live()) {
+          logger.warn(`Schedule: extending the lock of job '${run.job.name}' failed, retrying`, {
+            job: run.job.name,
+            runId: run.runId,
+            err: error,
+          })
+        }
+      } finally {
+        extending = false
       }
-      if (run.settled || run.abandoned) return
-      const now = this.clock.now()
-      if (extended === true) lastExtended = now
-      if (extended === false || now - lastExtended >= ttl) {
-        logger.warn(`Schedule: run ${run.runId} of job '${run.job.name}' lost its lock: aborting it`, {
-          job: run.job.name,
-          runId: run.runId,
-        })
-        run.abort('lock-lost')
-        return
-      }
-      beat()
+      if (!live()) return
+      if (extended === true) deadline(calledAt)
+      else if (extended === false) lose()
     }
+    const beat = (): void => {
+      run.heartbeat = this.clock.setTimer(
+        () => {
+          run.heartbeat = undefined
+          if (!live()) return
+          beat() // the next beat never waits for this extension
+          if (!extending) void extend()
+        },
+        Math.max(1, Math.floor(ttl / 3)),
+      )
+    }
+    deadline(claimedAt)
     beat()
+  }
+
+  #stopLease(run: RunRecord): void {
+    if (run.heartbeat !== undefined) this.clock.clearTimer(run.heartbeat)
+    if (run.leaseDeadline !== undefined) this.clock.clearTimer(run.leaseDeadline)
+    run.heartbeat = undefined
+    run.leaseDeadline = undefined
   }
 
   #stopTimers(run: RunRecord): void {
     if (run.timeout !== undefined) this.clock.clearTimer(run.timeout)
-    if (run.heartbeat !== undefined) this.clock.clearTimer(run.heartbeat)
     run.timeout = undefined
-    run.heartbeat = undefined
+    this.#stopLease(run)
   }
 
   /** Whether the runtime was disposed. */
@@ -1065,21 +1221,26 @@ function settleWithin(promises: readonly Promise<unknown>[], ms: number): Promis
   })
 }
 
-/** Binary min-heap of deadlines, ties broken by job name. */
+/**
+ * Binary min-heap of deadlines, ties broken by job name. Indexed by job: one entry per job at most
+ * (pushing replaces the job's entry), removed in O(log n), so cancelled occurrences of removed,
+ * paused or rescheduled jobs are not retained until their old deadline.
+ */
 class DeadlineHeap {
   readonly #items: HeapEntry[] = []
+  readonly #positions = new Map<JobRecord, number>()
 
+  /** Arms `entry`, replacing the entry of its job. */
   push(entry: HeapEntry): void {
-    const items = this.#items
-    items.push(entry)
-    let index = items.length - 1
-    while (index > 0) {
-      const parent = (index - 1) >> 1
-      if (!before(entry, items[parent] as HeapEntry)) break
-      items[index] = items[parent] as HeapEntry
-      index = parent
-    }
-    items[index] = entry
+    this.delete(entry.job)
+    this.#items.push(entry)
+    this.#up(this.#items.length - 1)
+  }
+
+  /** Removes the entry of `job`, if any. */
+  delete(job: JobRecord): void {
+    const index = this.#positions.get(job)
+    if (index !== undefined) this.#removeAt(index)
   }
 
   peek(): HeapEntry | undefined {
@@ -1097,26 +1258,60 @@ class DeadlineHeap {
   }
 
   pop(): HeapEntry | undefined {
-    const items = this.#items
-    const top = items[0]
-    const last = items.pop()
-    if (top === undefined || last === undefined || items.length === 0) return top
-    let index = 0
-    for (;;) {
-      const left = 2 * index + 1
-      if (left >= items.length) break
-      const right = left + 1
-      const child = right < items.length && before(items[right] as HeapEntry, items[left] as HeapEntry) ? right : left
-      if (!before(items[child] as HeapEntry, last)) break
-      items[index] = items[child] as HeapEntry
-      index = child
-    }
-    items[index] = last
+    const top = this.#items[0]
+    if (top !== undefined) this.#removeAt(0)
     return top
   }
 
   clear(): void {
     this.#items.length = 0
+    this.#positions.clear()
+  }
+
+  #removeAt(index: number): void {
+    const items = this.#items
+    this.#positions.delete((items[index] as HeapEntry).job)
+    const last = items.pop() as HeapEntry
+    if (index === items.length) return
+    items[index] = last
+    this.#positions.set(last.job, index)
+    if (index > 0 && before(last, items[(index - 1) >> 1] as HeapEntry)) this.#up(index)
+    else this.#down(index)
+  }
+
+  #up(start: number): void {
+    const items = this.#items
+    const entry = items[start] as HeapEntry
+    let index = start
+    while (index > 0) {
+      const parent = (index - 1) >> 1
+      const above = items[parent] as HeapEntry
+      if (!before(entry, above)) break
+      items[index] = above
+      this.#positions.set(above.job, index)
+      index = parent
+    }
+    items[index] = entry
+    this.#positions.set(entry.job, index)
+  }
+
+  #down(start: number): void {
+    const items = this.#items
+    const entry = items[start] as HeapEntry
+    let index = start
+    for (;;) {
+      const left = 2 * index + 1
+      if (left >= items.length) break
+      const right = left + 1
+      const child = right < items.length && before(items[right] as HeapEntry, items[left] as HeapEntry) ? right : left
+      const below = items[child] as HeapEntry
+      if (!before(below, entry)) break
+      items[index] = below
+      this.#positions.set(below.job, index)
+      index = child
+    }
+    items[index] = entry
+    this.#positions.set(entry.job, index)
   }
 }
 

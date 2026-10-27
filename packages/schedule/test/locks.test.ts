@@ -1,14 +1,17 @@
 /**
  * One runner across instances (RFC 0004 §4.7, §7.6): occurrence-fenced leases, heartbeats, lost
- * leases, store failures, abandoned leases, ZNIGHT043, and the conformance scenarios.
+ * leases, store failures, abandoned leases, runs dropped while waiting for their lease, stores that
+ * do not answer, ZNIGHT043, and the conformance scenarios.
  */
+import type { ScheduledRunEvent } from '@znight/core'
+import type { JobContext } from '../src/context.ts'
 import type { LockClaim, LockLease, ScheduleLockStore } from '../src/index.ts'
 
 import { hostname } from 'node:os'
 
 import { memoryLockStore } from '../src/index.ts'
-import { createTestClock, lockStoreScenarios } from '../src/testing/index.ts'
-import { aborted, boot, deferred, metadataWith } from './helpers.ts'
+import { lockStoreScenarios } from '../src/testing/index.ts'
+import { aborted, boot, deferred, metadataWith, testClock } from './helpers.ts'
 import { describe, expect, test as it } from 'bun:test'
 
 /** A store recording its claims, delegating to a memory store. */
@@ -26,7 +29,7 @@ function recordingStore(inner: ScheduleLockStore): ScheduleLockStore & { readonl
 
 describe('single runner', () => {
   it('two instances on one store and one clock: each occurrence runs once', async () => {
-    const clock = createTestClock('2026-01-01T00:00:00Z')
+    const clock = testClock('2026-01-01T00:00:00Z')
     const lock = memoryLockStore({ clock })
     const runs: string[] = []
     const metadata = metadataWith([
@@ -83,7 +86,7 @@ describe('single runner', () => {
 
 describe('leases', () => {
   it('extends the lease every ttl / 3 while the run lasts, then releases it', async () => {
-    const clock = createTestClock('2026-01-01T00:00:00Z')
+    const clock = testClock('2026-01-01T00:00:00Z')
     const extensions: number[] = []
     let released = 0
     const store: ScheduleLockStore = {
@@ -205,7 +208,7 @@ describe('leases', () => {
   })
 
   it('keeps the lease of a run abandoned at shutdown (it expires after its ttl)', async () => {
-    const clock = createTestClock('2026-01-01T00:00:00Z')
+    const clock = testClock('2026-01-01T00:00:00Z')
     const lock = memoryLockStore({ clock })
     const never = deferred()
     const booted = await boot({
@@ -222,6 +225,224 @@ describe('leases', () => {
     await clock.advance('10s')
     expect(await lock.acquire(key, next)).toBeDefined()
     never.resolve()
+  })
+})
+
+describe('runs waiting for their lease', () => {
+  /** A memory store whose `acquire()` waits for `gate` (store latency). */
+  function slowStore(inner: ScheduleLockStore, gate: Promise<void>): ScheduleLockStore {
+    return {
+      name: 'slow',
+      acquire: async (key, claim) => {
+        await gate
+        return inner.acquire(key, claim)
+      },
+    }
+  }
+  const next = { owner: 'other', occurrence: Date.parse('2026-01-01T00:02:00Z'), ttlMs: 1000 }
+
+  it('never start their job once the application stopped, and release the lease (drain timed out)', async () => {
+    const clock = testClock()
+    const inner = memoryLockStore({ clock })
+    const gate = deferred()
+    const executed: string[] = []
+    const events: ScheduledRunEvent[] = []
+    const booted = await boot({
+      clock,
+      schedule: { lock: { store: slowStore(inner, gate.promise), ttl: '30s' }, drainTimeoutMs: 20 },
+      metadata: metadataWith([{ name: 'job', kind: 'interval', every: 60_000, run: () => executed.push('ran') }]),
+    })
+    booted.app.hooks.on('schedule:run', event => {
+      events.push(event)
+    })
+    await clock.advance('1m')
+    expect(booted.registry.get('job')?.running).toBe(1)
+    await booted.app.stop() // abandoned after 20 ms, then disposed
+    gate.resolve()
+    await clock.settle()
+    expect(executed).toEqual([])
+    expect(events.map(event => [event.outcome, event.aborted])).toEqual([['skipped', 'shutdown']])
+    expect(booted.logs.messages('debug')).toContain(
+      "Schedule: job 'job' did not run: its run was aborted (shutdown) before it started",
+    )
+    expect(await inner.acquire('znight:schedule:job', next)).toBeDefined() // released: the job never ran
+    expect(clock.pendingTimers).toBe(0) // no heartbeat nor store timer after dispose
+  })
+
+  it('never start their job once stop() began, even when the drain succeeds', async () => {
+    const clock = testClock()
+    const gate = deferred()
+    const executed: string[] = []
+    const booted = await boot({
+      clock,
+      schedule: { lock: { store: slowStore(memoryLockStore({ clock }), gate.promise) } },
+      metadata: metadataWith([{ name: 'job', kind: 'interval', every: 60_000, run: () => executed.push('ran') }]),
+    })
+    await clock.advance('1m')
+    const stopping = booted.app.stop()
+    gate.resolve()
+    await stopping
+    expect(executed).toEqual([])
+    expect(booted.logs.messages('warn').filter(message => message.includes('abandoned'))).toEqual([])
+  })
+
+  it('never start the job of a removed or paused job (manual runs of a paused job do)', async () => {
+    const clock = testClock()
+    const gate = deferred()
+    const executed: string[] = []
+    const run = (ctx: JobContext): void => {
+      executed.push(`${ctx.job}:${ctx.trigger}`)
+    }
+    await using booted = await boot({
+      clock,
+      schedule: { lock: { store: slowStore(memoryLockStore({ clock }), gate.promise) } },
+      metadata: metadataWith([
+        { name: 'monitor.1', kind: 'cron', cron: '* * * * *', run },
+        { name: 'monitor.2', kind: 'cron', cron: '* * * * *', run },
+        { name: 'report', kind: 'cron', cron: '* * * * *', run },
+      ]),
+    })
+    await clock.advance('1m')
+    const [one, two, report] = ['monitor.1', 'monitor.2', 'report'].map(name => booted.registry.get(name))
+    booted.registry.remove('monitor.1', { abort: true })
+    booted.registry.remove('monitor.2')
+    report?.pause()
+    gate.resolve()
+    await booted.registry.idle()
+    expect(executed).toEqual([])
+    expect(one?.lastRun).toMatchObject({ outcome: 'skipped', aborted: 'removed', startedAt: undefined })
+    expect(two?.lastRun).toMatchObject({ outcome: 'skipped', startedAt: undefined })
+    expect(report?.lastRun).toMatchObject({ outcome: 'skipped', startedAt: undefined })
+    expect(booted.logs.messages('debug')).toEqual(
+      expect.arrayContaining([
+        "Schedule: job 'monitor.1' did not run: its run was aborted (removed) before it started",
+        "Schedule: job 'monitor.2' did not run: it was removed",
+        "Schedule: job 'report' did not run: it was paused",
+      ]),
+    )
+    await clock.advance('1s') // a manual run claims now: after the occurrence claimed at 00:01:00
+    expect((await report?.trigger())?.outcome).toBe('completed')
+    expect(executed).toEqual(['report:manual'])
+  })
+})
+
+describe('lock stores that do not answer', () => {
+  it("loses the lease ttl after the last successful extension, even while extend() hangs ('lock-lost')", async () => {
+    const clock = testClock()
+    const inner = memoryLockStore({ clock })
+    let extensions = 0
+    const store: ScheduleLockStore = {
+      name: 'partitioned',
+      acquire: async (key, claim) => {
+        const lease = await inner.acquire(key, claim)
+        return (
+          lease && {
+            extend: () => {
+              extensions++
+              return new Promise<boolean>(() => undefined) // a client queuing commands offline
+            },
+            release: () => lease.release(),
+          }
+        )
+      },
+    }
+    let reason: unknown
+    await using booted = await boot({
+      clock,
+      schedule: { lock: { store, ttl: '3s' } },
+      metadata: metadataWith([
+        {
+          name: 'job',
+          kind: 'cron',
+          cron: '* * * * *',
+          run: async ctx => {
+            reason = await aborted(ctx.signal)
+          },
+        },
+      ]),
+    })
+    await clock.advance('62999ms')
+    expect(reason).toBeUndefined()
+    expect(extensions).toBe(1) // later beats skip the store while the extension is pending
+    await clock.advance(1)
+    expect(reason).toMatchObject({ reason: 'lock-lost' }) // at 00:01:03, when the store expires the lease
+    expect(booted.logs.messages('warn')).toContain(
+      `Schedule: run ${booted.registry.get('job')?.lastRun?.runId} of job 'job' lost its lock: aborting it`,
+    )
+  })
+
+  it('fails closed when acquire() does not answer within the ttl, and releases a late lease', async () => {
+    const clock = testClock()
+    const inner = memoryLockStore({ clock })
+    const late = deferred<LockLease | undefined>()
+    let releasedLate = false
+    let calls = 0
+    const store: ScheduleLockStore = {
+      name: 'hung',
+      acquire: (key, claim) => (++calls === 1 ? late.promise : inner.acquire(key, claim)),
+    }
+    const runs: string[] = []
+    await using booted = await boot({
+      clock,
+      schedule: { lock: { store, ttl: '3s' } },
+      metadata: metadataWith([
+        { name: 'job', kind: 'interval', every: 60_000, run: ctx => runs.push(ctx.scheduledAt.toISOString()) },
+      ]),
+    })
+    await clock.advance('1m')
+    const job = booted.registry.get('job')
+    expect(job?.running).toBe(1)
+    await clock.advance('3s')
+    expect(job?.running).toBe(0)
+    expect(job?.lastRun).toMatchObject({ outcome: 'failed', startedAt: undefined })
+    expect(String((job?.lastRun?.error as Error | undefined)?.message)).toBe(
+      'the hung lock store did not answer within the lock ttl (3000 ms)',
+    )
+    expect(booted.logs.messages('error')).toContain("Schedule: job 'job' did not run: the hung lock store failed")
+    late.resolve({
+      extend: () => Promise.resolve(true),
+      release: () => {
+        releasedLate = true
+        return Promise.resolve()
+      },
+    })
+    await clock.settle()
+    expect(releasedLate).toBe(true)
+    await clock.advance('57s')
+    expect(runs).toEqual(['2026-01-01T00:02:00.000Z'])
+  })
+
+  it('frees the job when release() does not answer within the ttl (the lease expires)', async () => {
+    const clock = testClock()
+    const inner = memoryLockStore({ clock })
+    const store: ScheduleLockStore = {
+      name: 'hung',
+      acquire: async (key, claim) => {
+        const lease = await inner.acquire(key, claim)
+        return lease && { extend: ttl => lease.extend(ttl), release: () => new Promise<void>(() => undefined) }
+      },
+    }
+    const runs: string[] = []
+    await using booted = await boot({
+      clock,
+      schedule: { lock: { store, ttl: '3s' } },
+      metadata: metadataWith([
+        { name: 'job', kind: 'interval', every: 60_000, run: ctx => runs.push(ctx.scheduledAt.toISOString()) },
+      ]),
+    })
+    await clock.advance('1m')
+    const job = booted.registry.get('job')
+    expect(job?.running).toBe(1) // releasing
+    await clock.advance('3s')
+    expect(job?.running).toBe(0)
+    expect(job?.lastRun?.outcome).toBe('completed')
+    expect(booted.logs.messages('warn')).toContain(
+      "Schedule: releasing the lock of job 'job' did not answer within 3000 ms (it expires after its ttl)",
+    )
+    await clock.advance('57s')
+    expect(runs).toEqual(['2026-01-01T00:01:00.000Z', '2026-01-01T00:02:00.000Z'])
+    await clock.advance('3s') // the second release times out as well
+    expect(job?.running).toBe(0)
   })
 })
 

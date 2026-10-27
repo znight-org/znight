@@ -249,9 +249,12 @@ ObservabilityPlugin.configure({
 })
 ```
 
-Job entries carry `job`, `runId`, `trigger`, `scheduledAt`, plus `durationMs` and `lateMs` (start
-minus occurrence) for executed runs and `aborted` when the run's signal was aborted. Executed runs
-are logged inside their span (the entry carries `traceId`).
+Job entries carry `job`, `runId`, `trigger`, `scheduledAt`, plus `durationMs` for executed runs,
+`lateMs` (start minus occurrence) for dispatched runs and `aborted` when the run's signal was
+aborted. Executed runs are logged inside their span (the entry carries `traceId`). A run vetoed by
+a `schedule:run` wrapper that does not call `next()` (feature flag, maintenance window) is `job
+skipped` at `warn`, without `durationMs` or `err`, wherever that wrapper sits relative to the
+plugin's own.
 
 ## Metrics
 
@@ -322,7 +325,11 @@ producers send). Label cardinality stays bounded.
 | `schedule_active_runs`                    | gauge     | `job`                                        |
 | `schedule_last_success_timestamp_seconds` | gauge     | `job` (for "has not succeeded since" alerts) |
 
-`outcome` is `completed`, `failed`, `skipped` or `not-acquired`. Dynamic job names can be unbounded
+`outcome` is `completed`, `failed`, `skipped` or `not-acquired`. A run vetoed by a `schedule:run`
+wrapper that does not call `next()` is counted as `skipped`, but neither timed nor counted as a
+success: a maintenance window that blocks a job keeps its staleness alert firing (the lateness
+histogram, the scheduler's dispatch delay, still observes it when the vetoing wrapper is registered
+after the plugin). Dynamic job names can be unbounded
 (one job per monitor...): at most `maxJobs` (100) distinct names are labelled, later ones are
 `_OTHER`.
 
@@ -413,7 +420,9 @@ trace (a scheduled run is its own unit of work), except for manual runs (`regist
 are children of the caller (an admin request, for example). Attributes: `znight.schedule.job`,
 `.kind`, `.trigger`, `.run_id`, `.scheduled_at`, `.outcome`, `.aborted`, `code.function.name`
 (`DigestJobs.sendDaily`). A failed run sets the status to `ERROR` and records the exception.
-Occurrences that did not run (skipped, not acquired) get no span.
+Occurrences that did not run (skipped, not acquired) get no span, except a run vetoed by a
+`schedule:run` wrapper registered after the plugin: its span is already open, and ends with the
+outcome `skipped`.
 
 ### The `Tracer`
 

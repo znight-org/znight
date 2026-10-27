@@ -45,18 +45,33 @@ export function vendorOf(schema: StandardSchemaV1): string {
   return typeof vendor === 'string' ? vendor : 'unknown'
 }
 
+/** How a date travels in JSON: an ISO 8601 string. */
+const DATE_TIME: JsonSchema = Object.freeze({ type: 'string', format: 'date-time' })
+
 /**
- * Zod dates are serialised with `Date.prototype.toJSON`: in responses they are ISO strings. Other
+ * Zod dates are serialised with `Date.prototype.toJSON`: in responses they are ISO strings. A
+ * coerced date (`z.coerce.date()`) reads a string in requests (query, path, body). Other
  * unrepresentable parts throw (or become `{}` when lenient).
  */
 function zodOptions(context: SchemaConverterContext): Record<string, unknown> {
   return {
-    unrepresentable: (site: { zodSchema?: { _zod?: { def?: { type?: unknown } } } }) => {
-      if (context.io === 'output' && site.zodSchema?._zod?.def?.type === 'date') {
-        return { type: 'string', format: 'date-time' }
-      }
+    unrepresentable: (site: { zodSchema?: { _zod?: { def?: { type?: unknown; coerce?: unknown } } } }) => {
+      const def = site.zodSchema?._zod?.def
+      if (def?.type === 'date' && (context.io === 'output' || def.coerce === true)) return { ...DATE_TIME }
       return context.lenient ? 'any' : 'throw'
     },
+  }
+}
+
+/**
+ * `@valibot/to-json-schema` options: dates of responses are ISO strings (`Date.prototype.toJSON`),
+ * other unrepresentable parts throw (or are left out when lenient).
+ */
+function valibotOptions(context: SchemaConverterContext): Record<string, unknown> {
+  return {
+    ...(context.lenient ? { errorMode: 'ignore' } : {}),
+    overrideSchema: (site: { valibotSchema?: { type?: unknown } }) =>
+      context.io === 'output' && site.valibotSchema?.type === 'date' ? { ...DATE_TIME } : undefined,
   }
 }
 
@@ -93,7 +108,7 @@ export const valibotConverter: SchemaConverter = Object.freeze({
   async convert(schema: StandardSchemaV1, context: SchemaConverterContext): Promise<JsonSchema | undefined> {
     const props = propsOf(schema)
     if (props?.vendor !== 'valibot' || props.jsonSchema !== undefined) return undefined
-    let module: { toStandardJsonSchema?: (schema: unknown, config?: unknown) => unknown }
+    let module: { toStandardJsonSchema?: (schema: unknown) => unknown }
     try {
       module = (await import('@valibot/to-json-schema')) as typeof module
     } catch (error) {
@@ -107,8 +122,11 @@ export const valibotConverter: SchemaConverter = Object.freeze({
     if (typeof module.toStandardJsonSchema !== 'function') {
       throw new Error('@valibot/to-json-schema has no toStandardJsonSchema(): install version 1.5 or later')
     }
-    const standard = module.toStandardJsonSchema(schema, context.lenient ? { errorMode: 'ignore' } : undefined)
-    return callStandard(propsOf(standard as StandardSchemaV1), context) as JsonSchema | undefined
+    // options go through `libraryOptions` (toStandardJsonSchema takes the schema only)
+    const standard = module.toStandardJsonSchema(schema)
+    return callStandard(propsOf(standard as StandardSchemaV1), context, valibotOptions(context)) as
+      | JsonSchema
+      | undefined
   },
 })
 

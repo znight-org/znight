@@ -20,6 +20,8 @@ import type { SchemaPlaceholder, SchemaTemplate } from '../metadata.ts'
 import type { JsonSchema, JsonValue } from '../types.ts'
 import type { OpenApiStored, SlotData } from './model.ts'
 
+import { createHash } from 'node:crypto'
+
 import { compareStrings, componentName, schemaRef } from '../shared.ts'
 import { Codes, KEEP, SCHEMA_ALIASES, SCHEMA_MEMBERS } from './model.ts'
 
@@ -97,6 +99,11 @@ export class Slots {
     return this.#names.get(name)
   }
 
+  /** Adds an io to the slot of `identity` (no effect for an unknown slot). */
+  need(identity: string, io: 'input' | 'output'): void {
+    this.#slots.get(identity)?.io.add(io)
+  }
+
   /** Slots sorted by name. */
   list(): SlotData[] {
     return [...this.#slots.values()].sort((a, b) => compareStrings(a.name, b.name))
@@ -120,11 +127,14 @@ export class Schemas {
   readonly #reserved: ReadonlySet<string>
   /** Component name by named key. */
   readonly #names = new Map<string, string>()
+  /** The first named key given each component name. */
+  readonly #keys = new Map<string, string>()
   /** Components by name. */
   readonly #components = new Map<string, Component>()
   /** Every named shape seen, by key. */
   readonly #named = new Map<string, NamedShape>()
-  readonly #reported = new WeakSet<object>()
+  /** Issues reported so far, with the severity they were reported at. */
+  readonly #reported = new WeakMap<object, 'warning' | 'error'>()
   readonly #conflicts = new Set<string>()
 
   constructor(ctx: Context, options: { jsdoc: boolean; strict: boolean; reserved: ReadonlySet<string> }, slots: Slots) {
@@ -242,6 +252,36 @@ export class Schemas {
   // ------------------------------------------------------------------------------------------------
   // components
 
+  /**
+   * Checks the components against the schema slots once every operation is built, whatever the order
+   * they were met in: a declaration merged with the schema it is inferred from (`const User =
+   * z.object(...)` and `interface User extends z.infer<typeof User> {}`) is documented by the schema
+   * (its output variant); another declaration with the name of a schema is ZNIGHT034.
+   */
+  settle(): void {
+    for (const [name, component] of [...this.#components]) {
+      const slot = this.#slots.has(name)
+      if (slot === undefined) continue
+      if (slot.identity === component.identity) {
+        this.#components.delete(name)
+        this.#slots.need(slot.identity, 'output')
+        continue
+      }
+      const named = this.#named.get(component.key)
+      const key = `${name}\u0000${component.key}`
+      if (this.#conflicts.has(key)) continue
+      this.#conflicts.add(key)
+      this.#ctx.report({
+        code: Codes.SchemaNameConflict,
+        severity: 'error',
+        message: `Two schemas are named "${name}" in the OpenAPI document: the ${named?.declaration ?? 'declaration'} ${named?.name ?? component.identity} and the schema ${slot.identity}`,
+        location: component.location,
+        related: [{ message: 'the schema', location: slot.location }],
+        hints: ['Rename one of them: component names come from declaration and export names'],
+      })
+    }
+  }
+
   #component(named: NamedShape): void {
     const name = this.#nameOf(named)
     const existing = this.#components.get(name)
@@ -249,19 +289,15 @@ export class Schemas {
       if (existing.key !== named.key) this.#conflict(name, named, existing)
       return
     }
-    const slot = this.#slots.has(name)
-    if (this.#reserved.has(name) || (slot !== undefined && slot.identity !== named.identity)) {
+    if (this.#reserved.has(name)) {
       const key = `${name}\u0000${named.key}`
       if (!this.#conflicts.has(key)) {
         this.#conflicts.add(key)
         this.#ctx.report({
           code: Codes.SchemaNameConflict,
           severity: 'error',
-          message: this.#reserved.has(name)
-            ? `${named.name} is named "${name}", a name reserved for the standard error components of the OpenAPI document`
-            : `Two schemas are named "${name}" in the OpenAPI document: the ${named.declaration} ${named.name} and the schema ${slot?.identity}`,
+          message: `${named.name} is named "${name}", a name reserved for the standard error components of the OpenAPI document`,
           location: named.location,
-          ...(slot === undefined ? {} : { related: [{ message: 'the schema', location: slot.location }] }),
           hints: ['Rename one of them: component names come from declaration and export names'],
         })
       }
@@ -298,39 +334,59 @@ export class Schemas {
     return named === undefined ? undefined : this.#nameOf(named)
   }
 
+  /**
+   * The component name of a declaration: its name, then the names of its type arguments
+   * (`Page_Book`). An instantiation with an anonymous argument (`Page<{ id: string }>`), or whose
+   * name another instantiation of the same declaration already has (`Box<Book[]>`, `Box<BookArray>`),
+   * also gets a short hash of its key (`Page_object_1a2b3c4d`): two instantiations never clash.
+   */
   #nameOf(named: NamedShape): string {
     let name = this.#names.get(named.key)
     if (name === undefined) {
-      name =
-        named.typeArgs.length === 0
-          ? componentName(named.name)
-          : componentName([named.name, ...named.typeArgs.map(arg => this.#argName(arg))].join('_'))
+      if (named.typeArgs.length === 0) name = componentName(named.name)
+      else {
+        const args = named.typeArgs.map(arg => this.#argName(arg))
+        name = componentName([named.name, ...args.map(arg => arg.text)].join('_'))
+        const taken = this.#keys.get(name)
+        const sibling =
+          taken !== undefined && taken !== named.key && this.#named.get(taken)?.identity === named.identity
+        if (sibling || args.some(arg => !arg.exact)) name = `${name}_${shortHash(named.key)}`
+      }
       this.#names.set(named.key, name)
+      if (!this.#keys.has(name)) this.#keys.set(name, named.key)
     }
     return name
   }
 
-  #argName(shape: Shape): string {
+  /** The name of a type argument; `exact: false` when it does not tell the argument apart (`object`). */
+  #argName(shape: Shape): { text: string; exact: boolean } {
     switch (shape.kind) {
       case 'named':
-        return this.#nameOfKey(shape.key) ?? 'unknown'
+        return { text: this.#nameOfKey(shape.key) ?? 'unknown', exact: true }
       case 'literal':
-        return String(shape.value)
-      case 'array':
-        return `${this.#argName(shape.items)}Array`
+        return { text: String(shape.value), exact: true }
+      case 'array': {
+        const items = this.#argName(shape.items)
+        return { text: `${items.text}Array`, exact: items.exact }
+      }
       case 'union':
-      case 'intersection':
-        return shape.members.map(member => this.#argName(member)).join(shape.kind === 'union' ? '_or_' : '_and_')
+      case 'intersection': {
+        const members = shape.members.map(member => this.#argName(member))
+        return {
+          text: members.map(member => member.text).join(shape.kind === 'union' ? '_or_' : '_and_'),
+          exact: members.every(member => member.exact),
+        }
+      }
       case 'schema':
-        return componentName(shape.ref.name)
+        return { text: componentName(shape.ref.name), exact: true }
       case 'reference':
-        return shape.name
+        return { text: shape.name, exact: shape.typeArgs.length === 0 }
       case 'opaque':
       case 'object':
       case 'tuple':
-        return shape.kind
+        return { text: shape.kind, exact: false }
       default:
-        return shape.kind
+        return { text: shape.kind, exact: true }
     }
   }
 
@@ -417,10 +473,10 @@ export class Schemas {
       }
     })
     const schema: Record<string, JsonValue> = { oneOf: list }
-    schema['discriminator'] =
-      Object.keys(mapping).length === rest.length
-        ? { propertyName: discriminator.property, mapping }
-        : { propertyName: discriminator.property }
+    // without a mapping, tools read the values as component names: only when every member is a component
+    if (Object.keys(mapping).length === rest.length) {
+      schema['discriminator'] = { propertyName: discriminator.property, mapping }
+    }
     return schema
   }
 
@@ -477,8 +533,11 @@ export class Schemas {
   // diagnostics
 
   #issue(issue: ShapeIssue, use: SchemaUse): void {
-    if (this.#reported.has(issue)) return
-    this.#reported.add(issue)
+    // one report per issue, unless a later use is more severe (a bigint met in a request body, then in a response)
+    const severity = (issue.reason === 'bigint' && use.io === 'output') || this.#strict ? 'error' : 'warning'
+    const reported = this.#reported.get(issue)
+    if (reported === 'error' || reported === severity) return
+    this.#reported.set(issue, severity)
     const subject = issue.path === '' ? `The type of ${use.part}` : issue.path
     const location = issue.location ?? use.location
     const related =
@@ -489,7 +548,7 @@ export class Schemas {
       const response = use.io === 'output'
       this.#ctx.report({
         code: Codes.UnrepresentableType,
-        severity: response || this.#strict ? 'error' : 'warning',
+        severity,
         message: response
           ? `${subject} is a bigint: JSON.stringify throws on bigint, so ${use.operation} would answer 500`
           : `${subject} is a bigint: JSON has no bigint (${use.operation})`,
@@ -505,7 +564,7 @@ export class Schemas {
     }
     this.#ctx.report({
       code: Codes.UnrepresentableType,
-      severity: this.#strict ? 'error' : 'warning',
+      severity,
       message: `${subject} (${issue.text}) ${REASONS[issue.reason] ?? 'has no JSON Schema'}: it is documented as any value (${use.operation})`,
       ...(location === undefined ? {} : { location }),
       related,
@@ -532,6 +591,11 @@ export class Schemas {
       hints: ['JSDoc tag values are JSON (`@minimum 1`, `@example {"id": 1}`) or text'],
     })
   }
+}
+
+/** 8 hexadecimal characters of the SHA-256 of `text` (deterministic name suffixes). */
+function shortHash(text: string): string {
+  return createHash('sha256').update(text).digest('hex').slice(0, 8)
 }
 
 /** Keywords whose meaning changes when `null` joins the type list (`enum`, `const`...): `anyOf` instead. */

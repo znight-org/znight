@@ -74,6 +74,39 @@ describe('overlap', () => {
     await booted.registry.idle()
   })
 
+  it('queue: pause() drops the queued occurrence (it has not started); a queued manual run still runs', async () => {
+    let release = deferred()
+    const runs: string[] = []
+    await using booted = await boot({
+      metadata: metadataWith([
+        {
+          name: 'queued',
+          kind: 'interval',
+          every: 60_000,
+          overlap: 'queue',
+          run: async ctx => {
+            runs.push(`${ctx.trigger}@${ctx.scheduledAt.toISOString().slice(11, 16)}`)
+            await release.promise
+          },
+        },
+      ]),
+    })
+    await booted.clock.advance('2m') // 00:01 runs, 00:02 is queued
+    const job = booted.registry.get('queued')
+    job?.pause()
+    release.resolve()
+    await booted.registry.idle()
+    expect(runs).toEqual(['schedule@00:01'])
+    expect(job?.state).toBe('paused')
+    // trigger() runs a paused job, through the queue too
+    release = deferred()
+    const first = job?.trigger()
+    const second = job?.trigger()
+    release.resolve()
+    expect([(await first)?.outcome, (await second)?.outcome]).toEqual(['completed', 'completed'])
+    expect(runs).toEqual(['schedule@00:01', 'manual@00:02', 'queued@00:02'])
+  })
+
   it('allow: runs concurrently and implies lock: false', async () => {
     const release = deferred()
     await using booted = await boot({

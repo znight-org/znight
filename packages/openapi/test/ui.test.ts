@@ -1,8 +1,47 @@
 /** UI pages: CSP, escaping, pinned CDN assets (their SRI hashes are checked with ZNIGHT_NETWORK=1). */
+import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 
-import { cdnUrl, renderUiPage, UI_PACKAGES } from '../src/ui.ts'
-import { describe, expect, test as it } from 'bun:test'
+import { cdnUrl, findLocalPackage, renderUiPage, UI_PACKAGES } from '../src/ui.ts'
+import { afterAll, describe, expect, test as it } from 'bun:test'
+
+describe('findLocalPackage', () => {
+  // an installed @scalar/api-reference: its exports map does not export "./package.json"
+  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'znight-ui-')))
+  afterAll(() => fs.rmSync(root, { recursive: true, force: true }))
+  const dir = path.join(root, 'node_modules/@scalar/api-reference')
+  fs.mkdirSync(path.join(dir, 'dist/browser'), { recursive: true })
+  fs.writeFileSync(
+    path.join(dir, 'package.json'),
+    JSON.stringify({
+      name: '@scalar/api-reference',
+      version: '1.75.1',
+      type: 'module',
+      exports: { '.': { import: './dist/index.js' }, './style.css': './dist/style.css' },
+    }),
+  )
+  fs.writeFileSync(path.join(dir, 'dist/index.js'), 'export {}\n')
+  fs.writeFileSync(path.join(dir, 'dist/browser/standalone.js'), '// stub\n')
+  fs.writeFileSync(path.join(root, 'package.json'), '{"name":"app","type":"module"}')
+  const base = pathToFileURL(path.join(root, 'package.json')).href
+
+  it('finds a package whose exports map hides its package.json (Bun)', () => {
+    expect(findLocalPackage(UI_PACKAGES.scalar, [base])).toEqual({ dir, version: '1.75.1' })
+    expect(findLocalPackage(UI_PACKAGES.swagger, [base])).toBeUndefined()
+  })
+
+  it.skipIf(Bun.which('node') === null)('finds it on Node.js too', () => {
+    const script = `const { findLocalPackage, UI_PACKAGES } = await import(${JSON.stringify(
+      pathToFileURL(path.resolve(import.meta.dir, '../src/ui.ts')).href,
+    )})\nprocess.stdout.write(JSON.stringify(findLocalPackage(UI_PACKAGES.scalar, [${JSON.stringify(base)}]) ?? null))`
+    const output = execFileSync('node', ['--input-type=module', '--eval', script], { encoding: 'utf8' })
+    expect(JSON.parse(output)).toEqual({ dir, version: '1.75.1' })
+  })
+})
 
 describe('renderUiPage', () => {
   it('escapes the inline configuration and allows the inline script by hash only', () => {

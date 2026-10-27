@@ -8,6 +8,7 @@ import type { SseHost, SseStreamSettings } from '../src/sse.ts'
 
 import { EventChannel, encodeSseEvent, HttpResponse } from '../src/index.ts'
 import { checkSseOptions, isSseSource, SseBody, SseSession } from '../src/sse.ts'
+import { parseSseStream } from '../src/sse-parse.ts'
 import { caught, sleep } from './helpers.ts'
 import { describe, expect, it } from 'bun:test'
 
@@ -101,6 +102,12 @@ describe('SSE options and sources', () => {
     expect(() => checkSseOptions({ heartbeat: true }, 'x')).toThrow('heartbeat')
     expect(() => checkSseOptions({ retry: -1 }, 'x')).toThrow('retry')
     expect(() => checkSseOptions({ maxDuration: 10 }, 'x')).toThrow('maxDuration')
+    // above the longest setTimeout delay, the timer would fire after 1 ms
+    expect(() => checkSseOptions({ maxDuration: 2_147_483_647, heartbeat: 2_147_483_647 }, 'x')).not.toThrow()
+    expect(() => checkSseOptions({ maxDuration: 30 * 24 * 3_600_000 }, 'x')).toThrow(
+      'x: maxDuration must be an integer number of ms from 1000 to 2147483647',
+    )
+    expect(() => checkSseOptions({ heartbeat: 2 ** 31 }, 'x')).toThrow('x: heartbeat must be')
     expect(() => checkSseOptions({ ping: 1 }, 'x')).toThrow('unknown option "ping"')
     expect(() => checkSseOptions(null, 'x')).toThrow('options must be an object')
   })
@@ -290,6 +297,115 @@ describe('SseSession', () => {
     release()
     expect(await next).toBe('\ndata: y\n\n')
     expect(await stream.rest()).toEqual([])
+  })
+
+  it('resumes heartbeats once the LF of a CRLF boundary split across chunks arrives', async () => {
+    let release: () => void = () => undefined
+    async function* upstream(): AsyncGenerator<Uint8Array> {
+      yield ENCODER.encode('data: x\r\n\r')
+      await new Promise<void>(resolve => {
+        release = resolve
+      })
+      yield ENCODER.encode('\n') // the LF completing \r\n\r\n, alone, then a quiet upstream
+      await new Promise<void>(resolve => {
+        release = resolve
+      })
+    }
+    const stream = open(upstream(), { heartbeat: 15 })
+    await stream.read()
+    expect(await stream.read()).toBe('data: x\r\n\r')
+    const lf = stream.read()
+    await sleep(30)
+    release()
+    expect(await lf).toBe('\n')
+    expect(await stream.read()).toBe(':\n\n') // at a boundary again: heartbeats resume
+    const cancelled = stream.reader.cancel()
+    release()
+    await cancelled
+  })
+
+  it('never writes the final retry inside an unterminated raw event (shutdown, maxDuration)', async () => {
+    const parse = async (chunks: readonly string[]): Promise<string[]> => {
+      const events: string[] = []
+      const body = new Response(chunks.join('')).body as ReadableStream<Uint8Array>
+      for await (const item of parseSseStream(body)) {
+        if (item.type === 'event') events.push(item.data)
+        else if (item.type === 'retry') events.push(`retry ${item.retry}`)
+      }
+      return events
+    }
+    // the grace period ends while the last raw chunk is a partial event
+    let release: () => void = () => undefined
+    async function* upstream(): AsyncGenerator<Uint8Array> {
+      try {
+        yield ENCODER.encode('data: {"token":"a"}\n\n')
+        yield ENCODER.encode('data: {"token":"hel')
+        await new Promise<void>(resolve => {
+          release = resolve
+        })
+      } finally {
+        release = () => undefined
+      }
+    }
+    const cut = open(upstream(), { graceMs: 20, random: () => 0, stopTimeoutMs: 20 })
+    expect(await cut.read()).toBe(':\n\n')
+    expect(await cut.read()).toBe('data: {"token":"a"}\n\n')
+    expect(await cut.read()).toBe('data: {"token":"hel')
+    void cut.read() // a read waits on the source
+    cut.session.close('expired')
+    const rest = await cut.rest()
+    release()
+    expect(rest).toEqual([]) // no retry glued to the fragment: the client discards it at EOF
+    expect(await parse([':\n\n', 'data: {"token":"a"}\n\n', 'data: {"token":"hel', ...rest])).toEqual(['{"token":"a"}'])
+    // the upstream ends mid-event during the grace period
+    function* truncated(): Generator<Uint8Array> {
+      yield ENCODER.encode('data: {"token":"hel')
+    }
+    const ended = open(truncated(), { graceMs: 1_000 })
+    expect(await ended.read()).toBe(':\n\n')
+    ended.session.close('shutdown')
+    expect(await ended.rest()).toEqual(['data: {"token":"hel'])
+    // at a boundary (LF, CRLF or a final CR ending an empty line), the retry is sent
+    for (const tail of ['data: a\n\n', 'data: a\r\n\r\n', 'data: a\r\n\r']) {
+      function* framed(): Generator<Uint8Array> {
+        yield ENCODER.encode(tail)
+      }
+      const stream = open(framed(), { graceMs: 1_000, random: () => 0 })
+      expect(await stream.read()).toBe(':\n\n')
+      stream.session.close('shutdown')
+      const chunks = await stream.rest()
+      expect(chunks).toEqual([tail, 'retry: 3000\n\n'])
+      expect(await parse([':\n\n', ...chunks])).toEqual(['a', 'retry 3000'])
+    }
+  })
+
+  it('refuses an SseEvent after raw bytes that do not end at an event boundary', async () => {
+    function* mixed(): Generator<unknown> {
+      yield ENCODER.encode('data: {"token":"hel')
+      yield { event: 'done', data: 'x' }
+    }
+    const stream = open(mixed())
+    expect(await stream.rest()).toEqual([':\n\n', 'data: {"token":"hel'])
+    expect(String((stream.errors[0]?.error as Error | undefined)?.message)).toContain(
+      'an SseEvent cannot follow raw bytes that do not end at an event boundary',
+    )
+    function* framed(): Generator<unknown> {
+      yield ENCODER.encode('data: a\r\n\r')
+      yield { event: 'done', data: 'x' }
+    }
+    expect(await open(framed()).rest()).toEqual([':\n\n', 'data: a\r\n\r', 'event: done\ndata: x\n\n'])
+  })
+
+  it('caps its timers at the longest setTimeout delay (a larger one would fire after 1 ms)', async () => {
+    const channel = new EventChannel<SseEvent>()
+    const stream = open(channel, { maxDuration: 30 * 24 * 3_600_000, heartbeat: 2 ** 31 })
+    expect(await stream.read()).toBe(':\n\n')
+    const next = stream.read()
+    await sleep(50)
+    expect(stream.aborts).toEqual([]) // neither expired nor flooded with heartbeats
+    channel.push({ data: 1 })
+    expect(await next).toBe('data: 1\n\n')
+    await stream.reader.cancel()
   })
 
   it('ends cleanly and logs when the source fails', async () => {

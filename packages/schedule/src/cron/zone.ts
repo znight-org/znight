@@ -1,10 +1,14 @@
 /**
  * Time zones of cron schedules (RFC 0004 §4.4): IANA names through `Intl` (Node 24 has no
  * `Temporal`), `UTC`, fixed offsets (`+05:30`) and `local`. This module is **pure** (standard
- * globals only); it keeps one cache of zones and of their yearly transitions.
+ * globals only); it keeps a cache of zones and of their yearly transitions.
  *
  * Offsets are computed with one cached `Intl.DateTimeFormat` per zone. Transitions are found once per
  * zone and year, by sampling the offset every day and bisecting to the second where it changes.
+ *
+ * Memory stays bounded whatever names are resolved (they may come from user input, and `Intl` accepts
+ * IANA names in any case): zones are shared by the identifier `Intl` resolves a name to, a finite set,
+ * and only the last {@link MAX_NAMES} names as written are remembered.
  */
 import { civilFromDays, daysFromCivil } from './fields.ts'
 
@@ -38,7 +42,11 @@ export type ZoneResult =
 const DAY = 86_400_000
 const FIXED_OFFSET = /^([+-])(\d{2})(?::?(\d{2}))?$/
 
-const cache = new Map<string, TimeZone>()
+/** Names as written remembered by {@link resolveTimeZone}, least recently used first. */
+const MAX_NAMES = 256
+const names = new Map<string, TimeZone>()
+/** One zone (formatter and transitions) per identifier resolved by `Intl`, whatever the spelling. */
+const zones = new Map<string, IntlZone>()
 
 /**
  * Resolves a time zone: `'UTC'`, a fixed offset (`'+05:30'`, `'-03'`), `'local'` (the zone of the
@@ -48,8 +56,12 @@ export function resolveTimeZone(name: string): ZoneResult {
   if (typeof name !== 'string' || name === '') {
     return { ok: false, message: 'a time zone must be a non-empty string', unknown: false }
   }
-  const cached = cache.get(name)
-  if (cached !== undefined) return { ok: true, zone: cached }
+  const cached = names.get(name)
+  if (cached !== undefined) {
+    names.delete(name)
+    names.set(name, cached)
+    return { ok: true, zone: cached }
+  }
   if (name === 'local') {
     const local = localZoneName()
     const resolved = local === undefined ? undefined : resolveTimeZone(local)
@@ -77,7 +89,14 @@ export function resolveTimeZone(name: string): ZoneResult {
       } catch {
         return { ok: false, message: `unknown time zone '${name}'`, unknown: true }
       }
-      zone = new IntlZone(name, formatter)
+      const id = formatter.resolvedOptions().timeZone
+      const key = typeof id === 'string' && id !== '' ? id : name
+      let shared = zones.get(key)
+      if (shared === undefined) {
+        shared = new IntlZone(key, formatter)
+        zones.set(key, shared)
+      }
+      zone = shared.name === name ? shared : renamed(shared, name)
     } else {
       const hours = Number(fixed[2])
       const minutes = Number(fixed[3] ?? '0')
@@ -87,8 +106,14 @@ export function resolveTimeZone(name: string): ZoneResult {
       zone = fixedZone(name, (fixed[1] === '-' ? -1 : 1) * (hours * 3_600_000 + minutes * 60_000))
     }
   }
-  cache.set(name, zone)
+  names.set(name, zone)
+  if (names.size > MAX_NAMES) names.delete(names.keys().next().value as string)
   return { ok: true, zone }
+}
+
+/** Internal (tests): sizes of the caches. */
+export function zoneCacheSizes(): { readonly names: number; readonly zones: number } {
+  return { names: names.size, zones: zones.size }
 }
 
 /** Time zones known to this runtime (`Intl.supportedValuesOf('timeZone')`), for suggestions. */

@@ -77,28 +77,53 @@ export interface LocalPackage {
 
 /**
  * Finds an installed UI package: from `@znight/openapi` (it is an optional peer), then from the
- * working directory. `undefined` when it is not installed or misses an asset.
+ * working directory. `undefined` when it is not installed or misses an asset. The same on Node.js and
+ * Bun, whatever the exports map of the package says (`@scalar/api-reference` does not export its
+ * `package.json`).
  */
 export function findLocalPackage(pkg: UiPackage, from: readonly string[] = defaultBases()): LocalPackage | undefined {
   for (const base of from) {
-    let manifest: string | undefined
-    try {
-      manifest = createRequire(base).resolve(`${pkg.name}/package.json`)
-    } catch {
-      manifest = undefined
-    }
-    if (manifest === undefined) continue
-    try {
-      const dir = dirname(manifest)
-      const version = (JSON.parse(readFileSync(manifest, 'utf8')) as { version?: unknown }).version
-      if (typeof version !== 'string') continue
-      if (!pkg.assets.every(asset => existsSync(join(dir, asset.file)))) continue
-      return { dir, version }
-    } catch {
-      // unreadable manifest: try the next base
+    for (const manifest of manifestCandidates(pkg.name, base)) {
+      const found = readLocalPackage(pkg, manifest)
+      if (found !== undefined) return found
     }
   }
   return undefined
+}
+
+/**
+ * Where the manifest of `name` may be, seen from `base`: the `package.json` subpath when it resolves
+ * (Bun always resolves it, Node.js only when the exports map exports it), then `<dir>/<name>/package.json`
+ * in the `node_modules` directories the resolution searches.
+ */
+function manifestCandidates(name: string, base: string): string[] {
+  let require: ReturnType<typeof createRequire>
+  try {
+    require = createRequire(base)
+  } catch {
+    return []
+  }
+  const candidates: string[] = []
+  try {
+    candidates.push(require.resolve(`${name}/package.json`))
+  } catch {
+    // not installed, or an exports map without "./package.json"
+  }
+  for (const dir of require.resolve.paths(name) ?? []) candidates.push(join(dir, name, 'package.json'))
+  return [...new Set(candidates)]
+}
+
+function readLocalPackage(pkg: UiPackage, manifest: string): LocalPackage | undefined {
+  try {
+    if (!existsSync(manifest)) return undefined
+    const { name, version } = JSON.parse(readFileSync(manifest, 'utf8')) as { name?: unknown; version?: unknown }
+    if (name !== pkg.name || typeof version !== 'string') return undefined
+    const dir = dirname(manifest)
+    return pkg.assets.every(asset => existsSync(join(dir, asset.file))) ? { dir, version } : undefined
+  } catch {
+    // unreadable manifest: try the next candidate
+    return undefined
+  }
 }
 
 function defaultBases(): string[] {

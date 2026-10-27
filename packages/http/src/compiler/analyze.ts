@@ -54,6 +54,8 @@ const BODYLESS_METHODS: ReadonlySet<HttpMethod> = new Set<HttpMethod>(['GET', 'H
 const UPLOAD_OPTIONS = ['required', 'maxSize', 'maxFiles', 'mimeTypes']
 /** Smallest `@Sse` heartbeat and `maxDuration` (ms). */
 const MIN_SSE_INTERVAL_MS = 1_000
+/** Longest `@Sse` heartbeat and `maxDuration` (ms): the longest `setTimeout` delay. */
+const MAX_SSE_TIMER_MS = 2_147_483_647
 /** Primitive return types an `@Sse` handler cannot return (`any`, `unknown`, `object`, `never` are accepted). */
 const NOT_SSE_SOURCES: ReadonlySet<string> = new Set([
   'string',
@@ -464,8 +466,8 @@ function sseOptions(ctx: Context, arg: ArgInfo | undefined): SseRouteData | unde
     ok = false
     error(ctx, arg.location, `@Sse: ${message}`, hints)
   }
-  const integer = (value: StaticValue, min: number): value is number =>
-    typeof value === 'number' && Number.isSafeInteger(value) && value >= min
+  const integer = (value: StaticValue, min: number, max = Number.MAX_SAFE_INTEGER): value is number =>
+    typeof value === 'number' && Number.isSafeInteger(value) && value >= min && value <= max
   for (const [key, value] of Object.entries(arg.value)) {
     if (value === undefined) {
       continue
@@ -474,11 +476,11 @@ function sseOptions(ctx: Context, arg: ArgInfo | undefined): SseRouteData | unde
       case 'heartbeat':
         if (value === false) {
           result.heartbeat = 0
-        } else if (integer(value, MIN_SSE_INTERVAL_MS)) {
+        } else if (integer(value, MIN_SSE_INTERVAL_MS, MAX_SSE_TIMER_MS)) {
           result.heartbeat = value
         } else {
           invalid(
-            `"heartbeat" must be an integer number of ms ≥ ${MIN_SSE_INTERVAL_MS}, or false, got ${describe(value)}`,
+            `"heartbeat" must be an integer number of ms from ${MIN_SSE_INTERVAL_MS} to ${MAX_SSE_TIMER_MS}, or false, got ${describe(value)}`,
             ['Keep it below the idle timeouts of the proxies and of Bun.serve() (10 s): the default is 8 000'],
           )
         }
@@ -491,10 +493,12 @@ function sseOptions(ctx: Context, arg: ArgInfo | undefined): SseRouteData | unde
         }
         break
       case 'maxDuration':
-        if (integer(value, MIN_SSE_INTERVAL_MS)) {
+        if (integer(value, MIN_SSE_INTERVAL_MS, MAX_SSE_TIMER_MS)) {
           result.maxDuration = value
         } else {
-          invalid(`"maxDuration" must be an integer number of ms ≥ ${MIN_SSE_INTERVAL_MS}, got ${describe(value)}`)
+          invalid(
+            `"maxDuration" must be an integer number of ms from ${MIN_SSE_INTERVAL_MS} to ${MAX_SSE_TIMER_MS} (about 24.8 days), got ${describe(value)}`,
+          )
         }
         break
       default:

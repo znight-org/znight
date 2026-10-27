@@ -148,6 +148,63 @@ export class AppController {
     // own groups, not required: nothing for the runtime
     expect(generateSection(result).code).not.toContain('groups')
   })
+
+  it('accepts any key without explicit group, like the runtime (its own group)', async () => {
+    const result = await analyzeWithout({
+      'src/flags.ts': `
+import { createRouteDecorator } from '@znight/http'
+export const Legacy = createRouteDecorator('auth:public')
+export const Tagged = createRouteDecorator('app/tag', { required: true })
+export const Internal = createRouteDecorator('_internal', { group: '_internal' })
+`,
+      'src/app.controller.ts': `
+import { Controller, Get } from '@znight/http'
+import { Internal, Legacy, Tagged } from './flags.ts'
+
+@Controller('/app')
+@Tagged()
+export class AppController {
+  @Get()
+  @Legacy()
+  @Internal()
+  index() { return 'ok' }
+}
+`,
+    })
+    expect(httpDiagnostics(result)).toEqual([])
+    const [controller] = result.controllers
+    expect(controller?.meta.map(entry => [entry.key, entry.group, entry.required])).toEqual([
+      ['app/tag', 'app/tag', true],
+    ])
+    expect(controller?.routes[0]?.meta.map(entry => [entry.key, entry.group, entry.required])).toEqual([
+      ['auth:public', 'auth:public', false],
+      ['_internal', '_internal', false],
+    ])
+    const code = generateSection(result).code.replace(/\s+/g, '')
+    expect(code).toContain("groups:{'app/tag':{keys:['app/tag'],required:true,},}")
+  })
+
+  it('applies the group grammar to an explicit group only', async () => {
+    const result = await analyzeWithout({
+      'src/flags.ts': `
+import { createRouteDecorator } from '@znight/http'
+export const Bad = createRouteDecorator('auth:public', { group: 'auth:access' })
+`,
+      'src/app.controller.ts': `
+import { Controller, Get } from '@znight/http'
+import { Bad } from './flags.ts'
+
+@Controller('/app')
+export class AppController {
+  @Get()
+  @Bad()
+  index() { return 'ok' }
+}
+`,
+    })
+    const [diagnostic] = detailed(result, 'ZNIGHT005') as { message: string }[]
+    expect(diagnostic?.message).toContain('have an invalid group "auth:access"')
+  })
 })
 
 describe('one decision per group and target', () => {

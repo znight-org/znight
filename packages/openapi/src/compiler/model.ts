@@ -39,12 +39,14 @@ export const HttpIds: {
   readonly HttpResponse: string
   readonly FileBody: string
   readonly SseEvent: string
+  readonly SseBody: string
 } = Object.freeze({
   Controller: '@znight/http#Controller',
   createRouteDecorator: '@znight/http#createRouteDecorator',
   HttpResponse: '@znight/http#HttpResponse',
   FileBody: '@znight/http#FileBody',
   SseEvent: '@znight/http#SseEvent',
+  SseBody: '@znight/http#SseBody',
 })
 
 /** Route method decorators of `@znight/http` (a method carrying one is a route handler). */
@@ -108,6 +110,7 @@ export const KEEP: readonly string[] = Object.freeze([
   HttpIds.HttpResponse,
   HttpIds.FileBody,
   HttpIds.SseEvent,
+  HttpIds.SseBody,
   'globalThis#AsyncIterable',
   'globalThis#AsyncIterableIterator',
   'globalThis#AsyncGenerator',

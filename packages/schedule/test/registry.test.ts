@@ -7,8 +7,10 @@ import type { JobContext } from '../src/context.ts'
 
 import { Application, silentLogger } from '@znight/core'
 
+import { compileExpression } from '../src/cron.ts'
 import { SchedulePlugin } from '../src/index.ts'
-import { boot, deferred, iso, metadataWith } from './helpers.ts'
+import { ScheduleRuntime } from '../src/runtime.ts'
+import { boot, captureLogger, deferred, iso, metadataWith, testClock } from './helpers.ts'
 import { describe, expect, test as it } from 'bun:test'
 
 const STATIC = metadataWith([
@@ -225,6 +227,91 @@ describe('jobs', () => {
     expect(once?.state).toBe('scheduled')
     await booted.clock.advance('30s')
     expect(runs).toEqual(['once@2026-01-01T00:00:00.000Z', 'once@2026-01-01T00:00:30.000Z'])
+  })
+
+  it('re-arms a timeout rescheduled from its own run, before or after its first await, whatever the delay', async () => {
+    const runs: string[] = []
+    await using booted = await boot()
+    const { registry } = booted
+    const retry =
+      (name: string, delays: readonly (string | number)[], awaitFirst: boolean) => async (ctx: JobContext) => {
+        if (awaitFirst) await Promise.resolve()
+        runs.push(`${name}@${ctx.scheduledAt.toISOString().slice(14, 23)}`)
+        const delay = delays[runs.filter(run => run.startsWith(`${name}@`)).length - 1]
+        if (delay !== undefined) registry.get(name)?.reschedule(delay)
+      }
+    registry.addTimeout('sync', '5s', retry('sync', ['10s', '10s'], false))
+    registry.addTimeout('async', '5s', retry('async', ['10s', '10s'], true))
+    registry.addTimeout('zero', '1s', retry('zero', [0, 0], false))
+    await booted.clock.advance('1m')
+    expect(runs.filter(run => run.startsWith('sync@'))).toEqual(['sync@00:05.000', 'sync@00:15.000', 'sync@00:25.000'])
+    expect(runs.filter(run => run.startsWith('async@'))).toEqual([
+      'async@00:05.000',
+      'async@00:15.000',
+      'async@00:25.000',
+    ])
+    // reschedule(0) in the millisecond of the run: a new occurrence, 1 ms later
+    expect(runs.filter(run => run.startsWith('zero@'))).toEqual(['zero@00:01.000', 'zero@00:01.001', 'zero@00:01.002'])
+    expect(registry.jobs().map(job => [job.name, job.state])).toEqual([
+      ['async', 'done'],
+      ['sync', 'done'],
+      ['zero', 'done'],
+    ])
+  })
+
+  it('re-arms a cron job that had no further occurrence when it is rescheduled', () => {
+    const clock = testClock()
+    const runtime = new ScheduleRuntime(
+      { enabled: true, timeZone: 'UTC', lock: undefined, drainTimeoutMs: 100, clock },
+      { container: undefined as never, hooks: undefined as never, logger: captureLogger() },
+    )
+    const weekly = compileExpression('0 0 * * 0', 'UTC')
+    const job = runtime.add({
+      name: 'weekly',
+      origin: 'dynamic',
+      host: undefined,
+      method: undefined,
+      token: undefined,
+      // an engine without further occurrence (the parser rejects such expressions: ZNIGHT040)
+      schedule: {
+        kind: 'cron',
+        cron: '0 0 * * 0',
+        timeZone: 'UTC',
+        ownZone: undefined,
+        engine: { ...weekly, next: () => undefined },
+      },
+      overlap: 'skip',
+      lock: undefined,
+      maxDuration: undefined,
+      enabled: true,
+      runOnStart: false,
+      invoke: () => undefined,
+    })
+    runtime.start()
+    expect(job.handle.state).toBe('done')
+    job.handle.reschedule('0 0 * * 0')
+    expect(job.handle.state).toBe('scheduled')
+    expect(job.handle.nextRun?.toISOString()).toBe('2026-01-04T00:00:00.000Z')
+    runtime.dispose()
+  })
+
+  it('releases removed and rescheduled jobs at once (the deadline heap keeps one entry per live job)', async () => {
+    await using booted = await boot()
+    const alive: WeakRef<object>[] = []
+    const add = (name: string): void => {
+      const payload = { bytes: new Uint8Array(1024 * 1024) } // captured by the handler
+      alive.push(new WeakRef(payload))
+      booted.registry.addTimeout(name, '30d', () => payload.bytes.length)
+    }
+    for (let index = 0; index < 20; index++) add(`reminder.${index}`)
+    for (let index = 0; index < 20; index++) booted.registry.remove(`reminder.${index}`)
+    // a debounce: re-armed on every event, one armed occurrence at a time
+    const debounce = booted.registry.addTimeout('debounce', '30d', () => undefined)
+    for (let index = 0; index < 1000; index++) debounce.reschedule('30d')
+    await new Promise(resolve => setTimeout(resolve, 0))
+    Bun.gc(true)
+    expect(alive.filter(ref => ref.deref() !== undefined)).toHaveLength(0)
+    expect(booted.registry.jobs().map(job => job.name)).toEqual(['debounce'])
   })
 
   it('removes jobs (ZNIGHT042 for unknown names), aborting their runs on demand', async () => {

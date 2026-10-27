@@ -101,7 +101,10 @@ export const Codes: {
   MissingRouteDecision: 'ZNIGHT023',
 })
 
-/** Grammar of a route decorator group name (same as the runtime `createRouteDecorator`). */
+/**
+ * Grammar of an explicit route decorator group name (same as the runtime `createRouteDecorator`).
+ * A decorator without `group` is its own group, named after its key (any non-empty key).
+ */
 export const GROUP_NAME: RegExp = /^[A-Za-z][\w.-]*$/
 
 /** Primitive coercions (`coerce.<kind>`). */

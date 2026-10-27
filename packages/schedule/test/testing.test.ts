@@ -1,9 +1,19 @@
 /**
  * `@znight/schedule/testing` (RFC 0004 §4.8): the virtual clock and job contexts for unit tests.
  */
+import { readFile } from 'node:fs/promises'
+
 import { JobAbortedError } from '../src/index.ts'
 import { createJobContext, createTestClock } from '../src/testing/index.ts'
+import { aborted, boot, metadataWith } from './helpers.ts'
 import { describe, expect, test as it } from 'bun:test'
+
+/** Real I/O of a job: the file system, then a real timer (a database round trip...). */
+async function realIo(ms: number): Promise<void> {
+  await readFile(import.meta.path)
+  await new Promise(resolve => setTimeout(resolve, ms))
+  await readFile(import.meta.path)
+}
 
 describe('createTestClock', () => {
   it('starts at the given date (default 2026-01-01T00:00:00Z) and only moves when advanced', async () => {
@@ -48,11 +58,62 @@ describe('createTestClock', () => {
     }, 10)
     await clock.advance(10)
     expect(done).toBe(true)
-    let waiting = true
-    clock.track(new Promise(() => undefined)) // never settles
-    await clock.settle()
-    waiting = false
-    expect(waiting).toBe(false)
+    const quick = createTestClock(0, { settleTimeoutMs: 30 })
+    quick.track(new Promise(() => undefined)) // never settles
+    const started = performance.now()
+    await quick.settle()
+    expect(performance.now() - started).toBeGreaterThanOrEqual(29)
+    expect(performance.now() - started).toBeLessThan(1000)
+  })
+
+  it('waits for runs doing real I/O (no sleep needed in tests)', async () => {
+    const clock = createTestClock('2026-01-01T00:00:00Z')
+    const completed: string[] = []
+    await using booted = await boot({
+      clock,
+      metadata: metadataWith([
+        {
+          name: 'sync',
+          kind: 'cron',
+          cron: '* * * * *',
+          run: async ctx => {
+            await realIo(25)
+            completed.push(ctx.scheduledAt.toISOString().slice(11, 16))
+          },
+        },
+      ]),
+    })
+    await clock.advance('1m')
+    expect(completed).toEqual(['00:01'])
+    // the run of each occurrence settles before the next one fires: none is skipped by overlap
+    await clock.advance('4m')
+    expect(completed).toEqual(['00:01', '00:02', '00:03', '00:04', '00:05'])
+    expect(booted.logs.messages('warn')).toEqual([])
+  })
+
+  it('gives up on runs idle for settleTimeoutMs (waiting for a later timer or for the test)', async () => {
+    const clock = createTestClock('2026-01-01T00:00:00Z', { settleTimeoutMs: 50 })
+    let reason: unknown
+    await using booted = await boot({
+      clock,
+      metadata: metadataWith([
+        {
+          name: 'bounded',
+          kind: 'cron',
+          cron: '* * * * *',
+          maxDuration: 30_000,
+          run: async ctx => {
+            reason = await aborted(ctx.signal)
+          },
+        },
+      ]),
+    })
+    const started = performance.now()
+    await clock.advance('90s') // waits 50 ms for the run, then fires its maxDuration timer
+    expect(reason).toMatchObject({ reason: 'timeout' })
+    expect(performance.now() - started).toBeLessThan(1000)
+    expect(booted.registry.get('bounded')?.running).toBe(0)
+    expect(() => createTestClock(0, { settleTimeoutMs: -1 })).toThrow('settleTimeoutMs must be')
   })
 
   it('moves the wall clock without firing timers (clock jumps)', async () => {

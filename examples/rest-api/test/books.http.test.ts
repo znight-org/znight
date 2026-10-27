@@ -1,10 +1,11 @@
 import type { TestApp } from '@znight/testing'
 import type { BookResponse } from '../src/books/book.controller.js'
 
-import { MetricsRegistry } from '@znight/observability'
+import { Logger, MetricsRegistry } from '@znight/observability'
+import { createMock } from '@znight/testing'
 
 import { createTestApp } from './support/app.js'
-import { ADMIN_KEY, PNG_BYTES, pngFile, READER_KEY } from './support/fixtures.js'
+import { ADMIN_KEY, BROWSER_ORIGIN, PNG_BYTES, pngFile, READER_KEY } from './support/fixtures.js'
 import { afterAll, beforeAll, describe, expect, test as it } from 'bun:test'
 
 const admin = { 'x-api-key': ADMIN_KEY }
@@ -58,6 +59,13 @@ describe('Books API', () => {
       const me = await app.inject({ url: '/me', headers: reader })
 
       expect(me.json()).toEqual({ name: 'reader', roles: ['reader'] })
+    })
+
+    it('requires an API key on @Authenticated routes', async () => {
+      const response = await app.inject({ url: '/me' })
+
+      expect(response.status).toBe(401)
+      expect(response.headers['www-authenticate']).toBe('ApiKey header="x-api-key"')
     })
 
     it('enforces @Roles: the read-only key cannot write', async () => {
@@ -249,11 +257,95 @@ describe('Books API', () => {
     })
   })
 
+  describe('browser and proxy policies', () => {
+    const fromBrowser = { origin: BROWSER_ORIGIN }
+
+    it('answers CORS preflights before the guard (browsers send them without API key)', async () => {
+      const preflight = await app.inject({
+        method: 'OPTIONS',
+        url: '/books',
+        headers: {
+          ...fromBrowser,
+          'access-control-request-method': 'POST',
+          'access-control-request-headers': 'x-api-key',
+        },
+      })
+
+      expect(preflight.status).toBe(204)
+      expect(preflight.headers['access-control-allow-origin']).toBe(BROWSER_ORIGIN)
+      expect(preflight.headers['access-control-allow-headers']).toBe('x-api-key')
+
+      const elsewhere = await app.inject({
+        method: 'OPTIONS',
+        url: '/books',
+        headers: { origin: 'https://evil.test', 'access-control-request-method': 'POST' },
+      })
+      expect(elsewhere.status).toBe(403)
+      expect(elsewhere.headers['access-control-allow-origin']).toBeUndefined()
+    })
+
+    it('lets the allowed origin read replies, errors included', async () => {
+      const created = await app.inject({
+        method: 'POST',
+        url: '/books',
+        headers: { ...admin, ...fromBrowser },
+        body: { isbn: nextIsbn(), title: 'Emma', author: 'Jane Austen' },
+      })
+      expect(created.status).toBe(201)
+      expect(created.headers['access-control-allow-origin']).toBe(BROWSER_ORIGIN)
+      expect(created.headers['access-control-expose-headers']).toBe('location, x-request-id')
+      expect(created.headers.vary).toContain('origin')
+
+      // the page can show the 401; CORS is not access control, the guard still refuses
+      const anonymous = await app.inject({ url: '/books', headers: fromBrowser })
+      expect(anonymous.status).toBe(401)
+      expect(anonymous.headers['access-control-allow-origin']).toBe(BROWSER_ORIGIN)
+    })
+
+    it('sends the security headers, and no-store unless the route sets its own cache-control', async () => {
+      const list = await app.inject({ url: '/books', headers: reader })
+
+      expect(list.headers['cache-control']).toBe('no-store')
+      expect(list.headers['content-security-policy']).toBe("default-src 'none'; frame-ancestors 'none'")
+      expect(list.headers['x-content-type-options']).toBe('nosniff')
+      expect(list.headers['x-frame-options']).toBe('DENY')
+      expect(list.headers['referrer-policy']).toBe('no-referrer')
+
+      const book = await createBook()
+      const form = new FormData()
+      form.append('cover', pngFile())
+      await app.inject({ method: 'PUT', url: `/books/${book.id}/cover`, headers: admin, body: form })
+      const cover = await app.inject({ url: `/books/${book.id}/cover` })
+      expect(cover.headers['cache-control']).toBe('public, max-age=300')
+      expect(cover.headers['content-security-policy']).toBe("default-src 'none'; frame-ancestors 'none'")
+    })
+  })
+
   it('counts added books in Prometheus (@Metric)', async () => {
     await createBook()
 
     const metrics = await app.get(MetricsRegistry).metrics()
 
     expect(metrics).toMatch(/bookshelf_books_added_total\{[^}]*outcome="success"[^}]*\} \d+/)
+  })
+})
+
+describe('behind a proxy', () => {
+  /**
+   * The test application trusts the loopback address (`TRUSTED_PROXIES=loopback`), where
+   * `app.inject()` requests come from: the client address is read from `x-forwarded-for`.
+   */
+  it('logs rejected API keys with the client address, not the proxy', async () => {
+    const logger = createMock<Logger>()
+    await using app = await createTestApp({ overrides: [[Logger, logger]] })
+
+    const response = await app.inject({
+      url: '/books',
+      headers: { 'x-api-key': 'guessed', 'x-forwarded-for': '198.51.100.20, 203.0.113.7' },
+    })
+
+    expect(response.status).toBe(401)
+    // the rightmost untrusted address: a client cannot pick its address by prepending entries
+    expect(logger.warn).toHaveBeenCalledWith('Invalid API key', { ip: '203.0.113.7', route: '/books' })
   })
 })

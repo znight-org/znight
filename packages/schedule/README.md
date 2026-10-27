@@ -121,6 +121,8 @@ a job runs **once**, for its latest missed occurrence; an occurrence never runs 
 - Each field is `*`, a value, a range `a-b`, a step `*/s`, `a-b/s` or `a/s` (from `a` to the
   maximum), or a comma-separated list of those. Names are case-insensitive. Ranges do not wrap:
   write `FRI-SUN,MON`, not `FRI-MON`.
+- In the day of week, `a/s` runs up to Saturday (`1/2` is MON, WED, FRI) and `7/s` is Sunday alone.
+  `SUN` closing a range is 7 (`FRI-SUN`), except after Sunday: `SUN-SUN` is Sunday, like `0-0`.
 - Nicknames: `@yearly` / `@annually`, `@monthly`, `@weekly`, `@daily` / `@midnight`, `@hourly`.
 - **Day of month and day of week are OR-ed** when both are restricted (Vixie cron, POSIX):
   `0 0 13 * FRI` runs every 13th and every Friday.
@@ -156,7 +158,11 @@ evaluated on the wall clock of the zone:
 
 A daily job never runs twice nor gets skipped on a DST day, and sub-hourly jobs keep running every N
 minutes of real time. To keep a job clear of DST, schedule it outside 01:00–03:00 local time or in
-UTC.
+UTC. `matches()` agrees with `next()`: the end of a gap is an occurrence of the wall times it skips.
+
+Zone names may come from user input (`parseCron(expression, { timeZone })`): memory stays bounded
+whatever the spellings (`Intl` accepts IANA names in any case), since every spelling of a zone shares
+its data.
 
 ## Plugin configuration
 
@@ -166,7 +172,7 @@ SchedulePlugin.configure(container => {
   return {
     enabled: schedule.enabled, // SCHEDULE_ENABLED=false on web-only replicas
     timeZone: schedule.timeZone, // default zone of cron jobs
-    lock: { store: new PostgresLockStore(container.get(Database)), ttl: '30s' },
+    lock: { store: new PostgresLockStore(container.get(Database)), ttl: '30s' }, // recipe: see below
     // per-environment schedules, validated at boot (ZNIGHT040 / ZNIGHT042)
     jobs: { 'digest.daily': { cron: schedule.digestCron } },
   }
@@ -291,7 +297,7 @@ export class MonitorScheduler implements OnReady {
 | `jobs()`, `get(name)`, `has(name)`             | Every job, sorted by name                                                                        |
 | `addCron(name, expression, handler, options?)` | Validated at once (ZNIGHT040, ZNIGHT041); armed now when the scheduler runs, else when it starts |
 | `addInterval(...)`, `addTimeout(...)`          | Same, with a duration (a timeout added while running fires `delay` after the call)               |
-| `remove(name, { abort? })`                     | Stops future runs; a running run goes on unless `abort` (ZNIGHT042 for an unknown name)          |
+| `remove(name, { abort? })`                     | Stops future runs and runs not started yet; a running run goes on unless `abort` (ZNIGHT042)     |
 | `trigger(name)`                                | Runs the job now through the whole pipeline; never rejects for a job failure                     |
 | `idle()`                                       | Resolves once no run is in flight (queued runs included)                                         |
 
@@ -300,6 +306,14 @@ Each `ScheduledJob` exposes `name`, `kind`, `origin`, `schedule` (`'0 8 * * MON-
 `maxDuration`, `state` (`scheduled`, `paused`, `disabled`, `done`, `removed`), `running`, `nextRun`,
 `lastRun`, and `nextRuns(count, from?)`, `pause()`, `resume()`, `reschedule(schedule, { timeZone? })`
 (same kind only) and `trigger()`. Reschedules, pauses and dynamic jobs are not persisted.
+
+- A run **starts** when its job is called. A run that has not started yet (waiting for its lease, or
+  for a `schedule:run` wrapper to call `next()`) is dropped when the job is removed or paused, or
+  when the application stops: outcome `skipped`, with `aborted` when its signal was aborted, logged
+  at `debug`. `pause()` also drops the queued occurrence of an `overlap: 'queue'` job. A running run
+  goes on. Manual runs (`trigger()`) of a paused job still run.
+- `reschedule()` arms a timeout again, `delay` from now, also from its own run (a retry):
+  `registry.get('retry')?.reschedule('10s')`.
 
 The registry is usable from the end of the plugin's `onBootstrap`: providers' `onStart` / `onReady`,
 requests and runs. Earlier (a provider constructor) it throws ZNIGHT021; once the application is
@@ -341,11 +355,11 @@ export class JobsController {
 
 ## Overlap and maxDuration
 
-| `overlap`        | An occurrence fires while a run of the same job is in flight in this process                                         |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `skip` (default) | Dropped: outcome `skipped`, logged at `warn` with how long the run has been going                                    |
-| `queue`          | Kept as the single pending run (a later one replaces it, with the latest occurrence); it starts when the run settles |
-| `allow`          | Runs concurrently (implies `lock: false`)                                                                            |
+| `overlap`        | An occurrence fires while a run of the same job is in flight in this process                                                                    |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `skip` (default) | Dropped: outcome `skipped`, logged at `warn` with how long the run has been going                                                               |
+| `queue`          | Kept as the single pending run (a later one replaces it, with the latest occurrence); it starts when the run settles, unless the job was paused |
+| `allow`          | Runs concurrently (implies `lock: false`)                                                                                                       |
 
 The next occurrence is armed when one fires, not when its run settles, so a slow run never delays
 the schedule. `maxDuration` aborts `ctx.signal` with a `JobAbortedError` (ZNIGHT044, `reason`
@@ -382,17 +396,24 @@ claims occurrence 09:00, runs and releases. The second arrives late, finds 09:00
 is refused (outcome `not-acquired`): no `lockAtLeastFor` guesswork. `ctx.scheduledAt.getTime()` is a
 free fencing token for the job's writes.
 
-- The lease (`ttl`, default 30 s) is extended every `ttl / 3` while the run lasts; once lost, the
-  run's signal is aborted (`'lock-lost'`).
-- A store failure fails closed: no lease, no run (outcome `failed`).
+- The lease (`ttl`, default 30 s) is extended every `ttl / 3` while the run lasts. It is lost when
+  `extend()` answers `false`, or `ttl` after the last successful extension, even while an extension
+  hangs (a partitioned client queuing commands): the run's signal is aborted (`'lock-lost'`) when
+  another instance may take the lease over.
+- A store failure fails closed: no lease, no run (outcome `failed`). So does an `acquire()` that
+  does not answer within `ttl` (a lease granted later is released at once). A `release()` that does
+  not answer within `ttl` is logged at `warn` and the job is free again: the lease expires.
 - What it does not guarantee: that an occurrence runs if the instance holding it crashes (at most
   once, no catch-up), or "once per period" for `@Timeout` and `runOnStart` runs (their occurrence is
   per process).
 
 `memoryLockStore({ clock? })` works within one process (tests, several applications in one process).
-The Postgres store lives in the scheduling guide and the uptime-monitor example; the Redis store is
-[`test/integration/redis-lock-store.ts`](./test/integration/redis-lock-store.ts), tested on a real
-Redis with `ZNIGHT_INTEGRATION=1`. Check a custom store with the conformance scenarios:
+Two recipes are tested on a real server with `ZNIGHT_INTEGRATION=1` (copy them into your
+application): the Postgres store
+[`test/integration/postgres-lock-store.ts`](./test/integration/postgres-lock-store.ts) (one atomic
+upsert per claim, any client through a `query(sql, params)` port) and the Redis store
+[`test/integration/redis-lock-store.ts`](./test/integration/redis-lock-store.ts). Check a custom
+store with the conformance scenarios:
 
 ```ts
 import { lockStoreScenarios } from '@znight/schedule/testing'
@@ -462,9 +483,12 @@ test('the digest follows Paris time across the DST switch', async () => {
 })
 ```
 
-- `createTestClock(start = '2026-01-01T00:00:00Z')`: `now()`, `date`, `advance(duration)`,
-  `advanceTo(date)` (fire the due timers in order and wait for the runs they start: no sleep
-  needed), `setWallClock(date)` (a clock jump: timers keep their delays), `settle()`. Pass it to
+- `createTestClock(start = '2026-01-01T00:00:00Z', { settleTimeoutMs? })`: `now()`, `date`,
+  `advance(duration)`, `advanceTo(date)` (fire the due timers in order and wait for the runs they
+  start, real I/O included: no sleep needed), `setWallClock(date)` (a clock jump: timers keep their
+  delays), `settle()`. A run that makes no progress for `settleTimeoutMs` of real time (default
+  1000) is not waited for again during that call: it waits for a later timer (its `maxDuration`) or
+  for the test. Lower it in tests that keep runs pending on purpose. Pass the clock to
   `memoryLockStore({ clock })` too to expire leases in virtual time.
 - `createJobContext(init?)`: a `JobContext` for unit tests, with an `abort(reason)` helper.
 - `TestApp` creates the job hosts at boot (they are entry points, like controllers and consumers).

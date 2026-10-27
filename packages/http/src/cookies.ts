@@ -11,10 +11,16 @@
 export interface CookieOptions {
   /** Lifetime in seconds (integer). `0` or less expires the cookie now. Default: session cookie. */
   readonly maxAge?: number
-  /** Absolute expiry (sent as an IMF-fixdate). */
+  /**
+   * Absolute expiry (sent as an IMF-fixdate), in the years 1601 to 9999 (browsers ignore other
+   * years). Browsers cap lifetimes at 400 days: prefer `maxAge` for long-lived cookies.
+   */
   readonly expires?: Date
-  /** Domain (sub-domains included). Default: none, a host-only cookie. */
-  readonly domain?: string
+  /**
+   * Domain (sub-domains included). Default: none, a host-only cookie. `null`: host-only even when
+   * `cookies.defaults` sets a domain. `__Host-` cookies never take the default domain.
+   */
+  readonly domain?: string | null
   /** Default: `'/'`. */
   readonly path?: string
   /** Default: `true` (browsers only send it over HTTPS, `http://localhost` excepted). */
@@ -80,6 +86,9 @@ export const MAX_COOKIE_SIZE = 4096
 export const MAX_COOKIE_ATTRIBUTE_SIZE = 1024
 const MAX_DOMAIN_LENGTH = 253
 const EPOCH = 'Thu, 01 Jan 1970 00:00:00 GMT'
+/** Years a cookie-date can carry (RFC 6265 §5.1.1; four digits in an IMF-fixdate). */
+const MIN_EXPIRES_YEAR = 1601
+const MAX_EXPIRES_YEAR = 9999
 
 const OPTION_KEYS: ReadonlySet<string> = new Set([
   'maxAge',
@@ -113,11 +122,17 @@ export function parseCookieHeader(header: string | undefined): Readonly<Record<s
   if (typeof header === 'string') {
     let start = 0
     const length = header.length
+    // the next `=` at or after `start`, searched again only once passed: every character is scanned
+    // at most twice, even for a header made of `;` without `=` (linear time)
+    let equals = -1
     while (start < length) {
       let end = header.indexOf(';', start)
       if (end === -1) end = length
-      const equals = header.indexOf('=', start)
-      if (equals !== -1 && equals < end) {
+      if (equals < start) {
+        equals = header.indexOf('=', start)
+        if (equals === -1) equals = length
+      }
+      if (equals < end) {
         const name = trim(header, start, equals)
         if (name !== '' && !Object.hasOwn(result, name)) {
           result[name] = decodeCookieValue(unquote(trim(header, equals + 1, end)))
@@ -261,7 +276,7 @@ export function checkCookie(name: string, value: string | undefined, options: Co
     const encoded = encodeValue(name, value)
     checkSize(name, encoded)
   }
-  if (checked.domain !== undefined) normalizeDomain(name, checked.domain)
+  if (typeof checked.domain === 'string') normalizeDomain(name, checked.domain)
   if (checked.path !== undefined) checkPath(name, checked.path)
 }
 
@@ -287,7 +302,7 @@ export function serializeResponseCookie(
   checkName(name)
   const options = checkOptions(name, cookie.options)
   checkOptions(name, defaults, true)
-  const attributes = resolveAttributes(name, { ...defaults, ...definedOnly(options) })
+  const attributes = resolveAttributes(name, { ...applicableDefaults(name, defaults), ...definedOnly(options) })
   let wire: string
   let maxAge: number | undefined
   let expires: string | undefined
@@ -364,9 +379,20 @@ interface Attributes {
   readonly priority: 'low' | 'medium' | 'high' | undefined
 }
 
+/**
+ * The defaults a cookie takes: all of them, but a `__Host-` cookie (host-only, `Path=/` by
+ * definition) never takes a default domain or path. Its own options are still checked.
+ */
+function applicableDefaults(name: string, defaults: CookieDefaults): CookieDefaults {
+  if (!name.toLowerCase().startsWith('__host-')) return defaults
+  const { domain: _domain, path: _path, ...rest } = defaults
+  return rest
+}
+
 /** Attributes after the defaults, checked against the cross-attribute and prefix rules. */
 function resolveAttributes(name: string, options: CookieOptions): Attributes {
-  const domain = options.domain === undefined ? undefined : normalizeDomain(name, options.domain)
+  // `null`: host-only, whatever the defaults
+  const domain = typeof options.domain === 'string' ? normalizeDomain(name, options.domain) : undefined
   const path = options.path ?? '/'
   checkPath(name, path)
   const attributes: Attributes = {
@@ -443,8 +469,17 @@ function checkOptions(name: string, options: CookieOptions | undefined, defaults
   if (expires !== undefined && !(expires instanceof Date && !Number.isNaN(expires.getTime()))) {
     throw invalid(name, `expires must be a valid Date (received ${describe(expires)})`)
   }
-  if (domain !== undefined && typeof domain !== 'string') {
-    throw invalid(name, `domain must be a string (received ${describe(domain)})`)
+  if (expires !== undefined) {
+    const year = expires.getUTCFullYear()
+    if (year < MIN_EXPIRES_YEAR || year > MAX_EXPIRES_YEAR) {
+      throw invalid(
+        name,
+        `expires must be in the years ${MIN_EXPIRES_YEAR} to ${MAX_EXPIRES_YEAR} (received ${expires.toISOString()}): browsers ignore other dates; use maxAge for a long lifetime (browsers cap it at 400 days)`,
+      )
+    }
+  }
+  if (domain !== undefined && domain !== null && typeof domain !== 'string') {
+    throw invalid(name, `domain must be a string or null (received ${describe(domain)})`)
   }
   if (path !== undefined && typeof path !== 'string') {
     throw invalid(name, `path must be a string (received ${describe(path)})`)
@@ -646,13 +681,14 @@ export class CookieJar<T> {
 
 /**
  * The jar key of a cookie as given (`HttpResponse.withCookie()`, before the defaults are known):
- * an absent domain or path is keyed as "default".
+ * an absent domain or path is keyed as "default", a `null` domain as host-only.
  */
 export function givenCookieKey(name: string, options: CookieOptions): string {
-  const domain =
-    options.domain === undefined
-      ? '\u0001'
-      : (options.domain.startsWith('.') ? options.domain.slice(1) : options.domain).toLowerCase()
+  const given = options.domain
+  let domain: string
+  if (given === undefined) domain = '\u0001'
+  else if (given === null) domain = ''
+  else domain = (given.startsWith('.') ? given.slice(1) : given).toLowerCase()
   return `${name}\u0000${domain}\u0000${options.path ?? '\u0001'}`
 }
 

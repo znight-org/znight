@@ -554,6 +554,55 @@ describe('request ids, errors and hooks', () => {
     await app.stop()
   })
 
+  it('sends the cookies of a mapped HttpResponse when a hook wrapper fails before next()', async () => {
+    class RetryLater extends Error {}
+    const app = await createApp(
+      usersMetadata(),
+      {
+        exceptionMappers: [
+          {
+            map: (error: unknown) =>
+              error instanceof RetryLater
+                ? new HttpResponse({ retry: true }, { status: 429, headers: { 'retry-after': '5' } }).withCookie(
+                    'retry',
+                    'soon',
+                  )
+                : undefined,
+          },
+          {
+            map: (error: unknown) =>
+              error instanceof TypeError
+                ? HttpResponse.ok('bad').withCookie('__Host-x', 'y', { secure: false })
+                : undefined,
+          },
+        ],
+      },
+      { start: false },
+    )
+    try {
+      const remove = app.app.hooks.wrap('http:request', () => Promise.reject(new RetryLater()))
+      const res = await app.http.inject({ method: 'GET', url: '/users' })
+      expect(res.status).toBe(429)
+      expect(res.headers['retry-after']).toBe('5')
+      expect(res.json()).toEqual({ retry: true })
+      expect(res.headers['set-cookie']).toEqual(['retry=soon; Path=/; Secure; HttpOnly; SameSite=Lax'])
+      remove()
+      // an invalid cookie of the mapped reply is a logged 500, as on the normal path
+      const removeInvalid = app.app.hooks.wrap('http:request', () => Promise.reject(new TypeError('boom')))
+      const invalid = await app.http.inject({ method: 'GET', url: '/users' })
+      expect(invalid.status).toBe(500)
+      expect(invalid.headers['set-cookie']).toBeUndefined()
+      expect(
+        app.logger.entries.some(entry =>
+          (entry.context?.['err'] as Error | undefined)?.message?.includes('Invalid cookie "__Host-x"'),
+        ),
+      ).toBe(true)
+      removeInvalid()
+    } finally {
+      await app.stop()
+    }
+  })
+
   it('keeps the response when a hook wrapper fails after next()', async () => {
     const app = await createApp(usersMetadata(), {}, { start: false })
     app.app.hooks.wrap('http:request', async (_event, next) => {

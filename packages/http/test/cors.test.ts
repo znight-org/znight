@@ -53,6 +53,18 @@ describe('resolveCors', () => {
     [{ origin: '*', credentials: true }, "explicit origins when credentials is true (not '*')"],
     [{ origin: ['https://a.com', '*'], credentials: true }, "explicit origins when credentials is true (not '*')"],
     [{ origin: 'https://a.com', credentials: true, allowHeaders: '*' }, 'option "cors.allowHeaders"'],
+    [
+      { origin: 'https://a.com', credentials: true, allowHeaders: ['x-a', '*'] },
+      'option "cors.allowHeaders" must be a list of header names when credentials is true',
+    ],
+    [
+      { origin: 'https://a.com', credentials: true, methods: ['*'] },
+      'option "cors.methods" must be a list of HTTP method names when credentials is true',
+    ],
+    [
+      { origin: 'https://a.com', credentials: true, exposeHeaders: ['x-total', '*'] },
+      'option "cors.exposeHeaders" must be a list of header names when credentials is true',
+    ],
     [{ origin: 'https://a.com', credentials: 'yes' }, 'option "cors.credentials"'],
     [{ origin: 'https://a.com', methods: ['GET', 'BAD METHOD'] }, 'option "cors.methods"'],
     [{ origin: 'https://a.com', allowHeaders: ['x-ok', 'bad header'] }, 'option "cors.allowHeaders"'],
@@ -77,12 +89,17 @@ describe('resolveCors', () => {
     expect(cors.varyOrigin).toBe(true)
   })
 
-  it('accepts a wildcard (alone: no vary on origin)', async () => {
+  it('accepts a wildcard (alone or listed: no vary on origin)', async () => {
     const alone = policy({ origin: '*' })
     expect(await alone.allows('https://anything.example')).toBe(true)
     expect({ wildcard: alone.wildcard, varyOrigin: alone.varyOrigin }).toEqual({ wildcard: true, varyOrigin: false })
     const listed = policy({ origin: ['*', 'https://a.com'] })
-    expect({ wildcard: listed.wildcard, varyOrigin: listed.varyOrigin }).toEqual({ wildcard: true, varyOrigin: true })
+    expect({ wildcard: listed.wildcard, varyOrigin: listed.varyOrigin }).toEqual({ wildcard: true, varyOrigin: false })
+  })
+
+  it("accepts '*' in methods and exposeHeaders without credentials (a wildcard there)", () => {
+    const cors = policy({ origin: 'https://a.com', methods: ['*'], allowHeaders: ['*'], exposeHeaders: ['*'] })
+    expect([cors.methods, cors.allowHeaders, cors.exposeHeaders]).toEqual(['*', '*', '*'])
   })
 
   it('accepts a function (awaited by the pipeline)', async () => {
@@ -155,6 +172,29 @@ describe('preflight headers', () => {
     expect(preflightHeaders(star, 'https://a.com', {}, 'GET')['access-control-allow-headers']).toBe('*')
   })
 
+  it("names authorization next to '*' when the browser asks for it (never covered by '*')", () => {
+    const star = policy({ origin: 'https://a.com', allowHeaders: '*' })
+    const ask = (value: string): unknown =>
+      preflightHeaders(star, 'https://a.com', { 'access-control-request-headers': value }, 'GET')[
+        'access-control-allow-headers'
+      ]
+    expect(ask('authorization, content-type')).toBe('*, authorization')
+    expect(ask('Content-Type, Authorization')).toBe('*, authorization')
+    expect(ask('content-type')).toBe('*')
+    const listed = policy({ origin: 'https://a.com', allowHeaders: ['x-a', '*'] })
+    expect(
+      preflightHeaders(listed, 'https://a.com', { 'access-control-request-headers': 'authorization' }, 'GET')[
+        'access-control-allow-headers'
+      ],
+    ).toBe('x-a, *, authorization')
+    const explicit = policy({ origin: 'https://a.com', allowHeaders: ['*', 'Authorization'] })
+    expect(
+      preflightHeaders(explicit, 'https://a.com', { 'access-control-request-headers': 'authorization' }, 'GET')[
+        'access-control-allow-headers'
+      ],
+    ).toBe('*, authorization')
+  })
+
   it('builds reply headers', () => {
     expect(corsReplyHeaders(policy({ origin: 'https://a.com', credentials: true }), 'https://a.com')).toEqual({
       'access-control-allow-origin': 'https://a.com',
@@ -222,12 +262,36 @@ describe('CORS in the pipeline', () => {
     }
   })
 
-  it("does not vary on origin with origin: '*'", async () => {
-    const app = await createApp(meta, { cors: { origin: '*' } }, { start: false })
+  it.each([['*'], [['*']], [['https://a.example', '*']]])(
+    'sends access-control-allow-origin: * on every reply with origin: %p (no vary needed)',
+    async origin => {
+      const app = await createApp(meta, { cors: { origin: origin as never } }, { start: false })
+      try {
+        // a cache may store the reply to a request without origin and serve it to a CORS request
+        const variants: readonly Record<string, string>[] = [{}, { origin: 'https://a.example' }]
+        for (const headers of variants) {
+          for (const url of ['/items', '/missing']) {
+            const res = await app.http.inject({ method: 'GET', url, headers })
+            expect(res.headers['access-control-allow-origin']).toBe('*')
+            expect(res.headers['access-control-expose-headers']).toBe('x-request-id')
+            expect(res.headers['vary']).toBeUndefined()
+          }
+        }
+      } finally {
+        await app.stop()
+      }
+    },
+  )
+
+  it('keeps vary: origin and no CORS header without origin for explicit origins', async () => {
+    const app = await createApp(meta, { cors: { origin: 'https://a.example' } }, { start: false })
     try {
-      const res = await app.http.inject({ method: 'GET', url: '/items', headers: { origin: 'https://a.example' } })
-      expect(res.headers['access-control-allow-origin']).toBe('*')
-      expect(res.headers['vary']).toBeUndefined()
+      const plain = await app.http.inject({ method: 'GET', url: '/items' })
+      expect(plain.headers['access-control-allow-origin']).toBeUndefined()
+      expect(plain.headers['vary']).toBe('origin')
+      const cors = await app.http.inject({ method: 'GET', url: '/items', headers: { origin: 'https://a.example' } })
+      expect(cors.headers['access-control-allow-origin']).toBe('https://a.example')
+      expect(cors.headers['vary']).toBe('origin')
     } finally {
       await app.stop()
     }

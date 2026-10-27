@@ -1,9 +1,11 @@
 /**
  * End-to-end test of a scaffolded application (opt-in: `ZNIGHT_CLI_E2E=1`, it takes ~30 s):
  *
- * znight new → znight g → znight generate (--check) → tsc --noEmit → znight build (the `znight()`
- * Vite plugin) → znight start + HTTP requests → bun test (the `@znight/compiler/bun` preload,
- * TestBed / TestApp) → znight dev (restart on change, last good process kept on a compile error).
+ * znight new → znight g → znight generate (--check) → znight openapi (--check) → tsc --noEmit →
+ * znight build --openapi (the `znight()` and `openapi()` Vite plugins) → znight start + HTTP requests
+ * (and /openapi.json, /docs) → bun test (the `@znight/compiler/bun` preload, TestBed / TestApp, as
+ * many passing tests as generated) → znight dev (restart on change, last good process kept on a
+ * compile error).
  *
  * The application is created under `test/.tmp/` and its `node_modules` links the workspace packages,
  * which are loaded from their TypeScript sources (`@znight/source` condition, also passed to tsc).
@@ -14,7 +16,16 @@
  * Set `ZNIGHT_CLI_E2E_KEEP=1` to keep the application for inspection.
  */
 import { type ChildProcess, spawn } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { createRequire } from 'node:module'
 import { createServer } from 'node:net'
 import { dirname, join, resolve } from 'node:path'
@@ -141,6 +152,23 @@ function link(name: string, target: string): void {
 const packageDirectory = (name: string, from: string): string =>
   dirname(createRequire(join(from, 'package.json')).resolve(`${name}/package.json`))
 
+/**
+ * The test cases of the generated test files (one `test(...)` each): their number follows the
+ * features of the project (`--features all` adds test/heartbeat.jobs.test.ts...).
+ */
+function generatedTests(): { files: number; tests: number } {
+  const files = readdirSync(join(APP, 'test')).filter(file => file.endsWith('.test.ts'))
+  const tests = files.reduce(
+    (count, file) => count + countMatches(readFileSync(join(APP, 'test', file), 'utf8'), /^\s*(?:test|it)\(/gm),
+    0,
+  )
+  return { files: files.length, tests }
+}
+
+function countMatches(text: string, pattern: RegExp): number {
+  return [...text.matchAll(pattern)].length
+}
+
 /** Fails with the command output when it did not succeed. */
 function expectSuccess(result: Result, step: string): void {
   if (result.code !== 0) throw new Error(`${step} failed (exit code ${result.code}):\n${result.output}`)
@@ -228,6 +256,17 @@ describe.skipIf(!enabled)('scaffolded application (ZNIGHT_CLI_E2E=1)', () => {
   )
 
   it(
+    'znight openapi writes openapi.json, --check confirms it',
+    async () => {
+      expectSuccess(await znight(['openapi', '--config-loader', 'native']), 'znight openapi')
+      const document = JSON.parse(readFileSync(join(APP, 'openapi.json'), 'utf8')) as { paths?: object }
+      expect(Object.keys(document.paths ?? {})).toContain('/greetings/{name}')
+      expectSuccess(await znight(['openapi', '--check', '--config-loader', 'native']), 'znight openapi --check')
+    },
+    TIMEOUT,
+  )
+
+  it(
     'type-checks with tsc --noEmit',
     async () => {
       const result = await run('node', [join(REPO, 'node_modules/typescript/bin/tsc'), '--noEmit', '-p', APP])
@@ -238,10 +277,15 @@ describe.skipIf(!enabled)('scaffolded application (ZNIGHT_CLI_E2E=1)', () => {
   )
 
   it(
-    'znight build bundles the application',
+    'znight build bundles the application (--openapi: and its OpenAPI document)',
     async () => {
-      expectSuccess(await znight(['build', '--config', VITE_CONFIG, '--config-loader', 'native']), 'znight build')
+      expectSuccess(
+        await znight(['build', '--openapi', '--config', VITE_CONFIG, '--config-loader', 'native']),
+        'znight build',
+      )
       expect(existsSync(join(APP, 'dist/main.js'))).toBe(true)
+      // the document emitted by the build is the one of znight openapi
+      expect(readFileSync(join(APP, 'dist/openapi.json'), 'utf8')).toBe(readFileSync(join(APP, 'openapi.json'), 'utf8'))
     },
     TIMEOUT,
   )
@@ -267,6 +311,12 @@ describe.skipIf(!enabled)('scaffolded application (ZNIGHT_CLI_E2E=1)', () => {
         expect((await post('/greetings', { name: 'Grace' })).status).toBe(201)
         expect((await post('/greetings', { name: '' })).status).toBe(400)
         expect((await post('/greetings/async', { name: 'Grace' })).status).toBe(202)
+        const openapi = await fetch(`${base}/openapi.json`)
+        expect(openapi.status).toBe(200)
+        expect(Object.keys(((await openapi.json()) as { paths?: object }).paths ?? {})).toContain('/greetings/{name}')
+        const docs = await fetch(`${base}/docs`)
+        expect(docs.status).toBe(200)
+        expect(docs.headers.get('content-type')).toContain('text/html')
       } catch (error) {
         throw new Error(`${String(error)}\n--- znight start output ---\n${app.output()}`)
       } finally {
@@ -329,10 +379,13 @@ describe.skipIf(!enabled)('scaffolded application (ZNIGHT_CLI_E2E=1)', () => {
     async () => {
       // the preload regenerates the container (bunfig.toml): it does not need to exist
       rmSync(join(APP, 'src/.znight'), { recursive: true, force: true })
+      const expected = generatedTests()
+      expect(expected.tests).toBeGreaterThan(0)
       const result = await run('bun', ['test', SOURCE])
       expectSuccess(result, 'bun test')
-      expect(result.output).toMatch(/\b4 pass\b/)
+      expect(result.output).toMatch(new RegExp(`\\b${expected.tests} pass\\b`))
       expect(result.output).toMatch(/\b0 fail\b/)
+      expect(result.output).toContain(`Ran ${expected.tests} tests across ${expected.files} files`)
       expect(existsSync(join(APP, 'src/.znight/container.generated.ts'))).toBe(true)
     },
     TIMEOUT,

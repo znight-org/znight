@@ -51,13 +51,18 @@ export interface ScheduledJob {
   readonly lastRun: JobRunResult | undefined
   /** The next `count` occurrences after `from` (default: now), whatever the state of the job. */
   nextRuns(count: number, from?: Date): Date[]
-  /** Stops scheduling the job (a running run goes on). */
+  /**
+   * Stops scheduling the job. A queued occurrence and runs that have not started their job yet
+   * (waiting for their lease or a hook wrapper) are dropped; a running run goes on. Manual runs
+   * (`trigger()`) still run.
+   */
   pause(): void
   /** Schedules a paused job again, from now. */
   resume(): void
   /**
    * Same kind only: a cron expression for a cron job, a duration for an interval or a timeout
-   * (ZNIGHT040). A timeout is armed again, `delay` from now. Not persisted.
+   * (ZNIGHT040). A timeout is armed again, `delay` from now, also from its own run (a retry); a
+   * `done` job is scheduled again. Not persisted.
    */
   reschedule(schedule: string | Duration, options?: { readonly timeZone?: string }): void
   /**
@@ -93,7 +98,10 @@ export abstract class SchedulerRegistry {
     handler: JobHandler,
     options?: Omit<TimeoutOptions, 'name'>,
   ): ScheduledJob
-  /** Stops future runs; a running run goes on unless `abort`. Unknown name: ZNIGHT042. */
+  /**
+   * Stops future runs and runs that have not started their job yet (waiting for their lease or a
+   * hook wrapper); a running run goes on unless `abort`. Unknown name: ZNIGHT042.
+   */
   abstract remove(name: string, options?: { readonly abort?: boolean }): void
   /** `get(name).trigger()`; unknown name: ZNIGHT042. */
   abstract trigger(name: string): Promise<JobRunResult>

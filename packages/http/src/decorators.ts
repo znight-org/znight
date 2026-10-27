@@ -414,8 +414,16 @@ export interface RouteDecorator<T> extends RouteDecoratorInfo {
   meta(...args: RouteDecoratorArgs<T>): RouteMetaEntry<T>
 }
 
-/** Grammar of a decision group name (internal; the compiler extension has the same rule). */
+/**
+ * Grammar of an explicit decision group name (internal; the compiler extension has the same rule).
+ * A decorator without `group` is its own group, named after its key: any non-empty key is valid.
+ */
 export const GROUP_NAME: RegExp = /^[A-Za-z][\w.-]*$/
+
+/** `true` when `group` is a valid group of `key`: the key itself (the default) or a valid name. */
+export function isGroupOf(group: unknown, key: string): group is string {
+  return typeof group === 'string' && (group === key || GROUP_NAME.test(group))
+}
 
 /**
  * Creates a metadata decorator for controllers and routes. The compiler stores its argument
@@ -455,8 +463,9 @@ export function createRouteDecorator<T = true>(key: string, options?: RouteDecor
   if (options !== undefined && (options === null || typeof options !== 'object')) {
     throw new TypeError(`createRouteDecorator('${key}'): options must be an object { group?, required? }`)
   }
+  // the grammar applies to an explicit group only: without one, any key is its own group (as before groups)
   const group = options?.group ?? key
-  if (typeof group !== 'string' || !GROUP_NAME.test(group)) {
+  if (!isGroupOf(group, key)) {
     throw new TypeError(
       `createRouteDecorator('${key}'): "group" must be a name made of letters, digits, _ . - starting with a letter (received ${String(group)})`,
     )

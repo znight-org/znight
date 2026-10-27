@@ -320,13 +320,30 @@ export class C {
 }
 `),
     ).toEqual([
-      `error ZNIGHT005 src/app.ts:${L(4)}:14 @Sse: "heartbeat" must be an integer number of ms ≥ 1000, or false, got 500`,
-      `error ZNIGHT005 src/app.ts:${L(4)}:14 @Sse: "maxDuration" must be an integer number of ms ≥ 1000, got 10`,
+      `error ZNIGHT005 src/app.ts:${L(4)}:14 @Sse: "heartbeat" must be an integer number of ms from 1000 to 2147483647, or false, got 500`,
+      `error ZNIGHT005 src/app.ts:${L(4)}:14 @Sse: "maxDuration" must be an integer number of ms from 1000 to 2147483647 (about 24.8 days), got 10`,
       `error ZNIGHT005 src/app.ts:${L(4)}:14 @Sse: "retry" must be an integer number of ms ≥ 0, got -1`,
       `error ZNIGHT005 src/app.ts:${L(4)}:14 @Sse: unknown option "ping"`,
       `error ZNIGHT005 src/app.ts:${L(6)}:22 @Sse(options) takes a single argument`,
       `error ZNIGHT005 src/app.ts:${L(8)}:8 @Sse expects a path (string) or options, got 42`,
       `error ZNIGHT005 src/app.ts:${L(10)}:14 @Sse options must be an object { heartbeat?: number | false, retry?: number, maxDuration?: number }, got "x"`,
+    ])
+  })
+
+  it('reports timers above the longest setTimeout delay (ZNIGHT005)', async () => {
+    expect(
+      await diagnose(`
+@Controller()
+export class C {
+  @Sse('/a', { maxDuration: 30 * 24 * 3_600_000, heartbeat: 2_147_483_648 })
+  a() { return [] }
+  @Sse('/b', { maxDuration: 2_147_483_647, heartbeat: 2_147_483_647 })
+  b() { return [] }
+}
+`),
+    ).toEqual([
+      `error ZNIGHT005 src/app.ts:${L(4)}:14 @Sse: "heartbeat" must be an integer number of ms from 1000 to 2147483647, or false, got 2147483648`,
+      `error ZNIGHT005 src/app.ts:${L(4)}:14 @Sse: "maxDuration" must be an integer number of ms from 1000 to 2147483647 (about 24.8 days), got 2592000000`,
     ])
   })
 

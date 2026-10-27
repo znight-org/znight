@@ -40,8 +40,10 @@ export class RouteGroups {
     }
     for (const group of Object.keys(groups)) {
       const entry: unknown = groups[group]
-      if (!GROUP_NAME.test(group)) throw malformed(`invalid group name ${JSON.stringify(group)}`)
       const { keys, required } = (entry ?? {}) as { keys?: unknown; required?: unknown }
+      // a group is named explicitly (grammar) or after its single key (a decorator without group)
+      const ownGroup = Array.isArray(keys) && keys.length === 1 && keys[0] === group
+      if (!ownGroup && !GROUP_NAME.test(group)) throw malformed(`invalid group name ${JSON.stringify(group)}`)
       if (
         entry === null ||
         typeof entry !== 'object' ||
@@ -204,7 +206,9 @@ export type EnforcementMode = 'error' | 'warn'
 
 /**
  * The boot check (RFC 0001 §5.2): every route decides every required group, and every decision of
- * a required or enforced group is enforced by a guard of the route's chain. Problems are reported
+ * a required or enforced group is enforced by a guard of the route's chain. A group is enforced when
+ * a guard of some chain, or a guard class of the application (`enforcers`, in a chain or not),
+ * declares it: a guard registered nowhere does not make its decisions inert. Problems are reported
  * as one ZNIGHT023 error (`'error'`) or one warning per group (`'warn'`).
  */
 export function checkDecisions(
@@ -212,9 +216,10 @@ export function checkDecisions(
   groups: RouteGroups,
   mode: EnforcementMode,
   logger: CoreLogger,
+  enforcers: ReadonlyMap<string, ReadonlySet<string>> = new Map(),
 ): void {
   const required = groups.required()
-  const known = new Set<string>()
+  const known = new Set<string>(enforcers.keys())
   for (const route of routes) for (const group of route.enforced) known.add(group)
   const problems = new Map<string, { missing: string[]; unenforced: string[]; plugins: Set<string> }>()
   const problem = (group: string): { missing: string[]; unenforced: string[]; plugins: Set<string> } => {
@@ -265,6 +270,10 @@ export function checkDecisions(
       groupHints.push(
         `Register a guard declaring \`static enforces\` with the decorators of the "${group}" group (${keys.join(', ')}), e.g. HttpPlugin.configure({ guards: [AuthGuard] })`,
       )
+      const guards = [...(enforcers.get(group) ?? [])].sort()
+      if (guards.length > 0) {
+        groupHints.push(`Guards of the application enforcing the "${group}" group: ${guards.join(', ')}`)
+      }
     }
     const message = parts.join('; ')
     if (mode === 'warn') {

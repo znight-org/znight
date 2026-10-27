@@ -227,6 +227,12 @@ Names are converted: files are `kebab-case.<schematic>.ts`, classes `PascalCase<
 `UserProfileService`). Directories before the last `/` are relative to `src/`; without them the file
 goes to `src/<name>/`. Nothing has to be registered afterwards: the compiler discovers the class.
 
+Job names must be unique in the application (ZNIGHT041), so the `@Cron` of `job` is named after the
+location of the file: its directories relative to `src/` (to the project root for a `--path` outside
+`src/`), then the name, without the directory named after it. `znight g job digest` gives
+`digest.daily`, `znight g job reports/digest` gives `reports.digest.daily` and
+`znight g job digest --path src/emails` gives `emails.digest.daily`.
+
 | Option          | Description                                                |
 | --------------- | ---------------------------------------------------------- |
 | `--path <dir>`  | Directory of the file, relative to the current directory   |
@@ -306,6 +312,7 @@ that Vite sets in the CLI process for its build is not passed on) and, on Node.j
 znight build                    # ✓ Built dist/main.js 48.20 kB in 1.24s
 znight build --mode staging
 znight build --openapi          # also dist/openapi.json (--openapi=<path> for another file)
+znight build --openapi --openapi-prefix /api   # HttpPlugin.configure({ prefix: '/api' })
 ```
 
 Runs `vite build` with your Vite config. With the defaults of the `znight()` plugin, `src/main.ts`
@@ -322,11 +329,20 @@ same way.
 | `--mode <mode>`                            | `production`      | Vite mode                      |
 | `--log-level <info\|warn\|error\|silent>`  | `info`            | Vite log level                 |
 | `--openapi[=<path>]`                       | off               | Also emit the OpenAPI document |
+| `--openapi-prefix <path>`                  | none              | With `--openapi`: HTTP prefix  |
 
 `--openapi` adds the `openapi()` Vite plugin of `@znight/openapi` to the build when the Vite config
 does not register one: after the bundle is written, the document is emitted to `dist/openapi.json`
 (next to `dist/main.js`, ready for `OpenApiPlugin.configure({ document: { file } })`), or to the
 given path.
+
+When `HttpPlugin` has a `prefix`, pass it with `--openapi-prefix` (like `znight openapi --prefix`):
+it becomes the `servers` of the document (`[{ "url": "/api" }]`) unless `@OpenApiDocument` declares
+servers, so the file is the document the application serves in `'build'` mode. Without it, the
+document has no `servers`, and the API reference ("Test request", "Try it out") and generated
+clients call `/greetings` instead of `/api/greetings`. When the Vite config registers its own
+`openapi()`, that plugin emits the document with its options: `--openapi=<path>` and
+`--openapi-prefix` are then ignored, with a warning (set `output` and `prefix` on that `openapi()`).
 
 ## `znight start`
 

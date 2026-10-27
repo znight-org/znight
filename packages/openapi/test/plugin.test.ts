@@ -109,6 +109,27 @@ describe('serving', () => {
     expect(page.body).toContain('<title>Bookshelf API — API reference</title>')
   })
 
+  it('allows the declared servers in the CSP of the UI whatever the build mode', async () => {
+    const section = metadata.extensions?.openapi as NonNullable<NonNullable<ZnightMetadata['extensions']>['openapi']>
+    const declared: ZnightMetadata = {
+      ...metadata,
+      extensions: {
+        ...metadata.extensions,
+        openapi: { ...section, document: { ...section.document, servers: [{ url: 'https://api.example.com/v1' }] } },
+      },
+    }
+    for (const build of ['boot', 'first-request'] as const) {
+      await using app = await TestApp.create({
+        metadata: declared,
+        plugins: [HttpPlugin.configure({ port: 0 }), OpenApiPlugin.configure({ build, assets: 'cdn' })],
+        logger: silentLogger,
+      })
+      const page = await app.inject({ method: 'GET', url: '/docs' })
+      expect(String(page.headers['content-security-policy'])).toContain("connect-src 'self' https://api.example.com;")
+      expect(page.body).toContain('<title>Bookshelf API — API reference</title>')
+    }
+  })
+
   it('does not serve anything with enabled: false, and the OpenApi external still works', async () => {
     await using app = await create(OpenApiPlugin.configure({ enabled: false }))
     expect((await app.inject({ method: 'GET', url: '/openapi.json' })).status).toBe(404)
@@ -235,6 +256,53 @@ describe('build modes', () => {
     } finally {
       fs.rmSync(directory, { recursive: true, force: true })
     }
+  })
+})
+
+describe('a prebuilt document file', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'znight-openapi-file-'))
+  afterAll(() => fs.rmSync(directory, { recursive: true, force: true }))
+
+  it('applies filter, info, servers and transform as a build does', async () => {
+    const file = path.join(directory, 'openapi.json')
+    fs.writeFileSync(file, (await buildOpenApiDocument(metadata)).json)
+    const runtime = {
+      filter: (operation: { path: string }) => !operation.path.startsWith('/orders'),
+      info: { title: 'Public API' },
+      servers: [{ url: 'https://public.example.com' }],
+      transform: (document: object) => ({ ...document, 'x-transformed': true }) as never,
+    }
+    await using app = await create(OpenApiPlugin.configure({ document: { file }, ...runtime }))
+    const served = await app.inject({ method: 'GET', url: '/openapi.json' })
+    expect(served.body).toBe((await buildOpenApiDocument(metadata, runtime)).json)
+    const document = served.json<{ paths: Record<string, unknown>; info: { title: string } }>()
+    expect(Object.keys(document.paths).some(key => key.startsWith('/orders'))).toBe(false)
+    expect(document.info.title).toBe('Public API')
+  })
+
+  it('applies the prefix rule to a file emitted without servers, with a ZNIGHT030 warning', async () => {
+    const file = path.join(directory, 'unprefixed.json')
+    fs.writeFileSync(file, (await buildOpenApiDocument(metadata)).json)
+    const logger = recordingLogger()
+    await using app = await create(OpenApiPlugin.configure({ document: { file } }), { prefix: '/api' }, logger)
+    const served = await app.inject({ method: 'GET', url: '/api/openapi.json' })
+    expect(served.body).toBe((await buildOpenApiDocument(metadata, { prefix: '/api' })).json)
+    expect(served.json<{ servers: unknown }>().servers).toEqual([{ url: '/api' }])
+    expect(logger.lines.filter(line => line.startsWith('warn ZNIGHT030'))).toEqual([
+      `warn ZNIGHT030: ${file} declares no servers, but the HTTP prefix is "/api": it is served with the server "/api", and clients generated from the file would call the wrong paths`,
+    ])
+    // emitted with the prefix: served as is, no warning
+    const prefixed = path.join(directory, 'prefixed.json')
+    const built = await buildOpenApiDocument(metadata, { prefix: '/api' })
+    fs.writeFileSync(prefixed, built.json)
+    const quiet = recordingLogger()
+    await using again = await create(
+      OpenApiPlugin.configure({ document: { file: prefixed } }),
+      { prefix: '/api' },
+      quiet,
+    )
+    expect((await again.inject({ method: 'GET', url: '/api/openapi.json' })).body).toBe(built.json)
+    expect(quiet.lines.filter(line => line.startsWith('warn'))).toEqual([])
   })
 })
 

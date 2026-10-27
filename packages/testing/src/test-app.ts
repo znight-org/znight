@@ -162,7 +162,7 @@ export interface InjectSseResponse extends AsyncIterable<SseMessage>, AsyncDispo
 
 /**
  * What `TestApp.injectStream()` / `injectSse()` expect from the plugin named `'http'`
- * (`HttpPlugin` of `@znight/http` ≥ 0.2).
+ * (`HttpPlugin` of `@znight/http` ≥ 0.1.0, the release that ships streaming).
  */
 export interface HttpStreamInjector {
   injectStream(request: InjectStreamRequest & { readonly method: string }): Promise<InjectStreamResponse>
@@ -373,7 +373,7 @@ export class TestApp implements AsyncDisposable {
             hints: [
               plugin === undefined
                 ? 'Add HttpPlugin.configure({ adapter }) from @znight/http to TestApp.create({ plugins })'
-                : `TestApp.${method}() requires @znight/http ≥ 0.2 (HttpPlugin.${method}())`,
+                : `The plugin named 'http' does not implement ${method}(): register HttpPlugin.configure({ adapter }) from @znight/http ≥ 0.1.0 (the same release as @znight/testing)`,
             ],
           },
         )

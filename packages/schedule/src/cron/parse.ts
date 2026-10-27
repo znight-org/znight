@@ -346,13 +346,17 @@ function parseItem(spec: FieldSpec, item: string, start: number, count: number, 
   if (dash === -1) {
     const single = value(spec, base, start, false)
     if (typeof single !== 'number') return single
-    fill(bits.values, spec, single, slash === -1 ? single : top, step)
+    // `a/s` runs from `a` to the maximum: `7/s` (Sunday written 7) is Sunday alone, never an empty set
+    fill(bits.values, spec, single, slash === -1 ? single : Math.max(top, single), step)
     return undefined
   }
   const low = value(spec, base.slice(0, dash), start, false)
   if (typeof low !== 'number') return low
-  const high = value(spec, base.slice(dash + 1), start + dash + 1, true)
+  const highText = base.slice(dash + 1)
+  let high = value(spec, highText, start + dash + 1, true)
   if (typeof high !== 'number') return high
+  // `SUN` closing a range is 7 (`FRI-SUN`), but Sunday alone after Sunday (`SUN-SUN`, `0-SUN`, like `0-0`)
+  if (field === 'day-of-week' && low === 0 && high === 7 && !/^\d+$/.test(highText)) high = 0
   if (high < low) {
     return issue(
       `reversed range '${base}' in the ${field} field: ranges do not wrap`,

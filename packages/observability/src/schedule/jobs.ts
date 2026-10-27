@@ -2,10 +2,12 @@
  * Instrumentation of the `schedule:run` hook of `@znight/schedule` (RFC 0004 §7.9): logs, metrics and
  * spans of scheduled runs. `@znight/schedule` wraps executed runs with `hooks.run()` (spans,
  * durations, logs of executed runs), then emits every occurrence (counters, last success, logs of
- * occurrences that did not run). Read structurally: no dependency on `@znight/schedule`.
+ * occurrences that did not run). A wrapper that does not call `next()` vetoes the run (RFC 0004
+ * §7.4): the outer wrappers see `next()` resolve with no outcome, which they report as `skipped`.
+ * Read structurally: no dependency on `@znight/schedule`.
  */
 import type { Attributes } from '@opentelemetry/api'
-import type { HookListener, HookWrapper, ScheduledRunEvent } from '@znight/core'
+import type { HookListener, HookWrapper, ScheduledRunEvent, ScheduledRunOutcome } from '@znight/core'
 import type { LogEntryLevel } from '../logging/levels.ts'
 import type { Logger } from '../logging/logger.ts'
 import type { MetricsRegistry } from '../metrics/registry.ts'
@@ -77,17 +79,25 @@ const LOG_MESSAGES: Readonly<Record<string, string>> = {
 }
 
 /**
- * One log entry per settled run: `info` (completed), `error` (failed, with `err`), `warn` (skipped),
- * `debug` (not acquired: another instance holds the lock). Fields: `job`, `runId`, `trigger`,
- * `scheduledAt`, `durationMs` and `lateMs` (executed runs), `aborted`. Executed runs are logged by
- * the wrapper (inside their span, so the entry carries `traceId`), the others by the listener.
+ * One log entry per settled run: `info` (completed), `error` (failed, with `err`), `warn` (skipped,
+ * vetoed by a wrapper included), `debug` (not acquired: another instance holds the lock). Fields:
+ * `job`, `runId`, `trigger`, `scheduledAt`, `durationMs` (runs that went through the wrappers and
+ * were not vetoed), `lateMs` (dispatched runs), `aborted`. Runs that reach the wrapper are logged by
+ * it (inside their span, so the entry carries `traceId`), the others by the listener: occurrences
+ * that did not run, and runs an outer wrapper vetoed or failed before this one.
  */
 export function logJobs(logger: Logger, options: JobLogOptions = {}): ScheduleObserver {
   const level = options.level === undefined ? 'info' : parseEntryLevel(options.level, 'logging.jobs.level')
   const ignore = options.ignore
   const record = guard('Logging a scheduled run')
-  const write = (event: ScheduledRunEvent, started: number | undefined, thrown: unknown): void => {
-    const outcome = event.outcome ?? 'failed'
+  // runs whose entry the wrapper writes: the listener logs every other occurrence
+  const wrapped = new WeakSet<ScheduledRunEvent>()
+  const write = (
+    event: ScheduledRunEvent,
+    outcome: ScheduledRunOutcome,
+    started: number | undefined,
+    thrown: unknown,
+  ): void => {
     const severity = jobSeverity(outcome, level)
     if (!logger.isLevelEnabled(severity)) return
     const entry: Record<string, unknown> = {
@@ -107,21 +117,26 @@ export function logJobs(logger: Logger, options: JobLogOptions = {}): ScheduleOb
   return {
     wrap: async (event, next) => {
       if (ignore?.(event) === true) return next()
+      wrapped.add(event)
       const started = now()
+      let failed = false
       let thrown: unknown
       try {
         return await next()
       } catch (error) {
+        failed = true
         thrown = error
         throw error
       } finally {
-        record(() => write(event, started, thrown))
+        record(() => {
+          const outcome = settledOutcome(event, failed)
+          write(event, outcome, outcome === 'skipped' ? undefined : started, thrown)
+        })
       }
     },
     listen: event => {
-      // executed runs carry their context and were logged by the wrapper
-      if (event.context !== undefined || ignore?.(event) === true) return
-      record(() => write(event, undefined, undefined))
+      if (wrapped.has(event) || ignore?.(event) === true) return
+      record(() => write(event, event.outcome ?? 'failed', undefined, undefined))
     },
   }
 }
@@ -132,8 +147,8 @@ export function logJobs(logger: Logger, options: JobLogOptions = {}): ScheduleOb
  * | Metric | Type | Labels |
  * | --- | --- | --- |
  * | `schedule_runs_total` | counter | `job`, `outcome` (every occurrence) |
- * | `schedule_run_duration_seconds` | histogram | `job`, `outcome` (executed runs) |
- * | `schedule_run_lateness_seconds` | histogram | `job` (executed runs) |
+ * | `schedule_run_duration_seconds` | histogram | `job`, `outcome` (executed runs, not the vetoed ones) |
+ * | `schedule_run_lateness_seconds` | histogram | `job` (dispatched runs reaching the wrapper) |
  * | `schedule_active_runs` | gauge | `job` |
  * | `schedule_last_success_timestamp_seconds` | gauge | `job` ("has not succeeded since" alerts) |
  *
@@ -184,7 +199,8 @@ export function measureJobs(registry: MetricsRegistry, options: ScheduleMetricsO
       } finally {
         record(() => {
           active.dec({ job })
-          const outcome = event.outcome ?? (failed ? 'failed' : 'completed')
+          const outcome = settledOutcome(event, failed)
+          if (outcome === 'skipped') return // vetoed by an inner wrapper: the job did not run
           duration.observe({ job, outcome }, (now() - startOf(event.startTime, started)) / 1000)
           if (outcome === 'completed') {
             const startedAt = startedAtOf(event)
@@ -205,7 +221,7 @@ export function measureJobs(registry: MetricsRegistry, options: ScheduleMetricsO
  * One `INTERNAL` span `schedule <job>` per executed run: the root of a new trace, except for manual
  * runs (`registry.trigger()`), children of the caller (an admin request). Attributes:
  * `znight.schedule.job`, `.kind`, `.trigger`, `.run_id`, `.scheduled_at`, `.outcome`, `.aborted`; the
- * status is `ERROR` when the run failed.
+ * status is `ERROR` when the run failed. A run an inner wrapper vetoed keeps its span, `skipped`.
  */
 export function traceJobs(tracer: Tracer, options: ScheduleTracingOptions = {}): HookWrapper<'schedule:run'> {
   const ignore = options.ignore
@@ -240,7 +256,7 @@ export function traceJobs(tracer: Tracer, options: ScheduleTracingOptions = {}):
         throw error
       } finally {
         record(() => {
-          const outcome = event.outcome ?? (failed ? 'failed' : 'completed')
+          const outcome = settledOutcome(event, failed)
           span.setAttribute(Attr.ZNIGHT_SCHEDULE_OUTCOME, outcome)
           if (event.aborted !== undefined) span.setAttribute(Attr.ZNIGHT_SCHEDULE_ABORTED, event.aborted)
           if (outcome === 'failed') {
@@ -267,6 +283,16 @@ function boundedJobLabel(max: number = DEFAULT_MAX_JOBS): (job: string) => strin
     seen.add(job)
     return job
   }
+}
+
+/**
+ * Outcome of a run seen by a wrapper once `next()` settled. The producer sets `event.outcome` in its
+ * innermost callback (the job ran); when it is still unset, an inner wrapper either threw before the
+ * job (`failed`) or returned without calling `next()`, vetoing the run (`skipped`, RFC 0004 §7.4):
+ * the producer only fills these in after `hooks.run()` settles, so the wrappers derive them alike.
+ */
+function settledOutcome(event: ScheduledRunEvent, failed: boolean): ScheduledRunOutcome {
+  return event.outcome ?? (failed ? 'failed' : 'skipped')
 }
 
 function jobSeverity(outcome: string, success: LogEntryLevel): LogEntryLevel {

@@ -14,7 +14,7 @@ export interface Principal {
  * The caller of the current request.
  *
  * `scope: 'request'`: one instance per HTTP request, created on first use inside the request scope
- * opened by the HTTP plugin, and disposed when the response has been sent. `ApiKeyGuard` fills it;
+ * opened by the HTTP plugin, and disposed when the response has been sent. `AuthGuard` fills it;
  * controllers and services read it.
  *
  * Singletons cannot inject a request-scoped provider directly (the compiler reports ZNIGHT003: the

@@ -5,7 +5,7 @@
  * `@znight/schedule` runs it: executed runs go through `hooks.run()` in a scope seeded with the
  * `JobContext`, then every occurrence is emitted.
  */
-import type { Application, ScheduledRunEvent } from '@znight/core'
+import type { Application, Plugin, ScheduledRunEvent } from '@znight/core'
 import type { Entry } from './helpers.ts'
 
 import { SpanKind, SpanStatusCode, trace } from '@opentelemetry/api'
@@ -106,12 +106,29 @@ function drop(app: Application, job: string, outcome: 'skipped' | 'not-acquired'
   app.hooks.emit('schedule:run', event)
 }
 
+/** `before`: plugins registered ahead of the observability plugin (their wrappers run outside its own). */
 async function create(
   options: Parameters<typeof ObservabilityPlugin.configure>[0],
+  before: readonly Plugin[] = [],
 ): Promise<{ app: Application; plugin: ObservabilityPluginInstance }> {
   const plugin = ObservabilityPlugin.configure(options)
-  const app = await App.create({ metadata: meta({}), plugins: [plugin], shutdown: { signals: false } })
+  const app = await App.create({ metadata: meta({}), plugins: [...before, plugin], shutdown: { signals: false } })
   return { app, plugin }
+}
+
+/** A `schedule:run` wrapper that vetoes the runs of `jobs` (no `next()`: feature flag, maintenance window). */
+function veto(...jobs: string[]): (event: ScheduledRunEvent, next: () => Promise<unknown>) => Promise<unknown> {
+  return async (event, next) => (jobs.includes(event.job) ? undefined : next())
+}
+
+/** A plugin that registers a vetoing wrapper ahead of the observability plugin. */
+function vetoPlugin(job: string): Plugin {
+  return {
+    name: 'maintenance-window',
+    register: ctx => {
+      ctx.hooks.wrap('schedule:run', veto(job))
+    },
+  }
 }
 
 function jobEntries(entries: readonly Entry[]): Entry[] {
@@ -307,6 +324,86 @@ describe('tracing.schedule', () => {
     await execute(app, 'digest.daily')
     const span = exporter.getFinishedSpans().find(candidate => candidate.name === 'schedule digest.daily')
     expect(jobEntries(entries)[0]).toMatchObject({ traceId: span?.spanContext().traceId })
+    await app.stop()
+  })
+})
+
+describe('vetoed runs (a schedule:run wrapper that does not call next(), RFC 0004 §7.4)', () => {
+  it('logs them as skipped, whether the vetoing wrapper runs inside or outside the plugin', async () => {
+    const { stream, entries } = capture()
+    const { app } = await create(
+      { logging: { destination: stream, level: 'debug', replaceCoreLogger: false }, tracing: false, metrics: false },
+      [vetoPlugin('outer.vetoed')],
+    )
+    app.hooks.wrap('schedule:run', veto('inner.vetoed'))
+    app.hooks.wrap('schedule:run', (event, next) =>
+      event.job === 'inner.broken' ? Promise.reject(new Error('flag store down')) : next(),
+    )
+    let ran = 0
+    const inner = await execute(app, 'inner.vetoed', () => ran++)
+    await execute(app, 'outer.vetoed', () => ran++)
+    await execute(app, 'inner.broken', () => ran++)
+    expect(ran).toBe(0)
+    expect(inner.event.outcome).toBe('skipped')
+    const logged = jobEntries(entries)
+    expect(logged.map(entry => [entry.level, entry.msg, entry['job']])).toEqual([
+      [40, 'job skipped', 'inner.vetoed'],
+      [40, 'job skipped', 'outer.vetoed'],
+      [50, 'job failed', 'inner.broken'],
+    ])
+    const [innerVeto, outerVeto, broken] = logged
+    for (const entry of [innerVeto, outerVeto]) {
+      expect(entry).not.toHaveProperty('err')
+      expect(entry).not.toHaveProperty('durationMs')
+    }
+    expect(broken?.['err']).toMatchObject({ message: 'flag store down' })
+    await app.stop()
+  })
+
+  it('counts them as skipped without timing them nor refreshing the last success', async () => {
+    const { app, plugin } = await create({
+      logging: { destination: capture().stream },
+      tracing: false,
+      metrics: { defaultMetrics: false, server: false },
+    })
+    const lastSuccess = async (): Promise<string | undefined> =>
+      /schedule_last_success_timestamp_seconds\{job="digest.daily"\} ([\d.e+]+)/.exec(
+        (await plugin.metrics?.metrics()) ?? '',
+      )?.[1]
+    await execute(app, 'digest.daily')
+    const before = await lastSuccess()
+    expect(before).toBeDefined()
+    const unregister = app.hooks.wrap('schedule:run', veto('digest.daily', 'never.ran'))
+    await execute(app, 'digest.daily', () => undefined, {}, 60_000)
+    await execute(app, 'never.ran')
+    unregister()
+    expect(await lastSuccess()).toBe(before)
+    const body = (await plugin.metrics?.metrics()) ?? ''
+    expect(body).toContain('schedule_runs_total{job="digest.daily",outcome="completed"} 1')
+    expect(body).toContain('schedule_runs_total{job="digest.daily",outcome="skipped"} 1')
+    expect(body).toContain('schedule_run_duration_seconds_count{job="digest.daily",outcome="completed"} 1')
+    expect(body).not.toContain('schedule_run_duration_seconds_count{job="digest.daily",outcome="skipped"}')
+    expect(body).toContain('schedule_active_runs{job="digest.daily"} 0')
+    expect(body).toContain('schedule_runs_total{job="never.ran",outcome="skipped"} 1')
+    expect(body).not.toContain('schedule_run_duration_seconds_count{job="never.ran"')
+    expect(body).not.toContain('schedule_last_success_timestamp_seconds{job="never.ran"}')
+    // lateness is the scheduler's dispatch delay: observed even when a wrapper then vetoes the run
+    expect(body).toContain('schedule_run_lateness_seconds_count{job="digest.daily"} 2')
+    await app.stop()
+  })
+
+  it('gives their span the outcome skipped, without an error status', async () => {
+    const { app } = await create({
+      logging: { destination: capture().stream },
+      tracing: { tracerProvider: provider },
+      metrics: false,
+    })
+    app.hooks.wrap('schedule:run', veto('digest.daily'))
+    await execute(app, 'digest.daily')
+    const [span] = exporter.getFinishedSpans().filter(candidate => candidate.name === 'schedule digest.daily')
+    expect(span?.attributes['znight.schedule.outcome']).toBe('skipped')
+    expect(span?.status.code).toBe(SpanStatusCode.UNSET)
+    expect(span?.events).toEqual([])
     await app.stop()
   })
 })

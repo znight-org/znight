@@ -815,7 +815,11 @@ describe('TestApp.injectStream / injectSse', () => {
     const old = await TestApp.create({ metadata, providers, plugins: [fakeHttp()], logger: quiet() })
     const outdated = await rejection(old.injectStream({ url: '/' }))
     expect(outdated.code).toBe(ErrorCode.MissingProvider)
-    expect(outdated.hints).toEqual(['TestApp.injectStream() requires @znight/http ≥ 0.2 (HttpPlugin.injectStream())'])
+    // the hint names the cause and a version that exists (streaming ships with @znight/http 0.1.0)
+    expect(outdated.hints).toEqual([
+      "The plugin named 'http' does not implement injectStream(): register HttpPlugin.configure({ adapter }) from @znight/http ≥ 0.1.0 (the same release as @znight/testing)",
+    ])
+    expect(outdated.hints.join()).not.toContain('0.2')
     await Promise.all([none.close(), old.close()])
   })
 

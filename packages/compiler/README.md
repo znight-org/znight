@@ -765,7 +765,10 @@ so it keeps what `TypeInfo` loses: object literal types, and the names of aliase
   (`src/page.ts#Page<src/book.ts#Book>`). `result.named` holds every named shape the root
   references, transitively (structures and type arguments), sorted by key; a declaration only used
   structurally (`Partial<Book>`, `extends`) is not listed, its properties are copied. Enums are the
-  union of their member values, in declaration order. An alias
+  union of their member values, in declaration order, and an enum member type (`Kind.Cat`) is the
+  literal of its value. Key types (`Record<K, V>`, mapped types, `Pick`/`Omit` keys, `T[K]`) and
+  `Exclude`/`Extract`/`NonNullable` go through the members of enums and of aliases of unions:
+  `Record<Genre, number>` has a required property per member. An alias
   whose structure is a schema or a kept reference is transparent (`type CreateBook = z.output<typeof
   CreateBook>` is the schema itself).
 - **Issues.** `{ reason, path, named, text, location }` for every `opaque` part and every `bigint`

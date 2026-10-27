@@ -192,6 +192,18 @@ export class EventsController {
     return this.#hub.subscribe(lastEventId, ctx.signal)
   }
 
+  /** A pre-flight the client does not wait for (it leaves before the handler returns). */
+  async late(): Promise<HttpResponse> {
+    await sleep(LATE_PREFLIGHT_MS)
+    return HttpResponse.sse([{ data: 'late' }])
+  }
+
+  /** The same with a plain streamed body. */
+  async lateStream(): Promise<HttpResponse> {
+    await sleep(LATE_PREFLIGHT_MS)
+    return HttpResponse.stream(new Blob(['late']).stream())
+  }
+
   /** An async generator honouring the signal. */
   async *clock(ctx: HttpContext): AsyncGenerator<SseEvent> {
     sseState.bodyRan = true
@@ -335,6 +347,9 @@ export class ScopedEventsController {
 
 const cookieLabel = (name: string): string => `cookie "${name}"`
 
+/** How long the pre-flight of `/events/late` and `/events/late-stream` takes (ms). */
+export const LATE_PREFLIGHT_MS = 150
+
 /** Metadata of the application (what the compiler generates for the controllers above). */
 export function cookiesSseMetadata(): ZnightMetadata {
   return metadata(
@@ -410,6 +425,8 @@ export function cookiesSseMetadata(): ZnightMetadata {
           { sse: { retry: 5_000 } },
         ),
         route('clock', '/clock', (c: EventsController, ctx) => c.clock(ctx), { sse: { heartbeat: 0 } }),
+        route('late', '/late', (c: EventsController) => c.late(), { sse: {} }),
+        route('lateStream', '/late-stream', (c: EventsController) => c.lateStream()),
         route('framing', '/framing', (c: EventsController) => c.framing(), { sse: {} }),
         route(
           'assistant',

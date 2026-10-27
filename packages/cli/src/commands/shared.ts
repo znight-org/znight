@@ -53,6 +53,15 @@ export function parseNonNegativeInteger(value: string | undefined, option: strin
   return parsed
 }
 
+/** An HTTP prefix option (`/api`, the `prefix` of `HttpPlugin`): `undefined` when not given. */
+export function parseHttpPrefix(value: string | undefined, option: string): string | undefined {
+  if (value === undefined) return undefined
+  if (!value.startsWith('/')) {
+    throw new UsageError(`Invalid --${option} "${value}": expected a path starting with "/"`)
+  }
+  return value
+}
+
 /** A path for messages: relative to `from`, or absolute when that is shorter. POSIX separators. */
 export function displayPath(file: string, from: string): string {
   const path = relative(from, file)

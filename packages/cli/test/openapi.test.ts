@@ -190,4 +190,60 @@ describe('znight build --openapi', () => {
     expect(calls).toHaveLength(2)
     expect(fake.lastBuild().plugins?.map(plugin => (plugin as { name: string }).name)).not.toContain('znight:openapi')
   })
+
+  // HttpPlugin.configure({ prefix: '/api' }): without the prefix, the emitted document has no servers
+  // and the clients served with it (`document: { file }`) call /greetings instead of /api/greetings
+  it('passes --openapi-prefix to openapi(): the servers of the emitted document', async () => {
+    const fake = new FakeVite()
+    const calls: OpenApiVitePluginOptionsLike[] = []
+    const services = { loadVite: () => Promise.resolve(fake), loadOpenApiVite: () => Promise.resolve(vite(calls)) }
+    const first = await runCli(['build', '--openapi', '--openapi-prefix', '/api'], { cwd: project.path, services })
+    expect(first.code).toBe(0)
+    expect(first.stderr).toBe('')
+    const second = await runCli(['build', '--openapi=docs/api.json', '--openapi-prefix=/v1'], {
+      cwd: project.path,
+      services,
+    })
+    expect(second.code).toBe(0)
+    expect(calls).toEqual([{ prefix: '/api' }, { output: 'docs/api.json', prefix: '/v1' }])
+  })
+
+  it('checks --openapi-prefix', async () => {
+    const fake = new FakeVite()
+    const calls: OpenApiVitePluginOptionsLike[] = []
+    const services = { loadVite: () => Promise.resolve(fake), loadOpenApiVite: () => Promise.resolve(vite(calls)) }
+    const invalid = await runCli(['build', '--openapi', '--openapi-prefix', 'api'], { cwd: project.path, services })
+    expect(invalid.code).toBe(2)
+    expect(invalid.stderr).toContain('Invalid --openapi-prefix "api"')
+    const alone = await runCli(['build', '--openapi-prefix', '/api'], { cwd: project.path, services })
+    expect(alone.code).toBe(2)
+    expect(alone.stderr).toContain('--openapi-prefix needs --openapi')
+    expect(fake.builds).toHaveLength(0)
+    expect(calls).toHaveLength(0)
+  })
+
+  it('warns when the openapi() of the Vite config ignores the options of the command line', async () => {
+    const calls: OpenApiVitePluginOptionsLike[] = []
+    const services = (fake: FakeVite) => ({
+      loadVite: () => Promise.resolve(fake),
+      loadOpenApiVite: () => Promise.resolve(vite(calls)),
+    })
+    const configured = new FakeVite({ buildConfigPlugins: [{ name: 'znight:openapi' }] })
+    const ignored = await runCli(['build', '--openapi=docs/api.json', '--openapi-prefix', '/api'], {
+      cwd: project.path,
+      services: services(configured),
+    })
+    expect(ignored.code).toBe(0)
+    expect(ignored.stderr).toContain(
+      '--openapi=docs/api.json and --openapi-prefix /api ignored: the openapi() plugin of the Vite config emits the document',
+    )
+    // nothing to ignore (plain --openapi), or no openapi() in the Vite config: no warning
+    const plain = await runCli(['build', '--openapi'], { cwd: project.path, services: services(configured) })
+    expect(plain.stderr).toBe('')
+    const alone = await runCli(['build', '--openapi', '--openapi-prefix', '/api'], {
+      cwd: project.path,
+      services: services(new FakeVite()),
+    })
+    expect(alone.stderr).toBe('')
+  })
 })

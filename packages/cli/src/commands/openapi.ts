@@ -12,11 +12,11 @@ import type { ViteConfigLoader } from '../integrations/vite.ts'
 import { existsSync } from 'node:fs'
 
 import { defineCommand } from '../command.ts'
-import { CliError, errorMessage, UsageError } from '../errors.ts'
+import { CliError, errorMessage } from '../errors.ts'
 import { hasErrors } from '../integrations/compiler.ts'
 import { formatDuration, plural } from '../output.ts'
 import { compilerOptions } from './generate.ts'
-import { displayPath, resolveRoot } from './shared.ts'
+import { displayPath, parseHttpPrefix, resolveRoot } from './shared.ts'
 
 /** Values of a repeatable string option (`-o a -o b`, `--output=a`, `--output b,c`). */
 export function repeatedOption(rawArgs: readonly string[], name: string, alias: string): string[] {
@@ -83,9 +83,7 @@ export const openapiCommand: Command = defineCommand({
   async run({ args, cli, rawArgs }) {
     const root = resolveRoot(cli, args.root)
     const outputs = repeatedOption(rawArgs, 'output', 'o')
-    if (args.prefix !== undefined && !args.prefix.startsWith('/')) {
-      throw new UsageError(`Invalid --prefix "${args.prefix}": expected a path starting with "/"`)
-    }
+    const prefix = parseHttpPrefix(args.prefix, 'prefix')
     const compiler = await cli.services.loadCompiler(root)
     const configLoader = args['config-loader'] as ViteConfigLoader | undefined
     const options = await compilerOptions(cli, compiler, root, args.config, configLoader)
@@ -97,7 +95,7 @@ export const openapiCommand: Command = defineCommand({
         root,
         output: outputs.length > 0 ? outputs : ['openapi.json'],
         ...(args.check === true ? { check: true } : {}),
-        ...(args.prefix === undefined ? {} : { prefix: args.prefix }),
+        ...(prefix === undefined ? {} : { prefix }),
         ...(args.runtime === undefined ? {} : { runtime: args.runtime as 'auto' | 'node' | 'bun' }),
         ...(args.converters === undefined ? {} : { converters: args.converters }),
         ...(args.config === undefined ? {} : { config: args.config }),

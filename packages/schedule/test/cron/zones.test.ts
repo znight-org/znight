@@ -3,8 +3,9 @@
  * gaps fire once at the end of the gap, folds fire at their first occurrence unless the hour field
  * matches every hour.
  */
-import { resolveTimeZone } from '../../src/cron/zone.ts'
-import { between } from './helpers.ts'
+import { compileCron } from '../../src/cron/schedule.ts'
+import { resolveTimeZone, zoneCacheSizes } from '../../src/cron/zone.ts'
+import { between, runs, spec } from './helpers.ts'
 import { describe, expect, test as it } from 'bun:test'
 
 describe('Europe/Paris', () => {
@@ -182,6 +183,112 @@ describe('other zones', () => {
   })
 })
 
+describe('a search starting in the last second before a gap', () => {
+  /** Wall clock of an instant (ms, read as UTC) through `Intl`: independent of the engine. */
+  function wallClock(zone: string): (at: number) => number {
+    const format = new Intl.DateTimeFormat('en-US', {
+      timeZone: zone,
+      hourCycle: 'h23',
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: 'numeric',
+      second: 'numeric',
+    })
+    return at => {
+      const parts: Record<string, number> = {}
+      for (const part of format.formatToParts(at)) parts[part.type] = Number(part.value)
+      return Date.UTC(parts.year ?? 0, (parts.month ?? 1) - 1, parts.day, parts.hour, parts.minute, parts.second)
+    }
+  }
+
+  /**
+   * Brute-force gap rule (RFC 0004 §4.4), second by second, for windows without a fold: the first
+   * second after `after` whose wall time matches, or that ends a gap skipping a matching wall time.
+   */
+  function reference(wall: (at: number) => number, matches: (wall: Date) => boolean, after: number): number {
+    for (let at = Math.floor(after / 1000) * 1000 + 1000; at <= after + 3 * 3_600_000; at += 1000) {
+      const current = wall(at)
+      for (let skipped = wall(at - 1000) + 1000; skipped < current; skipped += 1000) {
+        if (matches(new Date(skipped))) return at
+      }
+      if (matches(new Date(current))) return at
+    }
+    throw new Error('no occurrence within 3 hours')
+  }
+
+  const EXPRESSIONS: readonly (readonly [string, (wall: Date) => boolean])[] = [
+    ['* * 1,2 * * *', wall => wall.getUTCHours() === 1 || wall.getUTCHours() === 2],
+    ['0,59 59 * * * *', wall => wall.getUTCMinutes() === 59 && wall.getUTCSeconds() % 59 === 0],
+    ['30 2 * * *', wall => wall.getUTCHours() === 2 && wall.getUTCMinutes() === 30 && wall.getUTCSeconds() === 0],
+    ['15 2 * * *', wall => wall.getUTCHours() === 2 && wall.getUTCMinutes() === 15 && wall.getUTCSeconds() === 0],
+    ['* * 2 * * *', wall => wall.getUTCHours() === 2],
+    ['*/30 * * * *', wall => wall.getUTCMinutes() % 30 === 0 && wall.getUTCSeconds() === 0],
+  ]
+
+  /** Spring gaps of a zone in `[from, to)`. */
+  function gaps(zone: string, from: string, to: string): number[] {
+    const resolved = resolveTimeZone(zone)
+    if (!resolved.ok) throw new Error(resolved.message)
+    const found: number[] = []
+    for (let cursor = Date.parse(from); ; ) {
+      const transition = resolved.zone.firstTransition(cursor, Date.parse(to))
+      if (transition === undefined) return found
+      if (transition.after > transition.before) found.push(transition.at)
+      cursor = transition.at
+    }
+  }
+
+  it.each([
+    ['Europe/Paris', '2024-01-01T00:00:00Z', '2028-01-01T00:00:00Z'],
+    ['America/New_York', '2024-01-01T00:00:00Z', '2028-01-01T00:00:00Z'],
+    ['Australia/Lord_Howe', '2024-01-01T00:00:00Z', '2028-01-01T00:00:00Z'],
+    ['Pacific/Apia', '2011-12-01T00:00:00Z', '2012-01-01T00:00:00Z'],
+  ])('%s: next() agrees with a brute-force reference, and matches() its answers', (zone, from, to) => {
+    const resolved = resolveTimeZone(zone)
+    if (!resolved.ok) throw new Error(resolved.message)
+    const wall = wallClock(zone)
+    const found = gaps(zone, from, to)
+    expect(found.length).toBeGreaterThan(0)
+    const mismatches: string[] = []
+    for (const at of found) {
+      for (const [expression, matches] of EXPRESSIONS) {
+        const engine = compileCron(spec(expression), resolved.zone)
+        for (const after of [at - 1001, at - 1000, at - 500, at - 1]) {
+          const expected = reference(wall, matches, after)
+          const actual = engine.next(after)
+          if (actual !== expected || !engine.matches(expected)) {
+            mismatches.push(`${expression} after ${new Date(after).toISOString()}: ${actual} vs ${expected}`)
+          }
+        }
+      }
+    }
+    expect(mismatches).toEqual([])
+  })
+
+  it('the scheduler chain (next of the last occurrence) keeps the gap occurrence', () => {
+    // Europe/Paris, 2027-03-28: 02:00-02:59:59 CET does not exist, 01:00:00Z is 03:00:00 CEST
+    expect(runs('* * 1,2 * * *', '2027-03-28T00:59:57Z', 4, 'Europe/Paris')).toEqual([
+      '2027-03-28T00:59:58.000Z', // 01:59:58 CET
+      '2027-03-28T00:59:59.000Z', // 01:59:59 CET
+      '2027-03-28T01:00:00.000Z', // every 02:xx:xx at once, when the gap ends
+      '2027-03-28T23:00:00.000Z', // 01:00:00 CEST the next day
+    ])
+    expect(runs('0,59 59 * * * *', '2027-03-28T00:59:30Z', 3, 'Europe/Paris')).toEqual([
+      '2027-03-28T00:59:59.000Z',
+      '2027-03-28T01:00:00.000Z', // 02:59:00 and 02:59:59 do not exist
+      '2027-03-28T01:59:00.000Z',
+    ])
+    const daily = resolveTimeZone('Europe/Paris')
+    if (!daily.ok) throw new Error(daily.message)
+    const engine = compileCron(spec('30 2 * * *'), daily.zone)
+    const end = Date.parse('2027-03-28T01:00:00Z')
+    expect(engine.next(end - 1)).toBe(end)
+    expect(engine.matches(end)).toBe(true)
+  })
+})
+
 describe('resolveTimeZone', () => {
   it('keeps the name as written (aliases are never canonicalised)', () => {
     const zone = resolveTimeZone('US/Eastern')
@@ -208,6 +315,25 @@ describe('resolveTimeZone', () => {
     const reference = resolveTimeZone(system)
     const instant = Date.parse('2026-07-01T12:00:00Z')
     expect(local.ok && local.zone.offsetAt(instant)).toBe(reference.ok ? reference.zone.offsetAt(instant) : -1)
+  })
+
+  it('keeps its cache bounded whatever the spellings (names may come from user input)', () => {
+    const name = 'America/Argentina/ComodRivadavia'
+    const spell = (variant: number): string =>
+      [...name].map((char, index) => ((variant >> (index % 10)) & 1 ? char.toUpperCase() : char.toLowerCase())).join('')
+    const spellings = new Set(Array.from({ length: 1024 }, (_, variant) => spell(variant)))
+    expect(spellings.size).toBeGreaterThan(1000)
+    const instant = Date.parse('2026-07-01T12:00:00Z')
+    const before = zoneCacheSizes()
+    for (const spelling of spellings) {
+      const zone = resolveTimeZone(spelling)
+      if (!zone.ok) throw new Error(zone.message)
+      expect(zone.zone.name).toBe(spelling) // kept as written
+      expect(zone.zone.offsetAt(instant)).toBe(-3 * 3_600_000)
+    }
+    const after = zoneCacheSizes()
+    expect(after.zones - before.zones).toBeLessThanOrEqual(1) // one formatter and transition cache
+    expect(after.names).toBeLessThanOrEqual(256)
   })
 
   it('finds the transitions of a year', () => {

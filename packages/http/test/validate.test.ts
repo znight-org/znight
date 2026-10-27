@@ -71,6 +71,26 @@ describe('validate', () => {
     expect(() => validate(custom, 'a', 'body')).toThrow(ValidationException)
   })
 
+  it('never echoes a cookie value: issue messages of cookies are replaced (valibot quotes the value)', async () => {
+    const token = 'eyJhbGciOiJIUzI1NiJ9.SECRET-SESSION-TOKEN'
+    const uuid = v.pipe(v.string(), v.uuid())
+    // the library message quotes the value...
+    const plain = await invalid(() => validate(uuid, token, 'query "id"'))
+    expect(JSON.stringify(plain.toBody())).toContain('SECRET-SESSION-TOKEN')
+    // ...but not for cookies, a signed cookie or the whole record
+    for (const [schema, value, location, path] of [
+      [uuid, token, 'cookie "sid"', ''],
+      [v.picklist(['light', 'dark']), token, 'cookie "theme"', ''],
+      [v.object({ sid: uuid }), { sid: token }, 'cookies', 'sid'],
+    ] as const) {
+      const error = await invalid(() => validate(schema as never, value, location))
+      expect(error.message).toBe(`Invalid ${location}`)
+      expect(error.details).toEqual([{ path, message: 'Invalid value' }])
+      expect(JSON.stringify(error.toBody())).not.toContain('SECRET')
+      expect(JSON.stringify(error.issues)).not.toContain('SECRET')
+    }
+  })
+
   it('throws a TypeError for non schemas', () => {
     expect(() => validate({} as never, 1, 'body')).toThrow(TypeError)
     expect(() => validate(null as never, 1, 'body')).toThrow('The schema of body is not a Standard Schema v1')

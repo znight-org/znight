@@ -80,6 +80,21 @@ describe('occurrences in UTC', () => {
     expect(runs('0 0 * * *', '2026-01-01T00:00:00Z', 1)).toEqual(['2026-01-02T00:00:00.000Z'])
     expect(runs('0 0 * * *', '2025-12-31T23:59:59.999Z', 1)).toEqual(['2026-01-01T00:00:00.000Z'])
   })
+
+  it('finds occurrences before 1970 (negative epoch seconds are not "not found")', () => {
+    expect(runs('0 0 * * *', '1960-01-01T00:00:00Z', 2)).toEqual([
+      '1960-01-02T00:00:00.000Z',
+      '1960-01-03T00:00:00.000Z',
+    ])
+    expect(runs('0 0 29 2 *', '1896-03-01T00:00:00Z', 1)).toEqual(['1904-02-29T00:00:00.000Z']) // 1900 is not leap
+    expect(runs('59 59 23 31 12 *', '1969-12-31T23:59:58Z', 1)).toEqual(['1969-12-31T23:59:59.000Z'])
+    const daily = parseCron('0 0 * * *')
+    expect(daily.matches(new Date('1960-01-02T00:00:00Z'))).toBe(true)
+    expect(daily.nextRuns(1, new Date('1700-06-01T12:00:00Z'))).toEqual([new Date('1700-06-02T00:00:00Z')])
+    expect(parseCron('0 9 * * *', { timeZone: 'Europe/Paris' }).next(new Date('1960-07-01T00:00:00Z'))).toEqual(
+      new Date('1960-07-01T08:00:00Z'), // CET all year in 1960
+    )
+  })
 })
 
 describe('parseCron', () => {

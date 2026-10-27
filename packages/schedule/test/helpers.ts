@@ -131,9 +131,17 @@ export interface BootOptions {
   readonly overrides?: Readonly<Record<Token, unknown>>
 }
 
+/**
+ * A test clock for these tests: their runs do no real I/O, and many wait for the test on purpose,
+ * so `advance()` gives up on idle runs after 20 ms instead of 1 s.
+ */
+export function testClock(start: Date | string | number = '2026-01-01T00:00:00Z'): TestClock {
+  return createTestClock(start, { settleTimeoutMs: 20 })
+}
+
 /** Creates (and starts) an application with `SchedulePlugin` on a test clock. */
 export async function boot(options: BootOptions = {}): Promise<Booted> {
-  const clock = options.clock ?? createTestClock('2026-01-01T00:00:00Z')
+  const clock = options.clock ?? testClock()
   const logs = captureLogger()
   const raw = options.schedule ?? {}
   const plugin = SchedulePlugin.configure(

@@ -95,6 +95,26 @@ describe('onStop', () => {
     expect(() => booted.registry.jobs()).toThrow('SchedulerRegistry.jobs(): the scheduler is stopped')
   })
 
+  it('never starts a job whose hook wrapper calls next() after stop() began', async () => {
+    const gate = deferred()
+    const executed: string[] = []
+    const booted = await boot({
+      metadata: metadataWith([{ name: 'job', kind: 'interval', every: 60_000, run: () => executed.push('ran') }]),
+    })
+    booted.app.hooks.wrap('schedule:run', async (_event, next) => {
+      await gate.promise // a wrapper waiting for a feature flag service...
+      await next()
+    })
+    await booted.clock.advance('1m')
+    const stopping = booted.app.stop()
+    gate.resolve()
+    await stopping
+    expect(executed).toEqual([])
+    expect(booted.logs.messages('debug')).toContain(
+      "Schedule: job 'job' did not run: its run was aborted (shutdown) before it started",
+    )
+  })
+
   it('arms nothing when the application stops during its start', async () => {
     let ran = false
     const stopper: Plugin = {

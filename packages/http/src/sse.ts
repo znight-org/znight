@@ -25,7 +25,8 @@ export interface SseEvent<T = unknown> {
 export interface SseOptions {
   /**
    * Milliseconds without an event after which a keep-alive comment (`:`) is sent (an integer
-   * ≥ 1 000). `false` disables it. Default: the plugin option `sse.heartbeat` (8 000).
+   * from 1 000 to 2 147 483 647). `false` disables it. Default: the plugin option `sse.heartbeat`
+   * (8 000).
    */
   readonly heartbeat?: number | false
   /**
@@ -36,7 +37,7 @@ export interface SseOptions {
   /**
    * The server ends the stream gracefully after this many ms (load rebalancing, re-authentication):
    * `ctx.signal` aborts (`'expired'`), then the client gets a jittered `retry` and reconnects. An
-   * integer ≥ 1 000. Default: none.
+   * integer from 1 000 to 2 147 483 647 (about 24.8 days, the longest timer). Default: none.
    */
   readonly maxDuration?: number
 }
@@ -86,10 +87,16 @@ export function isSseSource(value: unknown): value is SseSource {
 
 /** Smallest heartbeat and `maxDuration` (ms). */
 export const MIN_SSE_INTERVAL_MS = 1_000
+/**
+ * Longest heartbeat, `maxDuration` and grace period (ms): the longest `setTimeout` delay (larger
+ * ones overflow to 1 ms on Node.js and Bun, which would end every stream at once).
+ */
+export const MAX_SSE_TIMER_MS = 2_147_483_647
 
 /**
- * Checks SSE options (`HttpResponse.sse()`, hand-written metadata): `heartbeat` an integer ≥ 1 000
- * or `false`, `retry` an integer ≥ 0, `maxDuration` an integer ≥ 1 000, no other key.
+ * Checks SSE options (`HttpResponse.sse()`, hand-written metadata): `heartbeat` an integer from
+ * 1 000 to 2 147 483 647 or `false`, `retry` an integer ≥ 0, `maxDuration` an integer from 1 000 to
+ * 2 147 483 647, no other key.
  *
  * @throws TypeError naming `what`.
  */
@@ -107,16 +114,16 @@ export function sseOptionsProblem(options: unknown): string | undefined {
     if (value === undefined) continue
     switch (key) {
       case 'heartbeat':
-        if (value !== false && !isInteger(value, MIN_SSE_INTERVAL_MS)) {
-          return `heartbeat must be an integer number of ms ≥ ${MIN_SSE_INTERVAL_MS}, or false (received ${String(value)})`
+        if (value !== false && !isInteger(value, MIN_SSE_INTERVAL_MS, MAX_SSE_TIMER_MS)) {
+          return `heartbeat must be an integer number of ms from ${MIN_SSE_INTERVAL_MS} to ${MAX_SSE_TIMER_MS}, or false (received ${String(value)})`
         }
         break
       case 'retry':
         if (!isInteger(value, 0)) return `retry must be an integer number of ms ≥ 0 (received ${String(value)})`
         break
       case 'maxDuration':
-        if (!isInteger(value, MIN_SSE_INTERVAL_MS)) {
-          return `maxDuration must be an integer number of ms ≥ ${MIN_SSE_INTERVAL_MS} (received ${String(value)})`
+        if (!isInteger(value, MIN_SSE_INTERVAL_MS, MAX_SSE_TIMER_MS)) {
+          return `maxDuration must be an integer number of ms from ${MIN_SSE_INTERVAL_MS} to ${MAX_SSE_TIMER_MS} (received ${String(value)})`
         }
         break
       default:
@@ -126,8 +133,8 @@ export function sseOptionsProblem(options: unknown): string | undefined {
   return undefined
 }
 
-function isInteger(value: unknown, min: number): boolean {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= min
+function isInteger(value: unknown, min: number, max = Number.MAX_SAFE_INTEGER): boolean {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= min && value <= max
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -298,6 +305,8 @@ export class SseSession {
   /** Raw byte scanner: the current line has content / the previous byte was a CR. */
   #lineHasContent = false
   #afterCr = false
+  /** Whether the line the last CR ended was empty (an event boundary, whether a LF follows or not). */
+  #crBoundary = false
   #wake: (() => void) | undefined
   #graceTimer: ReturnType<typeof setTimeout> | undefined
   #maxTimer: ReturnType<typeof setTimeout> | undefined
@@ -322,7 +331,7 @@ export class SseSession {
           const retry = settings.retry
           controller.enqueue(retry === undefined ? HEARTBEAT : ENCODER.encode(`retry: ${retry}\n\n`))
           if (settings.maxDuration !== undefined) {
-            this.#maxTimer = unref(setTimeout(() => this.close('expired'), settings.maxDuration))
+            this.#maxTimer = unref(setTimeout(() => this.close('expired'), timerDelay(settings.maxDuration)))
           }
         },
         pull: controller => this.#pull(controller),
@@ -347,7 +356,7 @@ export class SseSession {
     this.#phase = 'closing'
     clearTimeout(this.#maxTimer)
     this.#host.abort(kind)
-    this.#graceTimer = unref(setTimeout(() => void this.#endGracefully(), this.#settings.graceMs))
+    this.#graceTimer = unref(setTimeout(() => void this.#endGracefully(), timerDelay(this.#settings.graceMs)))
     this.#wake?.()
   }
 
@@ -384,6 +393,12 @@ export class SseSession {
       }
       let encoded: string
       try {
+        if (!this.#endsAtBoundary()) {
+          // an event written after an unterminated raw event would merge into it
+          throw new TypeError(
+            'Invalid SSE event: an SseEvent cannot follow raw bytes that do not end at an event boundary (an empty line)',
+          )
+        }
         encoded = encodeSseEvent(value as SseEvent)
       } catch (error) {
         this.#host.error('The SSE stream failed', error)
@@ -429,7 +444,7 @@ export class SseSession {
         if (this.#wake === wake) this.#wake = undefined
         resolve(outcome)
       }
-      if (heartbeat > 0) timer = unref(setTimeout(() => settle('heartbeat'), heartbeat))
+      if (heartbeat > 0) timer = unref(setTimeout(() => settle('heartbeat'), timerDelay(heartbeat)))
       this.#wake = wake
       void pending.then(settle)
     })
@@ -439,13 +454,16 @@ export class SseSession {
   #scan(bytes: Uint8Array): void {
     for (const byte of bytes) {
       if (byte === 0x0a && this.#afterCr) {
+        // the LF of a CRLF (possibly the first byte of a chunk): the CR decided the boundary
         this.#afterCr = false
+        this.#atBoundary = this.#crBoundary
         continue
       }
       this.#afterCr = byte === 0x0d
       if (byte === 0x0a || byte === 0x0d) {
         this.#atBoundary = !this.#lineHasContent
         this.#lineHasContent = false
+        if (this.#afterCr) this.#crBoundary = this.#atBoundary
       } else {
         this.#lineHasContent = true
         this.#atBoundary = false
@@ -453,6 +471,15 @@ export class SseSession {
     }
     // a final CR may be the first half of a CRLF: no heartbeat until the next byte tells
     if (this.#afterCr) this.#atBoundary = false
+  }
+
+  /**
+   * Whether the bytes written so far end at an event boundary, for bytes written once the source
+   * is over (the final `retry`) or replaced (an encoded event): a final CR ending an empty line
+   * counts, since no raw byte will follow it.
+   */
+  #endsAtBoundary(): boolean {
+    return this.#atBoundary || (this.#afterCr && this.#crBoundary)
   }
 
   /**
@@ -465,7 +492,8 @@ export class SseSession {
     this.#phase = 'ended'
     this.#clearTimers()
     const controller = this.#controller as ReadableStreamDefaultController<Uint8Array>
-    if (graceful) controller.enqueue(this.#finalRetry())
+    // never inside an unterminated raw event (the client discards it at the end of the stream)
+    if (graceful && this.#endsAtBoundary()) controller.enqueue(this.#finalRetry())
     if (stop) await this.#stop()
     try {
       controller.close()
@@ -481,7 +509,8 @@ export class SseSession {
     this.#phase = 'ended'
     this.#clearTimers()
     const controller = this.#controller as ReadableStreamDefaultController<Uint8Array>
-    controller.enqueue(this.#finalRetry())
+    // never inside an unterminated raw event (the client discards it at the end of the stream)
+    if (this.#endsAtBoundary()) controller.enqueue(this.#finalRetry())
     this.#wake?.()
     await this.#stop()
     try {
@@ -591,6 +620,11 @@ function readerOf(source: SseSource): SourceReader {
     next: () => Promise.resolve(iterator.next()),
     stop: () => Promise.resolve(iterator.return?.()),
   }
+}
+
+/** A delay `setTimeout` keeps (larger ones overflow to 1 ms): the options are validated, this is a backstop. */
+function timerDelay(ms: number): number {
+  return Math.min(ms, MAX_SSE_TIMER_MS)
 }
 
 function unref<T>(timer: T): T {

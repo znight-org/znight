@@ -40,8 +40,10 @@ function toResponse({ coverUpdatedAt, ...book }: Book): BookResponse {
  * The books resource. A singleton: it is created once at boot, and the compiler generated one
  * `invoke` function per route that extracts, coerces and validates the arguments.
  *
- * - `@Roles(['reader'])` on the class applies to every route, `@Roles(['admin'])` on a route wins;
- *   `@Public()` opts a route out of authentication. The global `AuthGuard` enforces them.
+ * - Access decisions (`@Public`, `@Authenticated`, `@Roles`: one `access` group). `@Roles(['reader'])`
+ *   on the class is the decision of every route that has none of its own; a route's decision
+ *   replaces it: `@Roles(['admin'])` (the reader role no longer grants access) or `@Public()` (no API
+ *   key at all). The global `AuthGuard` enforces them.
  * - `@UseInterceptor` wraps every route of the controller (after the guards).
  */
 @Controller('/books')
@@ -124,10 +126,14 @@ export class BookController {
   }
 
   /**
-   * GET /books/42/cover: public, so that `<img src>` works without API key.
+   * GET /books/42/cover: `@Public()` replaces the controller's `@Roles(['reader'])`, so that
+   * `<img src>` works without API key.
    *
    * `HttpResponse.file()` sends the image with `content-length`, `last-modified` and an `etag`, and
-   * answers conditional (`if-none-match` → 304) and range requests (→ 206) by itself.
+   * answers conditional (`if-none-match` → 304) and range requests (→ 206) by itself. The security
+   * headers of the plugin (`x-content-type-options: nosniff`, `content-security-policy: default-src
+   * 'none'`) keep a file disguised as an image from being run as a page; this route's own
+   * `cache-control` replaces the API-wide `no-store`.
    */
   @Get('/:id/cover')
   @Public()
@@ -137,8 +143,6 @@ export class BookController {
       type: cover.contentType,
       lastModified: cover.updatedAt.getTime(),
     })
-    return HttpResponse.file(file, { disposition: 'inline' })
-      .withHeader('cache-control', 'public, max-age=300')
-      .withHeader('x-content-type-options', 'nosniff')
+    return HttpResponse.file(file, { disposition: 'inline' }).withHeader('cache-control', 'public, max-age=300')
   }
 }

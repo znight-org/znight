@@ -13,8 +13,10 @@ export interface TestClock extends ScheduleClock {
   track(run: Promise<unknown>): void
   /**
    * Moves time forward by `duration`, firing the due timers in order. After each timer, and at the
-   * end, it waits until the runs it started settle (or stop making progress: a run waiting for a later
-   * timer, such as its `maxDuration`), so assertions need no sleep.
+   * end, it waits until the runs it started settle, so assertions need no sleep: runs doing real I/O
+   * (a database, `fetch`, the file system) are awaited. A run that makes no progress for
+   * `settleTimeoutMs` of real time (it waits for a later timer, such as its `maxDuration`, or for the
+   * test) is not waited for again during this call.
    */
   advance(duration: Duration): Promise<void>
   /** {@link advance} up to `date` (an ISO string, a `Date` or epoch milliseconds). Never backwards. */
@@ -24,12 +26,24 @@ export interface TestClock extends ScheduleClock {
    * armed timers keep their remaining delays, as monotonic timers do.
    */
   setWallClock(date: Date | string | number): void
-  /** Waits until the tracked runs settle or stop making progress. */
+  /** Waits until the tracked runs settle, or make no progress for `settleTimeoutMs` of real time. */
   settle(): Promise<void>
 }
 
-/** Event loop turns without a run settling after which {@link TestClock.settle} gives up waiting. */
+/** Options of {@link createTestClock}. */
+export interface TestClockOptions {
+  /**
+   * Real time, in milliseconds, during which {@link TestClock.advance} and {@link TestClock.settle}
+   * wait for runs that make no progress (no run settles) before giving up on them. Long enough for
+   * the real I/O of a job; each run that waits for the clock or for the test costs it once per call.
+   * Default 1000.
+   */
+  readonly settleTimeoutMs?: number
+}
+
+/** Event loop turns without a run settling before {@link TestClock.settle} may give up waiting. */
 const IDLE_TURNS = 50
+const SETTLE_TIMEOUT_MS = 1000
 
 interface VirtualTimer {
   readonly due: number
@@ -48,8 +62,17 @@ interface VirtualTimer {
  * await clock.advanceTo('2027-03-29T07:00:00Z')
  * ```
  */
-export function createTestClock(start: Date | string | number = '2026-01-01T00:00:00Z'): TestClock {
-  return new VirtualClock(toInstant(start, 'createTestClock()'))
+export function createTestClock(
+  start: Date | string | number = '2026-01-01T00:00:00Z',
+  options: TestClockOptions = {},
+): TestClock {
+  const timeout = options.settleTimeoutMs ?? SETTLE_TIMEOUT_MS
+  if (typeof timeout !== 'number' || !(timeout >= 0) || !Number.isFinite(timeout)) {
+    throw new RangeError(
+      `[znight] createTestClock(): settleTimeoutMs must be a finite non-negative number, got ${String(timeout)}`,
+    )
+  }
+  return new VirtualClock(toInstant(start, 'createTestClock()'), timeout)
 }
 
 class VirtualClock implements TestClock {
@@ -59,10 +82,14 @@ class VirtualClock implements TestClock {
   #sequence = 0
   #timers: VirtualTimer[] = []
   readonly #runs = new Set<Promise<unknown>>()
+  /** Runs given up on during the current `advance()` / `settle()` call. */
+  readonly #stalled = new Set<Promise<unknown>>()
   #settled = 0
+  readonly #settleTimeoutMs: number
 
-  constructor(start: number) {
+  constructor(start: number, settleTimeoutMs: number) {
     this.#wall = start
+    this.#settleTimeoutMs = settleTimeoutMs
   }
 
   get date(): Date {
@@ -95,6 +122,7 @@ class VirtualClock implements TestClock {
     this.#runs.add(run)
     const done = (): void => {
       this.#runs.delete(run)
+      this.#stalled.delete(run)
       this.#settled++
     }
     run.then(done, done)
@@ -124,19 +152,39 @@ class VirtualClock implements TestClock {
     this.#wall = toInstant(date, 'TestClock.setWallClock()')
   }
 
-  async settle(): Promise<void> {
+  settle(): Promise<void> {
+    this.#stalled.clear()
+    return this.#settle()
+  }
+
+  /**
+   * Waits for the tracked runs not given up on yet. Idleness is measured in real time (and event
+   * loop turns): real I/O takes far more turns than microtasks do, and a run waiting for a virtual
+   * timer would never settle before the clock moves on.
+   */
+  async #settle(): Promise<void> {
     // one turn even without runs: timers may have started async work (lease extensions...)
     await nextTurn()
-    let idle = 0
-    while (this.#runs.size > 0 && idle < IDLE_TURNS) {
+    let turns = 0
+    let since = performance.now()
+    for (;;) {
+      const waiting = [...this.#runs].filter(run => !this.#stalled.has(run))
+      if (waiting.length === 0) return
       const settled = this.#settled
-      await Promise.race([Promise.allSettled([...this.#runs]), nextTurn()])
-      idle = this.#settled === settled ? idle + 1 : 0
+      await Promise.race([Promise.allSettled(waiting), nextTurn()])
+      if (this.#settled !== settled) {
+        turns = 0
+        since = performance.now()
+      } else if (++turns >= IDLE_TURNS && performance.now() - since >= this.#settleTimeoutMs) {
+        for (const run of waiting) this.#stalled.add(run)
+        return
+      }
     }
   }
 
   async #advance(target: number): Promise<void> {
-    await this.settle()
+    this.#stalled.clear()
+    await this.#settle()
     for (;;) {
       const timer = this.#earliest(target)
       if (timer === undefined) break
@@ -144,11 +192,11 @@ class VirtualClock implements TestClock {
       this.#monotonic = timer.due
       this.clearTimer(timer)
       timer.fn()
-      await this.settle()
+      await this.#settle()
     }
     this.#wall += target - this.#monotonic
     this.#monotonic = target
-    await this.settle()
+    await this.#settle()
   }
 
   #earliest(target: number): VirtualTimer | undefined {

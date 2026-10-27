@@ -54,6 +54,17 @@ function nextOccurrence(matcher: WallMatcher, zone: TimeZone, everyHour: boolean
   let from = Math.floor(after / 1000) * 1000 + 1000
   const horizon = after + HORIZON_MS
   const limit = Math.floor((horizon + 2 * DAY) / 1000)
+  if (!zone.fixed) {
+    // The search starts exactly where a gap ends (`after` in the last second before it): `offsetAt`
+    // already returns the new offset, so the wall times skipped by the gap are looked at here. They
+    // fire at `from`, the first instant after the gap. Later segments start at a transition only
+    // after the previous one ruled out the gap.
+    const gap = zone.lastTransition(from - 1000, from)
+    if (gap !== undefined && gap.at === from && gap.after > gap.before) {
+      const wall = matcher.next(Math.ceil((from + gap.before) / 1000), limit)
+      if (wall !== undefined && wall * 1000 < from + gap.after) return from
+    }
+  }
   for (let segment = 0; segment < MAX_SEGMENTS; segment++) {
     const offset = zone.offsetAt(from)
     let wallFrom = from + offset
@@ -63,7 +74,7 @@ function nextOccurrence(matcher: WallMatcher, zone: TimeZone, everyHour: boolean
       if (fold !== undefined && fold.before > fold.after) wallFrom = Math.max(wallFrom, fold.at + fold.before)
     }
     const wall = matcher.next(Math.ceil(wallFrom / 1000), limit)
-    if (wall < 0) return undefined
+    if (wall === undefined) return undefined
     const candidate = wall * 1000 - offset
     if (candidate > horizon) return undefined
     const transition = zone.fixed ? undefined : zone.firstTransition(from, candidate)
@@ -95,13 +106,16 @@ class WallMatcher {
     this.#firstMinute = this.#minutes[0] as number
   }
 
-  /** The first matching wall second `>= from`, or `-1` beyond `limit`. */
-  next(from: number, limit: number): number {
+  /**
+   * The first matching wall second `>= from`, or `undefined` beyond `limit`. Wall seconds before 1970
+   * are negative: `undefined`, never a negative sentinel, means "not found".
+   */
+  next(from: number, limit: number): number | undefined {
     let days = Math.floor(from / DAY_SECONDS)
     let time = from - days * DAY_SECONDS
     const lastDay = Math.floor(limit / DAY_SECONDS)
     const firstMonth = this.#months[1] as number
-    if (firstMonth < 0) return -1
+    if (firstMonth < 0) return undefined
     while (days <= lastDay) {
       const { year, month, day } = civilFromDays(days)
       if (this.#spec.months[month] !== 1) {
@@ -117,7 +131,7 @@ class WallMatcher {
       days++
       time = 0
     }
-    return -1
+    return undefined
   }
 
   #dayMatches(year: number, month: number, day: number, weekday: number): boolean {

@@ -33,7 +33,7 @@ import { fileURLToPath } from 'node:url'
 import { ErrorCode, resolveOptions, ZnightError } from '@znight/core'
 import { HttpResponse, NotFoundException } from '@znight/http'
 
-import { buildOpenApiDocument, openApiSection, operationViews } from './build.ts'
+import { applyDocumentOptions, buildOpenApiDocument, openApiSection, operationViews } from './build.ts'
 import { OpenApi, OpenApiTokens, toYaml } from './openapi.ts'
 import { findLocalPackage, renderUiPage, UI_PACKAGES } from './ui.ts'
 
@@ -312,6 +312,14 @@ export class OpenApiPlugin implements Plugin, PluginHttpRoutes {
           { hints: ['Regenerate it: znight openapi (or znight build --openapi)'] },
         )
       }
+      const prefix = this.#prefix()
+      if (options.build.servers === undefined) this.#checkFileServers(options.file, document.servers, prefix)
+      // the runtime options apply to the file as to a build (filter, info, servers, prefix, transform)
+      const applied = applyDocumentOptions(json, metadata, { ...options.build, prefix })
+      if (applied !== undefined) {
+        document = applied.document
+        json = applied.json
+      }
     }
     const yaml = options.yaml === undefined ? undefined : body(await toYaml(document), 'application/yaml')
     return { document, json: body(json, 'application/json; charset=utf-8'), yaml }
@@ -341,8 +349,14 @@ export class OpenApiPlugin implements Plugin, PluginHttpRoutes {
     if (this.#ui === undefined) {
       const ui = options.ui
       if (ui === undefined) throw new NotFoundException()
-      const served = options.lazy ? undefined : await this.served()
-      const document = served?.document
+      // the CSP allows the servers of the served document, whatever the build mode
+      let document: Pick<OpenApiObject, 'info' | 'servers'> | undefined
+      try {
+        document = (await this.served()).document
+      } catch {
+        // the document cannot be built: the declared servers, the page is not cached
+        document = this.#declared(options)
+      }
       const local = this.#localPackage(options)
       const base = prefix === '/' ? '' : prefix
       const uiPath = options.uiPath === '/' ? '' : options.uiPath
@@ -352,18 +366,32 @@ export class OpenApiPlugin implements Plugin, PluginHttpRoutes {
         assetsBase: local === undefined ? undefined : `${base}${uiPath}/_assets/${ui.kind}@${local.version}`,
         title: document?.info.title === undefined ? 'API reference' : `${document.info.title} — API reference`,
         config: ui.config,
-        connect: serverOrigins(document?.servers ?? options.build.servers ?? []),
+        connect: serverOrigins(document?.servers ?? []),
       })
       const bytes = ENCODER.encode(page.html)
-      this.#ui = { html: bytes, csp: page.csp, etag: etagOf(bytes) }
+      const rendered = { html: bytes, csp: page.csp, etag: etagOf(bytes) }
+      if (this.#served === undefined) return uiResponse(ctx, rendered)
+      this.#ui = rendered
     }
-    const page = this.#ui
-    const response = conditional(
-      ctx,
-      { bytes: page.html, etag: page.etag, contentType: 'text/html; charset=utf-8' },
-      'no-cache',
-    )
-    return response.withHeader('content-security-policy', page.csp).withHeader('x-content-type-options', 'nosniff')
+    return uiResponse(ctx, this.#ui)
+  }
+
+  /** `info` and `servers` as declared (static template and runtime options), without building. */
+  #declared(options: Resolved): Pick<OpenApiObject, 'info' | 'servers'> | undefined {
+    const metadata = this.#metadata
+    if (metadata === undefined) return undefined
+    let template: OpenApiObject['info'] | undefined
+    let servers: readonly ServerObject[] | undefined
+    try {
+      const section = openApiSection(metadata)
+      template = section.document.info
+      servers = section.document.servers
+    } catch {
+      return undefined
+    }
+    const info = { ...template, ...options.build.info } as OpenApiObject['info']
+    const resolved = options.build.servers ?? servers
+    return resolved === undefined ? { info } : { info, servers: resolved }
   }
 
   #serveAsset(ctx: HttpContext): HttpResponse {
@@ -414,11 +442,29 @@ export class OpenApiPlugin implements Plugin, PluginHttpRoutes {
 
   #checkServers(options: Resolved): void {
     const prefix = this.#prefix()
-    if (prefix === '' || options.file !== undefined) return
+    // a prebuilt file is checked once read (#checkFileServers), unless `servers` replaces its servers
+    if (prefix === '' || (options.file !== undefined && options.build.servers === undefined)) return
     const metadata = this.#metadata
     const declared =
       options.build.servers ?? (metadata === undefined ? undefined : openApiSection(metadata).document.servers)
-    for (const server of declared ?? []) {
+    this.#checkPrefix(declared ?? [], prefix)
+  }
+
+  /** The servers of a prebuilt file against the HTTP prefix (the file may be emitted without `--prefix`). */
+  #checkFileServers(file: string, servers: readonly ServerObject[] | undefined, prefix: string): void {
+    if (prefix === '' || prefix === '/') return
+    if (servers === undefined) {
+      this.#logger?.warn(
+        `ZNIGHT030: ${file} declares no servers, but the HTTP prefix is "${prefix}": it is served with the server "${prefix}", and clients generated from the file would call the wrong paths`,
+        { hints: [`Emit it with the prefix: znight openapi --prefix ${prefix}`] },
+      )
+      return
+    }
+    this.#checkPrefix(servers, prefix)
+  }
+
+  #checkPrefix(servers: readonly ServerObject[], prefix: string): void {
+    for (const server of servers) {
       if (server.url.startsWith('/') && !server.url.replace(/\/$/, '').endsWith(prefix)) {
         this.#logger?.warn(
           `ZNIGHT030: the OpenAPI server "${server.url}" does not end with the HTTP prefix "${prefix}": generated clients would call the wrong paths`,
@@ -472,6 +518,19 @@ class OpenApiService extends OpenApi {
     const served = await this.#plugin.served()
     return served.yaml === undefined ? toYaml(served.document) : new TextDecoder().decode(served.yaml.bytes)
   }
+}
+
+/** The UI page: HTML, its Content-Security-Policy, revalidated with its ETag. */
+function uiResponse(
+  ctx: HttpContext,
+  page: { readonly html: Uint8Array; readonly csp: string; readonly etag: string },
+): HttpResponse<Uint8Array | undefined> {
+  const response = conditional(
+    ctx,
+    { bytes: page.html, etag: page.etag, contentType: 'text/html; charset=utf-8' },
+    'no-cache',
+  )
+  return response.withHeader('content-security-policy', page.csp).withHeader('x-content-type-options', 'nosniff')
 }
 
 function body(text: string, contentType: string): Body {

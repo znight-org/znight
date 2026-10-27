@@ -375,7 +375,10 @@ fields (HTTP/2) are joined with `; ` on every adapter. The record has no prototy
 just a name) and parsing is linear, without regular expressions.
 
 **An invalid cookie answers 400, on purpose**: `Invalid cookie "visits": expected a number`. The
-message never echoes the value (cookies often carry tokens). Since cookies outlive deployments, a
+message never echoes the value (cookies often carry tokens): with a schema
+(`@Cookie(name, S)`, `@SignedCookie(name, S)`, `@Cookie(S)`), the `details` keep the issue paths
+but their messages are `Invalid value`, since some libraries (Valibot, ArkType) quote the received
+value in them. Since cookies outlive deployments, a
 stale value would fail every request until it expires: give such cookies a schema with a fallback
 (`z.enum([...]).catch('light')`, as above) rather than relying on lenient coercion, which would
 hide tampering.
@@ -393,8 +396,8 @@ return HttpResponse.noContent().withoutCookie('session')
 | Option        | Default | Description                                                                                        |
 | ------------- | ------- | -------------------------------------------------------------------------------------------------- |
 | `maxAge`      | —       | Lifetime in seconds (integer); `0` or less expires the cookie now. Default: a session cookie       |
-| `expires`     | —       | Absolute expiry (`Date`, sent as an IMF-fixdate)                                                   |
-| `domain`      | —       | Domain (sub-domains included). Default: a host-only cookie                                         |
+| `expires`     | —       | Absolute expiry (`Date` in the years 1601 to 9999, sent as an IMF-fixdate)                         |
+| `domain`      | —       | Domain (sub-domains included). Default: a host-only cookie; `null`: host-only despite the defaults |
 | `path`        | `'/'`   | Path                                                                                               |
 | `secure`      | `true`  | Sent over HTTPS only (and `http://localhost`)                                                      |
 | `httpOnly`    | `true`  | Not readable from JavaScript                                                                       |
@@ -404,7 +407,10 @@ return HttpResponse.noContent().withoutCookie('session')
 | `signed`      | `false` | Signs the value with the first secret of `cookies.secrets` (see [Signed cookies](#signed-cookies)) |
 
 The defaults are `Path=/; Secure; HttpOnly; SameSite=Lax`, host-only; change them for the whole
-application with the plugin option `cookies.defaults`, and per cookie with the options above.
+application with the plugin option `cookies.defaults`, and per cookie with the options above. With
+a default `domain` (cookies shared across subdomains), `domain: null` makes one cookie host-only,
+and `__Host-` cookies never take the default `domain` or `path` (the prefix forbids them): an
+explicit `domain` or a `path` other than `/` on such a cookie still throws.
 `Secure` is right behind TLS-terminating proxies: it governs the browser to edge connection, not
 the proxy to app hop. Plain `http://` development setups on a non-localhost host (and old Safari
 versions on `http://localhost`) need `defaults: { secure: config.env !== 'development' }`.
@@ -416,8 +422,10 @@ set instead:
   outside `cookie-octet` (and `%`), so it always round-trips (`a b;c` → `a%20b%3Bc`);
 - `name=value` is at most 4096 bytes on the wire (after encoding and signing), `Domain` and `Path`
   at most 1024 bytes each;
-- `maxAge` is an integer, `expires` a valid `Date`, `domain` an ASCII host name (IDNs in punycode;
-  lower-cased, a leading `.` removed), `path` starts with `/` and has no `;` or controls;
+- `maxAge` is an integer, `expires` a valid `Date` in the years 1601 to 9999 (browsers ignore
+  other years: `new Date(8.64e15)` would silently make a session cookie; use `maxAge`), `domain` an
+  ASCII host name (IDNs in punycode; lower-cased, a leading `.` removed), `path` starts with `/` and
+  has no `;` or controls;
 - `SameSite=None` and `partitioned` require `secure`;
 - prefixes (case-insensitive, like browsers): `__Secure-` requires `secure`; `__Host-` requires
   `secure`, `path: '/'` and no `domain`; `__Http-` and `__Host-Http-` also require `httpOnly`.
@@ -443,6 +451,9 @@ cookie).
 - The `set-cookie` field holds the raw values first (`@Header`, `ctx.setHeader()` /
   `appendHeader()`, `HttpResponse` headers, a Web `Response`'s own cookies), then the jar, in
   insertion order: one field line per cookie on every adapter, one array entry in `inject()`.
+- Cookies the native framework set before the Znight route (Express `res.cookie()` in a
+  middleware, Fastify `reply.header('set-cookie', ...)` in a hook, Hono `setCookie(c, ...)` in a
+  middleware) are kept, before the plugin's, on every reply (event streams included).
 - A `@Res()` handler writes its own response: the jar is not applied.
 - Once the response headers are sent (a running event stream), `setCookie()` / `clearCookie()`
   throw `Cannot set cookie "x": the response headers were already sent`.
@@ -905,6 +916,10 @@ that _returns_ the source, where it can still throw a 404 or return a 204.
 | `retry`       | plugin `sse.retry` (none)      | Client reconnection delay sent first (`retry:`, ms)                                                |
 | `maxDuration` | none                           | The server ends the stream gracefully after this many ms (≥ 1 000): rebalancing, re-authentication |
 
+`heartbeat` and `maxDuration` (like the plugin's `sse.heartbeat` and `sse.shutdownGraceMs`) are at
+most 2 147 483 647 ms (about 24.8 days), the longest timer: a larger delay would fire after 1 ms on
+Node.js and Bun (every stream expiring at once), so it is ZNIGHT005 at build time and at boot.
+
 ### Events and framing
 
 ```ts
@@ -926,7 +941,9 @@ leading space survives). An event with `event` but no `data` gets an empty `data
 numbers, `null`, unknown keys, an empty object, `event` / `id` with line breaks, data JSON cannot
 serialise) is a `TypeError`: yield `{ data: value }`. A `Uint8Array` item (a `Buffer` of a Node.js
 `Readable`) is written **as is**: already-framed SSE text from an upstream (proxying an LLM
-provider), not validated. `encodeSseEvent(event)` is exported.
+provider), not validated. An event object yielded after raw bytes that do not end at an event
+boundary (an empty line) would merge into the unterminated raw event: it fails the stream like an
+invalid item. `encodeSseEvent(event)` is exported.
 
 ```text
 HTTP/1.1 200 OK
@@ -984,12 +1001,15 @@ on other routes (`EventSource` requires 200; `fetch()` clients read any status).
   is stopped (`return()` / `cancel()`), and the request scope closes once it stopped, or after 5 s
   with a warning (`The SSE source did not stop within 5000 ms after its signal was aborted: make it
   honour ctx.signal`): an async generator blocked in an `await` that ignores the signal cannot be
-  stopped otherwise.
+  stopped otherwise. A client leaving before the handler returned (an async pre-flight) releases
+  the reply the same way, on every adapter and runtime.
 - **`maxDuration` and shutdown** (graceful close): `ctx.signal` aborts (`'expired'` /
   `'shutdown'`), the source keeps being read for `sse.shutdownGraceMs` (default 1 000 ms) so that it
   can send final events and finish, then `retry: R` is sent with R drawn in `[r, 2r]` (r = the
   `retry` option, else 3 000 ms; the jitter spreads the reconnections of a rolling deployment), the
-  source is stopped and the response ends.
+  source is stopped and the response ends. When the raw bytes written last do not end at an event
+  boundary (a proxied upstream cut mid-event), the `retry` is not sent: the client discards the
+  unterminated event at the end of the stream instead of receiving a corrupted one.
 - **HEAD** answers the headers only: the stream is cancelled before its first read (an async
   generator body never runs) and `ctx.signal` aborts (`'client'`), which releases a subscription
   made in a pre-flight.
@@ -1209,10 +1229,13 @@ control:
   RouteDecoratorInfo[]`, see `GuardClass`). When `HttpPlugin` registers the routes, each route
   whose decision belongs to a required group, or to a group some guard enforces, must have a guard
   enforcing that group in its chain (global, controller or route guards). Otherwise the boot fails
-  with one ZNIGHT023 listing every route, by group. This catches a forgotten
-  `guards: [AuthGuard]` in a second entrypoint or a test. A required group is also known at boot
-  through the `enforces` of a guard (an auth package shared between services), and plugin routes
-  are checked too.
+  with one ZNIGHT023 listing every route, by group. "Some guard" is any guard class of the
+  application, registered in a chain or not: a forgotten `guards: [AuthGuard]` or
+  `guards: [RateLimitGuard]` in a second entrypoint or a test fails the boot, for required groups
+  and for groups such as `@RateLimit` alike, with a hint naming the guards that enforce the group.
+  A guard class registered nowhere only makes its groups known; a required group is known at boot
+  through the compiled metadata and the `enforces` of the guards of the chains (an auth package
+  shared between services). Plugin routes are checked too.
 
   ```
   ZNIGHT023: HttpPlugin: No guard enforces the required "access" group on 9 routes: GET /books (BookController.list), ...
@@ -1226,7 +1249,10 @@ control:
 
 - All the definitions of a key must use the same options, and the decorators of a group must agree
   on `required` (ZNIGHT005 at build time; at boot for contradicting `enforces`). Route decorators
-  without options behave as before.
+  without options behave as before: the key is any non-empty string (`'auth:public'`,
+  `'app/roles'`), and a decorator without `group` is its own group, named after its key. An explicit
+  `group` is a letter followed by letters, digits, `_`, `.` or `-` (ZNIGHT005 at build time, a
+  `TypeError` where the decorator is created).
 
 `HttpPlugin.routes` lists the effective `meta` and the `guards` (display names, chain order) of
 every route: snapshot it in a test to review access changes in pull requests.
@@ -1261,14 +1287,19 @@ HttpPlugin.configure({
 | --------------- | ---------------------------- | ------------------------------------------------------------------------------------------------ |
 | `origin`        | required                     | `'*'`, an origin, an anchored `RegExp`, a list of them, or `(origin) => boolean \| Promise<...>` |
 | `credentials`   | `false`                      | `access-control-allow-credentials: true` (cookies, `authorization`); refused with `'*'`          |
-| `methods`       | the methods of the path      | `access-control-allow-methods` of preflights                                                     |
+| `methods`       | the methods of the path      | `access-control-allow-methods` of preflights; `'*'` is refused with `credentials`                |
 | `allowHeaders`  | the headers the browser asks | `access-control-allow-headers` of preflights, or `'*'` (refused with `credentials`)              |
-| `exposeHeaders` | the request id header        | `access-control-expose-headers` of replies                                                       |
+| `exposeHeaders` | the request id header        | `access-control-expose-headers` of replies; `'*'` is refused with `credentials`                  |
 | `maxAge`        | `600`                        | `access-control-max-age` of preflights, seconds (0 to 86400)                                     |
 
 The options are validated at boot (ZNIGHT005): an origin must be written exactly as browsers send
 it (`https://app.example.com`: no path, no trailing slash, no default port), `'null'` is refused,
 a `RegExp` must be anchored with `^` and `$` around every alternative and have no `g` / `y` flag.
+With `credentials: true`, `'*'` is refused in `methods`, `allowHeaders` and `exposeHeaders`:
+browsers read it literally on credentialed requests (a method or header named `*`). Without
+credentials it is a wildcard, except that it never covers `Authorization` (Fetch rule): with
+`allowHeaders: '*'`, a preflight asking for `authorization` gets
+`access-control-allow-headers: *, authorization`.
 
 Behaviour, identical on every adapter:
 
@@ -1283,7 +1314,11 @@ Behaviour, identical on every adapter:
   automatic `OPTIONS` and redirects alike. `@Res()` raw replies are the only exception.
 - **A denied origin** is served normally, without CORS headers: CORS protects what a page may read,
   it is not access control (use a guard).
-- `vary: origin` is merged into every reply (unless `origin: '*'`), for shared caches.
+- **A wildcard policy** (`'*'`, alone or in a list) adds `access-control-allow-origin: *` (and
+  `access-control-expose-headers`) to every reply, whether the request has an `origin` header or
+  not: the reply does not depend on the origin, so a cached reply serves CORS and non-CORS requests
+  alike.
+- Other policies merge `vary: origin` into every reply, for shared caches.
 - An origin function that throws or rejects denies the origin (logged at `error` level).
 
 With Fastify, Express or Hono, use either this option or the native CORS middleware, not both.
@@ -1584,7 +1619,7 @@ instead of Fastify's `415`. Created instances use
 `frameworkErrors` handler rendering Znight errors (with your own instance, malformed URLs are
 answered by Fastify). `inject()` uses `fastify.inject()`. Event streams are sent through
 `reply.hijack()`: `onSend` hooks (compression, ETag plugins) never touch them, and the headers your
-hooks already set (`onRequest`, helmet) are kept under Znight's.
+hooks already set (`onRequest`, helmet) are kept under Znight's (their cookies before Znight's).
 
 ### `expressAdapter()` — `@znight/http/express`
 
@@ -1625,7 +1660,9 @@ HttpPlugin.configure({ adapter: honoAdapter() })
 On Bun the server is `Bun.serve()`; on Node.js, `@hono/node-server`. Pass `app` (an existing
 `Hono` instance) to add Hono middleware (Znight sets its `notFound` and `onError` handlers);
 `adapter.fetch` is the Fetch handler of the application. `inject()` uses
-`app.request()`.
+`app.request()`. Cookies a middleware sets before the Znight route (`setCookie(c, ...)`) are kept,
+before Znight's; other headers set with `c.header()` before `next()` follow Hono's rules for a
+handler returning its own `Response`.
 
 | Option         | Description                                                                                                                   |
 | -------------- | ----------------------------------------------------------------------------------------------------------------------------- |
@@ -2007,7 +2044,8 @@ Rules:
   `@znight/http#createRouteDecorator`; its `key` (first argument) and its options (second
   argument) are static. A target holds at most one key per group.
 - `groups` (`HttpRouteGroupDefinition`: `{ keys, required }`): a key belongs to one group at most;
-  a key listed nowhere is its own group, not required. The plugin computes the effective metadata
+  a key listed nowhere is its own group, not required. A group name is a letter followed by
+  letters, digits, `_`, `.` or `-`, or the single key of the group (a decorator without `group`). The plugin computes the effective metadata
   of each route once at boot (the controller's entries whose group the route does not decide, then
   the route's entries). Malformed groups, or two keys of one group on a target, are ZNIGHT007 at
   boot.
@@ -2088,7 +2126,9 @@ is synchronous. It returns the handler result as is (promises included).
 
 Labels are `param "<name>"`, `query "<name>"`, `header "<lower-case name>"`, `cookie "<name>"`;
 validation locations are the same, or `params`, `query`, `body`, `cookies` for whole objects.
-Coercion errors of labels starting with `cookie ` never echo the received value. A route parameter is always present
+Coercion errors of labels starting with `cookie ` never echo the received value, and validation
+errors of the locations `cookie "<name>"` and `cookies` replace the issue messages with
+`Invalid value` (paths kept). A route parameter is always present
 (the route matched), so `@Param('id') id?: string` is still `coerce.string`.
 
 ### Runtime helpers (exported from `@znight/http`)

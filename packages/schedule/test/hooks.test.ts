@@ -5,13 +5,12 @@
 import type { ScheduledRunEvent } from '@znight/core'
 
 import { memoryLockStore } from '../src/index.ts'
-import { createTestClock } from '../src/testing/index.ts'
-import { boot, deferred, HOST, metadataWith } from './helpers.ts'
+import { boot, deferred, HOST, metadataWith, testClock } from './helpers.ts'
 import { describe, expect, test as it } from 'bun:test'
 
 describe('schedule:run', () => {
   it('wraps executed runs, then emits them; occurrences that did not run are only emitted', async () => {
-    const clock = createTestClock('2026-01-01T00:00:00Z')
+    const clock = testClock('2026-01-01T00:00:00Z')
     const lock = memoryLockStore({ clock })
     const release = deferred()
     const metadata = metadataWith([

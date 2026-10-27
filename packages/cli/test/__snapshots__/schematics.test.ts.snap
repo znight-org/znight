@@ -138,7 +138,7 @@ exports[`schematic contents job 1`] = `
  */
 export class UserProfileJobs {
   /** Every day at 03:00 UTC (set timeZone to follow a local clock). A run still running is skipped. */
-  @Cron('0 3 * * *', { name: 'user-profile.daily' })
+  @Cron('0 3 * * *', { name: 'users.user-profile.daily' })
   daily(ctx: JobContext): void {
     // checkpoint: throws when the run is aborted (shutdown, maxDuration or a lost lock)
     ctx.signal.throwIfAborted()

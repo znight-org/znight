@@ -194,8 +194,11 @@ Values are JSON (`@example {"id": 1}`) or text.
 ## What is inferred
 
 **Operations.** One per route and method; `:id` becomes `{id}`, a trailing `*` becomes
-`{wildcard}` (`x-znight-wildcard: true`). Automatic `HEAD` / `OPTIONS` are not documented, explicit
-ones are. `@All` is documented for GET, POST, PUT, PATCH and DELETE when no explicit route has the
+`{wildcard}` (`x-znight-wildcard: true`; `{wildcard_1}` when a parameter is named `wildcard`).
+Routes of one path that name its parameters differently (`GET /books/:id`,
+`DELETE /books/:bookId`) are documented under one template, with a ZNIGHT035 warning: OpenAPI
+forbids two templates of one path. Automatic `HEAD` / `OPTIONS` are not documented, explicit
+ones are (without content: a `HEAD` response has no body). `@All` is documented for GET, POST, PUT, PATCH and DELETE when no explicit route has the
 same path (ids end with the method: `proxy.forward.get`). Paths never contain the HTTP prefix: it
 belongs to `servers` (plugin `servers`, then `@OpenApiDocument({ servers })`, then
 `[{ url: prefix }]`).
@@ -211,8 +214,12 @@ belongs to `servers` (plugin `servers`, then `@OpenApiDocument({ servers })`, th
 | `@Headers('x-tenant') tenant: string`        | `{ in: 'header', required: true }`                                                             |
 | `@Cookie('theme') theme?: 'light' \| 'dark'` | `{ in: 'cookie', schema: { type: 'string', enum: ['dark', 'light'] } }` (also `@SignedCookie`) |
 | `@Param('id', IdSchema)`, `@Query('q', S)`   | `schema: { $ref }` to the **input** JSON Schema of the schema                                  |
-| `@Query(SearchQuery)` (whole object)         | One parameter per property of the input JSON Schema (ZNIGHT037 for a non-object schema)        |
+| `@Query(SearchQuery)` (whole object)         | One parameter per property of the input JSON Schema (ZNIGHT037 for a non-object schema)¹       |
 | `@Query() q: SearchParams` (TypeScript type) | One parameter per property of the type                                                         |
+
+¹ A property that another parameter of the operation already documents (`@Query('page')`,
+`@ApiQuery('page')`, another whole-object schema) is dropped, with a ZNIGHT035 assembly warning:
+OpenAPI forbids two parameters with one name and location.
 
 Coercion plans give `string`, `number`, `integer`, `boolean`, `bigint` (`string` with a pattern),
 `date` (`date-time`), enums and arrays. `Accept`, `Content-Type` and `Authorization` are never
@@ -226,17 +233,20 @@ Upload routes get a `multipart/form-data` object of their file fields
 `@Body(Form)` (`allOf`).
 
 **Responses.** The success status is `@HttpCode`, else 201 for POST, else 200 (204 when the
-handler returns `void`). Its content comes from the annotated return type, `Promise` unwrapped:
+handler returns `void`; `T | undefined` also documents the empty 204). Its content comes from the
+annotated return type, `Promise` unwrapped, with the media types of the serialiser:
 
 | Return type                                                         | Success response                                                                        |
 | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
 | Interfaces, aliases, classes, records, arrays, unions...            | `application/json` with the schema of the type                                          |
-| `HttpResponse<T>`                                                   | As `T`                                                                                  |
+| `HttpResponse<T>`, `HttpResponse<A> \| HttpResponse<B> \| C`        | As `T` (`A \| B \| C`); the status is chosen at runtime: other 2XX may be declared      |
+| `HttpResponse<SseBody>` (`HttpResponse.sse()`)                      | `text/event-stream`, status 200 even on POST (unless `@HttpCode`)                       |
 | `z.output<typeof S>`, `v.InferOutput<typeof S>`, ArkType `S.infer`  | The **output** JSON Schema of `S`                                                       |
-| `string`                                                            | `text/plain`                                                                            |
+| `string`, string literals, string enums                             | `text/plain` (`string \| null`: `text/plain` and `application/json` for the rest)       |
 | Bytes, streams, `Blob`, `HttpResponse<FileBody>`                    | `application/octet-stream` (set the media type with `@ApiResponse(s, { contentType })`) |
 | `@Sse` routes (`AsyncIterable<SseEvent<T>>`, `AsyncGenerator`...)   | `text/event-stream`, the schema of `T` in `x-znight-event-schema`                       |
 | `void`, `undefined`                                                 | No content                                                                              |
+| A body with `@HttpCode(204)` / `304`                                | ZNIGHT035 error: the serialiser drops the body of bodyless statuses                     |
 | No annotation, `unknown`, bare `HttpResponse`, `Response`, `@Res()` | ZNIGHT031, unless `@ApiResponse` documents the success status                           |
 
 `@Header` values are documented on the success response. **Standard errors** (`errors: true`):
@@ -246,12 +256,23 @@ routes that read a body, `415` on upload routes, and `HttpErrorBody` for every d
 `errors: { schema: ProblemDetails, contentType: 'application/problem+json' }`.
 
 **Types → JSON Schema.** Interfaces (flattened `extends`), classes (instance fields, `toJSON()`),
-aliases, enums, generics (`Page<Book>` → component `Page_Book`), records, tuples, `Partial`,
-`Pick`, `Omit`... `T | null` gives `type: [T, 'null']`, unions of literals give `enum`, unions of
-objects with a required literal property give `oneOf` with a `discriminator`. `Date` is a
-`date-time` string and `URL` a `uri` string. Named declarations become components, named after the
-declaration; Standard Schemas are named after their export, with an `XInput` variant when their
-input and output JSON Schemas differ.
+aliases, enums, generics (`Page<Book>` → component `Page_Book`; an anonymous type argument adds a
+short hash of the instantiation: `Page<{ id: string }>` → `Page_object_1a2b3c4d`), records, tuples,
+`Partial`, `Pick`, `Omit`... `T | null` gives `type: [T, 'null']`, unions of literals give `enum`,
+unions of objects with a required literal property give `oneOf`, with a `discriminator` and its
+`mapping` when every member is a named declaration. `Date` is a `date-time` string and `URL` a
+`uri` string. Named declarations become components, named after the declaration. Standard Schemas
+are named after their export, with an `XInput` variant when their input and output JSON Schemas
+differ; the same name for a declaration and a schema is ZNIGHT034 at compile time, except an
+interface merged with the schema it is inferred from
+(`export interface User extends z.infer<typeof User> {}`), documented by the schema.
+
+Converted schemas: `$defs` are hoisted into components. A definition with an id
+(`.meta({ id: 'Address' })`) is named after it, and gets an `AddressInput` variant when it differs
+between requests and responses; a root `.meta({ id })` equal to the export name is the component
+itself (another id gives an alias); anonymous definitions (Zod `__schema0` of a recursive schema)
+are scoped to their schema (`Tree_schema0`). Dates are `date-time` strings in responses (Zod and
+Valibot) and for coerced dates in requests (`z.coerce.date()`).
 
 ## Security
 
@@ -297,7 +318,7 @@ schemes (ZNIGHT036).
 | `ui`              | `'scalar'`        | `'scalar'`, `'swagger'`, `false`, or `{ scalar: config }` / `{ swagger: config }` (JSON configuration)       |
 | `uiPath`          | `'/docs'`         | The UI page; local assets are under `${uiPath}/_assets/`                                                     |
 | `assets`          | `'auto'`          | `'local'` (from `node_modules`), `'cdn'` (jsDelivr, pinned with SRI), `'auto'` (local when installed)        |
-| `document`        | `'build'`         | `{ file }` serves a prebuilt `openapi.json` (no conversion at boot; a stale file is a ZNIGHT030 warning)     |
+| `document`        | `'build'`         | `{ file }` serves a prebuilt `openapi.json` (no conversion at boot; a stale file is a ZNIGHT030 warning)²    |
 | `build`           | `'boot'`          | `'boot'`: a failure fails `Application.create`; `'first-request'`: built lazily, one shared promise, retried |
 | `info`, `servers` | —                 | Runtime overrides (`info` merged, `servers` replaced)                                                        |
 | `filter`          | —                 | `(operation: OpenApiOperationView) => boolean`; unreferenced components are pruned                           |
@@ -307,6 +328,10 @@ schemes (ZNIGHT036).
 | `meta`            | `[]`              | Route metadata of the docs routes (`[Public.meta()]`), seen by guards and by the route decision check        |
 | `guards`          | `[]`              | Extra guards of the docs routes (global guards still run first)                                              |
 | `cacheControl`    | `'no-cache'`      | `cache-control` of the document (revalidated with the ETag)                                                  |
+
+² `info`, `servers`, `filter` and `transform` apply to the file as to a build. A file without
+`servers` gets `[{ url: prefix }]` under an HTTP prefix, with a ZNIGHT030 warning: emit it with
+`znight openapi --prefix /api` so that clients generated from the file call the right paths.
 
 ```ts
 OpenApiPlugin.configure(container => ({
@@ -322,9 +347,12 @@ controllers (`http:request` hook, request scope, global guards, then `guards`), 
 `HttpPlugin.routes` with `source: 'openapi'`, and a collision with a controller route is ZNIGHT007.
 The document is served from precomputed bytes with a strong ETag (`if-none-match` → 304, `HEAD`
 included). The UI page has its own `content-security-policy` (`default-src 'none'`, the inline
-script allowed by hash, `connect-src` limited to the document's servers); Scalar runs without its
+script allowed by hash, `connect-src` limited to the document's servers, in every build mode: the
+first request of the page builds the document with `build: 'first-request'`); Scalar runs without its
 fonts, telemetry nor proxy, Swagger UI without its validator. With local assets nothing is loaded
-from a third party; otherwise only the pinned jsDelivr files, with Subresource Integrity.
+from a third party; otherwise only the pinned jsDelivr files, with Subresource Integrity. The
+installed UI package is found the same way on Node.js and Bun, even when its exports map does not
+export its `package.json` (`@scalar/api-reference`).
 
 Logs: `OpenAPI document built` (debug: operations, schemas, ms), each assembly warning once,
 `API reference: <address>/docs` when the server listens. Exclude the docs from request logs with
@@ -437,16 +465,16 @@ so it runs on Bun, Node.js and edge runtimes). `response` is an `InjectResponse`
 
 ## Diagnostics
 
-| Code      | Name                         | When                                                                                                                                                                                                                                                                                                                     | Severity                                       |
-| --------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------- |
-| ZNIGHT030 | `InvalidOpenApiDefinition`   | Invalid `@OpenApiDocument` options or a second one, `@Api*` outside a controller or route handler, invalid static values, a malformed `securityScheme()`, the reserved `$znight` key. At runtime: invalid plugin options, a missing OpenAPI section, a stale prebuilt file, servers not reflecting the prefix (warnings) | error / warning                                |
-| ZNIGHT031 | `UndocumentedResponse`       | The success response cannot be documented and no `@ApiResponse` covers it                                                                                                                                                                                                                                                | warning (error with `strict`)                  |
-| ZNIGHT032 | `UnrepresentableType`        | A documented type has no JSON Schema or does not serialise as declared; a `bigint` in a JSON response is always an error                                                                                                                                                                                                 | warning / error                                |
-| ZNIGHT033 | `DuplicateOperationId`       | Two operations with the same id                                                                                                                                                                                                                                                                                          | error                                          |
-| ZNIGHT034 | `SchemaNameConflict`         | Two declarations or schemas for one component name (at compile time, or at assembly for hoisted `$defs` and `XInput` names)                                                                                                                                                                                              | error                                          |
-| ZNIGHT035 | `InconsistentOperation`      | The documentation contradicts the route: a body on 204/304, another success status than the route's, `@ApiQuery('x')` next to `@Query('x')`, a documented `Accept` / `Content-Type` / `Authorization` header, `@ApiBody` next to a body schema, `@ApiBody` on GET/HEAD and `@ApiExclude` with other `@Api*` (warnings)   | error / warning                                |
-| ZNIGHT036 | `InvalidSecurityRequirement` | A requirement that is not a `securityScheme()`, misplaced or undeclared scopes, one scheme name for two definitions, an invalid decision, a decision never applied (warning)                                                                                                                                             | error / warning                                |
-| ZNIGHT037 | `SchemaConversionFailed`     | At assembly: no converter for a schema, a converter that throws or returns something else than an object, a whole-object query schema that is not an object                                                                                                                                                              | error (warning with `unrepresentable: 'warn'`) |
+| Code      | Name                         | When                                                                                                                                                                                                                                                                                                                                                                                                                                | Severity                                       |
+| --------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| ZNIGHT030 | `InvalidOpenApiDefinition`   | Invalid `@OpenApiDocument` options or a second one, `@Api*` outside a controller or route handler, invalid static values, a malformed `securityScheme()`, the reserved `$znight` key. At runtime: invalid plugin options, a missing OpenAPI section, a stale prebuilt file, servers not reflecting the prefix (warnings)                                                                                                            | error / warning                                |
+| ZNIGHT031 | `UndocumentedResponse`       | The success response cannot be documented and no `@ApiResponse` covers it                                                                                                                                                                                                                                                                                                                                                           | warning (error with `strict`)                  |
+| ZNIGHT032 | `UnrepresentableType`        | A documented type has no JSON Schema or does not serialise as declared; a `bigint` in a JSON response is always an error                                                                                                                                                                                                                                                                                                            | warning / error                                |
+| ZNIGHT033 | `DuplicateOperationId`       | Two operations with the same id                                                                                                                                                                                                                                                                                                                                                                                                     | error                                          |
+| ZNIGHT034 | `SchemaNameConflict`         | Two declarations or schemas for one component name (at compile time, or at assembly for hoisted `$defs` ids and `XInput` names)                                                                                                                                                                                                                                                                                                     | error                                          |
+| ZNIGHT035 | `InconsistentOperation`      | The documentation contradicts the route: a body on 204/304 (`@ApiResponse` or `@HttpCode`), another success status than the route's, `@ApiQuery('x')` next to `@Query('x')`, a documented `Accept` / `Content-Type` / `Authorization` header, `@ApiBody` next to a body schema. Warnings: `@ApiBody` on GET/HEAD, `@ApiExclude` with other `@Api*`, two templates of one path, a whole-object parameter documented twice (assembly) | error / warning                                |
+| ZNIGHT036 | `InvalidSecurityRequirement` | A requirement that is not a `securityScheme()`, misplaced or undeclared scopes, one scheme name for two definitions, an invalid decision, a decision never applied (warning)                                                                                                                                                                                                                                                        | error / warning                                |
+| ZNIGHT037 | `SchemaConversionFailed`     | At assembly: no converter for a schema, a converter that throws or returns something else than an object, a whole-object query schema that is not an object                                                                                                                                                                                                                                                                         | error (warning with `unrepresentable: 'warn'`) |
 
 ```text
 ✗ ZNIGHT032: ShelfStats.total is a bigint: JSON.stringify throws on bigint, so GET /books/stats (BookController.stats) would answer 500

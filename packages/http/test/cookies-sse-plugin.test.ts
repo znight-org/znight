@@ -93,7 +93,18 @@ describe('sse option', () => {
   const invalid: readonly [string, HttpPluginOptions, string][] = [
     ['not an object', { sse: 1 as never }, 'option "sse" must be an object'],
     ['an unknown key', { sse: { ping: 1 } as never }, 'unknown key \\"ping\\"'],
-    ['a short heartbeat', { sse: { heartbeat: 500 } }, 'option "sse.heartbeat" must be an integer number of ms ≥ 1000'],
+    [
+      'a short heartbeat',
+      { sse: { heartbeat: 500 } },
+      'option "sse.heartbeat" must be an integer number of ms from 1000 to 2147483647',
+    ],
+    // a longer delay overflows setTimeout to 1 ms: one heartbeat per millisecond
+    ['a heartbeat above the timer limit', { sse: { heartbeat: 2 ** 31 } }, 'option "sse.heartbeat"'],
+    [
+      'a grace above the timer limit',
+      { drainTimeoutMs: Number.POSITIVE_INFINITY, sse: { shutdownGraceMs: 2 ** 31 } },
+      'option "sse.shutdownGraceMs" must be an integer number of ms from 0 to 2147483647',
+    ],
     ['a negative retry', { sse: { retry: -1 } }, 'option "sse.retry"'],
     ['a fractional grace', { sse: { shutdownGraceMs: 1.5 } }, 'option "sse.shutdownGraceMs"'],
     [

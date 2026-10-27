@@ -8,8 +8,7 @@ import type { JobContext } from '../src/context.ts'
 import type { ScheduleClock } from '../src/index.ts'
 
 import { MAX_TIMER_DELAY, systemClock } from '../src/index.ts'
-import { createTestClock } from '../src/testing/index.ts'
-import { boot, deferred, iso, metadataWith } from './helpers.ts'
+import { boot, deferred, iso, metadataWith, testClock } from './helpers.ts'
 import { afterEach, describe, expect, test as it } from 'bun:test'
 
 describe('occurrences', () => {
@@ -30,7 +29,7 @@ describe('occurrences', () => {
   })
 
   it('aligns intervals on the Unix epoch (restarts never starve a long interval)', async () => {
-    const clock = createTestClock('2026-01-01T00:00:10Z')
+    const clock = testClock('2026-01-01T00:00:10Z')
     const seen: number[] = []
     await using booted = await boot({
       clock,
@@ -144,7 +143,7 @@ describe('clock', () => {
 
   it('arms one timer, capped at 60 s, whatever the number of jobs', async () => {
     const delays: number[] = []
-    const inner = createTestClock('2026-01-01T00:00:00Z')
+    const inner = testClock('2026-01-01T00:00:00Z')
     const spy: ScheduleClock = {
       now: () => inner.now(),
       setTimer: (fn, ms) => {

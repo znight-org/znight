@@ -99,6 +99,21 @@ describe('znight generate with @znight/compiler', () => {
     expect(stale.stderr).not.toContain('container.generated.ts')
   })
 
+  it('compiles the jobs of znight g job with the same name in two directories (unique job names)', async () => {
+    const root = fixture('compile')
+    for (const name of ['reports/digest', 'emails/digest', 'digest']) {
+      expect((await cli(['g', 'job', name], root)).code).toBe(0)
+    }
+    expect((await cli(['g', 'job', 'digest', '--path', 'src/billing'], root)).code).toBe(0)
+    const run = await cli(['generate'], root)
+    expect(run.stderr).toBe('')
+    expect(run.code).toBe(0)
+    const generated = readFileSync(join(root, OUT_FILE), 'utf8')
+    for (const name of ['reports.digest.daily', 'emails.digest.daily', 'digest.daily', 'billing.digest.daily']) {
+      expect(generated).toContain(`'${name}'`)
+    }
+  })
+
   it('prints the diagnostics with code frames and fails', async () => {
     const root = fixture('broken')
     const run = await cli(['generate'], root)

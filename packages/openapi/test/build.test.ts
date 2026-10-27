@@ -121,6 +121,38 @@ describe('conversion', () => {
     })
   })
 
+  it('documents coerced Zod dates of requests and Valibot dates of responses as date-time strings', async () => {
+    const Range = z.object({ since: z.coerce.date(), until: z.coerce.date().optional() })
+    const Event = v.object({ at: v.date(), name: v.string() })
+    const result = await buildOpenApiDocument(
+      metadata({
+        operations: [
+          op('/events', 'get', {
+            operationId: 'events',
+            parameters: [{ $znight: 'parameters', in: 'query', name: 'Range', io: 'input' }],
+            ...response('Event'),
+          }),
+        ],
+        schemas: [slot('Event', Event, ['output']), slot('Range', Range, ['input'])],
+      }),
+    )
+    expect(result.document.paths?.['/events']?.get?.parameters).toEqual([
+      { name: 'since', in: 'query', required: true, schema: { type: 'string', format: 'date-time' } },
+      { name: 'until', in: 'query', schema: { type: 'string', format: 'date-time' } },
+    ])
+    expect(result.document.components?.schemas?.['Event']).toMatchObject({
+      properties: { at: { type: 'string', format: 'date-time' }, name: { type: 'string' } },
+    })
+    // a plain z.date() / v.date() read from a request stays unrepresentable
+    const section = metadata({
+      operations: [op('/d', 'post', { operationId: 'd', requestBody: body('Plain') })],
+      schemas: [slot('Plain', v.object({ at: v.date(), n: v.number() }), ['input'])],
+    })
+    await expect(buildOpenApiDocument(section)).rejects.toMatchObject({ code: 'ZNIGHT037' })
+    const lenient = await buildOpenApiDocument(section, { unrepresentable: 'warn' })
+    expect(lenient.document.components?.schemas?.['Plain']).toMatchObject({ properties: { n: { type: 'number' } } })
+  })
+
   it('tries user converters first', async () => {
     const custom = { '~standard': { version: 1, vendor: 'effect', validate: () => ({ value: 1 }) } }
     const converter: SchemaConverter = {
@@ -212,6 +244,115 @@ describe('normalisation', () => {
     expect(await validateDocument(result.document)).toMatchObject({ valid: true })
   })
 
+  it('takes the definition as the slot component when the root only references it (.meta({ id }))', async () => {
+    const User = z.object({ id: z.number(), name: z.string() }).meta({ id: 'User' })
+    const result = await buildOpenApiDocument(
+      metadata({
+        operations: [op('/users', 'put', { operationId: 'put', requestBody: body('User'), ...response('User') })],
+        schemas: [slot('User', User, ['input', 'output'])],
+      }),
+    )
+    const schemas = result.document.components?.schemas ?? {}
+    expect(Object.keys(schemas)).toEqual(['User', 'UserInput'])
+    expect(schemas['User']).toMatchObject({ type: 'object', required: ['id', 'name'], additionalProperties: false })
+    expect(schemas['UserInput']).toMatchObject({ type: 'object', required: ['id', 'name'] })
+    expect(result.document.paths?.['/users']?.put?.requestBody).toMatchObject({
+      content: { 'application/json': { schema: { $ref: '#/components/schemas/UserInput' } } },
+    })
+    // another export name: the slot is an alias of the id
+    const UserSchema = z.object({ id: z.number() }).meta({ id: 'Account' })
+    const alias = await buildOpenApiDocument(
+      metadata({
+        operations: [op('/a', 'get', { operationId: 'a', ...response('UserSchema') })],
+        schemas: [slot('UserSchema', UserSchema, ['output'])],
+      }),
+    )
+    expect(alias.document.components?.schemas).toMatchObject({
+      UserSchema: { $ref: '#/components/schemas/Account' },
+      Account: { type: 'object' },
+    })
+    expect(await validateDocument(result.document)).toMatchObject({ valid: true })
+    expect(await validateDocument(alias.document)).toMatchObject({ valid: true })
+  })
+
+  it('scopes anonymous definitions to their slot and names the input variant of definitions', async () => {
+    const Category: z.ZodType = z.object({
+      name: z.string(),
+      get children() {
+        return z.array(Category)
+      },
+    })
+    const Node: z.ZodType = z.object({
+      value: z.number(),
+      get next() {
+        return Node.optional()
+      },
+    })
+    const Tree = z.object({ root: Category })
+    const List = z.object({ head: Node })
+    const Address = z.object({ street: z.string(), zip: z.string().default('00000') }).meta({ id: 'Address' })
+    const CreateUser = z.object({ address: Address })
+    const User = z.object({ id: z.number(), address: Address })
+    const result = await buildOpenApiDocument(
+      metadata({
+        operations: [
+          op('/tree', 'put', { operationId: 'tree', requestBody: body('Tree'), ...response('Tree') }),
+          op('/list', 'get', { operationId: 'list', ...response('List') }),
+          op('/users', 'post', { operationId: 'user', requestBody: body('CreateUser'), ...response('User') }),
+        ],
+        schemas: [
+          slot('CreateUser', CreateUser, ['input']),
+          slot('List', List, ['output']),
+          slot('Tree', Tree, ['input', 'output']),
+          slot('User', User, ['output']),
+        ],
+      }),
+    )
+    const schemas = result.document.components?.schemas ?? {}
+    expect(Object.keys(schemas)).toEqual([
+      'Address',
+      'AddressInput',
+      'CreateUser',
+      'List',
+      'List_schema0',
+      'Tree',
+      'TreeInput',
+      'Tree_schema0',
+      'Tree_schema0Input',
+      'User',
+    ])
+    expect(schemas['Address']).toMatchObject({ required: ['street', 'zip'], additionalProperties: false })
+    expect(schemas['AddressInput']).toMatchObject({ required: ['street'] })
+    expect(schemas['CreateUser']).toMatchObject({
+      properties: { address: { $ref: '#/components/schemas/AddressInput' } },
+    })
+    expect(schemas['User']).toMatchObject({ properties: { address: { $ref: '#/components/schemas/Address' } } })
+    expect(schemas['Tree']).toMatchObject({ properties: { root: { $ref: '#/components/schemas/Tree_schema0' } } })
+    expect(schemas['TreeInput']).toMatchObject({
+      properties: { root: { $ref: '#/components/schemas/Tree_schema0Input' } },
+    })
+    expect(schemas['Tree_schema0Input']).toMatchObject({
+      properties: { children: { items: { $ref: '#/components/schemas/Tree_schema0Input' } } },
+    })
+    expect(JSON.stringify(result.document)).not.toContain('__schema')
+    expect(await validateDocument(result.document)).toMatchObject({ valid: true })
+  })
+
+  it('names the input variant of a slot whose only difference is a referenced definition', async () => {
+    const Inner = z.object({ n: z.number().default(1) }).meta({ id: 'Inner' })
+    const Outer = z.array(Inner)
+    const result = await buildOpenApiDocument(
+      metadata({
+        operations: [op('/o', 'put', { operationId: 'o', requestBody: body('Outer'), ...response('Outer') })],
+        schemas: [slot('Outer', Outer, ['input', 'output'])],
+      }),
+    )
+    expect(result.document.components?.schemas).toMatchObject({
+      Outer: { type: 'array', items: { $ref: '#/components/schemas/Inner' } },
+      OuterInput: { type: 'array', items: { $ref: '#/components/schemas/InnerInput' } },
+    })
+  })
+
   it('reports ZNIGHT034 when two schemas get one name', async () => {
     const section = metadata({
       components: { Item: { type: 'object', properties: { ts: { type: 'string' } } } },
@@ -260,6 +401,48 @@ describe('normalisation', () => {
         }),
       ),
     ).rejects.toMatchObject({ code: 'ZNIGHT037' })
+  })
+})
+
+describe('parameters', () => {
+  it('drops expanded parameters that an explicit parameter or another schema already documents, with a warning', async () => {
+    const Search = z.object({ q: z.string(), page: z.number().optional(), size: z.number().optional() })
+    const Paging = z.object({ size: z.number(), cursor: z.string().optional() })
+    const result = await buildOpenApiDocument(
+      metadata({
+        operations: [
+          op('/s', 'get', {
+            operationId: 's',
+            parameters: [
+              { $znight: 'parameters', in: 'query', name: 'Search', io: 'input' },
+              { $znight: 'parameters', in: 'query', name: 'Paging', io: 'input' },
+              { name: 'page', in: 'query', schema: { type: 'integer' } },
+              { name: 'q', in: 'query', description: 'dup', schema: { type: 'string' } },
+              { name: 'q', in: 'header', schema: { type: 'string' } },
+            ],
+          }),
+        ],
+        schemas: [slot('Paging', Paging, ['input']), slot('Search', Search, ['input'])],
+      }),
+    )
+    const parameters = result.document.paths?.['/s']?.get?.parameters as { name: string; in: string }[]
+    expect(parameters.map(parameter => `${parameter.in} ${parameter.name}`)).toEqual([
+      'query size',
+      'query cursor',
+      'query page',
+      'query q',
+      'header q',
+    ])
+    expect(parameters[3]).toMatchObject({ description: 'dup' })
+    expect(result.warnings).toEqual([
+      {
+        code: 'ZNIGHT035',
+        message:
+          'Parameters expanded from whole-object schemas are already documented (OpenAPI forbids two parameters with one name and location), the duplicate is dropped:\n  - GET /s: the query parameter "q" of the schema Search\n  - GET /s: the query parameter "page" of the schema Search\n  - GET /s: the query parameter "size" of the schema Paging',
+        hints: ["Remove the property from the schema, or the @Query('name') / @ApiQuery('name') that reads it again"],
+      },
+    ])
+    expect(await validateDocument(result.document)).toMatchObject({ valid: true })
   })
 })
 

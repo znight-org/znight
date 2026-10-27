@@ -125,6 +125,7 @@ export function buildOperations(input: OperationsInput): {
     }
   }
   checkDuplicateIds(ctx, operations)
+  unifyPathTemplates(ctx, operations)
   for (const decision of input.document.decisions) {
     if (decision.used) continue
     ctx.report({
@@ -141,15 +142,93 @@ export function buildOperations(input: OperationsInput): {
   return { operations, tagDescriptions }
 }
 
-/** `/books/{id}` from `/books/:id`; the trailing wildcard is `{wildcard}`. */
+/**
+ * `/books/{id}` from `/books/:id`; the trailing wildcard is `{wildcard}` (`{wildcard_1}`... when a
+ * parameter of the path is named `wildcard`).
+ */
 export function pathTemplate(fullPath: string): string {
+  const wildcard = wildcardName(fullPath)
   return fullPath
     .split('/')
     .map(segment => {
       if (segment.startsWith(':')) return `{${segment.slice(1)}}`
-      return segment === '*' ? '{wildcard}' : segment
+      return segment === '*' ? `{${wildcard}}` : segment
     })
     .join('/')
+}
+
+/** The name of the wildcard parameter of a path: `wildcard`, unless a `:wildcard` parameter exists. */
+function wildcardName(fullPath: string): string {
+  const names = new Set(
+    fullPath
+      .split('/')
+      .filter(segment => segment.startsWith(':'))
+      .map(segment => segment.slice(1)),
+  )
+  let name = 'wildcard'
+  for (let index = 1; names.has(name); index++) name = `wildcard_${index}`
+  return name
+}
+
+/** Names of the parameters of a path template, in order. */
+function templateNames(template: string): string[] {
+  return [...template.matchAll(/\{([^}]*)\}/g)].map(match => match[1] as string)
+}
+
+/**
+ * OpenAPI forbids two templates of one path (`/books/{id}` and `/books/{bookId}`): the operations of
+ * such a path are documented under one template (the first one, or the one a whole-path schema
+ * names), with a ZNIGHT035 warning.
+ */
+function unifyPathTemplates(ctx: Context, operations: OperationModel[]): void {
+  const groups = new Map<string, number[]>()
+  operations.forEach((operation, index) => {
+    const shape = operation.path.replace(/\{[^}]*\}/g, '{}')
+    const group = groups.get(shape)
+    if (group === undefined) groups.set(shape, [index])
+    else group.push(index)
+  })
+  for (const indexes of groups.values()) {
+    const group = indexes.map(index => operations[index] as OperationModel)
+    const templates = [...new Set(group.map(operation => operation.path))].sort(compareStrings)
+    if (templates.length < 2) continue
+    const fixed = group.filter(hasPathPlaceholder).map(operation => operation.path)
+    const canonical = [...fixed].sort(compareStrings)[0] ?? (templates[0] as string)
+    const target = templateNames(canonical)
+    const renamed: OperationModel[] = []
+    for (const index of indexes) {
+      const operation = operations[index] as OperationModel
+      if (operation.path === canonical || hasPathPlaceholder(operation)) continue
+      const names = new Map(templateNames(operation.path).map((name, position) => [name, target[position] as string]))
+      for (const parameter of (operation.operation['parameters'] ?? []) as Json[]) {
+        const name = parameter['name']
+        if (parameter['in'] === 'path' && typeof name === 'string' && names.has(name)) {
+          parameter['name'] = names.get(name)
+        }
+      }
+      operations[index] = { ...operation, path: canonical }
+      renamed.push(operation)
+    }
+    const first = renamed[0] ?? (group[0] as OperationModel)
+    const kept = group.filter(operation => operation.path !== canonical && hasPathPlaceholder(operation))
+    ctx.report({
+      code: Codes.InconsistentOperation,
+      severity: 'warning',
+      message: `The routes of one path name its parameters differently (${group.map(operation => operation.label).join(', ')}): OpenAPI forbids two templates of one path, ${kept.length === 0 ? `documented as ${canonical}` : `the whole-path schemas keep ${kept.map(operation => operation.path).join(', ')}`}`,
+      location: first.location,
+      related: group
+        .filter(operation => operation !== first)
+        .map(operation => ({ message: operation.label, location: operation.location })),
+      hints: ['Give the parameters the same names on every route of the path'],
+    })
+  }
+}
+
+/** Whether the path parameters of an operation come from a whole-path schema (`@Param(Schema)`). */
+function hasPathPlaceholder(operation: OperationModel): boolean {
+  return ((operation.operation['parameters'] ?? []) as Json[]).some(
+    parameter => parameter['$znight'] === 'parameters' && parameter['in'] === 'path',
+  )
 }
 
 function pathShape(fullPath: string): string {
@@ -229,6 +308,19 @@ interface OperationSource {
   readonly methodDecorators: readonly DecoratorInfo[]
   readonly classTags: readonly string[]
   readonly defaultTag: string
+}
+
+/** The success response inferred from the handler. */
+interface SuccessModel {
+  readonly status: number
+  /** The status is chosen at runtime (`HttpResponse`, `@Res()`): other 2xx statuses may be declared. */
+  readonly dynamic: boolean
+  /** The status of an empty response also returned (`Book | undefined` → 204). */
+  readonly empty: number | undefined
+  readonly content: Record<string, Json> | undefined
+  readonly problem: string | undefined
+  readonly hints: string[]
+  readonly location: Location | undefined
 }
 
 /** Inferred or declared response of a status. */
@@ -405,7 +497,7 @@ class OperationBuilder {
         if (!segment.startsWith(':') && segment !== '*') continue
         const key = segment === '*' ? '*' : segment.slice(1)
         const data = params.find(param => param.source === 'param' && param.key === key)
-        const parameter: Json = { name: key === '*' ? 'wildcard' : key, in: 'path' }
+        const parameter: Json = { name: key === '*' ? wildcardName(route.fullPath) : key, in: 'path' }
         const doc = data === undefined ? undefined : this.#paramDoc(data)
         if (doc !== undefined) parameter['description'] = doc
         else if (key === '*') parameter['description'] = 'The rest of the path, `/` included'
@@ -798,6 +890,9 @@ class OperationBuilder {
         headers,
         content: success.content,
       })
+      if (success.empty !== undefined) {
+        responses.set(String(success.empty), { description: undefined, headers: { ...headers }, content: undefined })
+      }
     }
     for (const decorator of declared) this.#declaredResponse(decorator, responses, success)
     // standard errors
@@ -839,14 +934,7 @@ class OperationBuilder {
     return sorted
   }
 
-  #success(httpMethod: string): {
-    status: number
-    dynamic: boolean
-    content: Record<string, Json> | undefined
-    problem: string | undefined
-    hints: string[]
-    location: Location | undefined
-  } {
+  #success(httpMethod: string): SuccessModel {
     const { route, method } = this.#source
     const post = httpMethod === 'POST'
     const statusFor = (empty: boolean): number => {
@@ -854,9 +942,10 @@ class OperationBuilder {
       if (post) return 201
       return empty ? 204 : 200
     }
-    const undocumentable = (problem: string, hints: string[], dynamic = false) => ({
+    const undocumentable = (problem: string, hints: string[], dynamic = false): SuccessModel => ({
       status: statusFor(false),
       dynamic,
+      empty: undefined,
       content: undefined,
       problem,
       hints,
@@ -879,84 +968,178 @@ class OperationBuilder {
     const result = this.#input.schemas.shape({ returnOf: method })
     const use = this.#use('the response', 'output')
     this.#input.schemas.register(result, use)
-    let shape = result.root
+    // `HttpResponse<T>` members are documented as `T`, their status is chosen at runtime
     let dynamic = false
-    if (shape.kind === 'reference' && shape.identity === HttpIds.HttpResponse) {
-      dynamic = true
-      const body = shape.typeArgs[0]
-      if (shape.explicitTypeArgs === 0 || body === undefined) {
-        return undocumentable(
-          'HttpResponse has no body type',
-          [
-            'Give the body type: Promise<HttpResponse<BookResponse>>',
-            `Or declare it: @ApiResponse<BookResponse>(${statusFor(false)})`,
-          ],
-          true,
-        )
+    let returnsUndefined = false
+    const bodies: Shape[] = []
+    for (const member of unionMembers(result.root)) {
+      if (member.kind === 'reference' && member.identity === HttpIds.HttpResponse) {
+        dynamic = true
+        const body = member.typeArgs[0]
+        if (member.explicitTypeArgs === 0 || body === undefined) {
+          return undocumentable(
+            'HttpResponse has no body type',
+            [
+              'Give the body type: Promise<HttpResponse<BookResponse>>',
+              `Or declare it: @ApiResponse<BookResponse>(${statusFor(false)})`,
+            ],
+            true,
+          )
+        }
+        bodies.push(...unionMembers(body))
+      } else {
+        if (member.kind === 'undefined') returnsUndefined = true
+        bodies.push(member)
       }
-      shape = body
     }
-    if (shape.kind === 'reference' && shape.identity === 'globalThis#Response') {
+    const defined = distinct(bodies.filter(member => member.kind !== 'undefined' && member.kind !== 'never'))
+    if (defined.some(member => member.kind === 'reference' && member.identity === 'globalThis#Response')) {
       return undocumentable(
         'a Web Response has no body type',
         [`Declare it: @ApiResponse<Body>(${statusFor(false)})`],
         true,
       )
     }
-    if (shape.kind === 'unknown') {
+    if (defined.some(member => member.kind === 'unknown')) {
       return undocumentable(
         `the return type is ${method.returnType.kind === 'primitive' ? method.returnType.name : 'unknown'}`,
         ['Give a precise return type', `Or declare it: @ApiResponse<Body>(${statusFor(false)})`],
         dynamic,
       )
     }
-    if (shape.kind === 'union') {
-      const members = shape.members.filter(member => member.kind !== 'undefined')
-      if (members.length === 0) shape = { kind: 'undefined' }
-      else if (members.length === 1) shape = members[0] as Shape
-      else shape = { kind: 'union', members }
-    }
-    if (shape.kind === 'undefined' || shape.kind === 'never') {
+    if (defined.length === 0) {
       return {
         status: statusFor(true),
         dynamic,
+        empty: undefined,
         content: undefined,
         problem: undefined,
         hints: [],
         location: undefined,
       }
     }
-    const done = (content: Record<string, Json>) => ({
-      status: statusFor(false),
+    const events = defined.filter(member => member.kind === 'reference' && member.identity === HttpIds.SseBody)
+    if (events.length > 0) {
+      // HttpResponse.sse(): 200 (even on POST) unless @HttpCode, text/event-stream
+      if (events.length < defined.length) {
+        return undocumentable(
+          'the handler returns an event stream or another body',
+          [`Declare the responses: @ApiResponse(${route.status ?? 200}, { contentType: 'text/event-stream' })`],
+          true,
+        )
+      }
+      return {
+        status: route.status ?? 200,
+        dynamic: true,
+        empty: undefined,
+        content: httpMethod === 'HEAD' ? undefined : { 'text/event-stream': { schema: { type: 'string' } } },
+        problem: undefined,
+        hints: [],
+        location: undefined,
+      }
+    }
+    const status = statusFor(false)
+    let content: Record<string, Json> | undefined = this.#successContent(defined, use)
+    if (content !== undefined && isBodylessStatus(status)) {
+      this.#ctx.report({
+        code: Codes.InconsistentOperation,
+        severity: 'error',
+        message: `${this.#label} returns a body, but its status is always ${status} (@HttpCode(${status})): ${status} responses have none, the body is never sent`,
+        location: method.location,
+        hints: ['Return nothing (void), or use another status'],
+      })
+      content = undefined
+    }
+    return {
+      status,
       dynamic,
-      content,
+      // a plain `undefined` is sent as an empty 204 (not on POST routes, not with @HttpCode)
+      empty: returnsUndefined && route.status === undefined && !post && status !== 204 ? 204 : undefined,
+      // HEAD responses never have a body
+      content: httpMethod === 'HEAD' ? undefined : content,
       problem: undefined,
       hints: [],
       location: undefined,
-    })
-    if (shape.kind === 'string') return done({ 'text/plain': { schema: { type: 'string' } } })
-    if (shape.kind === 'binary' || (shape.kind === 'reference' && shape.identity === HttpIds.FileBody)) {
-      return done({ 'application/octet-stream': {} })
     }
-    if (shape.kind === 'reference' && shape.identity === 'globalThis#AsyncIterable') {
-      const event = shape.typeArgs[0]
-      const data = event?.kind === 'reference' && event.identity === HttpIds.SseEvent ? event.typeArgs[0] : event
-      const media: Json = { schema: { type: 'string' } }
-      if (data !== undefined) media['x-znight-event-schema'] = this.#input.schemas.convert(data, use, '')
-      return done({ 'text/event-stream': media })
+  }
+
+  /** Content of the success response: media types of the serialiser (§9.1 of the architecture). */
+  #successContent(members: readonly Shape[], use: SchemaUse): Record<string, Json> | undefined {
+    const single = members.length === 1 ? (members[0] as Shape) : undefined
+    if (single !== undefined) {
+      if (single.kind === 'binary' || (single.kind === 'reference' && single.identity === HttpIds.FileBody)) {
+        return { 'application/octet-stream': {} }
+      }
+      if (single.kind === 'reference' && single.identity === 'globalThis#AsyncIterable') {
+        const event = single.typeArgs[0]
+        const data = event?.kind === 'reference' && event.identity === HttpIds.SseEvent ? event.typeArgs[0] : event
+        const media: Json = { schema: { type: 'string' } }
+        if (data !== undefined) media['x-znight-event-schema'] = this.#input.schemas.convert(data, use, '')
+        return { 'text/event-stream': media }
+      }
     }
-    return done({ 'application/json': { schema: this.#input.schemas.convert(shape, use, '') } })
+    // strings are sent as text/plain, everything else as JSON
+    const text: Shape[] = []
+    const json: Shape[] = []
+    for (const member of members) this.#splitText(member, text, json, new Set())
+    const schemaOf = (shapes: Shape[]): SchemaTemplate =>
+      this.#input.schemas.convert(
+        shapes.length === 1 ? (shapes[0] as Shape) : { kind: 'union', members: shapes },
+        use,
+        '',
+      )
+    const content: Record<string, Json> = {}
+    if (json.length > 0) content['application/json'] = { schema: schemaOf(json) }
+    if (text.length > 0) content['text/plain'] = { schema: schemaOf(text) }
+    return content
+  }
+
+  /**
+   * Sorts the members of a body by the media type the serialiser gives them: strings (string, string
+   * literals, string enums) are text, the rest JSON. A named declaration stays whole when all its
+   * members go to one side.
+   */
+  #splitText(shape: Shape, text: Shape[], json: Shape[], seen: Set<string>): void {
+    const kind = this.#textKind(shape, new Set(seen))
+    if (kind === 'text') text.push(shape)
+    else if (kind === 'json') json.push(shape)
+    else if (shape.kind === 'union') {
+      for (const member of shape.members) this.#splitText(member, text, json, seen)
+    } else if (shape.kind === 'named') {
+      const named = this.#input.schemas.named(shape.key)
+      if (named === undefined || seen.has(shape.key)) json.push(shape)
+      else this.#splitText(named.shape, text, json, new Set([...seen, shape.key]))
+    } else {
+      json.push(shape)
+    }
+  }
+
+  #textKind(shape: Shape, seen: Set<string>): 'text' | 'json' | 'mixed' {
+    switch (shape.kind) {
+      case 'string':
+        return 'text'
+      case 'literal':
+        return typeof shape.value === 'string' ? 'text' : 'json'
+      case 'union': {
+        const kinds = new Set(shape.members.map(member => this.#textKind(member, seen)))
+        return kinds.size === 1 ? ([...kinds][0] as 'text' | 'json' | 'mixed') : 'mixed'
+      }
+      case 'intersection':
+        // branded strings (`string & { readonly brand: unique symbol }`)
+        return shape.members.some(member => this.#textKind(member, seen) === 'text') ? 'text' : 'json'
+      case 'named': {
+        const named = this.#input.schemas.named(shape.key)
+        if (named === undefined || seen.has(shape.key)) return 'json'
+        seen.add(shape.key)
+        return this.#textKind(named.shape, seen)
+      }
+      default:
+        return 'json'
+    }
   }
 
   /** `@Sse` routes: a 200 event stream; the type of the events' `data` when the return type tells it. */
-  #sse(): {
-    status: number
-    dynamic: boolean
-    content: Record<string, Json>
-    problem: undefined
-    hints: string[]
-    location: undefined
-  } {
+  #sse(): SuccessModel {
     const { method } = this.#source
     const media: Json = { schema: { type: 'string' } }
     if (method?.returnType !== undefined) {
@@ -969,6 +1152,7 @@ class OperationBuilder {
     return {
       status: 200,
       dynamic: true,
+      empty: undefined,
       content: { 'text/event-stream': media },
       problem: undefined,
       hints: [],
@@ -976,11 +1160,7 @@ class OperationBuilder {
     }
   }
 
-  #declaredResponse(
-    decorator: DecoratorInfo,
-    responses: Map<string, ResponseDraft>,
-    success: { status: number; dynamic: boolean },
-  ): void {
+  #declaredResponse(decorator: DecoratorInfo, responses: Map<string, ResponseDraft>, success: SuccessModel): void {
     const [statusArg, optionsArg] = decorator.args
     const raw = statusArg?.value
     const status = typeof raw === 'number' ? String(raw) : raw
@@ -1011,7 +1191,7 @@ class OperationBuilder {
     if (reserved !== undefined)
       invalidValue(this.#ctx, optionsArg ?? decorator, `"$znight" is a reserved key (${reserved})`)
     const code = Number(status)
-    if (Number.isInteger(code) && code >= 200 && code < 300 && code !== success.status) {
+    if (Number.isInteger(code) && code >= 200 && code < 300 && code !== success.status && code !== success.empty) {
       const fixed = this.#source.route.status !== undefined || !success.dynamic
       if (fixed) {
         this.#ctx.report({
@@ -1190,6 +1370,32 @@ function isArrayPlan(plan: CoercionPlan | undefined): boolean {
   if (plan === undefined) return false
   if (plan.kind === 'optional') return isArrayPlan(plan.item)
   return plan.kind === 'array'
+}
+
+/** The members of a union (the shape itself otherwise). */
+function unionMembers(shape: Shape): readonly Shape[] {
+  return shape.kind === 'union' ? shape.members : [shape]
+}
+
+/** The shapes without repetitions (`Book | HttpResponse<Book>` documents `Book` once). */
+function distinct(shapes: readonly Shape[]): Shape[] {
+  const seen = new Set<string>()
+  return shapes.filter(shape => {
+    let key: string
+    try {
+      key = JSON.stringify(shape)
+    } catch {
+      return true
+    }
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+/** Statuses whose responses have no body: the serialiser drops it (204, 304, 1xx). */
+function isBodylessStatus(status: number): boolean {
+  return status === 204 || status === 304 || (status >= 100 && status < 200)
 }
 
 /** The `T` of `SseEvent<T>` found in a stream type (`AsyncIterable<SseEvent<T>> | HttpResponse`). */

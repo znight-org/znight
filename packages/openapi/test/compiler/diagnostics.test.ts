@@ -156,6 +156,23 @@ describe('ZNIGHT032 UnrepresentableType', () => {
     ])
   })
 
+  it('reports a bigint met in a request body, then in a response, as an error for the response', async () => {
+    const { lines } = await diagnose({
+      ...controller(
+        `  @Post()
+  create(@Body() stats: ShelfStats): void {}
+  @Get()
+  get(): ShelfStats { return null! }`,
+        "import type { ShelfStats } from './stats.ts'",
+      ),
+      'src/stats.ts': 'export interface ShelfStats {\n  readonly total: bigint\n}\n',
+    })
+    expect(lines).toEqual([
+      'warning ZNIGHT032 src/stats.ts:2:19 ShelfStats.total is a bigint: JSON has no bigint (POST /items (ItemController.create))',
+      'error ZNIGHT032 src/stats.ts:2:19 ShelfStats.total is a bigint: JSON.stringify throws on bigint, so GET /items (ItemController.get) would answer 500',
+    ])
+  })
+
   it('reports invalid JSDoc tag values', async () => {
     const { lines } = await diagnose({
       ...controller('  @Get()\n  get(): Book { return null! }', "import type { Book } from './book.ts'"),

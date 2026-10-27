@@ -188,10 +188,24 @@ class HonoHttpAdapter implements HonoAdapter {
   }
 
   #toResponse(c: Context, reply: AdapterReply): Response {
-    if (reply.eventStream === true) {
-      // @hono/node-server: a quiet event stream must outlive a socket timeout
-      const outgoing = nodeOutgoing(c)
-      if (outgoing !== undefined && typeof outgoing.setTimeout === 'function') outgoing.setTimeout(0)
+    const outgoing = nodeOutgoing(c)
+    if (outgoing !== undefined) {
+      const body = reply.body instanceof ReadableStream ? reply.body : null
+      if (outgoing.destroyed) {
+        // @hono/node-server: the client left before the reply was ready (an async pre-flight). The
+        // server would neither read nor cancel the body: release it (event source, request scope)
+        discardStream(body)
+        return toResponse(c, { ...reply, body: null })
+      }
+      if (body !== null) {
+        // the client may leave before @hono/node-server reads the body (its own listener then comes
+        // too late): a body nobody locked is cancelled when the response closes unfinished
+        outgoing.once('close', () => {
+          if (!outgoing.writableFinished) discardStream(body)
+        })
+      }
+      // a quiet event stream must outlive a socket timeout
+      if (reply.eventStream === true && typeof outgoing.setTimeout === 'function') outgoing.setTimeout(0)
     }
     if (this.#bun === undefined || !(reply.body instanceof ReadableStream)) return toResponse(c, reply)
     // served by Bun.serve(): observe the end of the body (idle timeout, native blob: see #bunFetch)
@@ -446,5 +460,29 @@ function toResponse(c: Context, reply: AdapterReply): Response {
       headers: { 'content-type': 'application/json; charset=utf-8' },
     })
   }
+  keepContextCookies(c, headers)
   return new Response(reply.body, { status: reply.status, headers })
+}
+
+/**
+ * Keeps the cookies Hono middleware set before the Znight route (`setCookie(c, ...)`,
+ * `c.header('set-cookie', ..., { append: true })`) before the reply's own, like the other adapters.
+ * Hono drops the headers of the context when a handler returns its own `Response` (or, when a
+ * middleware read `c.res`, replaces the response's cookies with the context's): the reply's cookies
+ * are added to the context too, so that both ways end with every cookie, in order.
+ */
+function keepContextCookies(c: Context, headers: Headers): void {
+  let context: string[]
+  try {
+    // the headers of the context without changing it (`c.res` would create the context response)
+    context = c.newResponse(null).headers.getSetCookie()
+  } catch {
+    return // a status a bodyless Response refuses (`c.status(101)`): nothing to keep
+  }
+  if (context.length === 0) return
+  const own = headers.getSetCookie()
+  for (const line of own) c.header('set-cookie', line, { append: true })
+  headers.delete('set-cookie')
+  for (const line of context) headers.append('set-cookie', line)
+  for (const line of own) headers.append('set-cookie', line)
 }

@@ -35,6 +35,7 @@ import {
   normalizeNodeHeaders,
   onResponseAbort,
   readNodeBody,
+  withNativeCookies,
   writeNodeReply,
 } from './node-io.ts'
 import {
@@ -183,8 +184,10 @@ class FastifyHttpAdapter implements FastifyAdapter {
     }
     if (result.eventStream === true) {
       // no onSend hook (compression, ETag...) may rewrite an event stream: write it on the raw
-      // response, with the headers Fastify hooks already set (`onRequest`...) under the plugin's
-      const headers = { ...lowerCaseHeaders(reply.getHeaders()), ...result.headers }
+      // response, with the headers Fastify hooks already set (`onRequest`...) under the plugin's,
+      // and their cookies before the plugin's (as reply.header('set-cookie') does on the other path)
+      const native = lowerCaseHeaders(reply.getHeaders())
+      const headers = { ...native, ...withNativeCookies(native['set-cookie'], result.headers) }
       reply.hijack()
       void writeNodeReply(reply.raw, { ...result, headers })
       return reply

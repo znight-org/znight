@@ -267,8 +267,9 @@ test('order events', async () => {
 take(count), comments, lastEventId, retry, done, close(), reconnect() }`, an async iterable of
 `{ event, data, id, json() }` messages; `body` is the whole body when the answer is not an event
 stream (a 404, a 204). `injectStream()` resolves with `{ status, headers, cookies, body }` (cancel
-`body`, or abort `signal`, to disconnect). Both reject with `ZNIGHT001` (hint: `@znight/http` ≥ 0.2)
-when the HTTP plugin does not implement them, and with `ZNIGHT021` once closed.
+`body`, or abort `signal`, to disconnect). Both reject with `ZNIGHT001` when the plugin named `'http'`
+does not implement them (hint: `HttpPlugin` of `@znight/http` ≥ 0.1.0, the release that ships
+streaming), and with `ZNIGHT021` once closed.
 
 ```ts
 import { readFile } from 'node:fs/promises'
@@ -414,7 +415,7 @@ as is (signing `signedCookies` is the plugin's job), returns the plugin's respon
 `bytes` and `cookies`, and otherwise derives `bytes` from `body` and returns no cookies (`{}`).
 `TestApp.injectStream()` / `injectSse()` delegate the same way to the optional
 `injectStream(request)` / `injectSse(request)` members of that plugin (`HttpStreamInjector`:
-`HttpPlugin` of `@znight/http` ≥ 0.2), the method defaulting to `GET`; the response shapes are
+`HttpPlugin` of `@znight/http` ≥ 0.1.0), the method defaulting to `GET`; the response shapes are
 `InjectStreamResponse` and `InjectSseResponse` (structural copies of the `@znight/http` types).
 
 Runtime contract with every plugin: the optional `initRoots(context: { metadata }): readonly ProviderKey[]`

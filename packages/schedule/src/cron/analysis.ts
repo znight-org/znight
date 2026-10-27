@@ -5,7 +5,7 @@
 import type { CronField } from './fields.ts'
 import type { CronFieldText, CronSpec } from './parse.ts'
 
-import { MONTH_LABELS } from './fields.ts'
+import { FIELDS_HINT, MONTH_LABELS } from './fields.ts'
 
 /** A finding of the analysis, located on a field of the expression. */
 export interface CronFinding {
@@ -16,15 +16,29 @@ export interface CronFinding {
   readonly end: number
 }
 
+/** How often a field of seconds fires, by its number of values. */
+const RATES: Readonly<Record<number, string>> = { 1: 'every minute', 60: 'every second' }
+
 /** Longest month of each month number (February: 29, leap years included). */
 const LONGEST: readonly number[] = [0, 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
 
 /**
- * Why the expression never fires (proleptic Gregorian calendar), or `undefined`. Only a restricted
- * day-of-month without day-of-week can do that: every day of the week, every `#n` and every `L`
- * happens within a 400-year cycle.
+ * Why the expression never fires (proleptic Gregorian calendar), or `undefined`: a field that allows
+ * no value (defensive: the parser never builds one), or a restricted day-of-month without day-of-week
+ * that no month has. Every day of the week, every `#n` and every `L` happens within a 400-year cycle.
  */
 export function neverFires(spec: CronSpec): CronFinding | undefined {
+  const empty = emptyField(spec)
+  if (empty !== undefined) {
+    const field = fieldOf(spec, empty)
+    return {
+      message: `never fires: the ${empty} field allows no value`,
+      hint: FIELDS_HINT,
+      field: empty,
+      start: field?.start ?? 0,
+      end: field?.end ?? spec.expression.length,
+    }
+  }
   if (!spec.dayOfMonthRestricted || spec.dayOfWeekRestricted || spec.lastDay) return undefined
   const months = values(spec.months, 1)
   const days = values(spec.days, 1)
@@ -44,7 +58,8 @@ export function neverFires(spec: CronSpec): CronFinding | undefined {
 
 /**
  * Likely mistakes: a `*` minute (or second) under fixed hours (or minutes), which fires every minute
- * of those hours (`'* 9 * * *'` runs 60 times from 09:00 to 09:59). `0-59` states the intent.
+ * of those hours (`'* 9 * * *'` runs 60 times from 09:00 to 09:59). `0-59` states the intent. Every
+ * expression a hint suggests means what the hint says, and raises no warning.
  */
 export function cronWarnings(spec: CronSpec): CronFinding[] {
   const second = fieldOf(spec, 'second')
@@ -53,20 +68,26 @@ export function cronWarnings(spec: CronSpec): CronFinding[] {
   const findings: CronFinding[] = []
   const replace = (changes: Partial<Record<CronField, string>>): string =>
     spec.fields.map(entry => changes[entry.field] ?? entry.text).join(' ')
+  const pad = (value: number): string => String(value).padStart(2, '0')
   if (minute.text === '*' && isValueList(hour.text)) {
     const hours = hour.text.split(',').map(Number)
-    const everySecond = second?.text === '*'
-    const unit = everySecond ? 'second' : 'minute'
-    const pad = (value: number): string => String(value).padStart(2, '0')
+    const first = pad(hours[0] as number)
+    // runs per minute: 1 with 5 fields (second 0), 60 for a `*` second
+    const perMinute = second === undefined ? 1 : values(spec.seconds, 0).length
+    const everySecond = perMinute === 60
+    const rate = RATES[perMinute] ?? `${perMinute} times a minute`
     const message =
       hours.length === 1
-        ? `fires every ${unit} from ${pad(hours[0] as number)}:00${everySecond ? ':00' : ''} to ${pad(hours[0] as number)}:59${everySecond ? ':59' : ''}`
-        : `fires every ${unit} of the hours ${list(hours.map(String), 'and')}`
-    const once = replace(everySecond ? { second: '0', minute: '0' } : { minute: '0' })
-    const every = replace({ minute: '0-59' })
+        ? `fires ${rate} from ${first}:00${everySecond ? ':00' : ''} to ${first}:59${everySecond ? ':59' : ''}`
+        : `fires ${rate} ${perMinute === 1 || everySecond ? 'of' : 'in'} the hours ${list(hours.map(String), 'and')}`
+    // a second field firing several times a minute becomes `0` for "once" and "every minute"
+    const seconds: Partial<Record<CronField, string>> = perMinute === 1 ? {} : { second: '0' }
+    const once = replace({ ...seconds, minute: '0' })
+    const everyMinute = replace({ ...seconds, minute: '0-59' })
+    const keep = perMinute === 1 ? '' : `, or '${replace({ minute: '0-59' })}' to mean ${rate}`
     findings.push({
       message,
-      hint: `Once at ${pad(hours[0] as number)}:00 is '${once}'; write '${every}' to mean every minute`,
+      hint: `Once at ${first}:00 is '${once}'; write '${everyMinute}' to mean every minute${keep}`,
       field: 'minute',
       start: minute.start,
       end: minute.end,
@@ -75,21 +96,41 @@ export function cronWarnings(spec: CronSpec): CronFinding[] {
   }
   if (second !== undefined && second.text === '*' && isValueList(minute.text)) {
     const minutes = minute.text.split(',').map(Number)
-    const pad = (value: number): string => String(value).padStart(2, '0')
     const singleHour = isValueList(hour.text) && !hour.text.includes(',') ? Number(hour.text) : undefined
+    const at = singleHour !== undefined && minutes.length === 1 ? `${pad(singleHour)}:${pad(minutes[0] as number)}` : ''
     const message =
-      singleHour !== undefined && minutes.length === 1
-        ? `fires every second from ${pad(singleHour)}:${pad(minutes[0] as number)}:00 to ${pad(singleHour)}:${pad(minutes[0] as number)}:59`
-        : `fires every second of the minute${minutes.length === 1 ? '' : 's'} ${list(minutes.map(String), 'and')}`
+      at === ''
+        ? `fires every second of the minute${minutes.length === 1 ? '' : 's'} ${list(minutes.map(String), 'and')}`
+        : `fires every second from ${at}:00 to ${at}:59`
+    const zero = replace({ second: '0' })
     findings.push({
       message,
-      hint: `Once a minute is '${replace({ second: '0' })}'; write '${replace({ second: '0-59' })}' to mean every second`,
+      hint: `${at === '' ? `At second 0 only is '${zero}'` : `Once at ${at} is '${zero}'`}; write '${replace({ second: '0-59' })}' to mean every second`,
       field: 'second',
       start: second.start,
       end: second.end,
     })
   }
   return findings
+}
+
+/** A field that allows no value (the day fields count their `L` and `#` rules, OR-ed when both are restricted). */
+function emptyField(spec: CronSpec): CronField | undefined {
+  if (values(spec.seconds, 0).length === 0) return 'second'
+  if (values(spec.minutes, 0).length === 0) return 'minute'
+  if (values(spec.hours, 0).length === 0) return 'hour'
+  if (values(spec.months, 1).length === 0) return 'month'
+  const dayOfMonth = !spec.dayOfMonthRestricted || spec.lastDay || values(spec.days, 1).length > 0
+  const dayOfWeek =
+    !spec.dayOfWeekRestricted ||
+    values(spec.weekdays, 0).length > 0 ||
+    spec.nthWeekdays.some(bits => bits !== 0) ||
+    values(spec.lastWeekdays, 0).length > 0
+  if (spec.dayOfMonthRestricted && spec.dayOfWeekRestricted) {
+    return dayOfMonth || dayOfWeek ? undefined : 'day-of-week'
+  }
+  if (!dayOfMonth) return 'day-of-month'
+  return dayOfWeek ? undefined : 'day-of-week'
 }
 
 function fieldOf(spec: CronSpec, field: CronField): CronFieldText | undefined {

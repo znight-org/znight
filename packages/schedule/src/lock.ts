@@ -9,7 +9,10 @@ import type { Duration } from './duration.ts'
 
 import { systemClock } from './clock.ts'
 
-/** A lock store: Postgres, Redis... (recipes in the guide), or {@link memoryLockStore}. */
+/**
+ * A lock store: Postgres, Redis... (recipes in `test/integration` of this package, see the README), or
+ * {@link memoryLockStore}. The scheduler bounds `acquire()` and `release()` by the lease ttl.
+ */
 export interface ScheduleLockStore {
   /** Store name in logs. */
   readonly name: string

@@ -2,7 +2,7 @@
  * Grammar of the cron dialect (RFC 0004 §4.3): every accepted form, every error with its field and
  * its span in the expression.
  */
-import { issue, pointed, spec, values } from './helpers.ts'
+import { issue, pointed, runs, spec, values } from './helpers.ts'
 import { describe, expect, test as it } from 'bun:test'
 
 const range = (from: number, to: number, step = 1): number[] => {
@@ -65,6 +65,32 @@ describe('accepted forms', () => {
     expect(values(spec('0 0 * * FRI-SUN').weekdays)).toEqual([0, 5, 6])
     expect(values(spec('0 0 * * *').weekdays)).toEqual([0, 1, 2, 3, 4, 5, 6])
     expect(values(spec('0 0 * * */2').weekdays)).toEqual([0, 2, 4, 6])
+  })
+
+  it("'a/s' from Sunday written 7 is Sunday alone (7 is the maximum), never an empty set", () => {
+    expect(values(spec('0 0 * * 7/2').weekdays)).toEqual([0])
+    expect(values(spec('0 0 * * 7/1').weekdays)).toEqual([0])
+    expect(values(spec('0 0 * * 7-7/2').weekdays)).toEqual([0])
+    expect(values(spec('0 0 * * 0/2').weekdays)).toEqual([0, 2, 4, 6])
+    expect(values(spec('0 0 * * SUN/2').weekdays)).toEqual([0, 2, 4, 6])
+    expect(values(spec('0 0 * * 1/2').weekdays)).toEqual([1, 3, 5])
+    expect(runs('0 0 * * 7/2', '2026-10-27T00:00:00Z', 2)).toEqual([
+      '2026-11-01T00:00:00.000Z',
+      '2026-11-08T00:00:00.000Z',
+    ])
+  })
+
+  it('reads SUN closing a range that starts on Sunday as Sunday (SUN-SUN is 0-0, not the whole week)', () => {
+    for (const expression of ['0 0 * * SUN-SUN', '0 0 * * sun-sun', '0 0 * * 0-SUN', '0 0 * * SUN-SUN/2']) {
+      expect(values(spec(expression).weekdays)).toEqual([0])
+    }
+    expect(values(spec('0 0 * * SUN-SAT').weekdays)).toEqual([0, 1, 2, 3, 4, 5, 6])
+    expect(values(spec('0 0 * * MON-SUN').weekdays)).toEqual([0, 1, 2, 3, 4, 5, 6])
+    expect(values(spec('0 0 * * 0-7').weekdays)).toEqual([0, 1, 2, 3, 4, 5, 6]) // numbers: as written
+    expect(runs('0 0 * * SUN-SUN', '2026-10-27T00:00:00Z', 2)).toEqual([
+      '2026-11-01T00:00:00.000Z',
+      '2026-11-08T00:00:00.000Z',
+    ])
   })
 
   it('reads L, <day>L, <day>#<n> and ?', () => {

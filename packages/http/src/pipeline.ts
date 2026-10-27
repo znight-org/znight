@@ -354,7 +354,9 @@ export class Pipeline {
           // a wrapper failed before the request was handled, or did not call next(): answer anyway
           const error = failed ? hookError : new Error('An "http:request" hook wrapper did not call next()')
           event.error ??= error
-          outcome = await this.#errorReply(error, ctx)
+          // the same checks as a handled reply: an exception mapper's HttpResponse may carry cookies
+          const fallback = await this.#errorReply(error, ctx)
+          outcome = this.#checkCookies(this.#checkHeaders(fallback, ctx, event), ctx, event)
           event.status = outcome.status
         } else if (failed) {
           this.#logger.error('An "http:request" hook wrapper failed after the request was handled', {
@@ -477,8 +479,10 @@ export class Pipeline {
 
   /**
    * Headers the plugin adds to every reply when nothing set them: the request id, the CORS headers
-   * of an allowed origin (`vary: origin` whatever the origin), the security headers; and
-   * `connection: close` while draining.
+   * of an allowed origin (`vary: origin` whatever the origin) or, with a wildcard policy, of every
+   * reply (`access-control-allow-origin: *` does not depend on the request, so a cached reply serves
+   * CORS and non-CORS requests alike), the security headers; and `connection: close` while
+   * draining.
    */
   #frameworkHeaders(
     headers: Record<string, HeaderValue>,
@@ -490,8 +494,12 @@ export class Pipeline {
     if (header !== undefined && headers[header] === undefined && isHeaderValue(requestId)) headers[header] = requestId
     const policy = this.#options.cors
     if (policy !== undefined) {
-      // a preflight answer carries its own CORS headers; other replies get them for allowed origins
-      if (cors?.allowed === true && !preflight) addMissingHeaders(headers, corsReplyHeaders(policy, cors.origin))
+      // a preflight answer carries its own CORS headers; other replies get them for allowed origins,
+      // or always with a wildcard policy (with or without an origin header: no vary needed)
+      if (!preflight) {
+        if (policy.wildcard) addMissingHeaders(headers, corsReplyHeaders(policy, '*'))
+        else if (cors?.allowed === true) addMissingHeaders(headers, corsReplyHeaders(policy, cors.origin))
+      }
       if (policy.varyOrigin) mergeVary(headers, 'origin')
     }
     const security = this.#options.securityHeaders

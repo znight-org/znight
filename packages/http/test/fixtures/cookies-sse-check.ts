@@ -13,7 +13,13 @@ import { fastifyAdapter } from '../../src/adapters/fastify.ts'
 import { honoAdapter } from '../../src/adapters/hono.ts'
 import { nodeAdapter } from '../../src/adapters/node.ts'
 import { HttpPlugin, parseSseStream } from '../../src/index.ts'
-import { cookiesSseMetadata, cookiesSseOptions, resetSseState, sseState } from '../cookies-sse-app.ts'
+import {
+  cookiesSseMetadata,
+  cookiesSseOptions,
+  LATE_PREFLIGHT_MS,
+  resetSseState,
+  sseState,
+} from '../cookies-sse-app.ts'
 import { viaFetch } from '../helpers.ts'
 
 const REQUESTS: readonly InjectRequest[] = [
@@ -77,6 +83,27 @@ async function until(condition: () => boolean): Promise<void> {
   }
 }
 
+/** Waits for `condition` at most `ms` (no error: the caller reports what it observes). */
+async function settle(condition: () => boolean, ms: number): Promise<void> {
+  const started = Date.now()
+  while (!condition() && Date.now() - started < ms) await new Promise(resolve => setTimeout(resolve, 10))
+}
+
+/**
+ * A client leaving while the handler is still in its pre-flight: the reply body must be released
+ * (source stopped, request scope closed), so that `inflight` and `streams` return to 0.
+ */
+async function leaveDuringPreflight(http: HttpPlugin, path: string): Promise<unknown> {
+  const controller = new AbortController()
+  const pending = fetch(`${String(http.address)}${path}`, { signal: controller.signal }).catch(() => undefined)
+  await until(() => http.inflight === 1)
+  controller.abort()
+  await pending
+  await new Promise(resolve => setTimeout(resolve, LATE_PREFLIGHT_MS))
+  await settle(() => http.inflight === 0 && http.streams === 0, 1_500)
+  return { inflight: http.inflight, streams: http.streams }
+}
+
 /** Event stream scenarios, in memory and over the network. */
 async function sse(http: HttpPlugin): Promise<unknown> {
   const url = (path: string): string => `${String(http.address)}${path}`
@@ -113,7 +140,12 @@ async function sse(http: HttpPlugin): Promise<unknown> {
     rejected = (error as Error).message
   }
   await until(() => http.inflight === 0)
+  const leaves = {
+    sse: await leaveDuringPreflight(http, '/events/late'),
+    stream: await leaveDuringPreflight(http, '/events/late-stream'),
+  }
   return {
+    leaves,
     framed,
     framedNetwork,
     events,

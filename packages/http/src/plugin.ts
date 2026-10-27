@@ -55,7 +55,7 @@ import { resolveTrustProxy } from './proxy.ts'
 import { RouteTable } from './router.ts'
 import { resolveSecurityHeaders } from './security-headers.ts'
 import { parseByteSize } from './size.ts'
-import { MIN_SSE_INTERVAL_MS } from './sse.ts'
+import { MAX_SSE_TIMER_MS, MIN_SSE_INTERVAL_MS } from './sse.ts'
 import { isValidStatus } from './status.ts'
 import { HttpTokens } from './tokens.ts'
 import { bodyPlan, DEFAULT_UPLOAD_LIMITS, type ResolvedUploadLimits, type UploadLimits } from './uploads.ts'
@@ -501,7 +501,7 @@ export class HttpPlugin implements Plugin {
       container: ctx.container,
     })
     const { registrations, checked } = buildRegistrations(ctx, options, raw, pluginRoutes)
-    checkDecisions(checked.routes, checked.groups, options.enforcement, ctx.logger)
+    checkDecisions(checked.routes, checked.groups, options.enforcement, ctx.logger, checked.enforcers)
     const adapter = options.adapter
     const routes: HttpRouteSummary[] = []
     for (const registration of registrations) {
@@ -749,16 +749,23 @@ function resolveSse(value: HttpSseOptions | undefined, drainTimeoutMs: number): 
     }
   }
   const heartbeat = value.heartbeat ?? DEFAULT_SSE_SETTINGS.heartbeat
-  if (heartbeat !== false && !(Number.isSafeInteger(heartbeat) && heartbeat >= MIN_SSE_INTERVAL_MS)) {
-    throw invalidOption('sse.heartbeat', `an integer number of ms ≥ ${MIN_SSE_INTERVAL_MS}, or false`, heartbeat)
+  if (
+    heartbeat !== false &&
+    !(Number.isSafeInteger(heartbeat) && heartbeat >= MIN_SSE_INTERVAL_MS && heartbeat <= MAX_SSE_TIMER_MS)
+  ) {
+    throw invalidOption(
+      'sse.heartbeat',
+      `an integer number of ms from ${MIN_SSE_INTERVAL_MS} to ${MAX_SSE_TIMER_MS}, or false`,
+      heartbeat,
+    )
   }
   const retry = value.retry
   if (retry !== undefined && !(Number.isSafeInteger(retry) && retry >= 0)) {
     throw invalidOption('sse.retry', 'an integer number of ms ≥ 0', retry)
   }
   const shutdownGraceMs = value.shutdownGraceMs ?? DEFAULT_SSE_SETTINGS.shutdownGraceMs
-  if (!(Number.isSafeInteger(shutdownGraceMs) && shutdownGraceMs >= 0)) {
-    throw invalidOption('sse.shutdownGraceMs', 'an integer number of ms ≥ 0', shutdownGraceMs)
+  if (!(Number.isSafeInteger(shutdownGraceMs) && shutdownGraceMs >= 0 && shutdownGraceMs <= MAX_SSE_TIMER_MS)) {
+    throw invalidOption('sse.shutdownGraceMs', `an integer number of ms from 0 to ${MAX_SSE_TIMER_MS}`, shutdownGraceMs)
   }
   if (drainTimeoutMs !== Number.POSITIVE_INFINITY && shutdownGraceMs >= drainTimeoutMs) {
     throw invalidOption(
@@ -849,6 +856,8 @@ function httpMetadata(metadata: ZnightMetadata): HttpMetadata {
 interface Checked {
   readonly routes: readonly CheckedRoute[]
   readonly groups: RouteGroups
+  /** Group → the guard classes enforcing it, in a chain or not. */
+  readonly enforcers: ReadonlyMap<string, ReadonlySet<string>>
 }
 
 /** A declared route (controller route or plugin route), before HEAD, `@All` and trailing-slash expansion. */
@@ -1042,15 +1051,30 @@ function buildRegistrations(
     })
   }
 
-  // `enforces` of every guard class of every chain, read once per class: declares their groups
+  // `enforces` of every guard class, read once per class. The guards of the chains declare their
+  // groups; the guard classes of the application that sit in no chain only make their groups known,
+  // so that a decision whose guard was forgotten everywhere (a second entrypoint, a worker, a test)
+  // is still reported instead of being silently unenforced
   const enforcedGroups = new Map<unknown, ReadonlySet<string>>()
-  for (const route of declared) {
-    for (const guard of route.guards) {
-      if (enforcedGroups.has(guard.cls)) continue
-      const infos = enforcedBy(guard.cls, guard.name)
-      for (const info of infos) groups.declare(info, `the guard ${guard.name}`)
-      enforcedGroups.set(guard.cls, new Set(infos.map(info => info.group)))
+  const enforcers = new Map<string, Set<string>>()
+  const readEnforces = (cls: unknown, name: string, chained: boolean): void => {
+    if (enforcedGroups.has(cls)) return
+    const infos = enforcedBy(cls, name)
+    if (chained) for (const info of infos) groups.declare(info, `the guard ${name}`)
+    enforcedGroups.set(cls, new Set(infos.map(info => info.group)))
+    for (const info of infos) {
+      let names = enforcers.get(info.group)
+      if (names === undefined) {
+        names = new Set()
+        enforcers.set(info.group, names)
+      }
+      names.add(name)
     }
+  }
+  for (const route of declared) for (const guard of route.guards) readEnforces(guard.cls, guard.name, true)
+  for (const token of Object.keys(metadata.providers)) {
+    const cls = metadata.providers[token]?.class
+    if (isGuardClass(cls)) readEnforces(cls, displayName(token), false)
   }
   for (const check of pending) check()
   const checked: CheckedRoute[] = declared.map(route => {
@@ -1127,7 +1151,7 @@ function buildRegistrations(
     if (head !== 0) return head
     return compareRoutePaths(a.path, b.path) || compareStrings(a.method, b.method)
   })
-  return { registrations, checked: { routes: checked, groups } }
+  return { registrations, checked: { routes: checked, groups, enforcers } }
 }
 
 const EMPTY_META: RouteMeta = Object.freeze({})
@@ -1229,17 +1253,20 @@ function assertSse(route: HttpRouteDefinition, where: string): void {
   const sse: unknown = route.sse
   const invalid = (reason: string): ZnightError =>
     new ZnightError(ErrorCode.InvalidRoute, `Invalid route ${where}: ${reason}`, {
-      hints: ['sse: { heartbeat?: 0 | ms ≥ 1000, retry?: ms ≥ 0, maxDuration?: ms ≥ 1000 } on a GET route'],
+      hints: [
+        'sse: { heartbeat?: 0 | 1000 ≤ ms ≤ 2147483647, retry?: ms ≥ 0, maxDuration?: 1000 ≤ ms ≤ 2147483647 } on a GET route',
+      ],
     })
   if (route.method !== 'GET') throw invalid(`sse is only valid on GET routes (method ${route.method})`)
   if (sse === null || typeof sse !== 'object' || Array.isArray(sse)) throw invalid('sse must be an object')
   for (const [key, value] of Object.entries(sse)) {
     if (value === undefined) continue
     const integer = typeof value === 'number' && Number.isSafeInteger(value)
+    const timer = integer && value >= MIN_SSE_INTERVAL_MS && value <= MAX_SSE_TIMER_MS
     const valid =
-      (key === 'heartbeat' && integer && (value === 0 || value >= MIN_SSE_INTERVAL_MS)) ||
+      (key === 'heartbeat' && integer && (value === 0 || timer)) ||
       (key === 'retry' && integer && value >= 0) ||
-      (key === 'maxDuration' && integer && value >= MIN_SSE_INTERVAL_MS)
+      (key === 'maxDuration' && timer)
     if (!valid) throw invalid(`invalid sse.${key} ${describeValue(value)}`)
   }
 }
@@ -1345,6 +1372,17 @@ function globalRefs<T>(
       resolveRef<T>(container, metadata, ref, what, method, () =>
         invalidOption(key, `classes or objects with a ${method}() method`, ref),
       ).resolvable,
+  )
+}
+
+/** A provider class whose instances are guards (a `canActivate()` method on its prototype). */
+function isGuardClass(cls: unknown): boolean {
+  if (typeof cls !== 'function') return false
+  const prototype: unknown = (cls as { prototype?: unknown }).prototype
+  return (
+    typeof prototype === 'object' &&
+    prototype !== null &&
+    typeof (prototype as { canActivate?: unknown }).canActivate === 'function'
   )
 }
 

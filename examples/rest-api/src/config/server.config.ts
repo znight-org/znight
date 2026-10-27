@@ -31,4 +31,20 @@ export class ServerConfig {
   /** Send the message of unexpected errors in 500 responses. Development only. */
   @Env('EXPOSE_ERRORS')
   exposeErrors = false
+
+  /**
+   * Origins of the browser front-ends allowed to call the API (CORS), comma-separated and written
+   * exactly as browsers send them: `https://shelf.example.com,http://localhost:5173`. Empty: no CORS
+   * headers at all (server-to-server clients do not need them). A malformed origin fails the boot.
+   */
+  @Env('CORS_ORIGINS')
+  corsOrigins: string[] = []
+
+  /**
+   * The proxies in front of the API (load balancer, ingress), comma-separated: addresses, CIDR ranges
+   * or the aliases `loopback`, `private` and `linklocal`. Behind them, the client address is read
+   * from `x-forwarded-for`. Empty: the address of the connection.
+   */
+  @Env('TRUSTED_PROXIES')
+  trustedProxies: string[] = []
 }

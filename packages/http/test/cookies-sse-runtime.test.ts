@@ -62,6 +62,8 @@ for (const runtime of ['node', 'bun']) {
       expect(sse['disconnect']).toEqual({ first: 'alive', signals: ['client'], streams: 0 })
       expect(sse['assistant']).toEqual({ status: 200, cookies: ['conversation', 'turn'], tokens: ['a', 'b', ''] })
       expect(sse['rejected']).toContain('answered an event stream (text/event-stream)')
+      // a client leaving during an async pre-flight releases the reply (Hono on Node.js leaked it)
+      expect(sse['leaves']).toEqual({ sse: { inflight: 0, streams: 0 }, stream: { inflight: 0, streams: 0 } })
       for (const [adapter, observed] of Object.entries(results)) {
         expect({ adapter, network: observed.network }).toEqual({ adapter, network: reference })
         expect({ adapter, inject: observed.inject }).toEqual({ adapter, inject: reference })

@@ -2,6 +2,7 @@
 import type { IncomingHttpHeaders, IncomingMessage, OutgoingHttpHeaders, Server, ServerResponse } from 'node:http'
 import type { Socket } from 'node:net'
 import type { AdapterReply, AdapterRequest } from '../adapter.ts'
+import type { HeaderValue } from '../exceptions.ts'
 
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
@@ -237,8 +238,10 @@ export async function writeNodeReply(response: ServerResponse, reply: AdapterRep
     return
   }
   try {
-    // one call (merged over headers set earlier with setHeader(), e.g. by Express middleware)
-    response.writeHead(reply.status, reply.headers as OutgoingHttpHeaders)
+    // one call (merged over headers set earlier with setHeader(), e.g. by Express middleware); the
+    // cookies set earlier are kept before the reply's own (writeHead would replace them)
+    const headers = withNativeCookies(response.getHeader('set-cookie'), reply.headers)
+    response.writeHead(reply.status, headers as OutgoingHttpHeaders)
   } catch {
     // invalid header name or value set by user code
     discardStream(reply.body instanceof ReadableStream ? reply.body : null)
@@ -269,6 +272,22 @@ export async function writeNodeReply(response: ServerResponse, reply: AdapterRep
   } catch {
     if (!response.destroyed) response.destroy()
   }
+}
+
+/**
+ * `headers` with the `set-cookie` lines already set on the native response (Express middleware
+ * `res.cookie()`, Fastify hooks `reply.header('set-cookie', ...)`) before its own: `headers`
+ * unchanged when either side has none.
+ */
+export function withNativeCookies(
+  native: number | string | readonly string[] | undefined,
+  headers: Readonly<Record<string, HeaderValue>>,
+): Readonly<Record<string, HeaderValue>> {
+  const own = headers['set-cookie']
+  if (own === undefined || native === undefined || typeof native === 'number') return headers
+  const before = typeof native === 'string' ? [native] : native
+  if (before.length === 0) return headers
+  return { ...headers, 'set-cookie': [...before, ...(typeof own === 'string' ? [own] : own)] }
 }
 
 /** Last-resort 500 when a handler promise rejected (should not happen: the pipeline maps errors). */
