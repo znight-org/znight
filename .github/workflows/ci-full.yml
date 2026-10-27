@@ -1,0 +1,104 @@
+# Slow suites: end-to-end tests, Docker integration tests and the packed-tarball smoke test.
+#
+# They run on every push to main, on demand (Actions > CI (full) > Run workflow) and on pull
+# requests labelled `ci:full`. Set the repository variable CI_FULL_ON_PR=true to run them on every
+# pull request (recommended once the repository is public: Actions minutes are free). See RELEASING.md.
+name: CI (full)
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    types: [ opened, synchronize, reopened, labeled ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # adding an unrelated label must not cancel a running suite: it gets a group of its own (and skips)
+  group: >-
+    ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}${{
+    github.event.action == 'labeled' && github.event.label.name != 'ci:full'
+    && format('-label-{0}', github.event.label.name) || '' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  e2e:
+    # every e2e suite starts the production builds on Node.js 24 AND on Bun: one job covers both
+    name: E2E (Node 24 + Bun)
+    if: >-
+      github.event_name != 'pull_request' || (
+        (github.event.action != 'labeled' || github.event.label.name == 'ci:full') &&
+        (contains(github.event.pull_request.labels.*.name, 'ci:full') || vars.CI_FULL_ON_PR == 'true')
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          build: "true"
+      - name: Examples, golden and CLI e2e
+        run: bun run test:e2e
+
+  integration:
+    name: Integration (Docker)
+    if: >-
+      github.event_name != 'pull_request' || (
+        (github.event.action != 'labeled' || github.event.label.name == 'ci:full') &&
+        (contains(github.event.pull_request.labels.*.name, 'ci:full') || vars.CI_FULL_ON_PR == 'true')
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      # the worker example's e2e publishes jobs to a real broker (ZNIGHT_E2E_RABBITMQ_URL)
+      rabbitmq:
+        image: rabbitmq:4.1-alpine
+        ports:
+          - 5672:5672
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 5s
+          --health-timeout 10s
+          --health-retries 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          build: "true"
+      - name: Messaging drivers (RabbitMQ, LocalStack SQS, Kafka via testcontainers)
+        run: bun run test:integration
+      - name: Examples e2e against RabbitMQ
+        env:
+          ZNIGHT_E2E: "1"
+          ZNIGHT_INTEGRATION: "1"
+          ZNIGHT_E2E_RABBITMQ_URL: amqp://guest:guest@localhost:5672
+        run: bun run test:examples
+
+  smoke:
+    name: Packed tarballs (${{ matrix.pm }})
+    if: >-
+      github.event_name != 'pull_request' || (
+        (github.event.action != 'labeled' || github.event.label.name == 'ci:full') &&
+        (contains(github.event.pull_request.labels.*.name, 'ci:full') || vars.CI_FULL_ON_PR == 'true')
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        pm: [ npm, bun ]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          build: "true"
+      - name: Install the tarballs in a clean app, build it, run it on Node.js 24 and Bun
+        run: bun run release:smoke --pm ${{ matrix.pm }}

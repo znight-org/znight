@@ -1,0 +1,158 @@
+# Releases (see RELEASING.md).
+#
+# - On every push to main, changesets/action opens or updates the "chore: version packages" pull
+#   request while changesets are pending. Merging it bumps the versions and the changelogs.
+# - Publishing to npm never happens on its own: it is a manual run of this workflow
+#   (Actions > Release > Run workflow, on main), in the `npm` environment. Once the repository is
+#   public and the environment has required reviewers, the repository variable
+#   NPM_PUBLISH_ON_PUSH=true also queues the publish job after each push to main: it then waits for a
+#   reviewer's approval (the job refuses to run if the environment has no required reviewers).
+#
+# npm authentication: the NPM_TOKEN secret when set (bootstrap: the first release), otherwise npm
+# trusted publishing (OIDC). Provenance is attested only when the repository is public.
+name: Release
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Dry run (pack, verify and `npm publish --dry-run`, nothing is published)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    name: Version Packages pull request
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: release-version-pr
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - name: Create or update the pull request
+        uses: changesets/action@v2
+        with:
+          version-script: bun run version
+          commit-message: "chore: version packages"
+          pr-title: "chore: version packages"
+
+  plan:
+    name: Release plan
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.status.outputs.version }}
+      publishable: ${{ steps.status.outputs.publishable }}
+      unpublished: ${{ steps.status.outputs.unpublished }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - name: Versions not on npm yet
+        id: status
+        run: bun scripts/release/status.ts
+      - name: Ready to publish
+        if: >-
+          github.event_name == 'push' && steps.status.outputs.publishable == 'true'
+          && vars.NPM_PUBLISH_ON_PUSH != 'true'
+        env:
+          VERSION: ${{ steps.status.outputs.version }}
+        run: >-
+          echo "::notice title=Ready to publish ${VERSION}::Run the Release workflow manually
+          (Actions > Release > Run workflow, branch main) to publish to npm."
+
+  dry-run:
+    name: Publish (dry run)
+    needs: plan
+    if: github.event_name == 'workflow_dispatch' && inputs.dry_run
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          build: "true"
+      - name: Pack, verify, npm publish --dry-run
+        env:
+          ZNIGHT_REPOSITORY_VISIBILITY: ${{ github.event.repository.visibility }}
+        run: bun scripts/release/publish.ts --dry-run
+
+  publish:
+    name: Publish to npm
+    needs: plan
+    if: >-
+      needs.plan.outputs.publishable == 'true' && (
+        (github.event_name == 'workflow_dispatch' && !inputs.dry_run) ||
+        (github.event_name == 'push' && vars.NPM_PUBLISH_ON_PUSH == 'true')
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: npm
+      url: https://www.npmjs.com/org/znight
+    concurrency:
+      # one publish at a time, never cancelled halfway
+      group: release-publish
+      cancel-in-progress: false
+    permissions:
+      contents: write # tag + GitHub release
+      id-token: write # npm trusted publishing (OIDC) and provenance
+      actions: read # read the protection rules of the npm environment
+    steps:
+      - name: Require an approval for publishing on push
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          reviewers=$(gh api "repos/$GITHUB_REPOSITORY/environments/npm" \
+            --jq '[.protection_rules[]? | select(.type == "required_reviewers")] | length')
+          if [ "$reviewers" = "0" ]; then
+            echo "::error::NPM_PUBLISH_ON_PUSH=true but the npm environment has no required reviewers: refusing to publish without an approval. Add reviewers to the environment or publish with a manual run."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          build: "true"
+
+      - name: Publish
+        id: publish
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          ZNIGHT_REPOSITORY_VISIBILITY: ${{ github.event.repository.visibility }}
+        run: bun scripts/release/publish.ts
+
+      - name: Tag and GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "Release v$VERSION already exists"
+            exit 0
+          fi
+          bun scripts/release/notes.ts "$VERSION" > "$RUNNER_TEMP/notes.md"
+          prerelease=()
+          if [[ "$VERSION" == *-* ]]; then prerelease=(--prerelease); fi
+          gh release create "v$VERSION" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "v$VERSION" --notes-file "$RUNNER_TEMP/notes.md" "${prerelease[@]}"
