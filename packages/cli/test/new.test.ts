@@ -70,6 +70,38 @@ describe('project templates', () => {
     ).toMatchSnapshot()
   })
 
+  it('npm, node, schedule + openapi', () => {
+    expect(Object.fromEntries(files({ features: ['schedule', 'openapi'] }))).toMatchSnapshot()
+  })
+
+  it('schedule: the plugin before HttpPlugin, a sample job and its test-clock test', () => {
+    const project = files({ packageManager: 'bun', features: ['config', 'schedule'] })
+    expect(packageJson(project).dependencies['@znight/schedule']).toBe('^0.1.0')
+    const main = file(project, 'src/main.ts')
+    expect(main).toContain("import { SchedulePlugin } from '@znight/schedule'")
+    expect(main.indexOf('SchedulePlugin.configure()')).toBeLessThan(main.indexOf('HttpPlugin.configure('))
+    expect(file(project, 'src/app/heartbeat.jobs.ts')).toContain("@Cron('* * * * *', { name: 'heartbeat' })")
+    const test = file(project, 'test/heartbeat.jobs.test.ts')
+    expect(test).toContain("import { createTestClock } from '@znight/schedule/testing'")
+    expect(test).toContain("import { describe, expect, test } from 'bun:test'")
+    expect(test).toContain('only: [HeartbeatJobs]')
+    expect(file(files({ features: ['schedule'] }), 'test/heartbeat.jobs.test.ts')).toContain("from 'vitest'")
+    expect(file(project, 'README.md')).toContain('g job reports/digest')
+  })
+
+  it('openapi: the plugin after HttpPlugin, src/api.ts and the openapi scripts', () => {
+    const project = files({ features: ['openapi'] })
+    const manifest = packageJson(project)
+    expect(manifest.dependencies['@znight/openapi']).toBe('^0.1.0')
+    expect(manifest.scripts['openapi']).toBe('znight openapi')
+    expect(manifest.scripts['openapi:check']).toBe('znight openapi --check')
+    const main = file(project, 'src/main.ts')
+    expect(main.indexOf('OpenApiPlugin.configure()')).toBeGreaterThan(main.indexOf('HttpPlugin.configure('))
+    expect(file(project, 'src/api.ts')).toContain('@OpenApiDocument({')
+    expect(file(project, 'README.md')).toContain('| `npm run openapi` | Write `openapi.json`')
+    expect(project.has('src/app/heartbeat.jobs.ts')).toBe(false)
+  })
+
   it('package.json: ESM, scripts, @znight/* in lockstep with the CLI', () => {
     const manifest = packageJson(files({ znightVersion: '1.2.3' }))
     expect(manifest.name).toBe('my-service')
@@ -203,7 +235,8 @@ describe('options', () => {
     expect(parseFeatures(' Messaging , config ')).toEqual({ features: ['config', 'messaging'] })
     expect(parseFeatures('none')).toEqual({ features: [] })
     expect(parseFeatures('')).toEqual({ features: [] })
-    expect(parseFeatures('all')).toEqual({ features: ['config', 'observability', 'messaging'] })
+    expect(parseFeatures('all')).toEqual({ features: ['config', 'observability', 'messaging', 'schedule', 'openapi'] })
+    expect(parseFeatures('openapi,schedule')).toEqual({ features: ['schedule', 'openapi'] })
     expect(parseFeatures('config,graphql')).toEqual({ unknown: ['graphql'] })
   })
 
@@ -252,7 +285,9 @@ describe('znight new', () => {
     )
     expect(run.code).toBe(0)
     expect(run.stderr).toBe('')
-    expect(run.stdout).toContain('✓ Created my-api (bun, fastify, config, observability, messaging) in my-api')
+    expect(run.stdout).toContain(
+      '✓ Created my-api (bun, fastify, config, observability, messaging, schedule, openapi) in my-api',
+    )
     expect(run.stdout).toContain('cd my-api')
     expect(run.stdout).toContain('bun install')
     expect(run.stdout).toContain('bun run dev')

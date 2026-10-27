@@ -35,6 +35,7 @@ export const newCommand: Command = defineCommand({
     examples: [
       'znight new my-service',
       'znight new my-service --yes --pm pnpm --adapter fastify --features config,observability,messaging',
+      'znight new my-worker --yes --features config,schedule',
       'znight new . --yes --no-install',
     ],
   },
@@ -59,7 +60,7 @@ export const newCommand: Command = defineCommand({
       type: 'string',
       valueHint: 'list',
       description:
-        'Comma-separated features: config, observability, messaging, or "all" / "none" (default: config,observability)',
+        'Comma-separated features: config, observability, messaging, schedule, openapi, or "all" / "none" (default: config,observability)',
     },
     install: { type: 'boolean', default: true, description: 'Do not install the dependencies' },
     git: { type: 'boolean', default: true, description: 'Do not initialise a git repository' },

@@ -29,6 +29,9 @@ export const Ids: {
   readonly UploadedFile: string
   readonly UploadedFiles: string
   readonly BodyLimit: string
+  readonly Cookie: string
+  readonly SignedCookie: string
+  readonly Sse: string
   readonly createRouteDecorator: string
   readonly RouteDecorator: string
 } = Object.freeze({
@@ -48,11 +51,14 @@ export const Ids: {
   UploadedFile: '@znight/http#UploadedFile',
   UploadedFiles: '@znight/http#UploadedFiles',
   BodyLimit: '@znight/http#BodyLimit',
+  Cookie: '@znight/http#Cookie',
+  SignedCookie: '@znight/http#SignedCookie',
+  Sse: '@znight/http#Sse',
   createRouteDecorator: '@znight/http#createRouteDecorator',
   RouteDecorator: '@znight/http#RouteDecorator',
 })
 
-/** Route method decorators → HTTP method. */
+/** Route method decorators → HTTP method (`@Sse` declares a `GET` route). */
 export const ROUTE_METHODS: ReadonlyMap<string, HttpMethod> = new Map<string, HttpMethod>([
   ['@znight/http#Get', 'GET'],
   ['@znight/http#Post', 'POST'],
@@ -62,6 +68,7 @@ export const ROUTE_METHODS: ReadonlyMap<string, HttpMethod> = new Map<string, Ht
   ['@znight/http#Head', 'HEAD'],
   ['@znight/http#Options', 'OPTIONS'],
   ['@znight/http#All', 'ALL'],
+  ['@znight/http#Sse', 'GET'],
 ])
 
 /** Parameter decorators → parameter source. */
@@ -75,6 +82,8 @@ export const PARAM_SOURCES: ReadonlyMap<string, HttpParamSource> = new Map<strin
   [Ids.Ctx, 'context'],
   [Ids.UploadedFile, 'file'],
   [Ids.UploadedFiles, 'files'],
+  [Ids.Cookie, 'cookie'],
+  [Ids.SignedCookie, 'signedCookie'],
 ])
 
 /** Error codes used by the extension (see `ErrorCode` in `@znight/core`). */
@@ -145,7 +154,7 @@ export interface HttpParamData {
   /** Parameter name (messages). */
   readonly name: string
   readonly source: HttpParamSource
-  /** Route parameter name, query key or lower-case header name; `undefined` for the whole object. */
+  /** Route parameter name, query key, lower-case header name or cookie name; `undefined` for the whole object. */
   readonly key: string | undefined
   /** Declared (or inferred) type, formatted for humans. */
   readonly type: string | undefined
@@ -186,6 +195,14 @@ export interface MetaEntry {
   readonly definition: Location
 }
 
+/** Options of an `@Sse` route (`HttpRouteDefinition.sse`). */
+export interface SseRouteData {
+  /** Heartbeat in ms; `0` disables it (`heartbeat: false`). Absent: the plugin default. */
+  readonly heartbeat?: number
+  readonly retry?: number
+  readonly maxDuration?: number
+}
+
 /** A route: one route decorator of a handler. */
 export interface HttpRouteData {
   readonly method: HttpMethod
@@ -210,6 +227,8 @@ export interface HttpRouteData {
   /** `@BodyLimit` of the method (or of the controller), in bytes. */
   readonly bodyLimit: number | undefined
   readonly rawResponse: boolean
+  /** `@Sse` route: its options (`{}` without options). */
+  readonly sse?: SseRouteData
   /** Location of the route decorator. */
   readonly location: Location
   /** Location of the path argument (the decorator when absent). */

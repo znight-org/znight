@@ -779,6 +779,58 @@ describe('TestApp.inject', () => {
   })
 })
 
+describe('TestApp.injectStream / injectSse', () => {
+  it('delegate to the http plugin', async () => {
+    const calls: unknown[] = []
+    const stream = { status: 200, headers: {}, cookies: {}, body: new ReadableStream<Uint8Array>() }
+    const sse = { status: 200, body: '' }
+    const plugin = {
+      name: HTTP_PLUGIN_NAME,
+      injectStream(request: unknown) {
+        calls.push(['stream', request, this === plugin])
+        return Promise.resolve(stream)
+      },
+      injectSse(request: unknown) {
+        calls.push(['sse', request, this === plugin])
+        return Promise.resolve(sse)
+      },
+    }
+    const app = await TestApp.create({ metadata, providers, plugins: [plugin], logger: quiet() })
+    const signal = new AbortController().signal
+    expect(await app.injectStream({ url: '/a', signal })).toBe(stream as never)
+    expect(await app.injectSse({ method: 'post', url: '/b', cookies: { c: '1' } })).toBe(sse as never)
+    expect(calls).toEqual([
+      ['stream', { method: 'GET', url: '/a', signal }, true],
+      ['sse', { method: 'POST', url: '/b', cookies: { c: '1' } }, true],
+    ])
+    await app.close()
+  })
+
+  it('require an http plugin with streaming support (ZNIGHT001)', async () => {
+    const none = await TestApp.create({ metadata, providers, logger: quiet() })
+    const missing = await rejection(none.injectSse({ url: '/' }))
+    expect(missing.code).toBe(ErrorCode.MissingProvider)
+    expect(missing.message).toBe('ZNIGHT001: TestApp.injectSse() requires the HTTP plugin with streaming support')
+    expect(missing.hints.join()).toContain('HttpPlugin.configure')
+    const old = await TestApp.create({ metadata, providers, plugins: [fakeHttp()], logger: quiet() })
+    const outdated = await rejection(old.injectStream({ url: '/' }))
+    expect(outdated.code).toBe(ErrorCode.MissingProvider)
+    expect(outdated.hints).toEqual(['TestApp.injectStream() requires @znight/http ≥ 0.2 (HttpPlugin.injectStream())'])
+    await Promise.all([none.close(), old.close()])
+  })
+
+  it('validate the request and fail once closed', async () => {
+    const app = await TestApp.create({ metadata, providers, plugins: [fakeHttp()], logger: quiet() })
+    expect(await rejection(app.injectSse({} as never))).toBeInstanceOf(TypeError)
+    expect(await rejection(app.injectStream(null as never))).toBeInstanceOf(TypeError)
+    await app.close()
+    expect((await rejection(app.injectSse({ url: '/' }))).code).toBe(ErrorCode.LifecycleFailed)
+    expect((await rejection(app.injectStream({ url: '/' }))).message).toContain(
+      'TestApp.injectStream(): the application is closed',
+    )
+  })
+})
+
 describe('TestApp.get', () => {
   it('resolves by class, token or display name', async () => {
     const app = await TestApp.create({ metadata, providers, logger: quiet() })

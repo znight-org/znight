@@ -25,6 +25,14 @@ export type {
   ZnightOptions,
 } from './integrations/compiler.ts'
 export type {
+  OpenApiEmitApi,
+  OpenApiEmitOptionsLike,
+  OpenApiEmitResultLike,
+  OpenApiViteApi,
+  OpenApiVitePluginOptionsLike,
+  OpenApiWarningLike,
+} from './integrations/openapi.ts'
+export type {
   ChildHandle,
   ExecveFunction,
   ExitStatus,

@@ -198,7 +198,23 @@ export function nodeAdapterRequest(
     },
     streamBody: (limit: number): ReadableStream<Uint8Array> => nodeBodyStream(request, limit),
     rawStatus: (): number => response.statusCode,
+    onAbort: (listener: () => void): void => onResponseAbort(response, listener),
   }
+}
+
+/**
+ * Calls `listener` once when `response` closes before it was fully written (the client left): on
+ * the next microtask when it is already destroyed, never after a complete response.
+ */
+export function onResponseAbort(response: ServerResponse, listener: () => void): void {
+  if (response.writableFinished) return
+  if (response.destroyed) {
+    queueMicrotask(listener)
+    return
+  }
+  response.once('close', () => {
+    if (!response.writableFinished) listener()
+  })
 }
 
 /** Whether the request came over TLS (`node:https`, `node:http2` secure servers). */
@@ -238,6 +254,10 @@ export async function writeNodeReply(response: ServerResponse, reply: AdapterRep
   if (body === null) {
     response.end()
     return
+  }
+  // an event stream may stay quiet longer than a socket timeout (`server.timeout`, Bun's emulation)
+  if (reply.eventStream === true && (response as { isLightMyRequest?: boolean }).isLightMyRequest !== true) {
+    response.setTimeout(0)
   }
   if (body instanceof Uint8Array) {
     response.end(body)

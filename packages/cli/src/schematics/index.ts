@@ -8,7 +8,15 @@ import { isAbsolute, join, normalize } from 'node:path'
 import { camelCase, constantCase, kebabCase, pascalCase } from '../names.ts'
 
 /** Available schematics. */
-export type SchematicName = 'service' | 'controller' | 'consumer' | 'config' | 'guard' | 'interceptor' | 'factory'
+export type SchematicName =
+  | 'service'
+  | 'controller'
+  | 'consumer'
+  | 'config'
+  | 'guard'
+  | 'interceptor'
+  | 'factory'
+  | 'job'
 
 /** Names derived from the user input. */
 export interface SchematicNames {
@@ -161,6 +169,11 @@ import { Injectable } from '@znight/core'
 
 @Injectable()
 export class ${names.className} implements CanActivate {
+  // The route decisions this guard enforces (createRouteDecorator groups, see "Route decisions" in
+  // the @znight/http README): the boot fails when a route of a required group has no guard
+  // enforcing its decision.
+  // static readonly enforces = [Public, Roles]
+
   canActivate(ctx: HttpContext): boolean | Promise<boolean> {
     // Return false (403 Forbidden) or throw an HttpException (UnauthorizedException...) to reject
     // the request, e.g. return ctx.header('authorization') !== undefined
@@ -238,8 +251,41 @@ export class ${names.className} {
 `,
 }
 
+const job: Schematic = {
+  name: 'job',
+  aliases: ['j'],
+  description: 'Scheduled jobs: @Cron, @Interval, @Timeout methods (@znight/schedule)',
+  suffix: 'jobs',
+  render: names => `import { Cron, type JobContext } from '@znight/schedule'
+
+/**
+ * Scheduled jobs. A class with @Cron, @Interval or @Timeout methods becomes a singleton provider
+ * (no decorator needed): declare its dependencies as constructor parameters.
+ */
+export class ${names.className} {
+  /** Every day at 03:00 UTC (set timeZone to follow a local clock). A run still running is skipped. */
+  @Cron('0 3 * * *', { name: '${names.kebab}.daily' })
+  daily(ctx: JobContext): void {
+    // checkpoint: throws when the run is aborted (shutdown, maxDuration or a lost lock)
+    ctx.signal.throwIfAborted()
+  }
+}
+`,
+  hint: () =>
+    'jobs run with SchedulePlugin.configure() in src/main.ts; test them with createTestClock() from @znight/schedule/testing',
+}
+
 /** Every schematic, in display order. */
-export const SCHEMATICS: readonly Schematic[] = [service, controller, consumer, config, guard, interceptor, factory]
+export const SCHEMATICS: readonly Schematic[] = [
+  service,
+  controller,
+  consumer,
+  config,
+  guard,
+  interceptor,
+  factory,
+  job,
+]
 
 /** Finds a schematic by name or alias. */
 export function findSchematic(name: string): Schematic | undefined {

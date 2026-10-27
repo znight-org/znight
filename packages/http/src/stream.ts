@@ -129,9 +129,14 @@ export interface TrackedStream {
  * Wraps a response body so that the pipeline knows when it has been fully sent (or abandoned) and
  * reads the source in `run` (the async context of the request scope, so that stream producers can
  * use request-scoped providers). The wrapper is pull-based (no read-ahead): backpressure is the
- * consumer's. A `Blob` is read through `blob.stream()`, opened on the first read only.
+ * consumer's. A `Blob` is read through `blob.stream()`, opened on the first read only. `onCancel`
+ * runs when the consumer cancels the stream (the client left), before the source is cancelled.
  */
-export function trackStream(body: ReadableStream<Uint8Array> | Blob, run: ContextRunner): TrackedStream {
+export function trackStream(
+  body: ReadableStream<Uint8Array> | Blob,
+  run: ContextRunner,
+  onCancel?: () => void,
+): TrackedStream {
   let reader: ByteReader | undefined = body instanceof Blob ? undefined : body.getReader()
   let settle: (error: unknown) => void = () => undefined
   const done = new Promise<unknown>(resolve => {
@@ -164,6 +169,7 @@ export function trackStream(body: ReadableStream<Uint8Array> | Blob, run: Contex
         controller.enqueue(result.value as Uint8Array)
       },
       async cancel(reason) {
+        onCancel?.()
         try {
           const current = reader
           if (current !== undefined) await run(() => current.cancel(reason))

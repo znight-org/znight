@@ -45,6 +45,22 @@ describe('schematic contents', () => {
     expect(plan.hint).toContain('@Intercept(TimingInterceptor)')
   })
 
+  it('job: a class of scheduled jobs named <Name>Jobs', () => {
+    const plan = planSchematic({ schematic: schematic('job'), name: 'reports/digest', root: '/app', context: plain })
+    expect(plan.file).toBe('/app/src/reports/digest.jobs.ts')
+    expect(plan.names.className).toBe('DigestJobs')
+    expect(plan.content).toContain("@Cron('0 3 * * *', { name: 'digest.daily' })")
+    expect(plan.content).toContain("import { Cron, type JobContext } from '@znight/schedule'")
+    expect(plan.hint).toContain('SchedulePlugin.configure()')
+    expect(findSchematic('j')?.name).toBe('job')
+    expect(parseSchematicName('digest-jobs', schematic('job')).names.kebab).toBe('digest')
+  })
+
+  it('guard: a commented static enforces line (route decisions)', () => {
+    const plan = planSchematic({ schematic: schematic('guard'), name: 'auth', root: '/app', context: plain })
+    expect(plan.content).toContain('// static readonly enforces = [Public, Roles]')
+  })
+
   it('config: prefix and environment names from the name', () => {
     const plan = planSchematic({
       schematic: schematic('config'),
@@ -135,6 +151,7 @@ describe('znight g', () => {
       'thing/thing.factory.ts',
       'thing/thing.guard.ts',
       'thing/thing.interceptor.ts',
+      'thing/thing.jobs.ts',
       'thing/thing.service.ts',
     ])
     // the project depends on zod: the consumer validates its messages

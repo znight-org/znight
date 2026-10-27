@@ -147,7 +147,18 @@ function expectSuccess(result: Result, step: string): void {
 }
 
 const VITE_CONFIG = 'vite.e2e.config.ts'
-const WORKSPACE_PACKAGES = ['cli', 'compiler', 'config', 'core', 'http', 'messaging', 'observability', 'testing']
+const WORKSPACE_PACKAGES = [
+  'cli',
+  'compiler',
+  'config',
+  'core',
+  'http',
+  'messaging',
+  'observability',
+  'openapi',
+  'schedule',
+  'testing',
+]
 
 describe.skipIf(!enabled)('scaffolded application (ZNIGHT_CLI_E2E=1)', () => {
   beforeAll(async () => {

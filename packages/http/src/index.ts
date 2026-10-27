@@ -13,11 +13,23 @@ export type {
   HttpServerAddress,
   InjectRequest,
   InjectResponse,
+  InjectStreamOptions,
+  InjectStreamRequest,
+  InjectStreamResponse,
   ReplyBody,
 } from './adapter.ts'
-export type { HttpContext, HttpRouteInfo, RequestId } from './context.ts'
+export type { HttpContext, HttpRouteInfo, RequestAbortKind, RequestId } from './context.ts'
+export type {
+  ClearCookieOptions,
+  CookieDefaults,
+  CookieOptions,
+  ResponseCookie,
+  SetCookieInfo,
+} from './cookies.ts'
 export type { CorsOptions, CorsOrigin } from './cors.ts'
 export type { EnforcementMode } from './decisions.ts'
+export type { EventChannelOptions } from './event-channel.ts'
+export type { InjectSseResponse, InjectSseWaitOptions } from './inject-sse.ts'
 export type {
   CallHandler,
   CanActivate,
@@ -37,23 +49,29 @@ export type {
   HttpParamSource,
   HttpRouteDefinition,
   HttpRouteGroupDefinition,
+  HttpSseDefinition,
   HttpUploadDefinition,
 } from './metadata.ts'
 export type { PluginHttpRoutes, PluginHttpRoutesContext, PluginRoute } from './plugin-routes.ts'
 export type { TrustProxy } from './proxy.ts'
 export type { HstsOptions, SecurityHeadersOptions } from './security-headers.ts'
 export type { ByteSize } from './size.ts'
+export type { SseBody, SseEvent, SseOptions, SseSource } from './sse.ts'
+export type { ParseSseOptions, SseItem, SseMessage } from './sse-parse.ts'
 export type { StreamSource } from './stream.ts'
 
 export { type NodeAdapter, type NodeAdapterOptions, nodeAdapter } from './adapters/node.ts'
 export { isJsonType, type MediaType, parseBody, parseMediaType } from './body.ts'
 export { type Coercer, type Coercers, coerce } from './coerce.ts'
+export { RequestAbortedError } from './context.ts'
+export { parseCookieHeader, parseSetCookie, serializeClearCookie, serializeCookie } from './cookies.ts'
 export {
   All,
   Body,
   BodyLimit,
   Controller,
   type ControllerOptions,
+  Cookie,
   Ctx,
   createRouteDecorator,
   Delete,
@@ -75,12 +93,15 @@ export {
   type RouteDecoratorInfo,
   type RouteDecoratorOptions,
   type RouteMetaEntry,
+  SignedCookie,
+  Sse,
   UploadedFile,
   UploadedFiles,
   UseGuard,
   UseInterceptor,
   Validate,
 } from './decorators.ts'
+export { EventChannel } from './event-channel.ts'
 export {
   BadGatewayException,
   BadRequestException,
@@ -119,9 +140,11 @@ export { contentTypeFor, matchesMediaType } from './mime.ts'
 export {
   type ExceptionMapperRef,
   type GuardRef,
+  type HttpCookieOptions,
   HttpPlugin,
   type HttpPluginOptions,
   type HttpRouteSummary,
+  type HttpSseOptions,
   type InterceptorRef,
   type TrailingSlashPolicy,
 } from './plugin.ts'
@@ -134,6 +157,8 @@ export {
   type StreamResponseOptions,
 } from './response.ts'
 export { formatByteSize, parseByteSize } from './size.ts'
+export { encodeSseEvent } from './sse.ts'
+export { parseSseStream } from './sse-parse.ts'
 export {
   type InferSchemaInput,
   type InferSchemaOutput,

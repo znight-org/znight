@@ -1,7 +1,18 @@
 import type { Container, Plugin, PluginContext, PluginOptions, ProviderKey, Token, ZnightMetadata } from '@znight/core'
-import type { AdapterReply, HttpAdapter, HttpServerAddress, InjectRequest, InjectResponse } from './adapter.ts'
+import type {
+  AdapterReply,
+  HttpAdapter,
+  HttpServerAddress,
+  InjectRequest,
+  InjectResponse,
+  InjectStreamOptions,
+  InjectStreamResponse,
+} from './adapter.ts'
 import type { HttpContext } from './context.ts'
+import type { CookieSettings } from './cookie-settings.ts'
+import type { CookieDefaults } from './cookies.ts'
 import type { CorsOptions, CorsPolicy } from './cors.ts'
+import type { InjectSseResponse } from './inject-sse.ts'
 import type {
   CanActivate,
   ExceptionMapper,
@@ -19,6 +30,9 @@ import type { ByteSize } from './size.ts'
 import { displayName, ErrorCode, resolveOptions, ZnightError } from '@znight/core'
 
 import { nodeAdapter } from './adapters/node.ts'
+import { DEFAULT_COOKIE_SETTINGS, missingSecrets, signValue } from './cookie-settings.ts'
+import { type CookieSecret, CookieSigner, checkSecrets } from './cookie-signer.ts'
+import { DEFAULT_COOKIE_OPTIONS, decodeCookieValue, isCookieName, serializeResponseCookie } from './cookies.ts'
 import { resolveCors } from './cors.ts'
 import {
   type CheckedRoute,
@@ -31,15 +45,17 @@ import {
   type RouteMeta,
 } from './decisions.ts'
 import { isHeaderName } from './headers.ts'
+import { openInjectSse } from './inject-sse.ts'
 import { isMediaTypePattern } from './mime.ts'
 import { invalidOption } from './option-error.ts'
 import { compareRoutePaths, compareStrings, joinPaths, parseRoutePath, type RoutePath, RoutePathError } from './path.ts'
-import { Pipeline, type Resolvable, type RoutePlan } from './pipeline.ts'
+import { DEFAULT_SSE_SETTINGS, Pipeline, type Resolvable, type RoutePlan, type SseSettings } from './pipeline.ts'
 import { collectPluginRoutes } from './plugin-routes.ts'
 import { resolveTrustProxy } from './proxy.ts'
 import { RouteTable } from './router.ts'
 import { resolveSecurityHeaders } from './security-headers.ts'
 import { parseByteSize } from './size.ts'
+import { MIN_SSE_INTERVAL_MS } from './sse.ts'
 import { isValidStatus } from './status.ts'
 import { HttpTokens } from './tokens.ts'
 import { bodyPlan, DEFAULT_UPLOAD_LIMITS, type ResolvedUploadLimits, type UploadLimits } from './uploads.ts'
@@ -125,6 +141,40 @@ export interface HttpPluginOptions {
    * boot, `'warn'` logs one warning per group (tests that deliberately run without guards).
    */
   readonly enforcement?: EnforcementMode
+  /** Cookies: signing keys and defaults (see {@link HttpCookieOptions}). */
+  readonly cookies?: HttpCookieOptions
+  /** Server-Sent Events defaults (see {@link HttpSseOptions}). */
+  readonly sse?: HttpSseOptions
+}
+
+/** The plugin option `cookies`. */
+export interface HttpCookieOptions {
+  /**
+   * HMAC keys of signed cookies (`@SignedCookie`, `{ signed: true }`), at least 32 bytes each: the
+   * first signs, all verify (rotation: deploy `[next, current]`, wait for the longest cookie
+   * lifetime, then `[next]`). Default: none (signed cookies unavailable).
+   */
+  readonly secrets?: string | Uint8Array | readonly (string | Uint8Array)[]
+  /**
+   * Defaults of every cookie set by the application, merged over the secure defaults
+   * `{ path: '/', secure: true, httpOnly: true, sameSite: 'lax' }` (e.g. `{ secure: false }` for
+   * plain `http://` development setups on a non-localhost host).
+   */
+  readonly defaults?: CookieDefaults
+}
+
+/** The plugin option `sse`. */
+export interface HttpSseOptions {
+  /** Default heartbeat (ms, an integer ≥ 1 000, or `false`). Default: 8 000. */
+  readonly heartbeat?: number | false
+  /** Default `retry` sent first (ms). Default: none. */
+  readonly retry?: number
+  /**
+   * Time an event source gets to finish after `ctx.signal` aborted on shutdown or `maxDuration` (ms),
+   * before the stream ends with a jittered `retry`. Must be lower than `drainTimeoutMs`. Default:
+   * 1 000.
+   */
+  readonly shutdownGraceMs?: number
 }
 
 /** A route registered by the plugin (see {@link HttpPlugin.routes}). */
@@ -159,6 +209,8 @@ interface Resolved {
   readonly securityHeaders: Readonly<Record<string, string>>
   readonly trustProxy: TrustPolicy | undefined
   readonly enforcement: EnforcementMode
+  readonly cookies: CookieSettings
+  readonly sse: SseSettings
 }
 
 /** Resolved options and the raw options they come from (memoised per application). */
@@ -283,6 +335,26 @@ export class HttpPlugin implements Plugin {
     return this.#runtime?.pipeline.inflight ?? 0
   }
 
+  /** Number of open event streams (`@Sse`, `HttpResponse.sse()`): health checks, gauges, stream caps. */
+  get streams(): number {
+    return this.#runtime?.pipeline.streams ?? 0
+  }
+
+  /**
+   * The signed wire value of a cookie (`<encoded value>.<signature>`, signed with the first secret of
+   * `cookies.secrets`): what a browser would send back after `setCookie(name, value, { signed: true })`.
+   * For gateways minting cookies and for tests. Available after `onBootstrap`.
+   *
+   * @throws TypeError for an invalid name or value; Error without `cookies.secrets`.
+   */
+  signCookie(name: string, value: string): string {
+    const signer = this.#require('signCookie()').options.cookies.signer
+    if (!isCookieName(name)) throw new TypeError(`Invalid cookie name ${JSON.stringify(String(name))}`)
+    if (typeof value !== 'string') throw new TypeError(`The value of the cookie "${name}" must be a string`)
+    if (signer === undefined) throw missingSecrets(`Cannot sign the cookie "${name}"`)
+    return signValue(signer, name, value)
+  }
+
   /**
    * The provider classes the plugin resolves in `onBootstrap` although no compiled metadata
    * references them: the classes of the `guards`, `interceptors` and `exceptionMappers` options
@@ -323,10 +395,52 @@ export class HttpPlugin implements Plugin {
    */
   inject(request: InjectRequest): Promise<InjectResponse> {
     try {
-      return this.#require('inject()').adapter.inject(request)
+      const runtime = this.#require('inject()')
+      return runtime.adapter.inject(withSignedCookies(request, runtime.options.cookies, 'inject()'))
     } catch (error) {
       return Promise.reject(error)
     }
+  }
+
+  /**
+   * Sends a request in memory and resolves at the response headers, the body being read as it is
+   * produced (`body`). Cancelling `body` (or aborting `signal`) disconnects the client. Requires an
+   * adapter implementing `injectStream()` (the four built-in ones do).
+   */
+  injectStream(request: InjectStreamOptions): Promise<InjectStreamResponse> {
+    try {
+      if (request === null || typeof request !== 'object')
+        throw new TypeError('injectStream() expects a request object')
+      const runtime = this.#require('injectStream()')
+      const adapter = runtime.adapter
+      if (typeof adapter.injectStream !== 'function') {
+        throw new ZnightError(
+          ErrorCode.LifecycleFailed,
+          `HttpPlugin: the ${adapter.name} adapter does not implement injectStream()`,
+          { hints: ['Use a built-in adapter (node, fastify, express, hono) or implement HttpAdapter.injectStream()'] },
+        )
+      }
+      const sent = { ...request, method: request.method ?? 'GET' }
+      return adapter.injectStream(withSignedCookies(sent, runtime.options.cookies, 'injectStream()'))
+    } catch (error) {
+      return Promise.reject(error)
+    }
+  }
+
+  /**
+   * Opens an event stream in memory (`accept: text/event-stream`) and reads its events like
+   * `EventSource`: `next()`, `take()`, `comments`, `retry`, `lastEventId`, `reconnect()`, `close()`
+   * (the server sees a client disconnect). A response that is not an event stream (404, 204...) is
+   * read to its end (`body`).
+   *
+   * ```ts
+   * await using stream = await http.injectSse({ url: '/orders/o-1/events' })
+   * const event = await stream.next() // rejects after 2 000 ms
+   * expect(event.json()).toMatchObject({ status: 'paid' })
+   * ```
+   */
+  injectSse(request: InjectStreamOptions): Promise<InjectSseResponse> {
+    return openInjectSse(stream => this.injectStream(stream), request)
   }
 
   register(ctx: PluginContext): void {
@@ -377,6 +491,8 @@ export class HttpPlugin implements Plugin {
         cors: options.cors,
         securityHeaders: options.securityHeaders,
         trustProxy: options.trustProxy,
+        cookies: options.cookies,
+        sse: options.sse,
       },
       table,
     )
@@ -426,6 +542,8 @@ export class HttpPlugin implements Plugin {
     const runtime = this.#runtime
     if (runtime === undefined) return
     runtime.pipeline.draining = true
+    // event streams never end by themselves: let their sources finish, then send them a jittered retry
+    runtime.pipeline.closeStreams('shutdown')
     const timeoutMs = runtime.options.drainTimeoutMs
     let timer: ReturnType<typeof setTimeout> | undefined
     // no timer for Infinity; larger delays than setTimeout supports are clamped (they would fire at once)
@@ -546,6 +664,8 @@ function resolve(options: HttpPluginOptions): Resolved {
     throw invalidOption('enforcement', '"error" or "warn"', enforcement)
   }
   const resolvedRequestIdHeader = requestIdHeader === false ? undefined : requestIdHeader.toLowerCase()
+  const cookies = resolveCookies(options.cookies)
+  const sse = resolveSse(options.sse, drainTimeoutMs)
   return {
     adapter,
     port,
@@ -562,7 +682,123 @@ function resolve(options: HttpPluginOptions): Resolved {
     securityHeaders: resolveSecurityHeaders(options.securityHeaders),
     trustProxy: resolveTrustProxy(options.trustProxy),
     enforcement,
+    cookies,
+    sse,
   }
+}
+
+const COOKIE_DEFAULT_KEYS = ['domain', 'path', 'secure', 'httpOnly', 'sameSite', 'partitioned', 'priority']
+
+function resolveCookies(value: HttpCookieOptions | undefined): CookieSettings {
+  if (value === undefined) return DEFAULT_COOKIE_SETTINGS
+  if (value === null || typeof value !== 'object')
+    throw invalidOption('cookies', 'an object { secrets?, defaults? }', value)
+  for (const key of Object.keys(value)) {
+    if (key !== 'secrets' && key !== 'defaults') {
+      throw invalidOption('cookies', 'an object { secrets?, defaults? }', `unknown key "${key}"`)
+    }
+  }
+  let signer: CookieSigner | undefined
+  if (value.secrets !== undefined) {
+    const checked = checkSecrets(value.secrets)
+    // never echo a secret in an error
+    if ('problem' in checked) {
+      throw new ZnightError(
+        ErrorCode.InvalidDecorator,
+        `HttpPlugin: option "cookies.secrets" must be ${checked.problem}`,
+        {
+          hints: ["Generate secrets with crypto.randomBytes(32).toString('base64url') and load them with @Secret"],
+        },
+      )
+    }
+    signer = new CookieSigner(checked.secrets as readonly CookieSecret[])
+  }
+  const given = value.defaults
+  if (given !== undefined && (given === null || typeof given !== 'object' || Array.isArray(given))) {
+    throw invalidOption('cookies.defaults', `an object { ${COOKIE_DEFAULT_KEYS.join('?, ')}? }`, given)
+  }
+  const defaults: CookieDefaults = { ...DEFAULT_COOKIE_OPTIONS }
+  for (const [key, option] of Object.entries(given ?? {})) {
+    if (!COOKIE_DEFAULT_KEYS.includes(key)) {
+      throw invalidOption(
+        'cookies.defaults',
+        `an object { ${COOKIE_DEFAULT_KEYS.join('?, ')}? }`,
+        `unknown key "${key}"`,
+      )
+    }
+    if (option !== undefined) (defaults as Record<string, unknown>)[key] = option
+  }
+  try {
+    // a probe cookie checks every default and their combination (SameSite=None without Secure...)
+    serializeResponseCookie({ name: 'probe', value: '', options: {} }, defaults)
+  } catch (error) {
+    throw invalidOption('cookies.defaults', 'valid cookie attributes', given, error, [
+      error instanceof Error ? error.message.replace('Invalid cookie "probe": ', '') : String(error),
+    ])
+  }
+  return Object.freeze({ defaults: Object.freeze(defaults), signer })
+}
+
+function resolveSse(value: HttpSseOptions | undefined, drainTimeoutMs: number): SseSettings {
+  if (value === undefined) return DEFAULT_SSE_SETTINGS
+  const shape = '{ heartbeat?, retry?, shutdownGraceMs? }'
+  if (value === null || typeof value !== 'object') throw invalidOption('sse', `an object ${shape}`, value)
+  for (const key of Object.keys(value)) {
+    if (key !== 'heartbeat' && key !== 'retry' && key !== 'shutdownGraceMs') {
+      throw invalidOption('sse', `an object ${shape}`, `unknown key "${key}"`)
+    }
+  }
+  const heartbeat = value.heartbeat ?? DEFAULT_SSE_SETTINGS.heartbeat
+  if (heartbeat !== false && !(Number.isSafeInteger(heartbeat) && heartbeat >= MIN_SSE_INTERVAL_MS)) {
+    throw invalidOption('sse.heartbeat', `an integer number of ms ≥ ${MIN_SSE_INTERVAL_MS}, or false`, heartbeat)
+  }
+  const retry = value.retry
+  if (retry !== undefined && !(Number.isSafeInteger(retry) && retry >= 0)) {
+    throw invalidOption('sse.retry', 'an integer number of ms ≥ 0', retry)
+  }
+  const shutdownGraceMs = value.shutdownGraceMs ?? DEFAULT_SSE_SETTINGS.shutdownGraceMs
+  if (!(Number.isSafeInteger(shutdownGraceMs) && shutdownGraceMs >= 0)) {
+    throw invalidOption('sse.shutdownGraceMs', 'an integer number of ms ≥ 0', shutdownGraceMs)
+  }
+  if (drainTimeoutMs !== Number.POSITIVE_INFINITY && shutdownGraceMs >= drainTimeoutMs) {
+    throw invalidOption(
+      'sse.shutdownGraceMs',
+      `lower than drainTimeoutMs (${drainTimeoutMs})`,
+      shutdownGraceMs,
+      undefined,
+      [
+        'Event streams get shutdownGraceMs to finish, within the drain of in-flight requests: shutdownGraceMs < drainTimeoutMs < shutdown.hookTimeoutMs',
+      ],
+    )
+  }
+  return Object.freeze({ heartbeat: heartbeat === false ? 0 : heartbeat, retry, shutdownGraceMs })
+}
+
+/**
+ * The request with its `signedCookies` signed (first secret) and merged into `cookies`: adapters
+ * never receive `signedCookies`.
+ */
+function withSignedCookies<R extends InjectRequest>(request: R, cookies: CookieSettings, action: string): R {
+  if (request === null || typeof request !== 'object' || request.signedCookies === undefined) return request
+  const signed = request.signedCookies
+  if (signed === null || typeof signed !== 'object') throw new TypeError(`${action}: signedCookies must be an object`)
+  const signer = cookies.signer
+  if (signer === undefined) {
+    throw new TypeError(
+      `${action}: signedCookies require the HttpPlugin option cookies.secrets (HttpPlugin.configure({ cookies: { secrets: [...] } }))`,
+    )
+  }
+  const merged: Record<string, string> = { ...request.cookies }
+  for (const name of Object.keys(signed)) {
+    const value = signed[name]
+    if (!isCookieName(name)) throw new TypeError(`${action}: invalid signed cookie name ${JSON.stringify(name)}`)
+    if (typeof value !== 'string')
+      throw new TypeError(`${action}: the value of the signed cookie "${name}" must be a string`)
+    // the decoded wire value: inject() encodes cookie values again (the encoding is canonical)
+    merged[name] = decodeCookieValue(signValue(signer, name, value))
+  }
+  const { signedCookies: _signed, ...rest } = request
+  return { ...rest, cookies: merged } as R
 }
 
 function resolveUploadLimits(value: UploadLimits | undefined): ResolvedUploadLimits {
@@ -673,6 +909,20 @@ function buildRegistrations(
     for (const route of controller.routes) {
       const where = `${name}.${String(route?.handler)}`
       assertRoute(route, where)
+      if (options.cookies.signer === undefined) {
+        const signed = route.params.find(param => param?.source === 'signedCookie')
+        if (signed !== undefined) {
+          throw new ZnightError(
+            ErrorCode.MissingConfig,
+            `HttpPlugin: ${where} reads a signed cookie (@SignedCookie('${signed.name ?? ''}')) but cookies.secrets is not set`,
+            {
+              hints: [
+                "Set HttpPlugin.configure({ cookies: { secrets: [...] } }) with secrets of at least 32 bytes (crypto.randomBytes(32).toString('base64url'))",
+              ],
+            },
+          )
+        }
+      }
       let path: RoutePath
       try {
         path = parseRoutePath(joinPaths(options.prefix, route.fullPath))
@@ -972,6 +1222,26 @@ function assertRoute(route: HttpRouteDefinition, where: string): void {
     )
   }
   if (route.uploads !== undefined) assertUploads(route, where)
+  if (route.sse !== undefined) assertSse(route, where)
+}
+
+function assertSse(route: HttpRouteDefinition, where: string): void {
+  const sse: unknown = route.sse
+  const invalid = (reason: string): ZnightError =>
+    new ZnightError(ErrorCode.InvalidRoute, `Invalid route ${where}: ${reason}`, {
+      hints: ['sse: { heartbeat?: 0 | ms ≥ 1000, retry?: ms ≥ 0, maxDuration?: ms ≥ 1000 } on a GET route'],
+    })
+  if (route.method !== 'GET') throw invalid(`sse is only valid on GET routes (method ${route.method})`)
+  if (sse === null || typeof sse !== 'object' || Array.isArray(sse)) throw invalid('sse must be an object')
+  for (const [key, value] of Object.entries(sse)) {
+    if (value === undefined) continue
+    const integer = typeof value === 'number' && Number.isSafeInteger(value)
+    const valid =
+      (key === 'heartbeat' && integer && (value === 0 || value >= MIN_SSE_INTERVAL_MS)) ||
+      (key === 'retry' && integer && value >= 0) ||
+      (key === 'maxDuration' && integer && value >= MIN_SSE_INTERVAL_MS)
+    if (!valid) throw invalid(`invalid sse.${key} ${describeValue(value)}`)
+  }
 }
 
 function isSize(value: unknown): boolean {

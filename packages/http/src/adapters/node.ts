@@ -11,13 +11,15 @@ import type {
   HttpServerAddress,
   InjectRequest,
   InjectResponse,
+  InjectStreamRequest,
+  InjectStreamResponse,
 } from '../adapter.ts'
 
 import { createServer, type IncomingMessage, type Server, type ServerOptions, type ServerResponse } from 'node:http'
 
 import { RouteTable } from '../router.ts'
 import { ConnectionTracker, closeServer, nodeAdapterRequest, writeNodeFailure, writeNodeReply } from './node-io.ts'
-import { injectNode, serverAddress } from './shared.ts'
+import { bufferInjectStream, injectNodeStream, serverAddress } from './shared.ts'
 
 /** Options of {@link nodeAdapter}. */
 export interface NodeAdapterOptions {
@@ -124,6 +126,10 @@ class NodeHttpAdapter implements NodeAdapter {
   }
 
   inject(request: InjectRequest): Promise<InjectResponse> {
-    return injectNode('node', this.handler as (req: never, res: never) => void, request)
+    return bufferInjectStream(stream => this.injectStream(stream), request)
+  }
+
+  injectStream(request: InjectStreamRequest): Promise<InjectStreamResponse> {
+    return injectNodeStream('node', this.handler as (req: never, res: never) => void, request)
   }
 }

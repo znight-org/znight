@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 688 340" width="688" height="340" role="img" aria-labelledby="title desc">
+<title id="title">Compiler pipeline</title>
+<desc id="desc">The seven steps of the Znight compiler. 1 scan the files matched by include and exclude, plus provider libraries. 2 parse them with oxc and extract per-file facts, both cached per file by content hash. 3 resolve canonical identities. 4 analyse classes with the core and the compiler extensions. 5 bind every injection point. 6 validate the whole graph, reporting ZNIGHT diagnostics with code frames. 7 emit the module, re-parse it as a check, and write container.generated.ts only if its content changed.</desc>
+<defs>
+<linearGradient id="zn-card" x1="0" y1="0" x2="0" y2="1">
+<stop offset="0" stop-color="#1A2350"/>
+<stop offset="1" stop-color="#0B1020"/>
+</linearGradient>
+<linearGradient id="zn-accent" x1="0" y1="0" x2="1" y2="1">
+<stop offset="0" stop-color="#2F6AE8"/>
+<stop offset="1" stop-color="#7C4DEF"/>
+</linearGradient>
+<linearGradient id="zn-accent-line" x1="0" y1="0" x2="1" y2="0">
+<stop offset="0" stop-color="#3E7BFA"/>
+<stop offset="1" stop-color="#8B5CF6"/>
+</linearGradient>
+<style>.s{font-family:ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif}.m{font-family:ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace}</style>
+</defs>
+<rect x="0.5" y="0.5" width="687" height="339" rx="16" fill="url(#zn-card)" stroke="#2C3660"/>
+<rect x="42.3" y="22" width="102.4" height="24" rx="12" fill="#141C44" stroke="#4A5AA6" stroke-width="1"/>
+<text x="93.5" y="38.2" text-anchor="middle" class="m" font-size="12" fill="#F4F6FC">src/**/*.ts</text>
+<path d="M93.5,47 L93.5,66.5" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M93.5,74 L88.9,65.5 L98.1,65.5 Z" fill="#A9B4D6"/>
+<rect x="183" y="66" width="155" height="82" rx="14" fill="none" stroke="#7381B3" stroke-width="1.25" stroke-dasharray="4 4"/>
+<text x="260.5" y="40" text-anchor="middle" class="s" font-size="12.5" fill="#A9B4D6">cached per file</text>
+<text x="260.5" y="57" text-anchor="middle" class="s" font-size="12.5" fill="#A9B4D6">(content hash)</text>
+<rect x="24" y="76" width="139" height="62" rx="10" fill="#1E2858" stroke="#4A5AA6" stroke-width="1.25"/>
+<text x="93.5" y="95.2" text-anchor="middle" class="s" font-size="13.5" font-weight="600" fill="#F4F6FC">scan</text>
+<text x="93.5" y="112.5" text-anchor="middle" class="s" font-size="12" fill="#A9B4D6">include / exclude</text>
+<text x="93.5" y="128.5" text-anchor="middle" class="s" font-size="12" fill="#A9B4D6">+ provider libraries</text>
+<circle cx="26" cy="78" r="10" fill="url(#zn-accent)"/>
+<text x="26" y="82" text-anchor="middle" class="s" font-size="11.5" font-weight="700" fill="#FFFFFF">1</text>
+<path d="M166,107 L180.5,107" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M188,107 L179.5,111.6 L179.5,102.4 Z" fill="#A9B4D6"/>
+<rect x="191" y="76" width="139" height="62" rx="10" fill="#1E2858" stroke="#4A5AA6" stroke-width="1.25"/>
+<text x="260.5" y="103.2" text-anchor="middle" class="s" font-size="13.5" font-weight="600" fill="#F4F6FC">parse</text>
+<text x="260.5" y="120.5" text-anchor="middle" class="s" font-size="12" fill="#A9B4D6">oxc · per-file facts</text>
+<circle cx="193" cy="78" r="10" fill="url(#zn-accent)"/>
+<text x="193" y="82" text-anchor="middle" class="s" font-size="11.5" font-weight="700" fill="#FFFFFF">2</text>
+<path d="M333,107 L347.5,107" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M355,107 L346.5,111.6 L346.5,102.4 Z" fill="#A9B4D6"/>
+<rect x="358" y="76" width="139" height="62" rx="10" fill="#1E2858" stroke="#4A5AA6" stroke-width="1.25"/>
+<text x="427.5" y="103.2" text-anchor="middle" class="s" font-size="13.5" font-weight="600" fill="#F4F6FC">resolve identities</text>
+<text x="427.5" y="120.5" text-anchor="middle" class="s" font-size="12" fill="#A9B4D6">canonical ids</text>
+<circle cx="360" cy="78" r="10" fill="url(#zn-accent)"/>
+<text x="360" y="82" text-anchor="middle" class="s" font-size="11.5" font-weight="700" fill="#FFFFFF">3</text>
+<path d="M500,107 L514.5,107" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M522,107 L513.5,111.6 L513.5,102.4 Z" fill="#A9B4D6"/>
+<rect x="525" y="76" width="139" height="62" rx="10" fill="#1E2858" stroke="#4A5AA6" stroke-width="1.25"/>
+<text x="594.5" y="103.2" text-anchor="middle" class="s" font-size="13.5" font-weight="600" fill="#F4F6FC">analyse classes</text>
+<text x="594.5" y="120.5" text-anchor="middle" class="s" font-size="12" fill="#A9B4D6">core + extensions</text>
+<circle cx="527" cy="78" r="10" fill="url(#zn-accent)"/>
+<text x="527" y="82" text-anchor="middle" class="s" font-size="11.5" font-weight="700" fill="#FFFFFF">4</text>
+<path d="M594.5,140 L594.5,158 Q594.5,170 582.5,170 L95.3,170 Q84,170 84,181.3 L84,192.5" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M84,200 L79.4,191.5 L88.6,191.5 Z" fill="#A9B4D6"/>
+<rect x="24" y="202" width="120" height="62" rx="10" fill="#1E2858" stroke="#4A5AA6" stroke-width="1.25"/>
+<text x="84" y="229.2" text-anchor="middle" class="s" font-size="13.5" font-weight="600" fill="#F4F6FC">bind</text>
+<text x="84" y="246.5" text-anchor="middle" class="s" font-size="12" fill="#A9B4D6">injection points</text>
+<circle cx="26" cy="204" r="10" fill="url(#zn-accent)"/>
+<text x="26" y="208" text-anchor="middle" class="s" font-size="11.5" font-weight="700" fill="#FFFFFF">5</text>
+<path d="M147,233 L161.5,233" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M169,233 L160.5,237.6 L160.5,228.4 Z" fill="#A9B4D6"/>
+<rect x="172" y="202" width="120" height="62" rx="10" fill="#1E2858" stroke="#4A5AA6" stroke-width="1.25"/>
+<text x="232" y="229.2" text-anchor="middle" class="s" font-size="13.5" font-weight="600" fill="#F4F6FC">validate</text>
+<text x="232" y="246.5" text-anchor="middle" class="s" font-size="12" fill="#A9B4D6">the whole graph</text>
+<circle cx="174" cy="204" r="10" fill="url(#zn-accent)"/>
+<text x="174" y="208" text-anchor="middle" class="s" font-size="11.5" font-weight="700" fill="#FFFFFF">6</text>
+<path d="M295,233 L309.5,233" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M317,233 L308.5,237.6 L308.5,228.4 Z" fill="#A9B4D6"/>
+<rect x="320" y="202" width="120" height="62" rx="10" fill="#1E2858" stroke="#4A5AA6" stroke-width="1.25"/>
+<text x="380" y="229.2" text-anchor="middle" class="s" font-size="13.5" font-weight="600" fill="#F4F6FC">emit</text>
+<text x="380" y="246.5" text-anchor="middle" class="s" font-size="12" fill="#A9B4D6">re-parse check</text>
+<circle cx="322" cy="204" r="10" fill="url(#zn-accent)"/>
+<text x="322" y="208" text-anchor="middle" class="s" font-size="11.5" font-weight="700" fill="#FFFFFF">7</text>
+<path d="M443,233 L457.5,233" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M465,233 L456.5,237.6 L456.5,228.4 Z" fill="#A9B4D6"/>
+<rect x="468" y="202" width="196" height="62" rx="10" fill="#141C44" stroke="url(#zn-accent-line)" stroke-width="1.5"/>
+<text x="566" y="227" text-anchor="middle" class="m" font-size="12.5" font-weight="600" fill="#F4F6FC">container.generated.ts</text>
+<text x="566" y="246" text-anchor="middle" class="s" font-size="12" fill="#A9B4D6">written if its content changed</text>
+<path d="M232,266 L232,283.5" fill="none" stroke="#FB7185" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M232,291 L227.4,282.5 L236.6,282.5 Z" fill="#FB7185"/>
+<rect x="102.8" y="292.5" width="258.5" height="23" rx="11.5" fill="#3A1A2E" stroke="#FB7185" stroke-width="1"/>
+<text x="232" y="308.2" text-anchor="middle" class="s" font-size="12" fill="#FFE4E6"><tspan class="m">ZNIGHT001</tspan>, <tspan class="m">002</tspan>, <tspan class="m">003</tspan>... with code frames</text>
+</svg>

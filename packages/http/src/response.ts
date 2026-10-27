@@ -1,7 +1,15 @@
 import type { HeaderValue } from './exceptions.ts'
 
+import {
+  type ClearCookieOptions,
+  type CookieOptions,
+  checkCookie,
+  givenCookieKey,
+  type ResponseCookie,
+} from './cookies.ts'
 import { type ContentDispositionType, contentDisposition, FileBody, type FileResponseOptions } from './files.ts'
 import { contentTypeFor, OCTET_STREAM } from './mime.ts'
+import { SseBody, type SseOptions, type SseSource } from './sse.ts'
 import { isValidStatus } from './status.ts'
 import { isStreamSource, type StreamSource, toByteStream } from './stream.ts'
 
@@ -21,6 +29,8 @@ export interface HttpResponseInit {
   readonly status?: number
   /** Response headers (names are case-insensitive; arrays send the header several times). */
   readonly headers?: Readonly<Record<string, HeaderValue>>
+  /** Cookies to set (see {@link HttpResponse.withCookie}), in order. */
+  readonly cookies?: readonly ResponseCookie[]
 }
 
 /** Redirect statuses accepted by {@link HttpResponse.redirect}. */
@@ -44,6 +54,8 @@ export class HttpResponse<T = unknown> {
   readonly body: T
   readonly status: number | undefined
   readonly headers: Readonly<Record<string, HeaderValue>>
+  /** Cookies set by this response (`withCookie` / `withoutCookie`), in order; they win over `ctx.setCookie()`. */
+  readonly cookies: readonly ResponseCookie[]
 
   constructor(body: T, init: HttpResponseInit = {}) {
     if (init.status !== undefined && !isValidStatus(init.status)) {
@@ -52,6 +64,7 @@ export class HttpResponse<T = unknown> {
     this.body = body
     this.status = init.status
     this.headers = init.headers ?? {}
+    this.cookies = init.cookies === undefined ? NO_COOKIES : Object.freeze([...init.cookies])
   }
 
   /** `200 OK` with `body`. */
@@ -135,18 +148,83 @@ export class HttpResponse<T = unknown> {
     return new HttpResponse(toByteStream(source), { headers })
   }
 
+  /**
+   * An event stream (Server-Sent Events) on any route and any method: `200` unless `@HttpCode` or
+   * {@link withStatus} say otherwise (`EventSource` requires 200; `fetch()` clients read any status),
+   * even on `POST` routes. Same source, framing and lifecycle as an `@Sse()` route.
+   *
+   * ```ts
+   * @Post('/:id/assistant')
+   * assistant(@Param('id') id: string, @Body(Prompt) prompt: Prompt, @Ctx() ctx: HttpContext) {
+   *   return HttpResponse.sse(this.llm.complete(id, prompt, { signal: ctx.signal }))
+   * }
+   * ```
+   */
+  static sse(source: SseSource, options?: SseOptions): HttpResponse<SseBody> {
+    return new HttpResponse(new SseBody(source, options))
+  }
+
   /** A copy of this response with `name` set to `value`. */
   withHeader(name: string, value: HeaderValue): HttpResponse<T> {
-    return new HttpResponse(this.body, {
-      ...(this.status === undefined ? {} : { status: this.status }),
-      headers: { ...this.headers, [name.toLowerCase()]: value },
-    })
+    return this.#copy({ headers: { ...this.headers, [name.toLowerCase()]: value } })
   }
 
   /** A copy of this response with another status. */
   withStatus(status: number): HttpResponse<T> {
-    return new HttpResponse(this.body, { status, headers: this.headers })
+    return this.#copy({ status })
   }
+
+  /**
+   * A copy of this response setting a cookie, with the secure defaults (`Path=/; Secure; HttpOnly;
+   * SameSite=Lax`, see the plugin option `cookies.defaults`). It replaces a cookie with the same name,
+   * domain and path set by `ctx.setCookie()` or an earlier `withCookie()`.
+   *
+   * ```ts
+   * return HttpResponse.ok({ id: user.id }).withCookie('__Host-uid', user.id, { signed: true, maxAge: 8 * 3600 })
+   * ```
+   *
+   * The name, the value, the lifetime, the domain, the path and the size are checked now; the rules
+   * depending on the plugin (`secure` default with a prefix or `SameSite=None`, signing, the final
+   * size) when the response is sent: a violation then answers a generic 500, logged as
+   * `Invalid cookie "name": …`.
+   *
+   * @throws TypeError / RangeError for an invalid cookie.
+   */
+  withCookie(name: string, value: string, options: CookieOptions = {}): HttpResponse<T> {
+    checkCookie(name, value, options)
+    return this.#copy({ cookies: withCookie(this.cookies, { name, value, options: Object.freeze({ ...options }) }) })
+  }
+
+  /** A copy of this response clearing a cookie (see `ctx.clearCookie()`). */
+  withoutCookie(name: string, options: ClearCookieOptions = {}): HttpResponse<T> {
+    if (options === null || typeof options !== 'object') {
+      throw new TypeError(`Invalid cookie ${JSON.stringify(String(name))}: options must be an object`)
+    }
+    const { maxAge: _maxAge, expires: _expires, signed: _signed, ...clear } = options as CookieOptions
+    checkCookie(name, undefined, clear)
+    return this.#copy({ cookies: withCookie(this.cookies, { name, value: undefined, options: Object.freeze(clear) }) })
+  }
+
+  #copy(changes: HttpResponseInit): HttpResponse<T> {
+    const status = changes.status ?? this.status
+    return new HttpResponse(this.body, {
+      ...(status === undefined ? {} : { status }),
+      headers: changes.headers ?? this.headers,
+      cookies: changes.cookies ?? this.cookies,
+    })
+  }
+}
+
+const NO_COOKIES: readonly ResponseCookie[] = Object.freeze([])
+
+/** `cookies` with `cookie` added, replacing (in place) a cookie of the same name, domain and path. */
+function withCookie(cookies: readonly ResponseCookie[], cookie: ResponseCookie): ResponseCookie[] {
+  const key = givenCookieKey(cookie.name, cookie.options)
+  const index = cookies.findIndex(existing => givenCookieKey(existing.name, existing.options) === key)
+  if (index === -1) return [...cookies, cookie]
+  const result = [...cookies]
+  result[index] = cookie
+  return result
 }
 
 /** Whether `value` is an {@link HttpResponse} (also across duplicated package copies). */

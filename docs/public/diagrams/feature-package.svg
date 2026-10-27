@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 688 251" width="688" height="251" role="img" aria-labelledby="title desc">
+<title id="title">Anatomy of a feature package</title>
+<desc id="desc">A feature package such as @znight/http has three parts. Decorators (@Controller, @Get, @Body) live in your code: markers that do nothing at run time and are stripped from the bundle. The compiler extension (@znight/http/compiler), found through the package manifest, analyses the controllers at build time and emits extensions.http in __ZNIGHT_METADATA__. The runtime plugin (HttpPlugin.configure()), added to the application, reads extensions.http and serves the requests.</desc>
+<defs>
+<linearGradient id="zn-card" x1="0" y1="0" x2="0" y2="1">
+<stop offset="0" stop-color="#1A2350"/>
+<stop offset="1" stop-color="#0B1020"/>
+</linearGradient>
+<linearGradient id="zn-accent" x1="0" y1="0" x2="1" y2="1">
+<stop offset="0" stop-color="#2F6AE8"/>
+<stop offset="1" stop-color="#7C4DEF"/>
+</linearGradient>
+<linearGradient id="zn-accent-line" x1="0" y1="0" x2="1" y2="0">
+<stop offset="0" stop-color="#3E7BFA"/>
+<stop offset="1" stop-color="#8B5CF6"/>
+</linearGradient>
+<style>.s{font-family:ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif}.m{font-family:ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace}</style>
+</defs>
+<rect x="0.5" y="0.5" width="687" height="250" rx="16" fill="url(#zn-card)" stroke="#2C3660"/>
+<text x="24" y="34" class="s" font-size="12" font-weight="700" fill="#8E9AC4" letter-spacing="1.2">IN YOUR CODE</text>
+<rect x="24" y="50" width="196" height="112" rx="10" fill="#1E2858" stroke="#4A5AA6" stroke-width="1.25"/>
+<text x="38" y="76" class="s" font-size="14" font-weight="600" fill="#F4F6FC">Decorators</text>
+<text x="38" y="97" class="m" font-size="12" fill="#D6DCEE">@Controller @Get @Body</text>
+<text x="38" y="124" class="s" font-size="12.5" fill="#A9B4D6">markers, no-ops at run time</text>
+<text x="38" y="143" class="s" font-size="12.5" fill="#A9B4D6">stripped from the bundle</text>
+<path d="M223,106 L235.5,106" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M243,106 L234.5,110.6 L234.5,101.4 Z" fill="#A9B4D6"/>
+<text x="246" y="34" class="s" font-size="12" font-weight="700" fill="#8E9AC4" letter-spacing="1.2">AT BUILD TIME</text>
+<rect x="246" y="50" width="196" height="112" rx="10" fill="#1B2457" stroke="url(#zn-accent-line)" stroke-width="1.5"/>
+<text x="260" y="76" class="s" font-size="14" font-weight="600" fill="#F4F6FC">Compiler extension</text>
+<text x="260" y="97" class="m" font-size="12" fill="#D6DCEE">@znight/http/compiler</text>
+<text x="260" y="124" class="s" font-size="12.5" fill="#A9B4D6">found through the manifest</text>
+<text x="260" y="143" class="s" font-size="12.5" fill="#A9B4D6">analyses the controllers</text>
+<path d="M445,106 L457.5,106" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M465,106 L456.5,110.6 L456.5,101.4 Z" fill="#A9B4D6"/>
+<text x="468" y="34" class="s" font-size="12" font-weight="700" fill="#8E9AC4" letter-spacing="1.2">AT RUN TIME</text>
+<rect x="468" y="50" width="196" height="112" rx="10" fill="#1E2858" stroke="#4A5AA6" stroke-width="1.25"/>
+<text x="482" y="76" class="s" font-size="14" font-weight="600" fill="#F4F6FC">Runtime plugin</text>
+<text x="482" y="97" class="m" font-size="12" fill="#D6DCEE">HttpPlugin.configure()</text>
+<text x="482" y="124" class="s" font-size="12.5" fill="#A9B4D6">added to the application</text>
+<text x="482" y="143" class="s" font-size="12.5" fill="#A9B4D6">serves the requests</text>
+<rect x="314" y="201" width="282.1" height="26" rx="13" fill="#251E5C" stroke="#A78BFA" stroke-width="1"/>
+<text x="455" y="218.2" text-anchor="middle" class="m" font-size="12" fill="#EDE9FE">__ZNIGHT_METADATA__.extensions.http</text>
+<path d="M344,164 L344,191.5" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M344,199 L339.4,190.5 L348.6,190.5 Z" fill="#A9B4D6"/>
+<text x="353" y="185.9" class="s" font-size="12.5" fill="#A9B4D6">emits</text>
+<path d="M566,199 L566,171.5" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M566,164 L570.6,172.5 L561.4,172.5 Z" fill="#A9B4D6"/>
+<text x="575" y="185.9" class="s" font-size="12.5" fill="#A9B4D6">reads</text>
+</svg>

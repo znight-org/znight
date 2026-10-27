@@ -10,6 +10,7 @@ import { buildCommand } from './commands/build.ts'
 import { devCommand } from './commands/dev.ts'
 import { generateCommand } from './commands/generate.ts'
 import { newCommand } from './commands/new.ts'
+import { openapiCommand } from './commands/openapi.ts'
 import { schematicCommand } from './commands/schematic.ts'
 import { startCommand } from './commands/start.ts'
 import { createContext } from './context.ts'
@@ -24,6 +25,7 @@ export const COMMANDS: readonly Command[] = [
   devCommand,
   buildCommand,
   startCommand,
+  openapiCommand,
 ]
 
 /** Finds a command by name or alias. */
@@ -138,10 +140,11 @@ export function renderRootHelp(cli: Pick<CliContext, 'colors' | 'version'>): str
     [
       ['new <name>', newCommand.meta.description],
       ['generate', 'Generate the DI container (--check in CI, --watch)'],
-      ['g <schematic> <name>', 'Generate a service, controller, consumer, config, guard, interceptor or factory'],
+      ['g <schematic> <name>', 'Generate a service, controller, consumer, config, guard, interceptor, factory or job'],
       ['dev', 'Build in watch mode, restart the application on every change'],
       ['build', buildCommand.meta.description],
       ['start', startCommand.meta.description],
+      ['openapi', openapiCommand.meta.description],
     ],
     colors,
   )

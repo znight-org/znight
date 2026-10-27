@@ -16,7 +16,7 @@ Options
   -y, --yes                              Do not ask questions: use the flags and the defaults
   --pm <bun|npm|pnpm|yarn>               Package manager (default: the one running the CLI, bun under Bun, else npm)
   --adapter <node|fastify|express|hono>  HTTP adapter (default: node, the built-in node:http server)
-  --features <list>                      Comma-separated features: config, observability, messaging, or "all" / "none" (default: config,observability)
+  --features <list>                      Comma-separated features: config, observability, messaging, schedule, openapi, or "all" / "none" (default: config,observability)
   --no-install                           Do not install the dependencies
   --no-git                               Do not initialise a git repository
   --dir <path>                           Target directory (default: ./<name>)
@@ -26,6 +26,7 @@ Options
 Examples
   $ znight new my-service
   $ znight new my-service --yes --pm pnpm --adapter fastify --features config,observability,messaging
+  $ znight new my-worker --yes --features config,schedule
   $ znight new . --yes --no-install
 "
 `;

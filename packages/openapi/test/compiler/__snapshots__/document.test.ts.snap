@@ -1,0 +1,1386 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`bookshelf fixture matches the snapshot 1`] = `
+"{
+  "openapi": "3.1.1",
+  "info": {
+    "title": "Bookshelf API",
+    "version": "1.2.3",
+    "contact": {
+      "email": "api@example.com"
+    },
+    "description": "A shelf of books with a cover each.",
+    "license": {
+      "name": "MIT",
+      "identifier": "MIT"
+    }
+  },
+  "security": [
+    {
+      "apiKey": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Books",
+      "description": "The shelf"
+    },
+    {
+      "name": "Order",
+      "description": "Orders of books."
+    }
+  ],
+  "paths": {
+    "/books": {
+      "get": {
+        "operationId": "book.list",
+        "summary": "List books",
+        "description": "Sorted and paginated, filtered by text and tags.",
+        "tags": [
+          "Books"
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Case-insensitive search in titles.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "tag",
+            "in": "query",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": []
+            },
+            "style": "form",
+            "explode": true
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "author",
+                "title",
+                "year"
+              ],
+              "default": "title"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size.",
+            "schema": {
+              "type": "number",
+              "default": 20
+            }
+          },
+          {
+            "name": "x-tenant",
+            "in": "header",
+            "description": "Tenant of the shelf",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "cache-control": {
+                "schema": {
+                  "type": "string"
+                },
+                "example": "no-store"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_BookResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        },
+        "security": [
+          {
+            "oauth2": [
+              "reader"
+            ]
+          }
+        ]
+      },
+      "post": {
+        "operationId": "book.create",
+        "summary": "Add a book",
+        "tags": [
+          "Books"
+        ],
+        "parameters": [
+          {
+            "name": "x-tenant",
+            "in": "header",
+            "description": "Tenant of the shelf",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateBook"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The new book. Its URL is in the \`location\` header.",
+            "headers": {
+              "location": {
+                "description": "URL of the new book",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "description": "A book with this ISBN is already on the shelf",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorBody"
+                }
+              }
+            }
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          }
+        },
+        "security": [
+          {
+            "oauth2": [
+              "admin"
+            ]
+          }
+        ]
+      }
+    },
+    "/books/report": {
+      "get": {
+        "operationId": "book.report",
+        "summary": "Report of the shelf",
+        "tags": [
+          "Books"
+        ],
+        "parameters": [
+          {
+            "name": "x-tenant",
+            "in": "header",
+            "description": "Tenant of the shelf",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShelfReport"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oauth2": [
+              "reader"
+            ]
+          }
+        ]
+      }
+    },
+    "/books/search": {
+      "get": {
+        "operationId": "book.search",
+        "summary": "Search with a schema",
+        "tags": [
+          "Books"
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "tags",
+            "in": "query",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "style": "form",
+            "explode": true
+          },
+          {
+            "name": "x-tenant",
+            "in": "header",
+            "description": "Tenant of the shelf",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BookResponse"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        },
+        "security": []
+      }
+    },
+    "/books/{id}": {
+      "get": {
+        "operationId": "book.get",
+        "summary": "Get a book",
+        "tags": [
+          "Books"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "x-tenant",
+            "in": "header",
+            "description": "Tenant of the shelf",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "description": "No book with this id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "oauth2": [
+              "reader"
+            ]
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "removeBook",
+        "summary": "Remove a book",
+        "tags": [
+          "Books"
+        ],
+        "deprecated": true,
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "x-tenant",
+            "in": "header",
+            "description": "Tenant of the shelf",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        },
+        "security": [
+          {
+            "oauth2": [
+              "admin"
+            ]
+          }
+        ]
+      }
+    },
+    "/books/{id}/cover": {
+      "get": {
+        "operationId": "book.downloadCover",
+        "summary": "Download the cover",
+        "tags": [
+          "Books"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "x-tenant",
+            "in": "header",
+            "description": "Tenant of the shelf",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The cover image",
+            "content": {
+              "image/png": {},
+              "image/jpeg": {}
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "description": "No book with this id, or no cover",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      },
+      "put": {
+        "operationId": "book.uploadCover",
+        "summary": "Upload the cover",
+        "tags": [
+          "Books"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "x-tenant",
+            "in": "header",
+            "description": "Tenant of the shelf",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/CoverForm"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "cover": {
+                        "type": "string",
+                        "contentMediaType": "application/octet-stream",
+                        "description": "At most 2 MiB",
+                        "x-znight-max-size": 2097152
+                      }
+                    },
+                    "required": [
+                      "cover"
+                    ]
+                  }
+                ]
+              },
+              "encoding": {
+                "cover": {
+                  "contentType": "image/png, image/jpeg"
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "number"
+                    },
+                    "size": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "size"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          }
+        },
+        "security": [
+          {
+            "oauth2": [
+              "admin"
+            ]
+          }
+        ]
+      }
+    },
+    "/books/{id}/files/{wildcard}": {
+      "get": {
+        "operationId": "book.file",
+        "summary": "Files of a book",
+        "tags": [
+          "Books"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "wildcard",
+            "in": "path",
+            "description": "The rest of the path, \`/\` included",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "x-znight-wildcard": true
+          },
+          {
+            "name": "x-tenant",
+            "in": "header",
+            "description": "Tenant of the shelf",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "description": "Version of the file",
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        },
+        "security": [
+          {
+            "oauth2": [
+              "reader"
+            ]
+          }
+        ],
+        "x-znight-wildcard": true
+      }
+    },
+    "/books/{id}/proxy": {
+      "get": {
+        "operationId": "book.proxy.get",
+        "summary": "Proxy",
+        "tags": [
+          "Books"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "x-tenant",
+            "in": "header",
+            "description": "Tenant of the shelf",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        },
+        "security": [
+          {
+            "oauth2": [
+              "reader"
+            ]
+          }
+        ]
+      },
+      "put": {
+        "operationId": "book.proxy.put",
+        "summary": "Proxy",
+        "tags": [
+          "Books"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "x-tenant",
+            "in": "header",
+            "description": "Tenant of the shelf",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        },
+        "security": [
+          {
+            "oauth2": [
+              "reader"
+            ]
+          }
+        ]
+      },
+      "post": {
+        "operationId": "book.proxy.post",
+        "summary": "Proxy",
+        "tags": [
+          "Books"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "x-tenant",
+            "in": "header",
+            "description": "Tenant of the shelf",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        },
+        "security": [
+          {
+            "oauth2": [
+              "reader"
+            ]
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "book.proxy.delete",
+        "summary": "Proxy",
+        "tags": [
+          "Books"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "x-tenant",
+            "in": "header",
+            "description": "Tenant of the shelf",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        },
+        "security": [
+          {
+            "oauth2": [
+              "reader"
+            ]
+          }
+        ]
+      },
+      "patch": {
+        "operationId": "book.proxy.patch",
+        "summary": "Proxy",
+        "tags": [
+          "Books"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "x-tenant",
+            "in": "header",
+            "description": "Tenant of the shelf",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        },
+        "security": [
+          {
+            "oauth2": [
+              "reader"
+            ]
+          }
+        ]
+      }
+    },
+    "/books/{id}/ratings": {
+      "post": {
+        "operationId": "book.rate",
+        "summary": "Rate a book",
+        "tags": [
+          "Books"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "x-request-source",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-tenant",
+            "in": "header",
+            "description": "Tenant of the shelf",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Rating"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "number"
+                    },
+                    "stars": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "stars"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          }
+        },
+        "security": []
+      }
+    },
+    "/orders": {
+      "get": {
+        "operationId": "order.today",
+        "summary": "Orders of the day",
+        "tags": [
+          "Order"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Order"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      },
+      "post": {
+        "operationId": "order.place",
+        "summary": "Place an order",
+        "tags": [
+          "Order"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewOrder"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Order"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "BookResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "title": {
+            "type": "string",
+            "description": "The title.",
+            "minLength": 1,
+            "examples": [
+              "Dune"
+            ]
+          },
+          "isbn": {
+            "type": "string"
+          },
+          "genre": {
+            "$ref": "#/components/schemas/Genre"
+          },
+          "publishedYear": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "coverUrl": {
+            "type": "string"
+          },
+          "labels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "deprecated": true
+          }
+        },
+        "required": [
+          "createdAt",
+          "genre",
+          "id",
+          "isbn",
+          "publishedYear",
+          "tags",
+          "title"
+        ],
+        "description": "A book of the shelf."
+      },
+      "Card": {
+        "type": "object",
+        "properties": {
+          "method": {
+            "type": "string",
+            "const": "card"
+          },
+          "last4": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "last4",
+          "method"
+        ]
+      },
+      "CoverForm": {
+        "type": "object",
+        "properties": {
+          "caption": {
+            "type": "string"
+          }
+        }
+      },
+      "CreateBook": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "isbn": {
+            "type": "string",
+            "pattern": "^\\\\d{13}$"
+          },
+          "tags": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "year": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "isbn",
+          "year"
+        ]
+      },
+      "Genre": {
+        "type": "string",
+        "enum": [
+          "novel",
+          "poetry"
+        ],
+        "description": "Literary genres."
+      },
+      "HttpErrorBody": {
+        "type": "object",
+        "properties": {
+          "statusCode": {
+            "type": "integer"
+          },
+          "error": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "details": {}
+        },
+        "required": [
+          "statusCode",
+          "error",
+          "message"
+        ]
+      },
+      "NewOrder": {
+        "type": "object",
+        "properties": {
+          "bookId": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "bookId",
+          "quantity"
+        ]
+      },
+      "Order": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "bookId": {
+            "type": "number"
+          },
+          "payment": {
+            "$ref": "#/components/schemas/Payment"
+          }
+        },
+        "required": [
+          "bookId",
+          "id",
+          "payment"
+        ]
+      },
+      "Page_BookResponse": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BookResponse"
+            }
+          },
+          "total": {
+            "type": "number"
+          },
+          "limit": {
+            "type": "number"
+          },
+          "offset": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "items",
+          "limit",
+          "offset",
+          "total"
+        ],
+        "description": "A page of results."
+      },
+      "Payment": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/Card"
+          },
+          {
+            "$ref": "#/components/schemas/Transfer"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "method",
+          "mapping": {
+            "card": "#/components/schemas/Card",
+            "transfer": "#/components/schemas/Transfer"
+          }
+        },
+        "description": "How an order is paid."
+      },
+      "Rating": {
+        "type": "object",
+        "properties": {
+          "stars": {
+            "type": "integer",
+            "maximum": 5,
+            "minimum": 1
+          },
+          "comment": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "stars"
+        ]
+      },
+      "ShelfReport": {
+        "type": "object",
+        "properties": {
+          "books": {
+            "type": "number"
+          },
+          "genres": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "number"
+            }
+          }
+        },
+        "required": [
+          "books",
+          "genres"
+        ],
+        "description": "Statistics of the shelf."
+      },
+      "Transfer": {
+        "type": "object",
+        "properties": {
+          "method": {
+            "type": "string",
+            "const": "transfer"
+          },
+          "iban": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "iban",
+          "method"
+        ]
+      },
+      "ValidationErrorBody": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/HttpErrorBody"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "details": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "Bad Request",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ValidationErrorBody"
+            }
+          }
+        }
+      },
+      "PayloadTooLarge": {
+        "description": "Content Too Large",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/HttpErrorBody"
+            }
+          }
+        }
+      },
+      "UnsupportedMediaType": {
+        "description": "Unsupported Media Type",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/HttpErrorBody"
+            }
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "apiKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-api-key"
+      },
+      "oauth2": {
+        "type": "oauth2",
+        "flows": {
+          "clientCredentials": {
+            "tokenUrl": "https://id.example.com/oauth2/token",
+            "scopes": {
+              "reader": "Read books",
+              "admin": "Manage books"
+            }
+          }
+        }
+      }
+    }
+  },
+  "x-audience": "public",
+  "x-znight-fingerprint": "E4l-gAD5KlnG2dbLqvX_Fv9qNXIS_JR5AFsnTULy0GM"
+}
+"
+`;

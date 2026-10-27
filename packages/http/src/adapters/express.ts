@@ -12,6 +12,8 @@ import type {
   HttpServerAddress,
   InjectRequest,
   InjectResponse,
+  InjectStreamRequest,
+  InjectStreamResponse,
 } from '../adapter.ts'
 
 import { createServer, type Server } from 'node:http'
@@ -19,7 +21,7 @@ import express, { type Express, type NextFunction, type Request, type Response, 
 
 import { toRegExpSource } from '../path.ts'
 import { ConnectionTracker, closeServer, nodeAdapterRequest, writeNodeFailure, writeNodeReply } from './node-io.ts'
-import { injectNode, serverAddress } from './shared.ts'
+import { bufferInjectStream, injectNodeStream, serverAddress } from './shared.ts'
 
 /** Options of {@link expressAdapter}. */
 export interface ExpressAdapterOptions {
@@ -163,8 +165,12 @@ class ExpressHttpAdapter implements ExpressAdapter {
   }
 
   inject(request: InjectRequest): Promise<InjectResponse> {
+    return bufferInjectStream(stream => this.injectStream(stream), request)
+  }
+
+  injectStream(request: InjectStreamRequest): Promise<InjectStreamResponse> {
     this.#mount()
-    return injectNode('express', this.#injectListener as (req: never, res: never) => void, request)
+    return injectNodeStream('express', this.#injectListener as (req: never, res: never) => void, request)
   }
 
   /**

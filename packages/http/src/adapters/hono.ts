@@ -3,7 +3,7 @@
  * dependency `hono`). On Bun the server is `Bun.serve()`; on Node.js it is `@hono/node-server`
  * (optional peer dependency, loaded on `listen()`). `inject()` uses `app.request()`.
  */
-import type { Server } from 'node:http'
+import type { Server, ServerResponse } from 'node:http'
 import type {
   AdapterCloseOptions,
   AdapterHandler,
@@ -15,6 +15,8 @@ import type {
   HttpServerAddress,
   InjectRequest,
   InjectResponse,
+  InjectStreamRequest,
+  InjectStreamResponse,
 } from '../adapter.ts'
 
 import { type Context, Hono, type Next } from 'hono'
@@ -22,8 +24,8 @@ import { type Context, Hono, type Next } from 'hono'
 import { toHonoPath } from '../path.ts'
 import { discardStream } from '../stream.ts'
 import { isBun } from '../utils.ts'
-import { ConnectionTracker, closeServer } from './node-io.ts'
-import { injectFetch, readWebStream, serverAddress, webBodyStream } from './shared.ts'
+import { ConnectionTracker, closeServer, onResponseAbort } from './node-io.ts'
+import { bufferInjectStream, injectFetchStream, readWebStream, serverAddress, webBodyStream } from './shared.ts'
 
 /** Options of {@link honoAdapter}. */
 export interface HonoAdapterOptions {
@@ -186,6 +188,11 @@ class HonoHttpAdapter implements HonoAdapter {
   }
 
   #toResponse(c: Context, reply: AdapterReply): Response {
+    if (reply.eventStream === true) {
+      // @hono/node-server: a quiet event stream must outlive a socket timeout
+      const outgoing = nodeOutgoing(c)
+      if (outgoing !== undefined && typeof outgoing.setTimeout === 'function') outgoing.setTimeout(0)
+    }
     if (this.#bun === undefined || !(reply.body instanceof ReadableStream)) return toResponse(c, reply)
     // served by Bun.serve(): observe the end of the body (idle timeout, native blob: see #bunFetch)
     const reader = reply.body.getReader()
@@ -324,8 +331,12 @@ class HonoHttpAdapter implements HonoAdapter {
   }
 
   inject(request: InjectRequest): Promise<InjectResponse> {
+    return bufferInjectStream(stream => this.injectStream(stream), request)
+  }
+
+  injectStream(request: InjectStreamRequest): Promise<InjectStreamResponse> {
     this.#prepare()
-    return injectFetch(request => this.app.request(request, undefined, INJECT_ENV), request)
+    return injectFetchStream(request => this.app.request(request, undefined, INJECT_ENV), request)
   }
 }
 
@@ -359,7 +370,32 @@ function adapterRequest(c: Context): AdapterRequest {
       incoming === undefined
         ? request.body !== null
         : incoming.httpVersionMajor >= 2 && incoming.stream?.endAfterHeaders === false,
+    onAbort: (listener: () => void): void => {
+      const outgoing = nodeOutgoing(c)
+      if (outgoing !== undefined) {
+        onResponseAbort(outgoing as unknown as ServerResponse, listener)
+        return
+      }
+      // Bun.serve() and inject(): the request signal aborts when the client leaves
+      const signal = request.signal
+      if (signal.aborted) queueMicrotask(listener)
+      else signal.addEventListener('abort', listener, { once: true })
+    },
   }
+}
+
+/** The part of a Node.js `ServerResponse` used here. */
+interface NodeOutgoing {
+  readonly writableFinished: boolean
+  readonly destroyed: boolean
+  once(event: 'close', listener: () => void): unknown
+  setTimeout?(ms: number): unknown
+}
+
+/** The Node.js response of `@hono/node-server` (`c.env.outgoing`), absent on Bun and for `inject()`. */
+function nodeOutgoing(c: Context): NodeOutgoing | undefined {
+  const outgoing = (c.env as { outgoing?: Partial<NodeOutgoing> } | undefined)?.outgoing
+  return typeof outgoing?.once === 'function' ? (outgoing as NodeOutgoing) : undefined
 }
 
 /** The Node.js request of `@hono/node-server` (`c.env.incoming`), absent on Bun and for `inject()`. */

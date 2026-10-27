@@ -7,7 +7,7 @@ export type PackageManager = 'bun' | 'npm' | 'pnpm' | 'yarn'
 export type HttpAdapterName = 'node' | 'fastify' | 'express' | 'hono'
 
 /** Optional features of a new project. */
-export type Feature = 'config' | 'observability' | 'messaging'
+export type Feature = 'config' | 'observability' | 'messaging' | 'schedule' | 'openapi'
 
 /** Every package manager, in display order. */
 export const PACKAGE_MANAGERS: readonly PackageManager[] = ['bun', 'npm', 'pnpm', 'yarn']
@@ -16,7 +16,7 @@ export const PACKAGE_MANAGERS: readonly PackageManager[] = ['bun', 'npm', 'pnpm'
 export const HTTP_ADAPTERS: readonly HttpAdapterName[] = ['node', 'fastify', 'express', 'hono']
 
 /** Every feature, in display (and canonical) order. */
-export const FEATURES: readonly Feature[] = ['config', 'observability', 'messaging']
+export const FEATURES: readonly Feature[] = ['config', 'observability', 'messaging', 'schedule', 'openapi']
 
 /** Features selected when none are given. */
 export const DEFAULT_FEATURES: readonly Feature[] = ['config', 'observability']
@@ -34,6 +34,8 @@ export const FEATURE_LABELS: Readonly<Record<Feature, string>> = {
   config: 'Config: type-safe configuration classes (@znight/config)',
   observability: 'Observability: structured logs, metrics, tracing (@znight/observability)',
   messaging: 'Messaging: message consumers and publishing (@znight/messaging)',
+  schedule: 'Schedule: cron, interval and timeout jobs (@znight/schedule)',
+  openapi: 'OpenAPI: openapi.json and an API reference at /docs (@znight/openapi)',
 }
 
 /** Everything that determines the files of a new project. */
