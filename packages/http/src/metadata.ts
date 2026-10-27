@@ -71,7 +71,11 @@ export interface HttpRouteDefinition {
   readonly status?: number
   /** `@Header(name, value)` entries (names in lower case). */
   readonly headers?: Readonly<Record<string, string>>
-  /** Route metadata (`createRouteDecorator`), merged over the controller metadata at runtime. */
+  /**
+   * Route metadata (`createRouteDecorator`), merged over the controller metadata at runtime, one
+   * decision per group: the route's entry of a group replaces the controller's entries of that group
+   * (see {@link HttpMetadata.groups}).
+   */
   readonly meta: Readonly<Record<string, unknown>>
   /** Route guards (provider tokens), run after global and controller guards. */
   readonly guards: readonly Token[]
@@ -113,9 +117,23 @@ export interface HttpControllerDefinition {
   readonly routes: readonly HttpRouteDefinition[]
 }
 
+/** A route decorator group (`createRouteDecorator(key, { group, required })`). */
+export interface HttpRouteGroupDefinition {
+  /** Keys of the decorators of the group, sorted. */
+  readonly keys: readonly string[]
+  /** Every route must carry a decision of the group. */
+  readonly required: boolean
+}
+
 /** `metadata.extensions.http`. */
 export interface HttpMetadata {
   readonly controllers: readonly HttpControllerDefinition[]
+  /**
+   * Route decorator groups that need to be known at runtime (required, holding several keys, or
+   * named differently from their key): group → `{ keys, required }`. A key belongs to one group at
+   * most; a key listed nowhere is its own group. Absent when no group needs it.
+   */
+  readonly groups?: Readonly<Record<string, HttpRouteGroupDefinition>>
 }
 
 declare module '@znight/core' {

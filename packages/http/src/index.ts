@@ -16,6 +16,8 @@ export type {
   ReplyBody,
 } from './adapter.ts'
 export type { HttpContext, HttpRouteInfo, RequestId } from './context.ts'
+export type { CorsOptions, CorsOrigin } from './cors.ts'
+export type { EnforcementMode } from './decisions.ts'
 export type {
   CallHandler,
   CanActivate,
@@ -23,6 +25,7 @@ export type {
   ExceptionMapperClass,
   ExceptionMapperResult,
   GuardClass,
+  GuardEnforcement,
   HttpInterceptor,
   HttpInterceptorClass,
 } from './interfaces.ts'
@@ -33,8 +36,12 @@ export type {
   HttpParamDefinition,
   HttpParamSource,
   HttpRouteDefinition,
+  HttpRouteGroupDefinition,
   HttpUploadDefinition,
 } from './metadata.ts'
+export type { PluginHttpRoutes, PluginHttpRoutesContext, PluginRoute } from './plugin-routes.ts'
+export type { TrustProxy } from './proxy.ts'
+export type { HstsOptions, SecurityHeadersOptions } from './security-headers.ts'
 export type { ByteSize } from './size.ts'
 export type { StreamSource } from './stream.ts'
 
@@ -65,6 +72,9 @@ export {
   Res,
   type RouteDecorator,
   type RouteDecoratorArgs,
+  type RouteDecoratorInfo,
+  type RouteDecoratorOptions,
+  type RouteMetaEntry,
   UploadedFile,
   UploadedFiles,
   UseGuard,

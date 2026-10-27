@@ -1,0 +1,187 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`shapes from sources and from declaration files gives byte-identical shapes, keys and JSDoc 1`] = `
+{
+  "money": {
+    "issues": [],
+    "named": [
+      {
+        "declaration": "class",
+        "doc": undefined,
+        "key": "@acme/models#Money",
+        "properties": [],
+        "shape": "string",
+      },
+    ],
+    "root": "@@acme/models#Money[]",
+  },
+  "page": {
+    "issues": [],
+    "named": [
+      {
+        "declaration": "interface",
+        "doc": "A book of the shelf.",
+        "key": "@acme/models#Book",
+        "properties": [
+          [
+            "id",
+            "Identifier.",
+            [
+              "minimum",
+            ],
+          ],
+          [
+            "title",
+            undefined,
+            undefined,
+          ],
+          [
+            "tags",
+            undefined,
+            undefined,
+          ],
+          [
+            "status",
+            undefined,
+            undefined,
+          ],
+        ],
+        "shape": "{ readonly id: number; title: string; tags?: string[]; status: @@acme/models#Status }",
+      },
+      {
+        "declaration": "alias",
+        "doc": undefined,
+        "key": "@acme/models#BookPage",
+        "properties": [],
+        "shape": "@@acme/models#Page<@acme/models#Book>",
+      },
+      {
+        "declaration": "interface",
+        "doc": "A page of results.",
+        "key": "@acme/models#Page<@acme/models#Book>",
+        "properties": [
+          [
+            "items",
+            undefined,
+            undefined,
+          ],
+          [
+            "total",
+            undefined,
+            undefined,
+          ],
+        ],
+        "shape": "{ items: @@acme/models#Book[]; total: number }",
+      },
+      {
+        "declaration": "enum",
+        "doc": "Publication status.",
+        "key": "@acme/models#Status",
+        "properties": [],
+        "shape": ""draft" | "live"",
+      },
+    ],
+    "root": "@@acme/models#BookPage",
+  },
+  "patch": {
+    "issues": [],
+    "named": [
+      {
+        "declaration": "alias",
+        "doc": undefined,
+        "key": "@acme/models#Patch",
+        "properties": [
+          [
+            "title",
+            undefined,
+            undefined,
+          ],
+          [
+            "tags",
+            undefined,
+            undefined,
+          ],
+        ],
+        "shape": "{ title?: string; tags?: string[] }",
+      },
+    ],
+    "root": "@@acme/models#Patch",
+  },
+  "shelf": {
+    "issues": [],
+    "named": [
+      {
+        "declaration": "interface",
+        "doc": "A book of the shelf.",
+        "key": "@acme/models#Book",
+        "properties": [
+          [
+            "id",
+            "Identifier.",
+            [
+              "minimum",
+            ],
+          ],
+          [
+            "title",
+            undefined,
+            undefined,
+          ],
+          [
+            "tags",
+            undefined,
+            undefined,
+          ],
+          [
+            "status",
+            undefined,
+            undefined,
+          ],
+        ],
+        "shape": "{ readonly id: number; title: string; tags?: string[]; status: @@acme/models#Status }",
+      },
+      {
+        "declaration": "class",
+        "doc": undefined,
+        "key": "@acme/models#Shelf",
+        "properties": [
+          [
+            "createdAt",
+            "Creation date.",
+            [],
+          ],
+          [
+            "id",
+            "Shelf id.",
+            [],
+          ],
+          [
+            "owner",
+            undefined,
+            undefined,
+          ],
+          [
+            "name",
+            "Name of the shelf.",
+            [],
+          ],
+          [
+            "books",
+            undefined,
+            undefined,
+          ],
+        ],
+        "shape": "{ readonly createdAt: date; readonly id: number; owner?: string; readonly name: string; books: @@acme/models#Book[] }",
+      },
+      {
+        "declaration": "enum",
+        "doc": "Publication status.",
+        "key": "@acme/models#Status",
+        "properties": [],
+        "shape": ""draft" | "live"",
+      },
+    ],
+    "root": "@@acme/models#Shelf",
+  },
+}
+`;

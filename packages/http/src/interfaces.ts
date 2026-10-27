@@ -1,4 +1,5 @@
 import type { HttpContext } from './context.ts'
+import type { RouteDecoratorInfo } from './decorators.ts'
 import type { HttpException } from './exceptions.ts'
 import type { HttpResponse } from './response.ts'
 
@@ -70,8 +71,28 @@ export interface ExceptionMapper {
   map(error: unknown, ctx: HttpContext): ExceptionMapperResult | Promise<ExceptionMapperResult>
 }
 
+/**
+ * Static side of a guard class: the route decorators whose decisions the guard enforces. Read by
+ * `HttpPlugin` at boot: a route whose decision belongs to a required group (or to a group some
+ * guard enforces) must have a guard enforcing that group in its chain (ZNIGHT023 otherwise).
+ *
+ * ```ts
+ * @Injectable()
+ * export class AuthGuard implements CanActivate {
+ *   static readonly enforces = [Public, Authenticated, Roles]
+ *   canActivate(ctx: HttpContext) { ... }
+ * }
+ * ```
+ *
+ * Typed with {@link RouteDecoratorInfo} (not `RouteDecorator<unknown>`) so that `[Public, Roles]`
+ * stays assignable under `strictFunctionTypes`.
+ */
+export interface GuardEnforcement {
+  readonly enforces?: readonly RouteDecoratorInfo[]
+}
+
 /** A class producing {@link CanActivate} instances (for `@UseGuard` and plugin options). */
-export type GuardClass = abstract new (...args: never[]) => CanActivate
+export type GuardClass = (abstract new (...args: never[]) => CanActivate) & GuardEnforcement
 
 /** A class producing {@link HttpInterceptor} instances. */
 export type HttpInterceptorClass = abstract new (...args: never[]) => HttpInterceptor

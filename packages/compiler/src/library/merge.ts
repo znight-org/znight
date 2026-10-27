@@ -112,6 +112,10 @@ function mergeLibrary(input: MergeInput, library: CompiledLibrary): void {
     problem('malformed file ("extensions" must be an object)')
     return
   }
+  if (data.roots !== undefined && !(Array.isArray(data.roots) && data.roots.every(root => typeof root === 'string'))) {
+    problem('malformed file ("roots" must be an array of tokens)')
+    return
+  }
   const fileLocation: Location = { file: library.file, line: 1, column: 1, endLine: 1, endColumn: 1, start: 0, end: 0 }
   /** Runs one entry of the fragment; a malformed entry (or one that fails to decode) is reported and skipped. */
   const guarded = (what: string, run: () => void): void => {
@@ -153,6 +157,8 @@ function mergeLibrary(input: MergeInput, library: CompiledLibrary): void {
   }
 
   const providers: LibraryProvider[] = []
+  /** Tokens of the providers merged from this fragment. */
+  const merged = new Set<string>()
   for (const [index, provider] of data.providers.entries()) {
     const shape = providerProblem(provider)
     if (shape === undefined) {
@@ -186,7 +192,19 @@ function mergeLibrary(input: MergeInput, library: CompiledLibrary): void {
     }
     guarded(`provider ${provider.token}`, () => {
       input.registry.add(draftOf(input, provider, cls, name))
+      merged.add(provider.token)
     })
+  }
+
+  for (const token of [...(data.roots ?? [])].sort(compareStrings)) {
+    if (merged.has(token)) {
+      input.state.roots.push({
+        token,
+        origin: `compiled library ${name}`,
+        reason: `root of the compiled library ${name}`,
+        location: input.registry.get(token)?.location,
+      })
+    }
   }
 
   for (const [index, edge] of data.edges.entries()) {

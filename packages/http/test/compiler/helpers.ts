@@ -136,12 +136,12 @@ export function render(result: { readonly root: string; readonly diagnostics: re
   })
 }
 
-/** Diagnostics of the http extension's codes only (ZNIGHT005/007/017), rendered. */
+/** Diagnostics of the http extension's codes only (ZNIGHT003/005/007/017/023), rendered. */
 export function httpDiagnostics(result: HttpAnalysis): string[] {
   return render({
     root: result.root,
     diagnostics: result.diagnostics.filter(diagnostic =>
-      ['ZNIGHT005', 'ZNIGHT007', 'ZNIGHT017', 'ZNIGHT003'].includes(diagnostic.code),
+      ['ZNIGHT005', 'ZNIGHT007', 'ZNIGHT017', 'ZNIGHT003', 'ZNIGHT023'].includes(diagnostic.code),
     ),
   })
 }

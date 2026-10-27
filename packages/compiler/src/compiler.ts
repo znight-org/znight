@@ -293,7 +293,14 @@ class IncrementalCompiler implements ZnightCompiler {
     let library: LibraryOutput | undefined
     if (!hasErrors) {
       const render = (mode: CompileMode): ReturnType<typeof generateContainer> =>
-        generateContainer({ project, graph, extensions: analysis.extensions, mode, version: COMPILER_VERSION })
+        generateContainer({
+          project,
+          graph,
+          extensions: analysis.extensions,
+          mode,
+          version: COMPILER_VERSION,
+          types: analysis.types,
+        })
       const container = render(this.mode)
       bag.addAll(container.diagnostics)
       code = container.code

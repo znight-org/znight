@@ -74,7 +74,7 @@ export function analyzeHttpClass(cls: ClassInfo, ctx: Context): void {
   const basePath = normalizePath(options.path)
   const guards = classRefs(ctx, cls, cls.decorators, Ids.UseGuard, 'guard')
   const interceptors = classRefs(ctx, cls, cls.decorators, Ids.UseInterceptor, 'interceptor')
-  const meta = routeMeta(ctx, cls, cls.decorators)
+  const meta = routeMeta(ctx, cls, cls.decorators, cls.displayName)
   const bodyLimit = bodyLimitOf(ctx, cls.decorators)
   const routes: HttpRouteData[] = []
   for (const method of cls.methods) {
@@ -286,7 +286,7 @@ function analyzeMethod(
   const headers = responseHeaders(ctx, decorators)
   const guards = classRefs(ctx, cls, decorators, Ids.UseGuard, 'guard')
   const interceptors = classRefs(ctx, cls, decorators, Ids.UseInterceptor, 'interceptor')
-  const meta = routeMeta(ctx, cls, decorators)
+  const meta = routeMeta(ctx, cls, decorators, where)
   const bodySchema =
     bodyValidation !== undefined && !params.some(param => param.source === 'body') ? bodyValidation.schema : undefined
   const rawResponse = params.some(param => param.source === 'response')
@@ -640,11 +640,13 @@ function analyzeParam(
     return undefined
   }
   const declared = parameterType(ctx, cls, method, param)
+  const defaultValue = staticDefault(param)
   const base: Omit<HttpParamData, 'key' | 'schema' | 'coercion' | 'optional'> = {
     index: param.index,
     name: param.name,
     source,
     type: undefined,
+    ...(defaultValue === undefined ? {} : { defaultValue: defaultValue.value }),
     location: decorator.location,
   }
   // the declared type is recorded for coerced values (informational, `params[i].type`)
@@ -751,6 +753,36 @@ function analyzeParam(
       return coercion ? { ...base, key, type, optional, schema: undefined, coercion } : undefined
     }
   }
+}
+
+/**
+ * The statically evaluable default value of a parameter (`page = 1`), without references to
+ * exported bindings. `ParameterInfo.initializer` is read defensively (compilers before RFC 0002 C4
+ * do not provide it).
+ */
+function staticDefault(param: ParameterInfo): { readonly value: StaticValue } | undefined {
+  const initializer = (param as { readonly initializer?: ArgInfo | undefined }).initializer
+  if (initializer === undefined || !initializer.evaluated || initializer.ref !== undefined) {
+    return undefined
+  }
+  const value = initializer.value
+  if (value === undefined || hasRef(value)) {
+    return undefined
+  }
+  return { value }
+}
+
+function hasRef(value: StaticValue): boolean {
+  if (isValueRef(value)) {
+    return true
+  }
+  if (Array.isArray(value)) {
+    return value.some(hasRef)
+  }
+  if (typeof value === 'object' && value !== null) {
+    return Object.values(value).some(hasRef)
+  }
+  return false
 }
 
 /** `@UploadedFile(field?, options?)` / `@UploadedFiles(field?, options?)`: field, options and type. */

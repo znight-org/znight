@@ -48,18 +48,19 @@ scan order gives a byte-identical graph (`test/analysis/determinism.test.ts`).
 
 ## `ApplicationGraph`
 
-| Field             | Content                                                                                 |
-| ----------------- | --------------------------------------------------------------------------------------- |
-| `providers`       | `ProviderNode[]`, sorted by token                                                       |
-| `externals`       | `ExternalNode[]` referenced by at least one binding / interceptor / extension edge      |
-| `aliases`         | `AliasNode[]` (`{ key, token }`), sorted by key → `metadata.aliases`                    |
-| `resolutionOrder` | every provider token, dependencies first → `metadata.resolutionOrder`                   |
-| `edges`           | every dependency edge (validation, prune), typed by `EdgeKind`                          |
-| `extensions`      | `{ name, stored }[]`: data each extension stored with `ctx.store()`, in extension order |
-| `bindings`        | results of `AnalyzeContext.bindInjection` by handle id (`undefined` when it failed)     |
-| `bindingRequests` | the requests of `AnalyzeContext.bindInjection` by handle id (library mode)              |
-| `reachability`    | `{ roots, unreachable }` when `reportUnused` or `prune` is set, else `undefined`        |
-| `diagnostics`     | sorted diagnostics of every phase                                                       |
+| Field             | Content                                                                                                                                               |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `providers`       | `ProviderNode[]`, sorted by token                                                                                                                     |
+| `externals`       | `ExternalNode[]` referenced by at least one binding / interceptor / extension edge                                                                    |
+| `aliases`         | `AliasNode[]` (`{ key, token }`), sorted by key → `metadata.aliases`                                                                                  |
+| `resolutionOrder` | every provider token, dependencies first → `metadata.resolutionOrder`                                                                                 |
+| `edges`           | every dependency edge (validation, prune), typed by `EdgeKind`                                                                                        |
+| `extensions`      | `{ name, stored }[]`: data each extension stored with `ctx.store()`, in extension order                                                               |
+| `bindings`        | results of `AnalyzeContext.bindInjection` by handle id (`undefined` when it failed)                                                                   |
+| `bindingRequests` | the requests of `AnalyzeContext.bindInjection` by handle id (library mode)                                                                            |
+| `roots`           | roots declared by extensions (`addRoot`) and compiled libraries: `{ token, origin, reason, location }`, sorted by token then origin (always computed) |
+| `reachability`    | `{ roots, unreachable }` when `reportUnused` or `prune` is set, else `undefined`                                                                      |
+| `diagnostics`     | sorted diagnostics of every phase                                                                                                                     |
 
 ### `ProviderNode` → `ProviderDefinition` (§3.2)
 

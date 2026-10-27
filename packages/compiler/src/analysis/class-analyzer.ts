@@ -6,6 +6,7 @@
 import type {
   AccessorProperty,
   Class,
+  Expression,
   Function as FunctionNode,
   MethodDefinition,
   ParamPattern,
@@ -43,9 +44,11 @@ import {
   substituteType,
   withTypeParameters,
 } from '../project/index.ts'
+import { recordAnnotation } from './annotations.ts'
 import { evaluateArgument } from './arguments.ts'
 import { memberName, visibilityOf } from './ast.ts'
 import { LIFECYCLE_MEMBERS } from './core-decorators.ts'
+import { docAt, startWithDecorators } from './jsdoc.ts'
 
 const MAX_HERITAGE_DEPTH = 32
 const EMPTY_BINDINGS: ReadonlyMap<string, TypeInfo> = new Map()
@@ -221,6 +224,7 @@ export class ClassAnalyzer {
       lifecycle: [],
       decorated,
       declaration,
+      doc: docAt(file, startWithDecorators(node, node.decorators)),
     }
     const lifecycle = this.#lifecycle(info)
     return lifecycle.length === 0 ? info : { ...info, lifecycle }
@@ -232,7 +236,7 @@ export class ClassAnalyzer {
     const fn = member.value
     const typeScope = withTypeParameters(classScope, fn.typeParameters)
     const returnType = fn.returnType ? this.#project.resolveType(scope, fn.returnType, typeScope) : undefined
-    return {
+    const info: MethodInfo = {
       name: key.name,
       kind: member.kind === 'get' || member.kind === 'set' ? member.kind : 'method',
       visibility: visibilityOf(member.accessibility, key.privateName),
@@ -243,12 +247,20 @@ export class ClassAnalyzer {
       async: fn.async || returnType?.kind === 'promise',
       generator: fn.generator,
       optional: member.optional === true,
-      decorators: this.#reader.read(scope, member.decorators, 'method'),
+      decorators: this.#reader.read(scope, member.decorators, 'method', typeScope),
       params: this.#parameters(scope, typeScope, fn.params, 'parameter', EMPTY_BINDINGS),
       returnType,
       typeParameters: (fn.typeParameters?.params ?? []).map(parameter => parameter.name.name),
       location: file.location(member.key),
+      doc: docAt(file, startWithDecorators(member, member.decorators)),
     }
+    recordAnnotation(info, {
+      scope,
+      typeParameters: [...typeScope.keys()],
+      nodes: [fn.returnType?.typeAnnotation],
+      bindings: EMPTY_BINDINGS,
+    })
+    return info
   }
 
   #property(scope: ScopeRef, typeScope: TypeScope, member: PropertyDefinition | AccessorProperty): PropertyInfo {
@@ -266,7 +278,7 @@ export class ClassAnalyzer {
       )
     }
     const accessor = member.type === 'AccessorProperty' || member.type === 'TSAbstractAccessorProperty'
-    return {
+    const info: PropertyInfo = {
       name: key.name,
       privateName: key.privateName,
       computed: key.computed,
@@ -276,11 +288,19 @@ export class ClassAnalyzer {
       optional: !accessor && (member as PropertyDefinition).optional === true,
       declare: !accessor && (member as PropertyDefinition).declare === true,
       accessor,
-      decorators: this.#reader.read(scope, member.decorators, 'property'),
+      decorators: this.#reader.read(scope, member.decorators, 'property', typeScope),
       type: member.typeAnnotation ? this.#project.resolveType(scope, member.typeAnnotation, typeScope) : undefined,
       initializer,
       location: file.location(member.key),
+      doc: docAt(file, startWithDecorators(member, member.decorators)),
     }
+    recordAnnotation(info, {
+      scope,
+      typeParameters: [...typeScope.keys()],
+      nodes: [member.typeAnnotation?.typeAnnotation],
+      bindings: EMPTY_BINDINGS,
+    })
+    return info
   }
 
   /** Parameters of a function, with types substituted by `bindings`. */
@@ -304,12 +324,14 @@ export class ClassAnalyzer {
       const rest = pattern.type === 'RestElement'
       let annotation: TSTypeAnnotation | null | undefined
       let hasDefault = false
+      let defaultValue: Expression | undefined
       if (pattern.type === 'RestElement') {
         annotation = pattern.typeAnnotation
         pattern = pattern.argument
       }
       if (pattern.type === 'AssignmentPattern') {
         hasDefault = true
+        defaultValue = pattern.right
         decorators = [...decorators, ...(pattern.decorators ?? [])]
         pattern = pattern.left
       }
@@ -331,12 +353,23 @@ export class ClassAnalyzer {
         type: bindings.size === 0 ? resolved : substituteType(resolved, bindings),
         optional,
         hasDefault,
+        initializer:
+          defaultValue === undefined
+            ? undefined
+            : evaluateArgument(this.#project, scope, defaultValue, 'value', `default value of '${name}'`, undefined),
         rest,
-        decorators: this.#reader.read(scope, decorators, target),
+        decorators: this.#reader.read(scope, decorators, target, typeScope),
         location,
         typeLocation: annotation ? file.location(annotation.typeAnnotation) : location,
         property,
+        doc: docAt(file, startWithDecorators(param, decorators)),
       }
+      recordAnnotation(info, {
+        scope,
+        typeParameters: [...typeScope.keys()],
+        nodes: [annotation?.typeAnnotation],
+        bindings,
+      })
       if (external) {
         const nominal = this.#project.resolveType(scope, annotation, typeScope, { externalAliases: 'keep' })
         this.#injectionTypes.set(info, bindings.size === 0 ? nominal : substituteType(nominal, bindings))

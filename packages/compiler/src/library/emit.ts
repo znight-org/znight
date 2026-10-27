@@ -187,6 +187,11 @@ export function emitLibrary(input: EmitLibraryInput): EmitLibraryResult {
     }
   }
 
+  const emitted = new Set(providers.map(provider => provider.token))
+  const roots = [
+    ...new Set(analysis.graph.roots.map(entry => translator.token(entry.token)).filter(token => emitted.has(token))),
+  ].sort(compareStrings)
+
   const data: ProvidersFile = {
     schemaVersion: PROVIDERS_SCHEMA_VERSION,
     package: root.name,
@@ -195,6 +200,7 @@ export function emitLibrary(input: EmitLibraryInput): EmitLibraryResult {
     edges,
     bindings,
     extensions,
+    ...(roots.length > 0 ? { roots } : {}),
   }
   if (diagnostics.length > 0) {
     return { output: undefined, diagnostics }

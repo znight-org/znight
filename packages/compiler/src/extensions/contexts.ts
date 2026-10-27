@@ -17,26 +17,38 @@ import type {
   ClassInfo,
   ClassRef,
   ClassRefOptions,
+  DefinitionInfo,
   DependencyDetails,
   InjectionRequest,
   ProviderRegistration,
+  RootDetails,
+  RootNode,
   TypeHelpers,
   ValidateContext,
 } from './api.ts'
+import type { DefinitionIndex } from './definitions.ts'
 
 import { ErrorCode } from '@znight/core'
 
 import { awaitedType, stripNullish } from '../binding/injection.ts'
 import { displayNameOf, formatType, referenceType, serializeType, typesEqual } from '../project/index.ts'
+import { ShapeResolver } from '../shapes/resolver.ts'
 
-/** Type helpers exposed to extensions. */
-export const TYPE_HELPERS: TypeHelpers = Object.freeze({
-  format: formatType,
-  serialize: serializeType,
-  equals: typesEqual,
-  stripNullish,
-  awaited: awaitedType,
-})
+/**
+ * Type helpers exposed to extensions, for one compile of `project` (`shape()` memoizes the named
+ * shapes it computes).
+ */
+export function createTypeHelpers(project: Project): TypeHelpers {
+  const shapes = new ShapeResolver(project)
+  return Object.freeze({
+    format: formatType,
+    serialize: serializeType,
+    equals: typesEqual,
+    stripNullish,
+    awaited: awaitedType,
+    shape: (target, options) => shapes.shape(target, options),
+  } satisfies TypeHelpers)
+}
 
 const SCOPES: readonly Scope[] = ['singleton', 'request', 'transient']
 
@@ -65,6 +77,10 @@ export interface AnalysisState {
   readonly edges: ExtensionEdge[]
   readonly bindings: ExtensionBinding[]
   readonly stored: Map<string, unknown[]>
+  /** Roots declared with `addRoot` (and by compiled libraries), in call order. */
+  readonly roots: RootNode[]
+  readonly types: TypeHelpers
+  readonly definitions: DefinitionIndex
   nextBindingId: number
 }
 
@@ -73,13 +89,14 @@ export class ExtensionAnalyzeContext implements AnalyzeContext<unknown> {
   readonly extension: string
   readonly project: Project
   readonly options: ResolvedOptions
-  readonly types: TypeHelpers = TYPE_HELPERS
+  readonly types: TypeHelpers
   readonly #state: AnalysisState
 
   constructor(extension: string, state: AnalysisState) {
     this.extension = extension
     this.project = state.project
     this.options = state.project.options
+    this.types = state.types
     this.#state = state
   }
 
@@ -168,6 +185,21 @@ export class ExtensionAnalyzeContext implements AnalyzeContext<unknown> {
     }
     list.push(data)
   }
+
+  addRoot(cls: ClassInfo, details: RootDetails = {}): Token {
+    if (typeof cls !== 'object' || cls === null || typeof cls.identity !== 'string' || !cls.declaration) {
+      throw new TypeError(`[znight] extension '${this.extension}': addRoot(cls) expects a ClassInfo`)
+    }
+    const location = details.location ?? ownedDecorators(cls, this.extension)[0]?.location ?? cls.location
+    const reason = details.reason ?? `root of extension '${this.extension}'`
+    this.#state.roots.push({ token: cls.identity, origin: `extension '${this.extension}'`, reason, location })
+    this.#state.builder.requestRoot(cls, location, reason)
+    return cls.identity
+  }
+
+  definitionsOf(callee: string): readonly DefinitionInfo[] {
+    return this.#state.definitions.definitionsOf(callee)
+  }
 }
 
 /** {@link ValidateContext} of one extension. */
@@ -175,7 +207,7 @@ export class ExtensionValidateContext implements ValidateContext<unknown> {
   readonly extension: string
   readonly project: Project
   readonly options: ResolvedOptions
-  readonly types: TypeHelpers = TYPE_HELPERS
+  readonly types: TypeHelpers
   readonly graph: ApplicationGraph
   readonly stored: readonly unknown[]
   readonly #providers: ReadonlyMap<Token, ProviderNode>
@@ -185,6 +217,7 @@ export class ExtensionValidateContext implements ValidateContext<unknown> {
     this.extension = extension
     this.project = state.project
     this.options = state.project.options
+    this.types = state.types
     this.graph = graph
     this.stored = state.stored.get(extension) ?? []
     this.#providers = new Map(graph.providers.map(provider => [provider.token, provider]))
@@ -205,6 +238,10 @@ export class ExtensionValidateContext implements ValidateContext<unknown> {
 
   report(diagnostic: Diagnostic): void {
     this.#state.report(diagnostic)
+  }
+
+  definitionsOf(callee: string): readonly DefinitionInfo[] {
+    return this.#state.definitions.definitionsOf(callee)
   }
 }
 

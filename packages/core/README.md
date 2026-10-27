@@ -244,21 +244,22 @@ export class AuditService {
 ```ts
 import { type Plugin, type PluginOptions, resolveOptions } from '@znight/core'
 
-export const CronPlugin = {
-  configure(options: PluginOptions<{ timezone: string }>): Plugin {
+export const HeartbeatPlugin = {
+  configure(options: PluginOptions<{ intervalMs: number }>): Plugin {
     let timer: NodeJS.Timeout | undefined
+    let intervalMs = 1000
     return {
-      name: 'cron',
+      name: 'heartbeat',
       register(ctx) {
-        ctx.container.registerValue('@acme/cron#Clock', systemClock)
+        ctx.container.registerValue('@acme/heartbeat#Clock', systemClock)
       },
       onBootstrap(ctx) {
-        // options may be a function of the container: CronPlugin.configure(c => ({ timezone: c.get(AppConfig).tz }))
-        const { timezone } = resolveOptions(options, ctx.container)
-        ctx.logger.info('cron configured', { timezone })
+        // options may be a function of the container: HeartbeatPlugin.configure(c => ({ intervalMs: c.get(AppConfig).beat }))
+        intervalMs = resolveOptions(options, ctx.container).intervalMs
+        ctx.logger.info('heartbeat configured', { intervalMs })
       },
       onStart() {
-        timer = setInterval(tick, 1000)
+        timer = setInterval(beat, intervalMs)
       },
       onStop() {
         clearInterval(timer)
@@ -271,14 +272,65 @@ export const CronPlugin = {
 A plugin receives a `PluginContext` with `app`, `container`, `metadata`, `hooks`, a live `logger`
 (follows `app.setLogger()`) and `getPlugin(name)`.
 
+A plugin that resolves providers at boot which the metadata does not make entry points (classes
+given in its options, like the global guards of `HttpPlugin`, or hosts it reads from its own
+metadata section) lists them in an optional `initRoots(context)` method. The application never calls
+it; tools that restrict the boot to a few providers do, so that those providers and their async
+dependencies are created at boot (an async factory cannot run on demand): `TestApp` of
+`@znight/testing`, or your own `init: { only }` list.
+
+```ts
+const AuditPlugin = {
+  configure(options: { sinks: readonly (new (...args: never[]) => AuditSink)[] }): Plugin {
+    return {
+      name: 'audit',
+      // called before the application exists: cheap, side-effect free, never throws
+      initRoots: () => options.sinks,
+      onBootstrap(ctx) {
+        for (const sink of options.sinks) ctx.container.get(sink).open()
+      },
+    }
+  },
+}
+
+const audit = AuditPlugin.configure({ sinks: [S3AuditSink] })
+await Application.create({
+  metadata,
+  plugins: [audit],
+  init: { only: [UserController, ...(audit.initRoots?.({ metadata }) ?? [])] },
+})
+```
+
+`initRoots` receives `{ metadata }` (`PluginRootsContext`) and returns classes or tokens
+(`ProviderKey[]`). Options given as a function of the container cannot be read before the boot:
+return what is known (`[]`).
+
 ## Hooks
 
-`app.hooks` is a typed event bus. Feature packages declare their hooks by augmenting `ZnightHooks`:
+`app.hooks` is a typed event bus. The hooks of the first-party packages and their event types are
+declared in core, so producers and observers (`@znight/observability`, your plugins) share them
+without depending on each other:
+
+| Hook                | Event                  | Produced by                                                                  |
+| ------------------- | ---------------------- | ---------------------------------------------------------------------------- |
+| `http:request`      | `HttpRequestEvent`     | `@znight/http`, one request                                                  |
+| `messaging:message` | `MessageDeliveryEvent` | `@znight/messaging`, one delivery                                            |
+| `messaging:publish` | `MessagePublishEvent`  | `@znight/messaging`, one `MessageBroker` publication                         |
+| `schedule:run`      | `ScheduledRunEvent`    | `@znight/schedule`, one occurrence of a job (executed or not, see `outcome`) |
+
+`ScheduledRunEvent` carries `job`, `kind` (`cron` / `interval` / `timeout`), `host`, `method`,
+`runId`, `trigger` (`schedule` / `start` / `manual` / `queued`), `scheduledAt` (epoch ms),
+`context` (the `JobContext`), `startTime`, and, once settled, `outcome` (`completed` / `failed` /
+`skipped` / `not-acquired`), `error` and `aborted` (`timeout` / `lock-lost` / `removed` /
+`shutdown`). Executed runs are wrapped with `hooks.run`, then emitted; occurrences that did not run
+are only emitted.
+
+Other packages declare their hooks by augmenting `ZnightHooks`:
 
 ```ts
 declare module '@znight/core' {
   interface ZnightHooks {
-    'http:request': HttpRequestEvent
+    'acme:sync': AcmeSyncEvent
   }
 }
 
@@ -330,4 +382,11 @@ Every runtime error is a `ZnightError` with a `code` (`ZNIGHT001`...), `hints` a
 `cause`. `InstantiationError` (`ZNIGHT015`) adds `token`, `path` and `source`; `ZnightAggregateError`
 (`ZNIGHT021`) adds `errors`. Cleanup failures that happened while handling an error are attached to it:
 read them with `getSuppressedErrors(error)`. The catalogue is exported as `ErrorCode` /
-`ERROR_DESCRIPTIONS` and documented in the [architecture specification](../../docs/internals/architecture.md#48-validations).
+`ERROR_DESCRIPTIONS` and documented in the [error reference](../../docs/reference/error-codes.md) and
+the [architecture specification](../../docs/internals/architecture.md#48-validations).
+
+The catalogue is shared by the compiler and every first-party package. `ZNIGHT001`–`ZNIGHT029`
+belong to the core, the compiler and the features of the first release (`ZNIGHT023`, a missing
+route decision, is reported by `@znight/http`). From `ZNIGHT030`, each package owns a block of ten:
+`ZNIGHT030`–`039` `@znight/openapi`, `ZNIGHT040`–`049` `@znight/schedule` (`050`–`069` are
+reserved). Inside a block, codes are allocated in order; third-party packages get no `ZNIGHT` code.

@@ -13,7 +13,7 @@
  * report first (`project.syntaxErrors()`).
  */
 
-import type { ClassInfo, CompilerExtension } from './extensions/api.ts'
+import type { ClassInfo, CompilerExtension, RootNode, TypeHelpers } from './extensions/api.ts'
 import type { AnalysisState } from './extensions/contexts.ts'
 import type { ExtensionLoadResult, LoadedExtension } from './extensions/loader.ts'
 import type { ApplicationGraph, Reachability } from './graph/types.ts'
@@ -28,7 +28,13 @@ import { ProviderBuilder } from './analysis/providers.ts'
 import { ProviderRegistry } from './analysis/registry.ts'
 import { Binder } from './binding/binder.ts'
 import { NearMissAnalyzer } from './binding/near-miss.ts'
-import { ExtensionAnalyzeContext, ExtensionValidateContext, ownedDecorators } from './extensions/contexts.ts'
+import {
+  createTypeHelpers,
+  ExtensionAnalyzeContext,
+  ExtensionValidateContext,
+  ownedDecorators,
+} from './extensions/contexts.ts'
+import { DefinitionIndex } from './extensions/definitions.ts'
 import { loadExtensions } from './extensions/loader.ts'
 import { buildGraph } from './graph/build.ts'
 import { mergeCompiledLibraries } from './library/merge.ts'
@@ -68,6 +74,8 @@ export interface AnalysisResult {
   readonly classes: readonly ClassInfo[]
   readonly extensions: readonly LoadedExtension[]
   readonly stats: AnalysisStats
+  /** Type helpers of the extension contexts (shapes memoized for this compile), reused by code generation. */
+  readonly types: TypeHelpers
 }
 
 /** Internal hooks (tests). */
@@ -135,6 +143,9 @@ export function analyzeProject(
     edges: [],
     bindings: [],
     stored: new Map(),
+    roots: [],
+    types: createTypeHelpers(project),
+    definitions: new DefinitionIndex(project),
     nextBindingId: 1,
   }
   for (const extension of loaded) {
@@ -184,9 +195,10 @@ export function analyzeProject(
   checkCycles(bound.providers, bound.edges, report)
   checkScopes(bound.providers, bound.externals, bound.edges, report)
   checkLifecycle(project, bound.providers, report)
+  const roots = sortRoots(state.roots)
   let reachability: Reachability | undefined
   if (project.options.reportUnused || project.options.prune) {
-    reachability = computeReachability(project, bound.providers, bound.edges, bound.aliases)
+    reachability = computeReachability(project, bound.providers, bound.edges, bound.aliases, roots)
     if (project.options.reportUnused) {
       reportUnused(bound.providers, reachability, report)
     }
@@ -212,6 +224,7 @@ export function analyzeProject(
     extensions: extensionData,
     bindings: bound.bindings,
     bindingRequests: bound.bindingRequests,
+    roots,
     reachability,
     diagnostics,
   })
@@ -243,7 +256,20 @@ export function analyzeProject(
       providers: bound.providers.length,
       durationMs: performance.now() - start,
     },
+    types: state.types,
   }
+}
+
+/** Roots sorted by token then origin, one per (token, origin). */
+function sortRoots(roots: readonly RootNode[]): RootNode[] {
+  const unique = new Map<string, RootNode>()
+  for (const root of roots) {
+    const key = `${root.token}\u0000${root.origin}`
+    if (!unique.has(key)) {
+      unique.set(key, root)
+    }
+  }
+  return [...unique.values()].sort((a, b) => compareStrings(a.token, b.token) || compareStrings(a.origin, b.origin))
 }
 
 function extensionFailure(

@@ -150,6 +150,18 @@ describe('HttpResponse', () => {
     expect(HttpResponse.redirect('/x', 301).status).toBe(301)
   })
 
+  it('types created() and accepted() with their body (no `| undefined`)', () => {
+    interface Book {
+      readonly id: number
+    }
+    const created: HttpResponse<Book> = HttpResponse.created({ id: 1 }, '/books/1')
+    const accepted: HttpResponse<Book> = HttpResponse.accepted({ id: 2 })
+    const empty: HttpResponse<undefined> = HttpResponse.created()
+    const nothing: HttpResponse<undefined> = HttpResponse.accepted()
+    expect([created.body.id, accepted.body.id, empty.body, nothing.body]).toEqual([1, 2, undefined, undefined])
+    expect([created.status, accepted.status]).toEqual([201, 202])
+  })
+
   it('copies with headers and status', () => {
     const base = new HttpResponse('x', { headers: { a: '1' } })
     const copy = base.withHeader('B', '2').withStatus(201)

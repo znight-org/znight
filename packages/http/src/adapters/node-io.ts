@@ -188,6 +188,8 @@ export function nodeAdapterRequest(
     url: options.url ?? request.url ?? '/',
     headers: normalizeNodeHeaders(request.headers),
     ip: options.ip ?? request.socket?.remoteAddress,
+    remoteAddress: request.socket?.remoteAddress,
+    encrypted: isEncrypted(request),
     raw: options.raw ?? request,
     rawResponse: options.rawResponse ?? response,
     readBody: (limit: number): Promise<Uint8Array> => {
@@ -197,6 +199,11 @@ export function nodeAdapterRequest(
     streamBody: (limit: number): ReadableStream<Uint8Array> => nodeBodyStream(request, limit),
     rawStatus: (): number => response.statusCode,
   }
+}
+
+/** Whether the request came over TLS (`node:https`, `node:http2` secure servers). */
+export function isEncrypted(request: IncomingMessage): boolean {
+  return (request.socket as { readonly encrypted?: unknown } | undefined)?.encrypted === true
 }
 
 /**

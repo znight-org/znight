@@ -1,5 +1,7 @@
 import type { Container, Plugin, PluginContext, PluginOptions, ProviderKey, Token, ZnightMetadata } from '@znight/core'
 import type { AdapterReply, HttpAdapter, HttpServerAddress, InjectRequest, InjectResponse } from './adapter.ts'
+import type { HttpContext } from './context.ts'
+import type { CorsOptions, CorsPolicy } from './cors.ts'
 import type {
   CanActivate,
   ExceptionMapper,
@@ -9,16 +11,34 @@ import type {
   HttpInterceptorClass,
 } from './interfaces.ts'
 import type { HttpControllerDefinition, HttpMetadata, HttpMethod, HttpRouteDefinition } from './metadata.ts'
+import type { CollectedPluginRoute } from './plugin-routes.ts'
+import type { TrustPolicy, TrustProxy } from './proxy.ts'
+import type { SecurityHeadersOptions } from './security-headers.ts'
 import type { ByteSize } from './size.ts'
 
 import { displayName, ErrorCode, resolveOptions, ZnightError } from '@znight/core'
 
 import { nodeAdapter } from './adapters/node.ts'
+import { resolveCors } from './cors.ts'
+import {
+  type CheckedRoute,
+  checkDecisions,
+  conflictingKeys,
+  type EnforcementMode,
+  effectiveMeta,
+  enforcedBy,
+  RouteGroups,
+  type RouteMeta,
+} from './decisions.ts'
 import { isHeaderName } from './headers.ts'
 import { isMediaTypePattern } from './mime.ts'
+import { invalidOption } from './option-error.ts'
 import { compareRoutePaths, compareStrings, joinPaths, parseRoutePath, type RoutePath, RoutePathError } from './path.ts'
 import { Pipeline, type Resolvable, type RoutePlan } from './pipeline.ts'
+import { collectPluginRoutes } from './plugin-routes.ts'
+import { resolveTrustProxy } from './proxy.ts'
 import { RouteTable } from './router.ts'
+import { resolveSecurityHeaders } from './security-headers.ts'
 import { parseByteSize } from './size.ts'
 import { isValidStatus } from './status.ts'
 import { HttpTokens } from './tokens.ts'
@@ -79,15 +99,48 @@ export interface HttpPluginOptions {
    * application's `hookTimeoutMs` still bounds `onStop`). Default: 4 000 ms.
    */
   readonly drainTimeoutMs?: number
+  /**
+   * CORS: preflights are answered before routing and guards (never by a route), and replies to
+   * allowed origins get `access-control-allow-origin`, identically on every adapter. Default: off.
+   *
+   * ```ts
+   * cors: { origin: ['https://app.example.com', /^https:\/\/[a-z0-9-]+\.preview\.example\.com$/], credentials: true }
+   * ```
+   */
+  readonly cors?: CorsOptions | false
+  /**
+   * Security headers added to every reply that does not set them (`@Res()` raw replies excepted):
+   * `true` (default) for the API defaults, an object merged over them, `false` for none.
+   */
+  readonly securityHeaders?: boolean | SecurityHeadersOptions
+  /**
+   * Proxies trusted for `x-forwarded-for` / `x-forwarded-proto` (`ctx.ip`, `ctx.protocol`): a number
+   * of hops, or addresses, CIDR ranges and the aliases `'loopback'`, `'private'`, `'linklocal'`.
+   * Default `false`: the headers are ignored and `ctx.ip` is the adapter's address.
+   */
+  readonly trustProxy?: TrustProxy
+  /**
+   * What the boot check of route decisions does when a route misses a decision of a required group,
+   * or when no guard of its chain enforces its decision (ZNIGHT023): `'error'` (default) fails the
+   * boot, `'warn'` logs one warning per group (tests that deliberately run without guards).
+   */
+  readonly enforcement?: EnforcementMode
 }
 
 /** A route registered by the plugin (see {@link HttpPlugin.routes}). */
 export interface HttpRouteSummary {
   readonly method: string
+  /** Registered path, prefix included. */
   readonly path: string
-  /** Controller display name. */
+  /** Controller display name, or the name of the plugin declaring the route. */
   readonly controller: string
   readonly handler: string
+  /** `'controller'` for compiled routes, the plugin name for plugin routes. */
+  readonly source: string
+  /** Effective route metadata (the nearest decision of each group). */
+  readonly meta: Readonly<Record<string, unknown>>
+  /** Display names of the guards, in chain order (global, controller, route). */
+  readonly guards: readonly string[]
 }
 
 interface Resolved {
@@ -102,6 +155,16 @@ interface Resolved {
   readonly requestIdHeader: string | undefined
   readonly generateRequestId: () => string
   readonly drainTimeoutMs: number
+  readonly cors: CorsPolicy | undefined
+  readonly securityHeaders: Readonly<Record<string, string>>
+  readonly trustProxy: TrustPolicy | undefined
+  readonly enforcement: EnforcementMode
+}
+
+/** Resolved options and the raw options they come from (memoised per application). */
+interface ResolvedOptions {
+  readonly raw: HttpPluginOptions
+  readonly options: Resolved
 }
 
 interface Runtime {
@@ -115,6 +178,17 @@ interface Registration {
   readonly method: Exclude<HttpMethod, 'ALL'>
   readonly path: RoutePath
   readonly plan: RoutePlan
+  /** `BookController.list`, `plugin "openapi" (document)`. */
+  readonly label: string
+  readonly source: string
+  readonly guards: readonly string[]
+}
+
+/** A guard of a chain: how to resolve it, the class whose `enforces` counts, its display name. */
+interface GuardEntry {
+  readonly resolvable: Resolvable<CanActivate>
+  readonly cls: unknown
+  readonly name: string
 }
 
 const DEFAULT_PORT = 3000
@@ -149,13 +223,17 @@ const CONCRETE_METHODS: readonly Exclude<HttpMethod, 'ALL'>[] = [
  * ```
  *
  * Lifecycle: `register` declares the request-scoped externals `HttpContext` and `RequestId`;
- * `onBootstrap` resolves the options, controllers, guards and interceptors and registers the
- * routes; `onStart` listens; `onStop` stops accepting connections and drains in-flight requests
- * (`drainTimeoutMs`); `onDispose` closes the server.
+ * `onBootstrap` resolves the options, controllers, guards and interceptors, collects the routes of
+ * other plugins (`httpRoutes()`), checks route decisions and registers the routes; `onStart`
+ * listens; `onStop` stops accepting connections and drains in-flight requests (`drainTimeoutMs`);
+ * `onDispose` closes the server.
  */
 export class HttpPlugin implements Plugin {
   readonly name = 'http'
   readonly #options: PluginOptions<HttpPluginOptions>
+  /** Options resolved for the current application (reset in `register`). */
+  #resolved: ResolvedOptions | undefined
+  #container: Container | undefined
   #runtime: Runtime | undefined
   #address: HttpServerAddress | undefined
   #disposed = false
@@ -182,6 +260,17 @@ export class HttpPlugin implements Plugin {
   /** Address of the server once listening (`String(address)` is its URL), `undefined` otherwise. */
   get address(): HttpServerAddress | undefined {
     return this.#address
+  }
+
+  /**
+   * The path prefix of every route (`''` without prefix, `/api`), for plugins that serve routes or
+   * publish URLs. Readable once the plugin is registered (before or after its `onBootstrap`; at any
+   * time when the options are not a function of the container). Throws the options error when
+   * the options are invalid.
+   */
+  get prefix(): string {
+    const prefix = this.#resolve('prefix').options.prefix
+    return prefix === '/' ? '' : prefix
   }
 
   /** Registered routes (after `onBootstrap`), in registration order. */
@@ -251,14 +340,16 @@ export class HttpPlugin implements Plugin {
     this.#disposed = false
     this.#runtime = undefined
     this.#address = undefined
+    this.#resolved = undefined
+    this.#container = ctx.container
     ctx.container.registerExternal({ token: HttpTokens.Context, scope: 'request', providedBy: 'HttpPlugin' })
     ctx.container.registerExternal({ token: HttpTokens.RequestId, scope: 'request', providedBy: 'HttpPlugin' })
     ctx.container.registerValue(HttpTokens.Plugin, this)
   }
 
   onBootstrap(ctx: PluginContext): void {
-    const raw = resolveOptions(this.#options, ctx.container)
-    const options = resolve(raw)
+    this.#container = ctx.container
+    const { raw, options } = this.#resolve('onBootstrap')
     if (BOUND_ADAPTERS.has(options.adapter)) {
       throw new ZnightError(
         ErrorCode.LifecycleFailed,
@@ -283,10 +374,18 @@ export class HttpPlugin implements Plugin {
         requestIdHeader: options.requestIdHeader,
         generateRequestId: options.generateRequestId,
         mappers: globalRefs<ExceptionMapper>(ctx.container, ctx.metadata, raw, 'exceptionMappers'),
+        cors: options.cors,
+        securityHeaders: options.securityHeaders,
+        trustProxy: options.trustProxy,
       },
       table,
     )
-    const registrations = buildRegistrations(ctx.container, ctx.metadata, options, raw)
+    const pluginRoutes = collectPluginRoutes(ctx.app.plugins, this, {
+      prefix: options.prefix === '/' ? '' : options.prefix,
+      container: ctx.container,
+    })
+    const { registrations, checked } = buildRegistrations(ctx, options, raw, pluginRoutes)
+    checkDecisions(checked.routes, checked.groups, options.enforcement, ctx.logger)
     const adapter = options.adapter
     const routes: HttpRouteSummary[] = []
     for (const registration of registrations) {
@@ -297,15 +396,20 @@ export class HttpPlugin implements Plugin {
         path: registration.path,
         handler: (request): Promise<AdapterReply> => pipeline.handle(plan, request),
       })
-      routes.push({
-        method: registration.method,
-        path: registration.path.path,
-        controller: displayName(plan.info.controller),
-        handler: plan.info.handler,
-      })
+      routes.push(
+        Object.freeze({
+          method: registration.method,
+          path: registration.path.path,
+          controller: registration.source === 'controller' ? displayName(plan.info.controller) : registration.source,
+          handler: plan.info.handler,
+          source: registration.source,
+          meta: plan.info.meta,
+          guards: registration.guards,
+        }),
+      )
     }
     adapter.setFallbackHandler((request, error) => pipeline.fallback(request, error))
-    this.#runtime = { adapter, pipeline, options, routes }
+    this.#runtime = { adapter, pipeline, options, routes: Object.freeze(routes) }
   }
 
   async onStart(ctx: PluginContext): Promise<void> {
@@ -349,6 +453,27 @@ export class HttpPlugin implements Plugin {
     const runtime = this.#runtime
     this.#address = undefined
     if (runtime !== undefined) await runtime.adapter.close({ force: true })
+  }
+
+  /** Resolves the options once per application (`prefix` may need them before `onBootstrap`). */
+  #resolve(action: string): ResolvedOptions {
+    if (this.#resolved !== undefined) return this.#resolved
+    let raw: HttpPluginOptions
+    if (typeof this.#options === 'function') {
+      const container = this.#container
+      if (container === undefined) {
+        throw new ZnightError(
+          ErrorCode.LifecycleFailed,
+          `HttpPlugin: ${action} is only available once the plugin is registered in an application (its options are a function of the container)`,
+        )
+      }
+      raw = resolveOptions(this.#options, container)
+    } else {
+      raw = this.#options
+    }
+    const resolved: ResolvedOptions = { raw, options: resolve(raw) }
+    this.#resolved = resolved
+    return resolved
   }
 
   #require(action: string): Runtime {
@@ -416,6 +541,11 @@ function resolve(options: HttpPluginOptions): Resolved {
   ) {
     throw invalidOption('adapter', 'an HttpAdapter (nodeAdapter(), fastifyAdapter()...)', adapter)
   }
+  const enforcement = options.enforcement ?? 'error'
+  if (enforcement !== 'error' && enforcement !== 'warn') {
+    throw invalidOption('enforcement', '"error" or "warn"', enforcement)
+  }
+  const resolvedRequestIdHeader = requestIdHeader === false ? undefined : requestIdHeader.toLowerCase()
   return {
     adapter,
     port,
@@ -425,9 +555,13 @@ function resolve(options: HttpPluginOptions): Resolved {
     exposeErrors: options.exposeErrors === true,
     bodyLimit,
     uploads,
-    requestIdHeader: requestIdHeader === false ? undefined : requestIdHeader.toLowerCase(),
+    requestIdHeader: resolvedRequestIdHeader,
     generateRequestId,
     drainTimeoutMs,
+    cors: resolveCors(options.cors, resolvedRequestIdHeader),
+    securityHeaders: resolveSecurityHeaders(options.securityHeaders),
+    trustProxy: resolveTrustProxy(options.trustProxy),
+    enforcement,
   }
 }
 
@@ -462,22 +596,6 @@ function resolveUploadLimits(value: UploadLimits | undefined): ResolvedUploadLim
   }
 }
 
-function invalidOption(name: string, expected: string, value: unknown, cause?: unknown): ZnightError {
-  let received: string
-  try {
-    received = typeof value === 'function' ? 'a function' : (JSON.stringify(value) ?? String(value))
-  } catch {
-    received = typeof value
-  }
-  return new ZnightError(
-    ErrorCode.InvalidDecorator,
-    `HttpPlugin: option "${name}" must be ${expected} (received ${received})`,
-    {
-      ...(cause === undefined ? {} : { cause }),
-    },
-  )
-}
-
 // -------------------------------------------------------------------------------------------------
 // Routes
 // -------------------------------------------------------------------------------------------------
@@ -491,15 +609,34 @@ function httpMetadata(metadata: ZnightMetadata): HttpMetadata {
   return http
 }
 
+/** Routes as seen by the boot check of route decisions, with the groups they are checked against. */
+interface Checked {
+  readonly routes: readonly CheckedRoute[]
+  readonly groups: RouteGroups
+}
+
+/** A declared route (controller route or plugin route), before HEAD, `@All` and trailing-slash expansion. */
+interface Declared {
+  readonly method: HttpMethod
+  readonly path: RoutePath
+  readonly plan: (method: string) => RoutePlan
+  readonly label: string
+  readonly source: string
+  readonly guards: readonly GuardEntry[]
+  /** Effective metadata (available once every group is known). */
+  meta(): RouteMeta
+}
+
 function buildRegistrations(
-  container: Container,
-  metadata: ZnightMetadata,
+  ctx: PluginContext,
   options: Resolved,
   raw: HttpPluginOptions,
-): Registration[] {
+  pluginRoutes: readonly CollectedPluginRoute[],
+): { readonly registrations: Registration[]; readonly checked: Checked } {
+  const { container, metadata } = ctx
   const http = httpMetadata(metadata)
-  const globalGuards = globalRefs<CanActivate>(container, metadata, raw, 'guards')
-  const globalInterceptors = globalRefs<HttpInterceptor>(container, metadata, raw, 'interceptors')
+  const groups = RouteGroups.fromMetadata(http.groups)
+  const groupOf = (key: string): string => groups.groupOf(key)
   const resolvables = new Map<Token, Resolvable<unknown>>()
   const lookup = <T>(token: Token, what: string): Resolvable<T> => {
     let found = resolvables.get(token)
@@ -509,17 +646,30 @@ function buildRegistrations(
     }
     return found as Resolvable<T>
   }
+  const compiledGuard = (token: Token, what: string): GuardEntry => ({
+    resolvable: lookup<CanActivate>(token, what),
+    // the compiled class: a guard replaced through `overrides` in a test keeps its declaration
+    cls: Object.hasOwn(metadata.providers, token) ? metadata.providers[token]?.class : undefined,
+    name: displayName(token),
+  })
+  const globalGuards = guardEntries(container, metadata, raw.guards ?? [], ref =>
+    invalidOption('guards', 'classes or objects with a canActivate() method', ref),
+  )
+  const globalInterceptors = globalRefs<HttpInterceptor>(container, metadata, raw, 'interceptors')
+  const declared: Declared[] = []
+  /** Checks run once every group is declared. */
+  const pending: (() => void)[] = []
 
-  const explicit: Registration[] = []
-  const catchAll: { readonly path: RoutePath; readonly plan: (method: string) => RoutePlan }[] = []
   for (const controller of http.controllers) {
     assertController(controller)
     const name = displayName(controller.token)
     const instance = lookup<object>(controller.token, `controller ${name}`)
-    const controllerGuards = controller.guards.map(token => lookup<CanActivate>(token, `guard of ${name}`))
+    const controllerGuards = controller.guards.map(token => compiledGuard(token, `guard of ${name}`))
     const controllerInterceptors = controller.interceptors.map(token =>
       lookup<HttpInterceptor>(token, `interceptor of ${name}`),
     )
+    const controllerMeta = assertMeta(controller.meta, name)
+    pending.push(() => checkTargetMeta(controllerMeta, groupOf, name))
     for (const route of controller.routes) {
       const where = `${name}.${String(route?.handler)}`
       assertRoute(route, where)
@@ -534,11 +684,11 @@ function buildRegistrations(
           { cause: error },
         )
       }
-      const meta = Object.freeze({ ...controller.meta, ...route.meta })
+      const routeMeta = assertMeta(route.meta, where)
       const guards = [
         ...globalGuards,
         ...controllerGuards,
-        ...route.guards.map(token => lookup<CanActivate>(token, `guard of ${where}`)),
+        ...route.guards.map(token => compiledGuard(token, `guard of ${where}`)),
       ]
       const interceptors = [
         ...globalInterceptors,
@@ -547,47 +697,164 @@ function buildRegistrations(
       ]
       const body = bodyPlan(route, options.bodyLimit, options.uploads)
       const parseBody = body.upload || route.params.some(param => param.source === 'body')
-      const plan = (method: string): RoutePlan => ({
-        definition: route,
+      const chain = guards.map(guard => guard.resolvable)
+      // computed once every group is declared (guards of every chain, plugin routes), then frozen
+      let meta: RouteMeta | undefined
+      const effective = (): RouteMeta => {
+        meta ??= effectiveMeta(controllerMeta, routeMeta, groupOf)
+        return meta
+      }
+      pending.push(() => checkTargetMeta(routeMeta, groupOf, where))
+      declared.push({
+        method: route.method,
         path,
-        info: Object.freeze({ method, path: path.path, controller: controller.token, handler: route.handler, meta }),
-        controller: instance,
+        plan: (method: string): RoutePlan => ({
+          definition: route,
+          path,
+          info: Object.freeze({
+            method,
+            path: path.path,
+            controller: controller.token,
+            handler: route.handler,
+            meta: effective(),
+          }),
+          controller: instance,
+          guards: chain,
+          interceptors,
+          parseBody,
+          body,
+        }),
+        label: where,
+        source: 'controller',
         guards,
-        interceptors,
-        parseBody,
-        body,
+        meta: effective,
       })
-      if (route.method === 'ALL') catchAll.push({ path, plan })
-      else explicit.push({ method: route.method, path, plan: plan(route.method) })
     }
+  }
+
+  for (const route of pluginRoutes) {
+    const label = `plugin "${route.plugin}" (${route.name})`
+    const where = `${route.method} ${route.path.path} (${route.name})`
+    const guards = [
+      ...globalGuards,
+      ...guardEntries(
+        container,
+        metadata,
+        route.guards,
+        ref =>
+          new ZnightError(
+            ErrorCode.InvalidRoute,
+            `HttpPlugin: plugin "${route.plugin}": the guards of the route ${where} must be classes or objects with a canActivate() method (received ${describeValue(ref)})`,
+          ),
+      ),
+    ]
+    const values: Record<string, unknown> = {}
+    for (const entry of route.meta) {
+      groups.declare(entry, `the plugin "${route.plugin}"`)
+      values[entry.key] = entry.value
+    }
+    const meta: RouteMeta = Object.freeze(values)
+    pending.push(() => checkTargetMeta(meta, groupOf, `the route ${where} of the plugin "${route.plugin}"`))
+    const handler = route.handler
+    const definition: HttpRouteDefinition = Object.freeze({
+      method: route.method,
+      path: route.relativePath,
+      fullPath: route.relativePath,
+      handler: route.name,
+      meta,
+      guards: [],
+      interceptors: [],
+      params: [],
+      invoke: (_plugin: unknown, http: HttpContext): unknown => handler(http),
+    })
+    const instance: Resolvable<object> = { instance: route.instance }
+    const body = bodyPlan({}, options.bodyLimit, options.uploads)
+    const chain = guards.map(guard => guard.resolvable)
+    const path = route.path
+    declared.push({
+      method: route.method,
+      path,
+      plan: (method: string): RoutePlan => ({
+        definition,
+        path,
+        info: Object.freeze({ method, path: path.path, controller: route.plugin, handler: route.name, meta }),
+        controller: instance,
+        guards: chain,
+        // global interceptors wrap controllers only (a response envelope would break a document)
+        interceptors: [],
+        parseBody: false,
+        body,
+      }),
+      label,
+      source: route.plugin,
+      guards,
+      meta: () => meta,
+    })
+  }
+
+  // `enforces` of every guard class of every chain, read once per class: declares their groups
+  const enforcedGroups = new Map<unknown, ReadonlySet<string>>()
+  for (const route of declared) {
+    for (const guard of route.guards) {
+      if (enforcedGroups.has(guard.cls)) continue
+      const infos = enforcedBy(guard.cls, guard.name)
+      for (const info of infos) groups.declare(info, `the guard ${guard.name}`)
+      enforcedGroups.set(guard.cls, new Set(infos.map(info => info.group)))
+    }
+  }
+  for (const check of pending) check()
+  const checked: CheckedRoute[] = declared.map(route => {
+    const enforced = new Set<string>()
+    for (const guard of route.guards) for (const group of enforcedGroups.get(guard.cls) ?? []) enforced.add(group)
+    return {
+      description: `${route.method} ${route.path.path} (${route.label})`,
+      meta: route.meta(),
+      enforced,
+      ...(route.source === 'controller' ? {} : { plugin: route.source }),
+    }
+  })
+
+  const registration = (route: Declared, method: Exclude<HttpMethod, 'ALL'>): Registration => ({
+    method,
+    path: route.path,
+    plan: route.plan(method),
+    label: route.label,
+    source: route.source,
+    guards: Object.freeze(route.guards.map(guard => guard.name)),
+  })
+  const explicit: Registration[] = []
+  const catchAll: Declared[] = []
+  for (const route of declared) {
+    if (route.method === 'ALL') catchAll.push(route)
+    else explicit.push(registration(route, route.method))
   }
 
   // explicit routes, then HEAD for GET routes, then @All routes for the methods left
   const table = new RouteTable<Registration>()
   const accepted: Registration[] = []
-  const add = (registration: Registration, duplicate: boolean): void => {
-    const existing = table.add(registration.method, registration.path, registration)
-    if (existing === undefined) accepted.push(registration)
-    else if (duplicate) throw duplicateRoute(registration, existing)
+  const add = (candidate: Registration, duplicate: boolean): void => {
+    const existing = table.add(candidate.method, candidate.path, candidate)
+    if (existing === undefined) accepted.push(candidate)
+    else if (duplicate) throw duplicateRoute(candidate, existing)
   }
-  for (const registration of explicit) add(registration, true)
-  for (const registration of explicit) {
-    if (registration.method === 'GET') add({ ...registration, method: 'HEAD' }, false)
+  for (const candidate of explicit) add(candidate, true)
+  for (const candidate of explicit) {
+    if (candidate.method === 'GET') add({ ...candidate, method: 'HEAD' }, false)
   }
   const catchAllShapes = new Map<string, Registration>()
-  for (const { path, plan } of catchAll) {
-    const first: Registration = { method: 'GET', path, plan: plan('GET') }
-    const other = catchAllShapes.get(path.shape)
+  for (const route of catchAll) {
+    const first = registration(route, 'GET')
+    const other = catchAllShapes.get(route.path.shape)
     if (other !== undefined) throw duplicateRoute(first, other)
-    catchAllShapes.set(path.shape, first)
-    for (const method of CONCRETE_METHODS) add(method === 'GET' ? first : { method, path, plan: plan(method) }, false)
+    catchAllShapes.set(route.path.shape, first)
+    for (const method of CONCRETE_METHODS) add(method === 'GET' ? first : registration(route, method), false)
   }
 
   // trailing-slash variants
   const result: Registration[] = [...accepted]
   if (options.trailingSlash !== 'strict') {
-    for (const registration of accepted) {
-      const path = registration.path
+    for (const candidate of accepted) {
+      const path = candidate.path
       if (path.segments.length === 0 || path.wildcard) continue
       const variant: RoutePath = {
         path: `${path.path}/`,
@@ -598,27 +865,58 @@ function buildRegistrations(
       }
       const plan: RoutePlan =
         options.trailingSlash === 'redirect'
-          ? { ...registration.plan, path: variant, redirect: true }
-          : { ...registration.plan, path: variant }
-      result.push({ method: registration.method, path: variant, plan })
+          ? { ...candidate.plan, path: variant, redirect: true }
+          : { ...candidate.plan, path: variant }
+      result.push({ ...candidate, path: variant, plan })
     }
   }
 
   // HEAD first (Express answers HEAD with the first matching GET route), then most specific first
-  return result.sort((a, b) => {
+  const registrations = result.sort((a, b) => {
     const head = (a.method === 'HEAD' ? 0 : 1) - (b.method === 'HEAD' ? 0 : 1)
     if (head !== 0) return head
     return compareRoutePaths(a.path, b.path) || compareStrings(a.method, b.method)
   })
+  return { registrations, checked: { routes: checked, groups } }
+}
+
+const EMPTY_META: RouteMeta = Object.freeze({})
+
+/** Hand-written metadata: two keys of one group on one target (ZNIGHT007). */
+function checkTargetMeta(meta: RouteMeta, groupOf: (key: string) => string, target: string): void {
+  const conflict = conflictingKeys(meta, groupOf)
+  if (conflict === undefined) return
+  throw new ZnightError(
+    ErrorCode.InvalidRoute,
+    `Invalid route metadata of ${target}: "${conflict[0]}" and "${conflict[1]}" are two decisions of the "${conflict[2]}" group`,
+    { hints: ['The decorators of a group are alternatives: keep one per controller or route'] },
+  )
 }
 
 function duplicateRoute(registration: Registration, existing: Registration): ZnightError {
-  const describe = (plan: RoutePlan): string => `${displayName(plan.info.controller)}.${plan.info.handler}`
+  const plugin = registration.source === 'controller' ? existing.source : registration.source
   return new ZnightError(
     ErrorCode.InvalidRoute,
-    `Duplicate route ${registration.method} ${registration.path.path}: ${describe(registration.plan)} conflicts with ${describe(existing.plan)} (${existing.path.path})`,
-    { hints: ['Two routes with the same method and the same path shape (parameter names aside) cannot coexist'] },
+    `Duplicate route ${registration.method} ${registration.path.path}: ${registration.label} conflicts with ${existing.label} (${existing.path.path})`,
+    {
+      hints: [
+        'Two routes with the same method and the same path shape (parameter names aside) cannot coexist',
+        ...(plugin === 'controller' ? [] : [`Change the path of the route in the options of the plugin "${plugin}"`]),
+      ],
+    },
   )
+}
+
+/** Route metadata must be a plain object (hand-written metadata). */
+function assertMeta(meta: unknown, where: string): RouteMeta {
+  if (meta === undefined) return EMPTY_META
+  if (meta === null || typeof meta !== 'object' || Array.isArray(meta)) {
+    throw new ZnightError(
+      ErrorCode.InvalidRoute,
+      `Invalid route metadata of ${where}: expected an object (received ${describeValue(meta)})`,
+    )
+  }
+  return meta as RouteMeta
 }
 
 function assertController(controller: HttpControllerDefinition): void {
@@ -772,20 +1070,53 @@ function globalRefs<T>(
   if (!Array.isArray(refs)) throw invalidOption(key, 'an array', refs)
   const method = GLOBAL_METHOD[key]
   const what = GLOBAL_WHAT[key]
-  return refs.map((ref: unknown): Resolvable<T> => {
-    if (typeof ref === 'function') {
-      const token = container.tokenOf(ref as GuardClass)
-      if (token === undefined) {
-        const name = (ref as { name?: string }).name || '<anonymous>'
-        throw new ZnightError(ErrorCode.MissingProvider, `HttpPlugin: the global ${what} ${name} is not a provider`, {
-          hints: ['Add @Injectable() to the class, or pass an instance'],
-        })
-      }
-      return resolvable<T>(container, metadata, token, `global ${what}`)
+  return refs.map(
+    (ref: unknown): Resolvable<T> =>
+      resolveRef<T>(container, metadata, ref, what, method, () =>
+        invalidOption(key, `classes or objects with a ${method}() method`, ref),
+      ).resolvable,
+  )
+}
+
+/** Guards given as classes or instances (`guards` option, plugin routes), with their class and name. */
+function guardEntries(
+  container: Container,
+  metadata: ZnightMetadata,
+  refs: unknown,
+  invalid: (ref: unknown) => ZnightError,
+): GuardEntry[] {
+  if (!Array.isArray(refs)) throw invalidOption('guards', 'an array', refs)
+  return refs.map((ref: unknown) =>
+    resolveRef<CanActivate>(container, metadata, ref, 'guard', 'canActivate', () => invalid(ref)),
+  )
+}
+
+function resolveRef<T>(
+  container: Container,
+  metadata: ZnightMetadata,
+  ref: unknown,
+  what: string,
+  method: string,
+  invalid: () => ZnightError,
+): { readonly resolvable: Resolvable<T>; readonly cls: unknown; readonly name: string } {
+  if (typeof ref === 'function') {
+    const token = container.tokenOf(ref as GuardClass)
+    if (token === undefined) {
+      const name = (ref as { name?: string }).name || '<anonymous>'
+      throw new ZnightError(ErrorCode.MissingProvider, `HttpPlugin: the global ${what} ${name} is not a provider`, {
+        hints: ['Add @Injectable() to the class, or pass an instance'],
+      })
     }
-    if (ref !== null && typeof ref === 'object' && typeof (ref as Record<string, unknown>)[method] === 'function') {
-      return { instance: ref as T }
+    return {
+      resolvable: resolvable<T>(container, metadata, token, `global ${what}`),
+      cls: ref,
+      name: displayName(token),
     }
-    throw invalidOption(key, `classes or objects with a ${method}() method`, ref)
-  })
+  }
+  if (ref !== null && typeof ref === 'object' && typeof (ref as Record<string, unknown>)[method] === 'function') {
+    const cls: unknown = (ref as { constructor?: unknown }).constructor
+    const className = typeof cls === 'function' && cls !== Object ? (cls as { name?: string }).name : undefined
+    return { resolvable: { instance: ref as T }, cls, name: className || `${what} instance` }
+  }
+  throw invalid()
 }

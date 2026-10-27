@@ -52,6 +52,8 @@ interface ClassRefRequest {
   readonly declaration: Declaration | undefined
   readonly location: Location
   readonly role: string
+  /** How an auto-registered provider is described (default: `<role> reference`). */
+  readonly registeredWith?: string
 }
 
 /** Builds provider drafts. One instance per compile. */
@@ -388,6 +390,14 @@ export class ProviderBuilder {
   }
 
   /**
+   * A root declared by an extension (`AnalyzeContext.addRoot`): auto-registered as a singleton by
+   * {@link resolveClassRefs} unless a provider decorator registers the class.
+   */
+  requestRoot(cls: ClassInfo, location: Location, reason: string): void {
+    this.#request({ token: cls.identity, declaration: cls.declaration, location, role: reason, registeredWith: reason })
+  }
+
+  /**
    * Resolves pending class references: providers and externals are kept, other classes are
    * auto-registered as singletons (which may request more references).
    */
@@ -412,7 +422,7 @@ export class ProviderBuilder {
       const cls = this.#analyzer.infoOf(request.declaration)
       this.registerClass(cls, {
         registeredBy: 'auto',
-        registeredWith: `${request.role} reference`,
+        registeredWith: request.registeredWith ?? `${request.role} reference`,
         registration: request.location,
         scope: 'singleton',
       })

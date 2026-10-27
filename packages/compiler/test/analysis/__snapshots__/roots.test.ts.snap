@@ -1,0 +1,8 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`AnalyzeContext.addRoot reports the auto-registration problems of a host at the given location 1`] = `
+"error ZNIGHT005 src/abstract.jobs.ts:4:3: scheduled job host cannot register the abstract class AbstractJobs
+  = hint: Register a concrete subclass, or provide the value with a @Provides method
+error ZNIGHT005 src/hidden.jobs.ts:4:3: HiddenJobs must be importable by the generated module to be a provider: 'HiddenJobs' is not exported by src/hidden.jobs.ts
+  = hint: Export it: \`export class HiddenJobs ...\`"
+`;

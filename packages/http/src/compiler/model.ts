@@ -83,12 +83,17 @@ export const Codes: {
   readonly InvalidDecorator: 'ZNIGHT005'
   readonly InvalidRoute: 'ZNIGHT007'
   readonly UnvalidatedInput: 'ZNIGHT017'
+  readonly MissingRouteDecision: 'ZNIGHT023'
 } = Object.freeze({
   MissingProvider: 'ZNIGHT001',
   InvalidDecorator: 'ZNIGHT005',
   InvalidRoute: 'ZNIGHT007',
   UnvalidatedInput: 'ZNIGHT017',
+  MissingRouteDecision: 'ZNIGHT023',
 })
+
+/** Grammar of a route decorator group name (same as the runtime `createRouteDecorator`). */
+export const GROUP_NAME: RegExp = /^[A-Za-z][\w.-]*$/
 
 /** Primitive coercions (`coerce.<kind>`). */
 export type ScalarCoercion = 'string' | 'number' | 'integer' | 'boolean' | 'bigint' | 'date'
@@ -152,16 +157,33 @@ export interface HttpParamData {
   readonly coercion: ParamCoercion | undefined
   /** Upload parameter (`source` `file` / `files`). */
   readonly upload?: UploadData
+  /**
+   * The default value of the handler parameter (`@Query('page') page = 1` → `1`), when it is
+   * statically evaluable (literals, `const` references; references to exported bindings are left
+   * out). Informational (documentation): the handler applies its own default.
+   */
+  readonly defaultValue?: StaticValue
   /** Location of the parameter decorator. */
   readonly location: Location
 }
 
-/** A `createRouteDecorator` value (`route.meta[key]`). */
+/** A `createRouteDecorator` value (`route.meta[key]`) and the definition of its decorator. */
 export interface MetaEntry {
   readonly key: string
   /** Statically evaluated value; may be or contain references to exported bindings. */
   readonly value: StaticValue
+  /** Location of the decorator usage. */
   readonly location: Location
+  /** Decision group (`options.group ?? key`). */
+  readonly group: string
+  /** The group is required (`options.required`). */
+  readonly required: boolean
+  /** Display name of the decorator (`Roles`). */
+  readonly decorator: string
+  /** Canonical identity of the decorator `const` (`src/auth/access.ts#Roles`). */
+  readonly identity: string
+  /** Location of the decorator definition (`export const Roles = createRouteDecorator(...)`). */
+  readonly definition: Location
 }
 
 /** A route: one route decorator of a handler. */

@@ -40,7 +40,58 @@ export function generateHttp(ctx: Context): GenNode | undefined {
   }
   const controllers = [...ctx.stored].sort((a, b) => compareStrings(a.token, b.token))
   const helpers = createHelpers(ctx)
-  return ctx.obj({ controllers: ctx.arr(controllers.map(controller => controllerNode(ctx, helpers, controller))) })
+  const entries: [string, GenInput][] = [
+    ['controllers', ctx.arr(controllers.map(controller => controllerNode(ctx, helpers, controller)))],
+  ]
+  const groups = groupsNode(ctx, controllers)
+  if (groups !== undefined) {
+    entries.push(['groups', groups])
+  }
+  return ctx.obj(entries)
+}
+
+/**
+ * `groups`: the route decorator groups the runtime needs (required, holding several keys, or named
+ * differently from their key), sorted, with sorted keys; `undefined` when there is none, so that
+ * applications without groups keep a byte-identical output.
+ */
+function groupsNode(ctx: Context, controllers: readonly HttpControllerData[]): GenNode | undefined {
+  const groups = new Map<string, { readonly keys: Set<string>; required: boolean }>()
+  const visit = (entries: readonly MetaEntry[]): void => {
+    for (const entry of entries) {
+      const group = groups.get(entry.group)
+      if (group === undefined) {
+        groups.set(entry.group, { keys: new Set([entry.key]), required: entry.required })
+      } else {
+        group.keys.add(entry.key)
+        group.required ||= entry.required
+      }
+    }
+  }
+  for (const controller of controllers) {
+    visit(controller.meta)
+    for (const route of controller.routes) {
+      visit(route.meta)
+    }
+  }
+  const needed = [...groups]
+    .filter(([name, group]) => group.required || group.keys.size > 1 || !group.keys.has(name))
+    .sort(([a], [b]) => compareStrings(a, b))
+  if (needed.length === 0) {
+    return undefined
+  }
+  return ctx.obj(
+    needed.map(
+      ([name, group]) =>
+        [
+          name,
+          ctx.obj([
+            ['keys', ctx.lit([...group.keys].sort(compareStrings))],
+            ['required', group.required],
+          ]),
+        ] as const,
+    ),
+  )
 }
 
 function createHelpers(ctx: Context): Helpers {

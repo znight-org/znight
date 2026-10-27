@@ -6,7 +6,7 @@
  * the same sources produce structurally identical graphs whatever the scan order. See ./README.md.
  */
 import type { DependencyRef, Scope, SourceLocation, Token } from '@znight/core'
-import type { CustomFactory, LifecycleHookInfo } from '../extensions/api.ts'
+import type { CustomFactory, LifecycleHookInfo, RootNode } from '../extensions/api.ts'
 import type { Diagnostic, ImportRoute, Location, ReferenceType, StaticValue, TypeInfo } from '../project/index.ts'
 
 /** How the instance of a provider is created. */
@@ -186,6 +186,11 @@ export interface ApplicationGraph {
   readonly bindings: ReadonlyMap<number, DependencyRef | undefined>
   /** The requests of `AnalyzeContext.bindInjection`, by handle id. */
   readonly bindingRequests: ReadonlyMap<number, BindingRequestNode>
+  /**
+   * Roots declared by extensions (`AnalyzeContext.addRoot`) and by compiled libraries, sorted by
+   * token then origin. Always computed (also without `reportUnused` / `prune`).
+   */
+  readonly roots: readonly RootNode[]
   readonly reachability: Reachability | undefined
   /** Sorted diagnostics of every phase (project layer included). */
   readonly diagnostics: readonly Diagnostic[]

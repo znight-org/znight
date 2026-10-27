@@ -97,9 +97,31 @@ describe('error reference', () => {
   const text = readFileSync(join(docsDir, 'reference/error-codes.md'), 'utf8')
   const codes = Object.values(ErrorCode)
 
-  it('codes are contiguous from ZNIGHT001', () => {
-    const expected = codes.map((_, index) => `ZNIGHT${String(index + 1).padStart(3, '0')}`)
-    expect(codes as readonly string[]).toEqual(expected)
+  /** Allocated ranges (rfcs/README.md): the core and 0.1 features, then a block of ten per package. */
+  const ranges: readonly (readonly [owner: string, first: number, last: number])[] = [
+    ['core', 1, 29],
+    ['@znight/openapi', 30, 39],
+    ['@znight/schedule', 40, 49],
+    ['@znight/websocket', 50, 59],
+    ['@znight/graphql', 60, 69],
+  ]
+  const numberOf = (code: string): number => Number(code.slice('ZNIGHT'.length))
+
+  it('codes are well-formed and in ascending order', () => {
+    for (const code of codes) expect(code).toMatch(/^ZNIGHT\d{3}$/)
+    const numbers = codes.map(numberOf)
+    expect(numbers).toEqual([...new Set(numbers)].toSorted((a, b) => a - b))
+  })
+
+  it('codes are contiguous from the start of each allocated range', () => {
+    for (const [owner, first, last] of ranges) {
+      const numbers = codes.map(numberOf).filter(n => n >= first && n <= last)
+      expect({ owner, numbers }).toEqual({ owner, numbers: numbers.map((_, index) => first + index) })
+    }
+    const unallocated = codes.filter(
+      code => !ranges.some(([, first, last]) => numberOf(code) >= first && numberOf(code) <= last),
+    )
+    expect(unallocated).toEqual([])
   })
 
   it.each(codes)('%s has a section with a stable anchor', code => {

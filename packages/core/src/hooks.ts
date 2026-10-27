@@ -20,6 +20,12 @@ export interface ZnightHooks {
   'messaging:message': MessageDeliveryEvent
   /** One message published through `MessageBroker` of `@znight/messaging` (wrapped with `hooks.run`). */
   'messaging:publish': MessagePublishEvent
+  /**
+   * One occurrence of a job of `@znight/schedule`: executed runs are wrapped with `hooks.run`, then
+   * emitted; occurrences that do not execute (`skipped`, `not-acquired`, a lock store failure) are
+   * only emitted.
+   */
+  'schedule:run': ScheduledRunEvent
 }
 
 /**
@@ -82,6 +88,45 @@ export interface MessageDeliveryEvent {
   /** Outcome set before `hooks.run` resolves. */
   outcome?: 'ack' | 'retry' | 'dead-letter'
   error?: unknown
+}
+
+/** How a scheduled run was triggered (`ScheduledRunEvent.trigger`). */
+export type ScheduledRunTrigger = 'schedule' | 'start' | 'manual' | 'queued'
+
+/** Outcome of a scheduled run (`ScheduledRunEvent.outcome`). */
+export type ScheduledRunOutcome = 'completed' | 'failed' | 'skipped' | 'not-acquired'
+
+/** Why a scheduled run was aborted (`ScheduledRunEvent.aborted`, the `reason` of `JobAbortedError`). */
+export type ScheduledRunAbortReason = 'timeout' | 'lock-lost' | 'removed' | 'shutdown'
+
+/**
+ * Instrumentation event of the `schedule:run` hook, produced by `@znight/schedule` for every
+ * occurrence of a job. Mutable fields are filled in by the producer: before `hooks.run` resolves for
+ * executed runs, before `emit` for occurrences that did not execute.
+ */
+export interface ScheduledRunEvent {
+  /** Job name (`digest.daily`, `OutboxJobs.flush`). */
+  readonly job: string
+  readonly kind: 'cron' | 'interval' | 'timeout'
+  /** Display name of the host class; `undefined` for dynamic jobs. */
+  readonly host: string | undefined
+  /** Job method; `undefined` for dynamic jobs. */
+  readonly method: string | undefined
+  /** Unique id of the run. */
+  readonly runId: string
+  readonly trigger: ScheduledRunTrigger
+  /** Epoch milliseconds of the occurrence (scheduler clock). */
+  readonly scheduledAt: number
+  /** `JobContext` from `@znight/schedule`; `undefined` when the run did not execute. */
+  readonly context: unknown
+  /** `performance.now()` when the run started, or was dropped. */
+  readonly startTime: number
+  /** Outcome of the run. */
+  outcome?: ScheduledRunOutcome
+  /** What the job threw or rejected with (`failed`), or the lock store failure. */
+  error?: unknown
+  /** Set when the run's signal was aborted. */
+  aborted?: ScheduledRunAbortReason
 }
 
 /** Name of a declared hook. */

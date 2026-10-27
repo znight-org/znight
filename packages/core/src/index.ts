@@ -47,6 +47,10 @@ export {
   type HttpRequestEvent,
   type MessageDeliveryEvent,
   type MessagePublishEvent,
+  type ScheduledRunAbortReason,
+  type ScheduledRunEvent,
+  type ScheduledRunOutcome,
+  type ScheduledRunTrigger,
   type ZnightHooks,
 } from './hooks.ts'
 export {
@@ -69,7 +73,14 @@ export {
   silentLogger,
 } from './logger.ts'
 export * from './metadata.ts'
-export { type Plugin, type PluginContext, type PluginHook, type PluginOptions, resolveOptions } from './plugin.ts'
+export {
+  type Plugin,
+  type PluginContext,
+  type PluginHook,
+  type PluginOptions,
+  type PluginRootsContext,
+  resolveOptions,
+} from './plugin.ts'
 export { getSuppressedErrors, InstantiationError, ZnightAggregateError } from './runtime-errors.ts'
 export {
   type ClassKey,

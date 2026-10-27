@@ -6,6 +6,7 @@ import {
   ErrorCode,
   type Plugin,
   type PluginContext,
+  type PluginRootsContext,
   type ProviderKey,
   silentLogger,
   type ZnightError,
@@ -17,8 +18,11 @@ import {
   createMock,
   defineTestMetadata,
   HTTP_PLUGIN_NAME,
+  type HttpInjectResult,
   override,
   overrideFactory,
+  type PluginInitRoots,
+  type SetCookieInfo,
   TestApp,
   testToken,
 } from '../src/index.ts'
@@ -205,6 +209,55 @@ describe('TestApp: instantiated providers', () => {
     await app.close()
   })
 
+  it('hosts of scheduled jobs are roots too, disabled jobs included', async () => {
+    const jobs = createMetadata(
+      {
+        [T.Database]: { scope: 'singleton', class: Database, deps: [], factory: () => new Database() },
+        [T.AuditService]: { scope: 'singleton', class: AuditService, deps: [], factory: () => new AuditService() },
+        [T.BrokenService]: { scope: 'singleton', class: BrokenService, deps: [], factory: () => new BrokenService() },
+      },
+      {
+        extensions: {
+          schedule: {
+            jobs: [
+              { name: 'audit.purge', token: T.AuditService, method: 'purge', kind: 'interval', every: 60_000 },
+              { name: 'db.vacuum', token: T.Database, method: 'vacuum', kind: 'cron', cron: '@daily', enabled: false },
+            ],
+          },
+        },
+      },
+    )
+    const app = await TestApp.create({ metadata: jobs, logger: quiet() })
+    expect(app.container.instances().map(instance => instance.token)).toEqual(
+      expect.arrayContaining([T.AuditService, T.Database]),
+    )
+    // BrokenService is no entry point: not instantiated
+    expect(app.container.instances()).toHaveLength(2)
+    await app.close()
+  })
+
+  it('job hosts join the controllers, and malformed job entries are ignored', async () => {
+    const withJobs: ZnightMetadata = {
+      ...metadata,
+      extensions: {
+        ...metadata.extensions,
+        schedule: { jobs: [{ token: T.AuditService }, null, 'junk', { token: 42 }, { token: 'src/gone.ts#Gone' }] },
+      },
+    }
+    const app = await TestApp.create({ metadata: withJobs, providers, logger: quiet() })
+    const created = app.container.instances().map(instance => instance.token)
+    expect(created).toEqual(expect.arrayContaining([T.UserController, T.AuditService]))
+    expect(created).not.toContain(T.BrokenService)
+    await app.close()
+  })
+
+  it('a malformed schedule section adds no root', async () => {
+    const odd = defineTestMetadata({ providers: [Database, AuditService], extensions: { schedule: { jobs: 'x' } } })
+    const app = await TestApp.create({ metadata: odd, logger: quiet() })
+    expect(app.container.instances()).toHaveLength(2)
+    await app.close()
+  })
+
   it('overridden providers are part of the instantiated closure', async () => {
     const factory = mock(() => new AuditService())
     const app = await TestApp.create({
@@ -373,6 +426,36 @@ describe('TestApp: providers resolved by plugins at bootstrap', () => {
       }),
     )
     expect(error.message).toContain('no database in tests')
+  })
+
+  it('initRoots() receives the metadata, so a plugin can derive its roots from its own section', async () => {
+    const contexts: PluginRootsContext[] = []
+    /** Like a scheduler: the hosts listed in `extensions.jobs` are needed at boot. */
+    const jobsPlugin: Plugin = {
+      name: 'jobs',
+      initRoots(context) {
+        contexts.push(context)
+        const section = context.metadata.extensions?.['jobs'] as { hosts?: readonly string[] } | undefined
+        return section?.hosts ?? []
+      },
+    }
+    const base = guardedMetadata()
+    const withJobs: ZnightMetadata = { ...base, extensions: { ...base.extensions, jobs: { hosts: [G.AuthGuard] } } }
+    const app = await TestApp.create({ metadata: withJobs, plugins: [jobsPlugin], logger: quiet() })
+    expect(contexts).toHaveLength(1)
+    expect(contexts[0]?.metadata).toBe(withJobs)
+    expect(Object.isFrozen(contexts[0])).toBe(true)
+    // the async store the host depends on was created at boot: the host resolves synchronously
+    expect(app.get(AuthGuard).canActivate('secret')).toBe(true)
+    expect(app.container.instances().map(instance => instance.token)).not.toContain(G.Database)
+    await app.close()
+  })
+
+  it('initRoots() is part of the Plugin contract of @znight/core', () => {
+    const plugin: Plugin = globalsPlugin([AuthGuard])
+    const roots: PluginInitRoots = { initRoots: () => [AuthGuard] }
+    expect(plugin.initRoots?.({ metadata: guardedMetadata() })).toEqual([AuthGuard])
+    expect(roots.initRoots({ metadata: guardedMetadata() })).toEqual([AuthGuard])
   })
 
   it('rejects a plugin whose initRoots() does not return an array', async () => {
@@ -559,14 +642,24 @@ describe('TestApp.inject', () => {
   it('the method defaults to GET; other fields are passed through', async () => {
     const http = fakeHttp()
     const app = await TestApp.create({ metadata, providers, plugins: [http], logger: quiet() })
-    const response = await app.inject({ url: '/nope', headers: { 'x-id': '1' }, query: { a: '1' }, body: { b: 2 } })
+    const response = await app.inject({
+      url: '/nope',
+      headers: { 'x-id': '1' },
+      query: { a: '1' },
+      body: { b: 2 },
+      cookies: { theme: 'dark' },
+      signedCookies: { uid: 'u-1' },
+    })
     expect(response.status).toBe(404)
+    expect(response.cookies).toEqual({})
     expect(http.requests[0]).toEqual({
       method: 'GET',
       url: '/nope',
       headers: { 'x-id': '1' },
       query: { a: '1' },
       body: { b: 2 },
+      cookies: { theme: 'dark' },
+      signedCookies: { uid: 'u-1' },
     })
     await app.close()
   })
@@ -582,14 +675,55 @@ describe('TestApp.inject', () => {
     await app.close()
   })
 
-  it('returns the response of the plugin as is when it has bytes', async () => {
+  it('returns the response of the plugin as is when it has bytes and cookies', async () => {
     const bytes = new Uint8Array([0xff, 0x00, 0x7f])
-    const response = { status: 200, headers: {}, body: '\ufffd\u0000\u007f', bytes, json: <T>() => null as T }
+    const response = {
+      status: 200,
+      headers: {},
+      body: '\ufffd\u0000\u007f',
+      bytes,
+      cookies: {},
+      json: <T>() => null as T,
+    }
     const binary = { name: HTTP_PLUGIN_NAME, inject: () => Promise.resolve(response) }
     const app = await TestApp.create({ metadata, providers, plugins: [binary], logger: quiet() })
     const received = await app.inject({ url: '/file.bin' })
     expect(received).toBe(response)
     expect(received.bytes).toBe(bytes)
+    await app.close()
+  })
+
+  it('keeps the bytes and the cookies the plugin provides, and returns no cookies when it has none', async () => {
+    const session: SetCookieInfo = {
+      name: 'session',
+      value: 'abc',
+      raw: 'session=abc; Path=/; HttpOnly; Secure; SameSite=Lax',
+      path: '/',
+      secure: true,
+      httpOnly: true,
+      sameSite: 'lax',
+      partitioned: false,
+    }
+    const bytes = new Uint8Array([1, 2, 3])
+    const responses: HttpInjectResult[] = [
+      { status: 200, headers: {}, body: 'x', bytes, json: <T>() => null as T },
+      { status: 204, headers: { 'set-cookie': session.raw }, body: '', cookies: { session }, json: <T>() => null as T },
+      { status: 200, headers: {}, body: 'y', cookies: null as never, json: <T>() => null as T },
+    ]
+    const plugin = { name: HTTP_PLUGIN_NAME, inject: () => Promise.resolve(responses.shift() as HttpInjectResult) }
+    const app = await TestApp.create({ metadata, providers, plugins: [plugin], logger: quiet() })
+
+    const binary = await app.inject({ url: '/file.bin' })
+    expect(binary.bytes).toBe(bytes)
+    expect(binary.cookies).toEqual({})
+    expect(Object.isFrozen(binary.cookies)).toBe(true)
+
+    const login = await app.inject({ method: 'POST', url: '/login' })
+    expect(login.cookies['session']).toBe(session)
+    expect(login.bytes).toEqual(new Uint8Array())
+    expect(login.headers['set-cookie']).toBe(session.raw)
+
+    expect((await app.inject({ url: '/' })).cookies).toEqual({})
     await app.close()
   })
 

@@ -3,8 +3,10 @@
  *
  * **Roots** are the providers the application uses without being injected:
  * 1. providers registered by compiler extensions (controllers, consumers, config classes...);
- * 2. providers with a lifecycle hook (`onStart`, `onReady`, `onStop`): they do work on their own;
- * 3. providers referenced as a value in the scanned application code, outside type positions,
+ * 2. classes declared as roots by extensions (`AnalyzeContext.addRoot`: scheduled job hosts) and
+ *    by compiled libraries (`roots` of `znight.providers.json`);
+ * 3. providers with a lifecycle hook (`onStart`, `onReady`, `onStop`): they do work on their own;
+ * 4. providers referenced as a value in the scanned application code, outside type positions,
  *    imports/exports and decorators — e.g. `app.container.get(UserService)` in `main.ts` or an
  *    `overrides` entry (a reference to an alias key such as an abstract class marks its provider).
  *
@@ -14,6 +16,7 @@
 import type { Token } from '@znight/core'
 import type { Expression, Node } from 'oxc-parser'
 import type { Reporter } from '../analysis/arguments.ts'
+import type { RootNode } from '../extensions/api.ts'
 import type { AliasNode, GraphEdge, ProviderNode, Reachability } from '../graph/types.ts'
 import type { Project, SourceFile } from '../project/index.ts'
 
@@ -50,9 +53,15 @@ export function computeReachability(
   providers: readonly ProviderNode[],
   edges: readonly GraphEdge[],
   aliases: readonly AliasNode[],
+  declared: readonly RootNode[] = [],
 ): Reachability {
   const tokens = new Set(providers.map(provider => provider.token))
   const roots = new Set<Token>()
+  for (const root of declared) {
+    if (tokens.has(root.token)) {
+      roots.add(root.token)
+    }
+  }
   for (const provider of providers) {
     if (provider.registeredBy !== 'core' && provider.registeredBy !== 'auto') {
       roots.add(provider.token)
@@ -109,7 +118,7 @@ export function reportUnused(providers: readonly ProviderNode[], reachability: R
       message: `${provider.displayName} is never used: no root depends on it`,
       location: provider.location,
       hints: [
-        'Roots are extension providers (controllers, consumers...), providers with lifecycle hooks and providers referenced in code (container.get(X))',
+        'Roots are extension providers (controllers, consumers...), classes declared as roots by extensions (scheduled jobs), providers with lifecycle hooks and providers referenced in code (container.get(X))',
         'Remove the provider, or enable "prune" to drop unused providers from the build',
       ],
     })

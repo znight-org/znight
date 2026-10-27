@@ -3,6 +3,7 @@ import type {
   Container,
   CoreLogger,
   Plugin,
+  PluginRootsContext,
   ProviderClass,
   ProviderKey,
   ProviderValues,
@@ -14,7 +15,7 @@ import type {
 
 import { Application, createConsoleLogger, ErrorCode, ZnightError } from '@znight/core'
 
-import { readHttpRoots, readMessagingRoots } from './extensions.ts'
+import { readHttpRoots, readMessagingRoots, readScheduleRoots } from './extensions.ts'
 import { MetadataIndex } from './metadata-index.ts'
 import { entriesOf } from './utils.ts'
 
@@ -37,6 +38,38 @@ export interface InjectRequest {
   readonly body?: unknown
   /** Query parameters added to those of `url`. */
   readonly query?: Readonly<Record<string, string | readonly string[]>>
+  /**
+   * Request cookies (name → value), sent by the HTTP plugin in a `cookie` header, after any `cookie`
+   * header of `headers`. Values are encoded like the cookies the plugin sets, so a value read from
+   * `response.cookies` can be sent back as is (signed values included).
+   */
+  readonly cookies?: Readonly<Record<string, string>>
+  /**
+   * Cookies the HTTP plugin signs with its current secret (`cookies.secrets[0]`) and merges into
+   * `cookies` before dispatch: the way to send a valid `@SignedCookie`.
+   */
+  readonly signedCookies?: Readonly<Record<string, string>>
+}
+
+/**
+ * A parsed `Set-Cookie` header of an {@link InjectResponse}: the shape of `SetCookieInfo` from
+ * `@znight/http`.
+ */
+export interface SetCookieInfo {
+  readonly name: string
+  /** Decoded value (a signed cookie: `<value>.<signature>`). */
+  readonly value: string
+  /** The `Set-Cookie` header line. */
+  readonly raw: string
+  readonly expires?: Date
+  readonly maxAge?: number
+  readonly domain?: string
+  readonly path?: string
+  readonly secure: boolean
+  readonly httpOnly: boolean
+  readonly sameSite?: 'strict' | 'lax' | 'none'
+  readonly partitioned: boolean
+  readonly priority?: 'low' | 'medium' | 'high'
 }
 
 /** The response of {@link TestApp.inject}. */
@@ -48,15 +81,20 @@ export interface InjectResponse {
   readonly body: string
   /** The raw body bytes (downloads, binary responses). */
   readonly bytes: Uint8Array
+  /** The `set-cookie` headers parsed, by cookie name (the last one wins); `{}` without any. */
+  readonly cookies: Readonly<Record<string, SetCookieInfo>>
   /** The body parsed as JSON. */
   json<T = unknown>(): T
 }
 
 /**
- * What the `inject()` of the HTTP plugin resolves with: an {@link InjectResponse} whose `bytes` may
- * be absent (`TestApp.inject()` then encodes `body` as UTF-8).
+ * What the `inject()` of the HTTP plugin resolves with: an {@link InjectResponse} whose `bytes` and
+ * `cookies` may be absent (`TestApp.inject()` then encodes `body` as UTF-8 and returns no cookies).
  */
-export type HttpInjectResult = Omit<InjectResponse, 'bytes'> & { readonly bytes?: Uint8Array }
+export type HttpInjectResult = Omit<InjectResponse, 'bytes' | 'cookies'> & {
+  readonly bytes?: Uint8Array
+  readonly cookies?: Readonly<Record<string, SetCookieInfo>>
+}
 
 /**
  * What `TestApp.inject()` expects from the plugin named `'http'`: an in-memory dispatch (no socket).
@@ -67,18 +105,18 @@ export interface HttpInjector {
 }
 
 /**
- * Optional plugin member read by `TestApp.create()`: the providers the plugin resolves while it
- * bootstraps although the metadata does not reference them, i.e. classes or tokens given in its
- * options (`HttpPlugin.configure({ guards, interceptors, exceptionMappers })`). `TestApp` adds them
- * to the providers instantiated at boot (see {@link TestAppOptions.only}), so that their async
- * dependencies exist when the plugin resolves them: an async factory cannot run on demand.
+ * A plugin implementing the optional `initRoots(context)` member of `Plugin` (`@znight/core`), read
+ * by `TestApp.create()`: the providers the plugin needs at boot although the metadata does not make
+ * them entry points, i.e. classes or tokens given in its options (`HttpPlugin.configure({ guards,
+ * interceptors, exceptionMappers })`) or derived from its metadata section (`context.metadata`).
+ * `TestApp` adds them to the providers instantiated at boot (see {@link TestAppOptions.only}), so
+ * that their async dependencies exist when the plugin resolves them: an async factory cannot run on
+ * demand.
  *
- * Called once, before the application is created. Keys that are not providers of the metadata are
- * ignored (the plugin reports them itself).
+ * Called once per `TestApp.create()`, before the application is created. Keys that are not
+ * providers of the metadata are ignored (the plugin reports them itself).
  */
-export interface PluginInitRoots {
-  initRoots(): readonly ProviderKey[]
-}
+export type PluginInitRoots = Required<Pick<Plugin, 'initRoots'>>
 
 /** Options of {@link TestApp.create}. */
 export interface TestAppOptions {
@@ -96,8 +134,9 @@ export interface TestAppOptions {
    * Which providers are instantiated at boot (with their dependency closure, plus the overrides and
    * the providers the plugins resolve at bootstrap, see {@link PluginInitRoots}: global guards,
    * interceptors and exception mappers of `HttpPlugin`):
-   * - default: the HTTP controllers (with their guards and interceptors) and the message consumers
-   *   of the metadata, or every provider when there is none;
+   * - default: the entry points of the metadata, i.e. the HTTP controllers (with their guards and
+   *   interceptors), the message consumers and the hosts of scheduled jobs, or every provider when
+   *   there is none;
    * - `'all'`: every provider;
    * - a list of classes or tokens.
    *
@@ -188,7 +227,8 @@ export class TestApp implements AsyncDisposable {
   /**
    * Dispatches a request in memory through the HTTP plugin (`HttpPlugin`): routing, guards,
    * interceptors, validation, serialisation, without opening a socket. Send uploads as a
-   * `FormData` body; read downloads from `response.bytes`.
+   * `FormData` body; read downloads from `response.bytes`. Send cookies with `cookies` (and
+   * `signedCookies`), read those the response sets from `response.cookies`.
    *
    * @throws ZnightError ZNIGHT001 when the application has no HTTP plugin, ZNIGHT021 once closed.
    */
@@ -198,7 +238,9 @@ export class TestApp implements AsyncDisposable {
         throw new ZnightError(ErrorCode.LifecycleFailed, 'TestApp.inject(): the application is closed')
       }
       if (request === null || typeof request !== 'object' || typeof request.url !== 'string') {
-        throw new TypeError('[znight] TestApp.inject() expects { method?, url, headers?, body?, query? }')
+        throw new TypeError(
+          '[znight] TestApp.inject() expects { method?, url, headers?, body?, query?, cookies?, signedCookies? }',
+        )
       }
       const plugin = this.app.getPlugin<Plugin & Partial<HttpInjector>>(HTTP_PLUGIN_NAME)
       if (plugin === undefined || typeof plugin.inject !== 'function') {
@@ -207,7 +249,7 @@ export class TestApp implements AsyncDisposable {
         })
       }
       const method = (request.method ?? 'GET').toUpperCase()
-      return Promise.resolve(plugin.inject({ ...request, method })).then(withBytes)
+      return Promise.resolve(plugin.inject({ ...request, method })).then(complete)
     } catch (error) {
       return Promise.reject(error)
     }
@@ -227,15 +269,22 @@ export class TestApp implements AsyncDisposable {
 
 const ENCODER = new TextEncoder()
 
-/** The plugin response, with `bytes` derived from `body` when the plugin did not provide them. */
-function withBytes(response: HttpInjectResult): InjectResponse {
-  if (response.bytes instanceof Uint8Array) return response as InjectResponse
-  const bytes = ENCODER.encode(response.body)
+const NO_COOKIES: Readonly<Record<string, SetCookieInfo>> = Object.freeze({})
+
+/**
+ * The plugin response, as is when it is complete; otherwise with `bytes` derived from `body` and
+ * no `cookies` when the plugin did not provide them.
+ */
+function complete(response: HttpInjectResult): InjectResponse {
+  const hasBytes = response.bytes instanceof Uint8Array
+  const hasCookies = response.cookies !== null && typeof response.cookies === 'object'
+  if (hasBytes && hasCookies) return response as InjectResponse
   return {
     status: response.status,
     headers: response.headers,
     body: response.body,
-    bytes,
+    bytes: hasBytes ? (response.bytes as Uint8Array) : ENCODER.encode(response.body),
+    cookies: hasCookies ? (response.cookies as Readonly<Record<string, SetCookieInfo>>) : NO_COOKIES,
     json: <T = unknown>(): T => response.json<T>(),
   }
 }
@@ -266,30 +315,34 @@ function initOptions(
   if (only === 'all') return {}
   let roots: readonly ProviderKey[]
   if (only === undefined) {
-    roots = [...readHttpRoots(options.metadata), ...readMessagingRoots(options.metadata)].filter(token =>
-      index.isProvider(token),
+    const metadata = options.metadata
+    roots = [...readHttpRoots(metadata), ...readMessagingRoots(metadata), ...readScheduleRoots(metadata)].filter(
+      token => index.isProvider(token),
     )
+    // plugin roots complete the entry points; they never restrict the boot by themselves
     if (roots.length === 0) return {}
   } else {
     if (!Array.isArray(only)) throw new TypeError("[znight] TestApp.create(): only must be 'all' or an array of keys")
     roots = only
   }
   const extra = (overrides ?? []).map(([key]) => key)
-  return { only: unique([...roots, ...pluginRoots(options.plugins ?? [], index), ...extra]) }
+  const plugins = pluginRoots(options.plugins ?? [], { metadata: options.metadata }, index)
+  return { only: unique([...roots, ...plugins, ...extra]) }
 }
 
 /**
- * Providers the plugins resolve at bootstrap ({@link PluginInitRoots}), as provider tokens of the
- * metadata. Other keys (classes without provider, unknown or ambiguous names) are left to the
- * plugin, which reports them with its own message.
+ * Providers the plugins need at boot (`Plugin.initRoots()`, {@link PluginInitRoots}), as provider
+ * tokens of the metadata. Other keys (classes without provider, unknown or ambiguous names) are
+ * left to the plugin, which reports them with its own message.
  */
-function pluginRoots(plugins: readonly Plugin[], index: MetadataIndex): Token[] {
+function pluginRoots(plugins: readonly Plugin[], context: PluginRootsContext, index: MetadataIndex): Token[] {
   const providers = new Set(index.providerTokens())
   const roots: Token[] = []
+  const frozen: PluginRootsContext = Object.freeze({ metadata: context.metadata })
   for (const plugin of plugins) {
     const initRoots = (plugin as Partial<PluginInitRoots> | null | undefined)?.initRoots
     if (typeof initRoots !== 'function') continue
-    const keys: unknown = initRoots.call(plugin)
+    const keys: unknown = initRoots.call(plugin, frozen)
     if (!Array.isArray(keys)) {
       throw new TypeError(
         `[znight] TestApp.create(): initRoots() of the plugin "${String(plugin.name)}" must return an array of classes or tokens`,

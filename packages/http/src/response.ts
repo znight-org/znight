@@ -59,13 +59,20 @@ export class HttpResponse<T = unknown> {
     return new HttpResponse(body, headers === undefined ? { status: 200 } : { status: 200, headers })
   }
 
-  /** `201 Created`, with a `location` header when given. */
-  static created<T = undefined>(body?: T, location?: string): HttpResponse<T | undefined> {
+  /**
+   * `201 Created`, with a `location` header when given. With a body, the response is typed with it
+   * (`Promise<HttpResponse<BookResponse>>` type-checks).
+   */
+  static created(): HttpResponse<undefined>
+  static created<T>(body: T, location?: string): HttpResponse<T>
+  static created<T>(body?: T, location?: string): HttpResponse<T | undefined> {
     return new HttpResponse(body, location === undefined ? { status: 201 } : { status: 201, headers: { location } })
   }
 
-  /** `202 Accepted`. */
-  static accepted<T = undefined>(body?: T): HttpResponse<T | undefined> {
+  /** `202 Accepted`, typed with its body when there is one. */
+  static accepted(): HttpResponse<undefined>
+  static accepted<T>(body: T): HttpResponse<T>
+  static accepted<T>(body?: T): HttpResponse<T | undefined> {
     return new HttpResponse(body, { status: 202 })
   }
 

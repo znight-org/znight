@@ -1,16 +1,25 @@
 /**
- * User-defined route metadata decorators (`createRouteDecorator<T>(key)`).
+ * User-defined route metadata decorators (`createRouteDecorator<T>(key, { group?, required? })`).
  *
  * A decorator is a route decorator when its callee is a `const` initialised with a call to
- * `@znight/http#createRouteDecorator` whose first argument (the key) is statically evaluable. Its
- * argument is evaluated like a `value` decorator argument (literals, `const` references, references
- * to exported bindings); without argument the value is `true`.
+ * `@znight/http#createRouteDecorator` whose first argument (the key) and optional second argument
+ * (the options) are statically evaluable. Its argument is evaluated like a `value` decorator
+ * argument (literals, `const` references, references to exported bindings); without argument the
+ * value is `true`. Decorators of one group are alternatives: one per controller or route.
  */
-import type { AnalyzeContext, ClassInfo, DecoratorInfo, Diagnostic, StaticValue, ValueRef } from '@znight/compiler'
+import type {
+  AnalyzeContext,
+  ClassInfo,
+  DecoratorInfo,
+  Diagnostic,
+  Location,
+  StaticValue,
+  ValueRef,
+} from '@znight/compiler'
 import type { HttpControllerData, MetaEntry } from './model.ts'
 
 import { type AstNode, child, children, isNode, unwrap } from './ast.ts'
-import { Codes, Ids } from './model.ts'
+import { Codes, GROUP_NAME, Ids } from './model.ts'
 
 type Context = AnalyzeContext<HttpControllerData>
 type Project = Context['project']
@@ -18,11 +27,30 @@ type ScopeInput = Parameters<Project['evaluate']>[0]
 type ExpressionInput = Parameters<Project['evaluate']>[1]
 type EntityName = Parameters<Project['resolveIdentifier']>[1]
 
+/** A route decorator definition: `export const Roles = createRouteDecorator<T>(key, options)`. */
+export interface RouteDecoratorDefinition {
+  readonly kind: 'route'
+  readonly key: string
+  /** `options.group ?? key`. */
+  readonly group: string
+  readonly required: boolean
+  /** Name of the `const` (`Roles`). */
+  readonly name: string
+  /** Location of the `const` name. */
+  readonly definition: Location
+}
+
 /** What a decorator identity refers to. */
 export type RouteDecoratorResolution =
-  | { readonly kind: 'route'; readonly key: string }
+  | RouteDecoratorDefinition
   | { readonly kind: 'other' }
-  | { readonly kind: 'invalid'; readonly message: string; readonly hints: readonly string[] }
+  | {
+      readonly kind: 'invalid'
+      readonly message: string
+      readonly hints: readonly string[]
+      /** The definition, when the problem is there. */
+      readonly definition?: Location
+    }
 
 const OTHER: RouteDecoratorResolution = Object.freeze({ kind: 'other' })
 
@@ -87,12 +115,14 @@ function resolve(ctx: Context, identity: string): RouteDecoratorResolution {
   if (resolved.identity?.identity !== Ids.createRouteDecorator) {
     return OTHER
   }
-  const [keyNode] = children(call, 'arguments')
+  const definition = file.location(declaration.span)
+  const [keyNode, optionsNode, ...extra] = children(call, 'arguments')
   if (!keyNode || keyNode.type === 'SpreadElement') {
     return {
       kind: 'invalid',
       message: `createRouteDecorator() requires a key (${declaration.name})`,
       hints: [`export const ${declaration.name} = createRouteDecorator('${declaration.name.toLowerCase()}')`],
+      definition,
     }
   }
   const key = ctx.project.evaluate(scope, keyNode as unknown as ExpressionInput, { refs: 'none' })
@@ -101,9 +131,81 @@ function resolve(ctx: Context, identity: string): RouteDecoratorResolution {
       kind: 'invalid',
       message: `the key of the route decorator ${declaration.name} must be a statically evaluable non-empty string`,
       hints: ["Use a string literal or a `const` string: createRouteDecorator('roles')"],
+      definition,
     }
   }
-  return { kind: 'route', key: key.value }
+  const optionsHints = [
+    `export const ${declaration.name} = createRouteDecorator('${key.value}', { group: 'access', required: true })`,
+  ]
+  if (extra.length > 0 || optionsNode?.type === 'SpreadElement') {
+    return {
+      kind: 'invalid',
+      message: `createRouteDecorator() takes a key and an optional { group?, required? } object (${declaration.name})`,
+      hints: optionsHints,
+      definition,
+    }
+  }
+  let options: StaticValue
+  if (optionsNode !== undefined) {
+    const evaluated = ctx.project.evaluate(scope, optionsNode as unknown as ExpressionInput, { refs: 'none' })
+    if (evaluated.kind !== 'value') {
+      return {
+        kind: 'invalid',
+        message: `the options of the route decorator ${declaration.name} must be statically evaluable (literals and \`const\` references)`,
+        hints: optionsHints,
+        definition,
+      }
+    }
+    options = evaluated.value
+  }
+  const parsed = parseRouteDecoratorOptions(key.value, options)
+  if ('error' in parsed) {
+    return {
+      kind: 'invalid',
+      message: `the options of the route decorator ${declaration.name} ${parsed.error}`,
+      hints: optionsHints,
+      definition,
+    }
+  }
+  return { kind: 'route', key: key.value, ...parsed, name: declaration.name, definition }
+}
+
+/**
+ * The group and `required` of a route decorator from its evaluated options (`undefined`: the
+ * defaults), or why the options are invalid.
+ */
+export function parseRouteDecoratorOptions(
+  key: string,
+  options: StaticValue,
+): { readonly group: string; readonly required: boolean } | { readonly error: string } {
+  if (options === undefined) {
+    return { group: key, required: false }
+  }
+  if (!isPlainObject(options)) {
+    return { error: 'must be an object { group?, required? }' }
+  }
+  const unknown = Object.keys(options).find(name => name !== 'group' && name !== 'required')
+  if (unknown !== undefined) {
+    return { error: `have an unknown property "${unknown}" (expected group and required)` }
+  }
+  const group = options['group'] ?? key
+  if (typeof group !== 'string' || !GROUP_NAME.test(group)) {
+    const shown = typeof group === 'object' && group !== null ? 'a reference' : JSON.stringify(group)
+    return { error: `have an invalid group ${shown}: a letter followed by letters, digits, _ . or -` }
+  }
+  const required = options['required'] ?? false
+  if (typeof required !== 'boolean') {
+    return { error: 'have a non-boolean "required"' }
+  }
+  return { group, required }
+}
+
+function isPlainObject(value: unknown): value is Record<string, StaticValue> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false
+  }
+  const prototype = Object.getPrototypeOf(value)
+  return prototype === Object.prototype || prototype === null
 }
 
 function isEntityName(node: AstNode): boolean {
@@ -119,9 +221,15 @@ function isEntityName(node: AstNode): boolean {
 
 /**
  * Metadata entries of the route decorators applied to a class or a method (source order).
- * Problems are reported as ZNIGHT005.
+ * `target` names the class or the handler (`BookController`, `BookController.remove`). Problems are
+ * reported as ZNIGHT005: two decisions of one group on the same target included.
  */
-export function routeMeta(ctx: Context, cls: ClassInfo, decorators: readonly DecoratorInfo[]): MetaEntry[] {
+export function routeMeta(
+  ctx: Context,
+  cls: ClassInfo,
+  decorators: readonly DecoratorInfo[],
+  target: string,
+): MetaEntry[] {
   const entries: MetaEntry[] = []
   for (const decorator of decorators) {
     if (decorator.owner !== undefined || decorator.identity === undefined) {
@@ -132,25 +240,56 @@ export function routeMeta(ctx: Context, cls: ClassInfo, decorators: readonly Dec
       continue
     }
     if (resolution.kind === 'invalid') {
-      report(ctx, decorator, `Invalid route decorator @${decorator.name}: ${resolution.message}`, resolution.hints)
+      report(
+        ctx,
+        decorator,
+        `Invalid route decorator @${decorator.name}: ${resolution.message}`,
+        resolution.hints,
+        resolution.definition === undefined
+          ? undefined
+          : { message: 'The route decorator is defined here', location: resolution.definition },
+      )
       continue
     }
     const value = metaValue(ctx, cls, decorator)
     if (value === INVALID) {
       continue
     }
-    const previous = entries.find(entry => entry.key === resolution.key)
+    const previous = entries.find(entry => entry.group === resolution.group)
     if (previous) {
-      report(
-        ctx,
-        decorator,
-        `@${decorator.name} sets the route metadata '${resolution.key}', already set on the same target`,
-        ['Apply each route decorator once per controller or route'],
-        previous.location,
-      )
+      if (previous.key === resolution.key && resolution.group === resolution.key) {
+        report(
+          ctx,
+          decorator,
+          `@${decorator.name} sets the route metadata '${resolution.key}', already set on the same target`,
+          ['Apply each route decorator once per controller or route'],
+          { message: 'First applied here', location: previous.location },
+        )
+      } else {
+        const alternatives =
+          previous.decorator === resolution.name
+            ? `@${resolution.name} once`
+            : `one of @${previous.decorator}, @${resolution.name}`
+        report(
+          ctx,
+          decorator,
+          `@${resolution.name} sets the "${resolution.group}" decision of ${target}, already set by @${previous.decorator} on the same target`,
+          [`Keep ${alternatives}: the decorators of the "${resolution.group}" group are alternatives`],
+          { message: 'First applied here', location: previous.location },
+        )
+      }
       continue
     }
-    entries.push({ key: resolution.key, value, location: decorator.location })
+    entries.push({
+      key: resolution.key,
+      value,
+      location: decorator.location,
+      group: resolution.group,
+      required: resolution.required,
+      decorator: resolution.name,
+      identity: decorator.identity,
+      definition: resolution.definition,
+    })
   }
   return entries
 }
@@ -252,7 +391,7 @@ function report(
   decorator: DecoratorInfo,
   message: string,
   hints: readonly string[],
-  related?: Diagnostic['location'],
+  related?: { readonly message: string; readonly location: Diagnostic['location'] },
 ): void {
   ctx.report({
     code: Codes.InvalidDecorator,
@@ -260,6 +399,6 @@ function report(
     message,
     location: decorator.location,
     hints,
-    ...(related ? { related: [{ message: 'First applied here', location: related }] } : {}),
+    ...(related?.location ? { related: [{ message: related.message, location: related.location }] } : {}),
   })
 }

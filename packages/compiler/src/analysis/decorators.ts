@@ -16,6 +16,8 @@ import type {
   Project,
   ScopeRef,
   SymbolResolution,
+  TypeInfo,
+  TypeScope,
 } from '../project/index.ts'
 import type { Reporter } from './arguments.ts'
 import type { ManifestIndex } from './manifests.ts'
@@ -23,6 +25,7 @@ import type { ManifestIndex } from './manifests.ts'
 import { ErrorCode } from '@znight/core'
 
 import { declarationKey, displayNameOf, relativePath } from '../project/index.ts'
+import { recordAnnotation } from './annotations.ts'
 import { evaluateArguments, rawArgument } from './arguments.ts'
 import { walk } from './ast.ts'
 import {
@@ -120,19 +123,41 @@ export class DecoratorReader {
     return this.#catalog
   }
 
-  /** Reads the decorators of a node (in source order). */
-  read(scope: ScopeRef, decorators: readonly Decorator[] | undefined, target: DecoratorTarget): DecoratorInfo[] {
+  /**
+   * Reads the decorators of a node (in source order).
+   *
+   * @param types type parameters in scope (type arguments of the decorator calls)
+   */
+  read(
+    scope: ScopeRef,
+    decorators: readonly Decorator[] | undefined,
+    target: DecoratorTarget,
+    types: TypeScope = EMPTY_TYPE_SCOPE,
+  ): DecoratorInfo[] {
     if (!decorators || decorators.length === 0) {
       return []
     }
-    return decorators.map(decorator => this.#read(scope, decorator, target))
+    return decorators.map(decorator => this.#read(scope, decorator, target, types))
   }
 
-  #read(scope: ScopeRef, decorator: Decorator, target: DecoratorTarget): DecoratorInfo {
+  #read(scope: ScopeRef, decorator: Decorator, target: DecoratorTarget, types: TypeScope): DecoratorInfo {
+    const info = this.#build(scope, decorator, target, types)
+    const nodes =
+      decorator.expression.type === 'CallExpression' ? decorator.expression.typeArguments?.params : undefined
+    if (nodes && nodes.length > 0) {
+      recordAnnotation(info, { scope, typeParameters: [...types.keys()], nodes, bindings: EMPTY_BINDINGS })
+    }
+    return info
+  }
+
+  #build(scope: ScopeRef, decorator: Decorator, target: DecoratorTarget, types: TypeScope): DecoratorInfo {
     const file = scope.file
     const location = file.location(decorator)
     const expression = decorator.expression
     const called = expression.type === 'CallExpression'
+    const typeArgs: TypeInfo[] = called
+      ? (expression.typeArguments?.params ?? []).map(node => this.#project.resolveType(scope, node, types))
+      : []
     const callee = called ? expression.callee : expression
     const resolved = isEntityName(callee)
       ? this.#project.resolveIdentifier(scope, callee, 'value')
@@ -151,6 +176,7 @@ export class DecoratorReader {
         name,
         owner: undefined,
         args: called ? expression.arguments.map(argument => rawArgument(scope, argument)) : [],
+        typeArgs,
         called,
         target,
         location,
@@ -178,7 +204,7 @@ export class DecoratorReader {
     const args = called
       ? evaluateArguments(this.#project, scope, expression.arguments, entry.spec, name, this.#report)
       : []
-    return { identity, name, owner: entry.owner, args, called, target, location, node: decorator }
+    return { identity, name, owner: entry.owner, args, typeArgs, called, target, location, node: decorator }
   }
 
   /**
@@ -297,6 +323,9 @@ interface WrappedDecorator {
   /** Aliases: the module exporting the Znight decorator (`@znight/core`), for the re-export hint. */
   readonly module: string
 }
+
+const EMPTY_TYPE_SCOPE: TypeScope = new Map()
+const EMPTY_BINDINGS: ReadonlyMap<string, TypeInfo> = new Map()
 
 /** Maximum chain of `const` aliases followed (`const A = Injectable; const B = A`). */
 const MAX_ALIAS_DEPTH = 8

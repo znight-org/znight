@@ -3,6 +3,7 @@ import type { Container } from './container.ts'
 import type { Hooks } from './hooks.ts'
 import type { CoreLogger } from './logger.ts'
 import type { ZnightMetadata } from './metadata.ts'
+import type { ProviderKey } from './tokens.ts'
 
 /**
  * A runtime feature (HTTP server, message consumers, configuration, observability...). Every hook
@@ -25,6 +26,26 @@ export interface Plugin {
   onReady?(ctx: PluginContext): void | Promise<void>
   onStop?(ctx: PluginContext): void | Promise<void>
   onDispose?(ctx: PluginContext): void | Promise<void>
+  /**
+   * The providers (classes or tokens) the plugin needs at boot although the metadata does not make
+   * them entry points: classes given in its options (`HttpPlugin`'s global `guards`,
+   * `interceptors`, `exceptionMappers`), or providers it derives from its own metadata section.
+   *
+   * Read by tools that restrict the boot to a few providers (`init: { only }`), such as `TestApp`
+   * of `@znight/testing`: they create these providers at boot with their dependencies, because an
+   * async factory cannot run on demand. The application itself never calls it.
+   *
+   * Called before the application is created (before `register`), possibly several times: it must
+   * be cheap and side-effect free, and SHOULD NOT throw (report invalid options in `onBootstrap`).
+   * Options given as a function of the container cannot be read yet: return what is known (`[]`).
+   */
+  initRoots?(context: PluginRootsContext): readonly ProviderKey[]
+}
+
+/** What {@link Plugin.initRoots} receives. */
+export interface PluginRootsContext {
+  /** The metadata the application will be created with. */
+  readonly metadata: ZnightMetadata
 }
 
 /** Name of a {@link Plugin} hook. */

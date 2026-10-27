@@ -313,16 +313,18 @@ export class OrderConsumer {
 
 All `@znight/*` packages are versioned together. Install only what you use.
 
-| Package                                             | What it gives you                                                              | Install as    |
-| --------------------------------------------------- | ------------------------------------------------------------------------------ | ------------- |
-| [`@znight/core`](./packages/core)                   | Container, application lifecycle, plugins, hooks, AOP, marker decorators       | dependency    |
-| [`@znight/compiler`](./packages/compiler)           | Vite plugin, CLI/Bun integration: analysis, validation, code generation        | devDependency |
-| [`@znight/http`](./packages/http)                   | Controllers, routing, validation, guards, interceptors; Fastify, Express, Hono | dependency    |
-| [`@znight/messaging`](./packages/messaging)         | Consumers, retries, dead-letter queues; RabbitMQ, SQS, Kafka, in-memory        | dependency    |
-| [`@znight/config`](./packages/config)               | Typed config classes from env, `.env`, JSON/YAML, Vault, AWS Secrets Manager   | dependency    |
-| [`@znight/observability`](./packages/observability) | Pino logger, Prometheus metrics, OpenTelemetry tracing                         | dependency    |
-| [`@znight/testing`](./packages/testing)             | `TestBed` with auto-mocks, `TestApp` for in-memory end-to-end tests            | devDependency |
-| [`@znight/cli`](./packages/cli)                     | `znight new`, `generate`, `dev`, `build`, `start`, code generators             | devDependency |
+| Package                                             | What it gives you                                                                            | Install as    |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------- | ------------- |
+| [`@znight/core`](./packages/core)                   | Container, application lifecycle, plugins, hooks, AOP, marker decorators                     | dependency    |
+| [`@znight/compiler`](./packages/compiler)           | Vite plugin, CLI/Bun integration: analysis, validation, code generation                      | devDependency |
+| [`@znight/http`](./packages/http)                   | Controllers, routing, validation, guards, interceptors; Fastify, Express, Hono               | dependency    |
+| [`@znight/messaging`](./packages/messaging)         | Consumers, retries, dead-letter queues; RabbitMQ, SQS, Kafka, in-memory                      | dependency    |
+| [`@znight/config`](./packages/config)               | Typed config classes from env, `.env`, JSON/YAML, Vault, AWS Secrets Manager                 | dependency    |
+| [`@znight/observability`](./packages/observability) | Pino logger, Prometheus metrics, OpenTelemetry tracing                                       | dependency    |
+| [`@znight/testing`](./packages/testing)             | `TestBed` with auto-mocks, `TestApp` for in-memory end-to-end tests                          | devDependency |
+| [`@znight/cli`](./packages/cli)                     | `znight new`, `generate`, `dev`, `build`, `start`, code generators                           | devDependency |
+| [`@znight/openapi`](./packages/openapi)             | OpenAPI 3.1 document generated at build time, served with Scalar or Swagger UI (in progress) | dependency    |
+| [`@znight/schedule`](./packages/schedule)           | `@Cron`, `@Interval`, `@Timeout` jobs validated at build time (in progress)                  | dependency    |
 
 ## How it fits together
 

@@ -1,0 +1,7 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`schema aliases falls back to the alias structure when the argument is not a schema, or without options 1`] = `
+"@fakezod#output<string>
+fakezod#output<string> (alias) = opaque(conditional: T extends { _zod: { output: any } } ? T['_zod']['output'] : unknown)
+! conditional at fakezod#output<string> output<string>: T extends { _zod: { output: any } } ? T['_zod']['output'] : unknown"
+`;

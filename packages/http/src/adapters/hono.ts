@@ -114,6 +114,7 @@ const BUN_BODIES = new WeakMap<ReadableStream<Uint8Array>, BunBody>()
 /** The Node.js request behind a request of `@hono/node-server`. */
 interface NodeIncoming {
   readonly url?: string
+  readonly socket?: { readonly encrypted?: unknown }
   readonly httpVersionMajor: number
   readonly stream?: { readonly endAfterHeaders?: boolean }
 }
@@ -333,13 +334,16 @@ function adapterRequest(c: Context): AdapterRequest {
   const headers: Record<string, string> = {}
   for (const [name, value] of request.headers) headers[name] = value
   const incoming = nodeIncoming(c)
+  const address = remoteAddress(c)
   let body: Promise<Uint8Array> | undefined
   return {
     method: request.method,
     // the raw target on Node.js; on Bun only the normalised URL is known
     url: pathAndQuery(typeof incoming?.url === 'string' && incoming.url !== '' ? incoming.url : request.url),
     headers,
-    ip: remoteAddress(c),
+    ip: address,
+    remoteAddress: address,
+    encrypted: incoming === undefined ? request.url.startsWith('https:') : incoming.socket?.encrypted === true,
     raw: request,
     rawResponse: c,
     readBody: (limit: number): Promise<Uint8Array> => {

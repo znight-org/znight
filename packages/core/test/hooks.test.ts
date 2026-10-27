@@ -1,4 +1,11 @@
-import { Hooks } from '../src/index.ts'
+import {
+  type HookEvent,
+  Hooks,
+  type ScheduledRunAbortReason,
+  type ScheduledRunEvent,
+  type ScheduledRunOutcome,
+  type ScheduledRunTrigger,
+} from '../src/index.ts'
 import { caught, memoryLogger, sleep } from './helpers.ts'
 import { describe, expect, it } from 'bun:test'
 
@@ -168,5 +175,84 @@ describe('Hooks.wrap / run', () => {
     off()
     await hooks.run('test:request', e, async () => 1)
     expect(e.trail).toEqual([])
+  })
+})
+
+describe('schedule:run', () => {
+  /** What @znight/schedule does for an executed run: wrappers around the job, then listeners. */
+  async function run(hooks: Hooks, job: () => Promise<void>): Promise<ScheduledRunEvent> {
+    const event: ScheduledRunEvent = {
+      job: 'digest.daily',
+      kind: 'cron',
+      host: 'DigestJobs',
+      method: 'sendDaily',
+      runId: 'r-1',
+      trigger: 'schedule',
+      scheduledAt: Date.UTC(2027, 2, 29, 6),
+      context: { job: 'digest.daily' },
+      startTime: performance.now(),
+    }
+    let executed = false
+    try {
+      await hooks.run('schedule:run', event, async () => {
+        executed = true
+        await job()
+      })
+      event.outcome = executed ? 'completed' : 'skipped'
+    } catch (error) {
+      event.outcome = 'failed'
+      event.error = error
+    }
+    hooks.emit('schedule:run', event)
+    return event
+  }
+
+  it('is a declared hook: wrappers see the run, listeners its outcome', async () => {
+    const hooks = new Hooks()
+    const wrapped: string[] = []
+    const settled: (ScheduledRunOutcome | undefined)[] = []
+    hooks.wrap('schedule:run', (event, next) => {
+      wrapped.push(`${event.job}@${event.trigger}`)
+      return next()
+    })
+    hooks.on('schedule:run', event => settled.push(event.outcome))
+    await run(hooks, () => Promise.resolve())
+    const failed = await run(hooks, () => Promise.reject(new Error('smtp down')))
+    expect(wrapped).toEqual(['digest.daily@schedule', 'digest.daily@schedule'])
+    expect(settled).toEqual(['completed', 'failed'])
+    expect((failed.error as Error).message).toBe('smtp down')
+  })
+
+  it('a wrapper that does not call next() vetoes the run (outcome skipped)', async () => {
+    const hooks = new Hooks()
+    hooks.wrap('schedule:run', () => Promise.resolve(undefined)) // maintenance window
+    let ran = false
+    const event = await run(hooks, () => {
+      ran = true
+      return Promise.resolve()
+    })
+    expect(ran).toBe(false)
+    expect(event.outcome).toBe('skipped')
+  })
+
+  it('types the abort reasons, triggers and outcomes', () => {
+    const reasons: readonly ScheduledRunAbortReason[] = ['timeout', 'lock-lost', 'removed', 'shutdown']
+    const triggers: readonly ScheduledRunTrigger[] = ['schedule', 'start', 'manual', 'queued']
+    const outcomes: readonly ScheduledRunOutcome[] = ['completed', 'failed', 'skipped', 'not-acquired']
+    const event: HookEvent<'schedule:run'> = {
+      job: 'cache.refresh',
+      kind: 'interval',
+      host: undefined,
+      method: undefined,
+      runId: 'r-2',
+      trigger: 'manual',
+      scheduledAt: 0,
+      context: undefined,
+      startTime: 0,
+      outcome: 'not-acquired',
+      aborted: 'lock-lost',
+    }
+    expect([reasons.length, triggers.length, outcomes.length]).toEqual([4, 4, 4])
+    expect(event.aborted).toBe('lock-lost')
   })
 })

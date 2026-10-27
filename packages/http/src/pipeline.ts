@@ -1,13 +1,16 @@
 import type { Container, CoreLogger, Hooks, HttpRequestEvent, Token } from '@znight/core'
 import type { AdapterReply, AdapterRequest } from './adapter.ts'
+import type { CorsPolicy } from './cors.ts'
 import type { CanActivate, ExceptionMapper, HttpInterceptor } from './interfaces.ts'
 import type { HttpRouteDefinition } from './metadata.ts'
+import type { TrustPolicy } from './proxy.ts'
 import type { RouteTable } from './router.ts'
 import type { BodyPlan } from './uploads.ts'
 
 import { displayName } from '@znight/core'
 
 import { type HttpRouteInfo, RequestContext, type RequestId } from './context.ts'
+import { corsReplyHeaders, isPreflight, mergeVary, preflightHeaders } from './cors.ts'
 import {
   BadRequestException,
   ForbiddenException,
@@ -64,6 +67,12 @@ export interface PipelineOptions {
   readonly requestIdHeader: string | undefined
   readonly generateRequestId: () => string
   readonly mappers: readonly Resolvable<ExceptionMapper>[]
+  /** CORS policy (`cors` option), `undefined` when disabled. */
+  readonly cors?: CorsPolicy | undefined
+  /** Security headers added to every reply that does not set them (`securityHeaders` option). */
+  readonly securityHeaders?: Readonly<Record<string, string>>
+  /** `trustProxy` policy, `undefined` when proxies are not trusted. */
+  readonly trustProxy?: TrustPolicy | undefined
 }
 
 type Target =
@@ -71,6 +80,15 @@ type Target =
   | { readonly kind: 'error'; readonly error: unknown }
   | { readonly kind: 'options'; readonly allow: string }
   | { readonly kind: 'redirect'; readonly location: string }
+  /** A CORS preflight; `allow` is `undefined` when no route has the path (404). */
+  | { readonly kind: 'preflight'; readonly allow: string | undefined }
+
+/** The CORS decision of a request (an `origin` header and a CORS policy). */
+interface CorsDecision {
+  readonly policy: CorsPolicy
+  readonly origin: string
+  readonly allowed: boolean
+}
 
 const RAW = Symbol('raw response')
 type Outcome = SerializedReply | typeof RAW
@@ -134,7 +152,9 @@ export class Pipeline {
     this.#enter()
     let served: Served | undefined
     try {
-      served = await this.#route(plan, request, startTime)
+      served = this.#isPreflight(request)
+        ? await this.#preflight(request, startTime)
+        : await this.#route(plan, request, startTime)
       return served.reply
     } finally {
       this.#leaveWhen(served)
@@ -185,6 +205,7 @@ export class Pipeline {
       const target: Target = { kind: 'error', error: frameworkError(error) }
       return this.#serve(request, undefined, emptyRecord(), target, startTime, body)
     }
+    if (this.#isPreflight(request)) return this.#preflight(request, startTime)
     const { path } = splitUrl(request.url)
     if (reroute) {
       // routing happens on the raw path: serve a route the adapter's router missed (Hono routes the
@@ -214,6 +235,17 @@ export class Pipeline {
     return this.#serve(request, undefined, emptyRecord(), target, startTime, body)
   }
 
+  /** A CORS preflight (with the `cors` option): answered without running any route. */
+  #isPreflight(request: AdapterRequest): boolean {
+    return this.#options.cors !== undefined && isPreflight(request.method, request.headers)
+  }
+
+  #preflight(request: AdapterRequest, startTime: number): Promise<Served> {
+    const allowed = this.#table.allowedMethods(splitUrl(request.url).path)
+    const target: Target = { kind: 'preflight', allow: allowed.length === 0 ? undefined : allowHeader(allowed) }
+    return this.#serve(request, undefined, emptyRecord(), target, startTime, this.#options.body)
+  }
+
   async #serve(
     request: AdapterRequest,
     route: HttpRouteInfo | undefined,
@@ -223,12 +255,16 @@ export class Pipeline {
     body: BodyPlan,
   ): Promise<Served> {
     const requestId = this.#requestId(request)
+    const proxy = this.#options.trustProxy
     const ctx = new RequestContext(request, {
       requestId,
       adapter: this.#options.adapter,
       route,
       params,
       body,
+      ...(proxy === undefined
+        ? {}
+        : { client: proxy.resolve(request.remoteAddress ?? request.ip, request.headers, request.encrypted === true) }),
     })
     const event: HttpRequestEvent = {
       method: request.method,
@@ -242,6 +278,8 @@ export class Pipeline {
     }
     let outcome: Outcome | undefined
     let reply: AdapterReply | undefined
+    let cors: CorsDecision | undefined
+    const preflight = target.kind === 'preflight'
     let replied: () => void = () => undefined
     const ready = new Promise<void>(resolve => {
       replied = resolve
@@ -252,9 +290,10 @@ export class Pipeline {
         let hookError: unknown
         let failed = false
         let run: ContextRunner | undefined
+        if (this.#options.cors !== undefined) cors = await this.#corsDecision(request, requestId)
         try {
           await this.#hooks.run('http:request', event, async () => {
-            outcome = await this.#process(ctx, target, event)
+            outcome = await this.#process(ctx, target, event, cors)
             if (outcome !== RAW) outcome = this.#checkHeaders(outcome, ctx, event)
             run = captureContext() // stream producers run in the context of the handler (scope, hooks)
             return outcome
@@ -279,7 +318,7 @@ export class Pipeline {
           replied()
           return
         }
-        const serialized = this.#complete(outcome, ctx, event, requestId)
+        const serialized = this.#complete(outcome, ctx, event, requestId, cors, preflight)
         const body = serialized.body
         if (!(body instanceof ReadableStream || body instanceof Blob)) {
           reply = serialized
@@ -319,7 +358,14 @@ export class Pipeline {
     }
     if (reply === undefined) {
       const failure = new Error('Request not handled')
-      reply = this.#complete(serializeError(500, this.#internalBody(failure), ctx.method), ctx, event, requestId)
+      reply = this.#complete(
+        serializeError(500, this.#internalBody(failure), ctx.method),
+        ctx,
+        event,
+        requestId,
+        cors,
+        preflight,
+      )
       event.status = 500
     }
     this.#emit(event)
@@ -327,26 +373,64 @@ export class Pipeline {
   }
 
   /**
-   * Adds the headers of the `http:request` wrappers, the request id and `connection: close` while
-   * draining, then checks the final headers (see {@link #checkHeaders}).
+   * Adds the headers of the `http:request` wrappers, then the framework headers (see
+   * {@link #frameworkHeaders}), then checks the final headers (see {@link #checkHeaders}).
    */
   #complete(
     reply: SerializedReply,
     ctx: RequestContext,
     event: HttpRequestEvent,
     requestId: RequestId,
+    cors: CorsDecision | undefined,
+    preflight: boolean,
   ): SerializedReply {
-    const headers = reply.headers
-    addMissingHeaders(headers, event.responseHeaders)
+    addMissingHeaders(reply.headers, event.responseHeaders)
+    this.#frameworkHeaders(reply.headers, requestId, cors, preflight)
+    const checked = this.#checkHeaders(reply, ctx, event)
+    if (checked !== reply) this.#frameworkHeaders(checked.headers, requestId, cors, preflight)
+    return checked
+  }
+
+  /**
+   * Headers the plugin adds to every reply when nothing set them: the request id, the CORS headers
+   * of an allowed origin (`vary: origin` whatever the origin), the security headers; and
+   * `connection: close` while draining.
+   */
+  #frameworkHeaders(
+    headers: Record<string, HeaderValue>,
+    requestId: RequestId,
+    cors: CorsDecision | undefined,
+    preflight: boolean,
+  ): void {
     const header = this.#options.requestIdHeader
     if (header !== undefined && headers[header] === undefined && isHeaderValue(requestId)) headers[header] = requestId
-    if (this.draining) headers['connection'] = 'close'
-    const checked = this.#checkHeaders(reply, ctx, event)
-    if (checked !== reply) {
-      if (header !== undefined && isHeaderValue(requestId)) checked.headers[header] = requestId
-      if (this.draining) checked.headers['connection'] = 'close'
+    const policy = this.#options.cors
+    if (policy !== undefined) {
+      // a preflight answer carries its own CORS headers; other replies get them for allowed origins
+      if (cors?.allowed === true && !preflight) addMissingHeaders(headers, corsReplyHeaders(policy, cors.origin))
+      if (policy.varyOrigin) mergeVary(headers, 'origin')
     }
-    return checked
+    const security = this.#options.securityHeaders
+    if (security !== undefined) addMissingHeaders(headers, security)
+    if (this.draining) headers['connection'] = 'close'
+  }
+
+  /**
+   * The CORS decision of a request carrying an `origin` header, made once before the hooks run. An
+   * origin function that throws or rejects denies the origin (logged).
+   */
+  async #corsDecision(request: AdapterRequest, requestId: RequestId): Promise<CorsDecision | undefined> {
+    const policy = this.#options.cors
+    const origin = request.headers['origin']
+    if (policy === undefined || origin === undefined) return undefined
+    let allowed = false
+    try {
+      // an origin that cannot be echoed in a response header is never allowed
+      allowed = isHeaderValue(origin) && (await policy.allows(origin)) === true
+    } catch (error) {
+      this.#logger.error('The CORS origin check failed: the origin is denied', { err: error, requestId, origin })
+    }
+    return { policy, origin, allowed }
   }
 
   /**
@@ -365,11 +449,25 @@ export class Pipeline {
     return serializeError(500, this.#internalBody(error), ctx.method)
   }
 
-  async #process(ctx: RequestContext, target: Target, event: HttpRequestEvent): Promise<Outcome> {
+  async #process(
+    ctx: RequestContext,
+    target: Target,
+    event: HttpRequestEvent,
+    cors: CorsDecision | undefined,
+  ): Promise<Outcome> {
     try {
       switch (target.kind) {
         case 'error':
           throw target.error
+        case 'preflight':
+          // never runs guards, interceptors or handlers (@Options and @All routes included)
+          if (target.allow === undefined) throw new NotFoundException(`Cannot OPTIONS ${truncate(ctx.path)}`)
+          if (cors === undefined || !cors.allowed) throw new ForbiddenException('CORS origin not allowed')
+          return this.#finish(event, {
+            status: 204,
+            headers: withContextHeaders(preflightHeaders(cors.policy, cors.origin, ctx.headers, target.allow), ctx),
+            body: null,
+          })
         case 'options':
           return this.#finish(event, {
             status: 204,

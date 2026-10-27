@@ -3,6 +3,8 @@
 HTTP for [Znight](../../README.md): controllers, routing, parameter coercion, validation with any
 [Standard Schema](https://standardschema.dev) library (Zod, Valibot, ArkType...), file uploads and
 downloads, streaming, guards, interceptors, exception mappers, request scopes and graceful shutdown.
+Security is built in: access decisions on every route checked at build time and at boot, CORS,
+security headers and trusted proxies.
 It ships a zero-dependency server on `node:http` and adapters for **Fastify**, **Express** and
 **Hono**, and behaves the same on every one of them (on Node.js and Bun).
 
@@ -27,15 +29,21 @@ Runs on Node.js >= 24 and Bun >= 1.3 (ESM only). Decorators require `"experiment
 - [Files](#files)
 - [Errors](#errors)
 - [Guards](#guards)
+- [Route decisions](#route-decisions)
+- [CORS](#cors)
+- [Security headers](#security-headers)
+- [Behind a proxy](#behind-a-proxy)
 - [Interceptors](#interceptors)
 - [The request context](#the-request-context)
 - [Hooks and observability](#hooks-and-observability)
 - [Plugin options](#plugin-options)
+- [Plugin routes](#plugin-routes)
 - [Adapters](#adapters)
 - [Testing](#testing)
 - [Lifecycle and graceful shutdown](#lifecycle-and-graceful-shutdown)
 - [Compiler](#compiler)
 - [Compiler contract](#compiler-contract)
+- [Compiler contract for other extensions](#compiler-contract-for-other-extensions)
 - [Writing an adapter](#writing-an-adapter)
 - [Limitations](#limitations)
 
@@ -275,11 +283,12 @@ interceptors, for routes declaring `@Body()` or [upload parameters](#uploads):
 
 **Header precedence:** content type < `@Header` < `ctx.setHeader()` < `HttpResponse` headers.
 Headers set with `ctx.setHeader()` / `ctx.appendHeader()` are also sent with error responses (a
-guard can set `www-authenticate` and throw). Every response carries the request id header.
+guard can set `www-authenticate` and throw). Every response carries the request id header and the
+[security headers](#security-headers) it does not set itself.
 
 ```ts
 return HttpResponse.ok(user)
-return HttpResponse.created(user, `/users/${user.id}`) // location header
+return HttpResponse.created(user, `/users/${user.id}`) // location header; typed HttpResponse<User>
 return HttpResponse.accepted()
 return HttpResponse.noContent()
 return HttpResponse.redirect('/login', 303)
@@ -682,11 +691,16 @@ then controller guards, then route guards. Returning anything but `true` answers
 `403 Forbidden`; throw an `HttpException` for another status.
 
 ```ts
-export const Roles = createRouteDecorator<readonly string[]>('roles')
-export const Public = createRouteDecorator('public') // flag: @Public()
+// access.ts: one decision per route, every route must have one
+export const Public = createRouteDecorator('public', { group: 'access', required: true })
+export const Authenticated = createRouteDecorator('authenticated', { group: 'access', required: true })
+export const Roles = createRouteDecorator<readonly Role[]>('roles', { group: 'access', required: true })
 
 @Injectable()
 export class AuthGuard implements CanActivate {
+  /** Read by HttpPlugin at boot: every route needs a guard enforcing the "access" group. */
+  static readonly enforces = [Public, Authenticated, Roles]
+
   constructor(private readonly tokens: TokenService) {}
 
   async canActivate(ctx: HttpContext): Promise<boolean> {
@@ -695,15 +709,16 @@ export class AuthGuard implements CanActivate {
     if (user === undefined) throw new UnauthorizedException()
     ctx.state.set('user', user)
     const roles = Roles.get(ctx)
-    return roles === undefined || roles.some(role => user.roles.includes(role))
+    if (roles !== undefined) return roles.some(role => user.roles.includes(role))
+    return Authenticated.get(ctx) === true // no decision: denied
   }
 }
 
 @Controller('/admin')
-@Roles(['admin'])
+@Roles(['admin']) // the decision of every route of the controller...
 export class AdminController {
   @Get('/health')
-  @Public()
+  @Public() // ...unless the route has its own decision of the group
   health() {
     return 'ok'
   }
@@ -712,10 +727,167 @@ export class AdminController {
 HttpPlugin.configure({ guards: [AuthGuard] })
 ```
 
-Route metadata (`ctx.route.meta`) merges controller and route values (the route wins).
-`decorator.get(ctx)` reads it with its type. Guards, interceptors and mappers are providers: they
-may be request-scoped (resolved per request) and have dependencies. Plugin options also accept
-instances (`guards: [new IpAllowList(['10.0.0.0/8'])]`).
+`decorator.get(ctx)` reads the route metadata (`ctx.route.meta`) with its type. Guards,
+interceptors and mappers are providers: they may be request-scoped (resolved per request) and have
+dependencies. Plugin options also accept instances (`guards: [new IpAllowList(['10.0.0.0/8'])]`).
+
+## Route decisions
+
+`createRouteDecorator(key, { group, required })` makes route metadata safe to use for access
+control:
+
+- **Decorators of a group are alternatives.** A route (or a controller) has at most one decision
+  per group: `@Public() @Roles(['admin'])` on one method is ZNIGHT005 at build time.
+- **The nearest decision wins.** The effective metadata of a route (`ctx.route.meta`,
+  `decorator.get(ctx)`) is made of the controller's entries whose group the route does not decide,
+  then the route's entries. `@Public()` on a controller and `@Roles(['admin'])` on one of its
+  routes give `{ roles: ['admin'] }` for that route: the route is not public. A decorator without
+  `group` is its own group (the route value wins over the controller value, key by key).
+- **Every route has a decision of each `required` group, checked at build time.** A route without
+  one, neither on itself nor on its controller, is **ZNIGHT023** — including routes of an
+  application that defines the decorators of a required group without applying them yet:
+
+  ```
+  ✗ ZNIGHT023: Route DELETE /books/:id (BookController.remove) has no "access" decision
+    --> src/books/book.controller.ts:104:3
+    = hint: Add @Public(), @Authenticated() or @Roles(...) to the route or to BookController
+    = related: The "access" group is required (src/auth/access.ts:5:14)
+  ```
+
+- **Every decision is enforced, checked at boot.** Guards declare the decorators whose decisions
+  they enforce (`static enforces = [Public, Authenticated, Roles]`, typed `readonly
+  RouteDecoratorInfo[]`, see `GuardClass`). When `HttpPlugin` registers the routes, each route
+  whose decision belongs to a required group, or to a group some guard enforces, must have a guard
+  enforcing that group in its chain (global, controller or route guards). Otherwise the boot fails
+  with one ZNIGHT023 listing every route, by group. This catches a forgotten
+  `guards: [AuthGuard]` in a second entrypoint or a test. A required group is also known at boot
+  through the `enforces` of a guard (an auth package shared between services), and plugin routes
+  are checked too.
+
+  ```
+  ZNIGHT023: HttpPlugin: No guard enforces the required "access" group on 9 routes: GET /books (BookController.list), ...
+    hint: Register a guard declaring `static enforces` with the decorators of the "access" group (authenticated, public, roles), e.g. HttpPlugin.configure({ guards: [AuthGuard] })
+  ```
+
+  The class whose `enforces` counts is the compiled class of controller and route guards (a guard
+  replaced through `overrides` in a test keeps its declaration), the class or the
+  `instance.constructor` of global guards. A test that deliberately runs without guards sets
+  `enforcement: 'warn'` (one warning per group instead of the error).
+
+- All the definitions of a key must use the same options, and the decorators of a group must agree
+  on `required` (ZNIGHT005 at build time; at boot for contradicting `enforces`). Route decorators
+  without options behave as before.
+
+`HttpPlugin.routes` lists the effective `meta` and the `guards` (display names, chain order) of
+every route: snapshot it in a test to review access changes in pull requests.
+
+```ts
+test('access matrix', async () => {
+  await using app = await createTestApp()
+  const matrix = app
+    .get(HttpPlugin)
+    .routes.filter(route => route.method !== 'HEAD')
+    .map(route => `${route.method} ${route.path} ${JSON.stringify(route.meta)} [${route.guards.join(', ')}]`)
+  expect(matrix).toMatchSnapshot()
+})
+```
+
+`decorator.meta(value?)` gives the same metadata as data (`{ key, value, group, required }`) for
+routes that are not compiled controllers: [plugin routes](#plugin-routes) such as
+`OpenApiPlugin.configure({ meta: [Public.meta()] })`.
+
+## CORS
+
+```ts
+HttpPlugin.configure({
+  cors: {
+    origin: ['https://app.example.com', /^https:\/\/[a-z0-9-]+\.preview\.example\.com$/],
+    credentials: true,
+  },
+})
+```
+
+| Option          | Default                      | Description                                                                                      |
+| --------------- | ---------------------------- | ------------------------------------------------------------------------------------------------ |
+| `origin`        | required                     | `'*'`, an origin, an anchored `RegExp`, a list of them, or `(origin) => boolean \| Promise<...>` |
+| `credentials`   | `false`                      | `access-control-allow-credentials: true` (cookies, `authorization`); refused with `'*'`          |
+| `methods`       | the methods of the path      | `access-control-allow-methods` of preflights                                                     |
+| `allowHeaders`  | the headers the browser asks | `access-control-allow-headers` of preflights, or `'*'` (refused with `credentials`)              |
+| `exposeHeaders` | the request id header        | `access-control-expose-headers` of replies                                                       |
+| `maxAge`        | `600`                        | `access-control-max-age` of preflights, seconds (0 to 86400)                                     |
+
+The options are validated at boot (ZNIGHT005): an origin must be written exactly as browsers send
+it (`https://app.example.com`: no path, no trailing slash, no default port), `'null'` is refused,
+a `RegExp` must be anchored with `^` and `$` around every alternative and have no `g` / `y` flag.
+
+Behaviour, identical on every adapter:
+
+- **Preflights** (`OPTIONS` with `origin` and `access-control-request-method`) are answered by the
+  pipeline inside the `http:request` hook (logs, metrics and traces see them) and **never run
+  guards, interceptors or handlers**, even when an `@Options` or `@All` route matches: `204` with
+  the CORS headers, `allow` and `vary`; `403 CORS origin not allowed` for a denied origin; `404`
+  for a path without route (both without CORS headers).
+- **Other replies to an allowed origin** get `access-control-allow-origin`,
+  `access-control-allow-credentials` and `access-control-expose-headers` unless the handler, an
+  interceptor, a mapper or a hook wrapper set them: 2xx, guard 401 / 403, 404, 405, 413, 500,
+  automatic `OPTIONS` and redirects alike. `@Res()` raw replies are the only exception.
+- **A denied origin** is served normally, without CORS headers: CORS protects what a page may read,
+  it is not access control (use a guard).
+- `vary: origin` is merged into every reply (unless `origin: '*'`), for shared caches.
+- An origin function that throws or rejects denies the origin (logged at `error` level).
+
+With Fastify, Express or Hono, use either this option or the native CORS middleware, not both.
+
+## Security headers
+
+On by default, added to every reply that does not set them (`@Res()` raw replies excepted):
+
+| Option                      | Header                         | Default                                                                                             |
+| --------------------------- | ------------------------------ | --------------------------------------------------------------------------------------------------- |
+| `contentSecurityPolicy`     | `content-security-policy`      | `default-src 'none'; frame-ancestors 'none'`                                                        |
+| `frameOptions`              | `x-frame-options`              | `'DENY'` (or `'SAMEORIGIN'`)                                                                        |
+| `noSniff`                   | `x-content-type-options`       | `true` (`nosniff`)                                                                                  |
+| `referrerPolicy`            | `referrer-policy`              | `'no-referrer'`                                                                                     |
+| `hsts`                      | `strict-transport-security`    | `false`; `true`: `max-age=31536000; includeSubDomains`; or `{ maxAge, includeSubDomains, preload }` |
+| `crossOriginResourcePolicy` | `cross-origin-resource-policy` | `false` (`'same-origin'`, `'same-site'`, `'cross-origin'`)                                          |
+| `cacheControl`              | `cache-control`                | `false` (`'no-store'` for APIs serving personal data)                                               |
+
+```ts
+HttpPlugin.configure({ securityHeaders: { hsts: true, cacheControl: 'no-store' } }) // merged over the defaults
+HttpPlugin.configure({ securityHeaders: false }) // none
+```
+
+The defaults are safe for APIs: the CSP blocks a stored XSS through an uploaded HTML or SVG file
+served by `HttpResponse.file()` and changes nothing for JSON. Every header loses to one set by the
+handler (`@Header`, `ctx.setHeader`, `HttpResponse`), an interceptor, an exception or a hook
+wrapper: a route serving an HTML page sets its own `content-security-policy`. HSTS normally belongs
+to the TLS terminator. Values are validated at boot (ZNIGHT005).
+
+## Behind a proxy
+
+```ts
+HttpPlugin.configure({ trustProxy: 1 }) // one load balancer in front of the server
+HttpPlugin.configure({ trustProxy: ['loopback', '10.0.0.0/8'] }) // the addresses of the proxies
+```
+
+`trustProxy` (default `false`) gives a correct `ctx.ip` and `ctx.protocol` behind load balancers,
+the same way on every adapter. Both forms walk `[socket peer, ...x-forwarded-for from right to
+left]`:
+
+- a **number** of hops (an integer ≥ 1): the client is the entry at that index, or the leftmost one
+  when the list is shorter;
+- a **list** of IPv4 / IPv6 addresses, CIDR ranges and the aliases `'loopback'` (127.0.0.0/8,
+  ::1), `'private'` (10/8, 172.16/12, 192.168/16, fc00::/7) and `'linklocal'` (169.254/16,
+  fe80::/10): the walk continues while the addresses are trusted; the first untrusted one is the
+  client (or the leftmost entry when all are trusted).
+
+IPv4-mapped IPv6 addresses are normalised (`::ffff:10.0.0.1` → `10.0.0.1`), and a malformed entry
+stops the walk at the last valid address. When the socket peer is trusted, `ctx.protocol` is the
+leftmost `x-forwarded-proto` (`http` or `https` only); otherwise it is the protocol of the
+connection. `true` is refused (ZNIGHT005): trusting every hop would let any client choose its
+`ctx.ip`. Without the option, `ctx.ip` is the adapter's address, so the proxy settings of Fastify
+(`trustProxy`) and Express (`trust proxy`) still apply. The `Forwarded` header (RFC 7239) is not
+read.
 
 ## Interceptors
 
@@ -741,21 +913,22 @@ export class TimingInterceptor implements HttpInterceptor {
 `HttpContext` is adapter-neutral. Use it with `@Ctx()`, in guards, interceptors and mappers, or
 inject it in request-scoped providers.
 
-| Member                                             | Description                                                              |
-| -------------------------------------------------- | ------------------------------------------------------------------------ |
-| `requestId`                                        | Incoming `x-request-id` (when valid) or a generated UUID                 |
-| `method`, `url`, `path`                            | Upper-case method, raw target (`/a%20b?x=1`), raw path                   |
-| `params`                                           | Decoded route parameters (`'*'` for the wildcard)                        |
-| `query`                                            | Parsed query, repeated keys as arrays (parsed on first access)           |
-| `headers`, `header(name)`                          | Request headers (lower-case names)                                       |
-| `body`, `parseBody()`, `rawBody()`                 | Parsed body ([when](#request-bodies)), lazy parsing, raw bytes           |
-| `files`                                            | Files of a multipart body by field (`Record<string, File[]>`)            |
-| `bodyStream()`                                     | The body as a Web stream, nothing buffered ([Large files](#large-files)) |
-| `route`                                            | `{ method, path, controller, handler, meta }`, `undefined` for 404/405   |
-| `state`                                            | `Map` shared by guards, interceptors and handlers                        |
-| `setHeader()`, `appendHeader()`, `responseHeaders` | Response headers, also sent with errors                                  |
-| `request`, `response`                              | Native objects of the adapter                                            |
-| `adapter`, `ip`                                    | Adapter name, remote address                                             |
+| Member                                             | Description                                                                                                                          |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `requestId`                                        | Incoming `x-request-id` (when valid) or a generated UUID                                                                             |
+| `method`, `url`, `path`                            | Upper-case method, raw target (`/a%20b?x=1`), raw path                                                                               |
+| `params`                                           | Decoded route parameters (`'*'` for the wildcard)                                                                                    |
+| `query`                                            | Parsed query, repeated keys as arrays (parsed on first access)                                                                       |
+| `headers`, `header(name)`                          | Request headers (lower-case names)                                                                                                   |
+| `body`, `parseBody()`, `rawBody()`                 | Parsed body ([when](#request-bodies)), lazy parsing, raw bytes                                                                       |
+| `files`                                            | Files of a multipart body by field (`Record<string, File[]>`)                                                                        |
+| `bodyStream()`                                     | The body as a Web stream, nothing buffered ([Large files](#large-files))                                                             |
+| `route`                                            | `{ method, path, controller, handler, meta }` (effective metadata, see [Route decisions](#route-decisions)), `undefined` for 404/405 |
+| `state`                                            | `Map` shared by guards, interceptors and handlers                                                                                    |
+| `setHeader()`, `appendHeader()`, `responseHeaders` | Response headers, also sent with errors                                                                                              |
+| `request`, `response`                              | Native objects of the adapter                                                                                                        |
+| `adapter`                                          | Adapter name                                                                                                                         |
+| `ip`, `protocol`                                   | Client address and `'http'` / `'https'` ([Behind a proxy](#behind-a-proxy))                                                          |
 
 Each request runs in a container scope seeded with `HttpContext` and `RequestId`:
 
@@ -826,10 +999,24 @@ once at bootstrap: `HttpPlugin.configure(c => ({ port: c.get(AppConfig).port }))
 | `requestIdHeader`   | `x-request-id`        | Header read (when ≤ 128 chars of `[A-Za-z0-9_-.:@/+=]`) and echoed; `false` to always generate                     |
 | `generateRequestId` | `randomUUID`          | Request id generator                                                                                               |
 | `drainTimeoutMs`    | `4000`                | Maximum wait for in-flight requests on shutdown (keep it below `shutdown.hookTimeoutMs`; `Infinity`: no own limit) |
+| `cors`              | off                   | [CORS](#cors) policy: `{ origin, credentials?, methods?, allowHeaders?, exposeHeaders?, maxAge? }`                 |
+| `securityHeaders`   | `true`                | [Security headers](#security-headers): `true`, `false` or settings merged over the defaults                        |
+| `trustProxy`        | `false`               | [Trusted proxies](#behind-a-proxy): a number of hops or addresses / CIDR ranges / aliases                          |
+| `enforcement`       | `'error'`             | [Route decisions](#route-decisions) not enforced by a guard: `'error'` fails the boot, `'warn'` logs               |
 
 The plugin instance (`app.getPlugin<HttpPlugin>('http')`, or injected as `HttpPlugin`) exposes
 `address` (`{ host, port, family, url }`, `String(address)` is the URL; `undefined` when not
-listening), `inject(request)`, `routes`, `adapter`, `inflight` and `initRoots()`.
+listening), `inject(request)`, `routes`, `adapter`, `inflight`, `prefix` and `initRoots()`.
+
+`routes` lists every registered route (HEAD and trailing-slash variants included):
+`{ method, path, controller, handler, source, meta, guards }`, where `source` is `'controller'` or
+the name of the plugin declaring a [plugin route](#plugin-routes), `meta` the effective metadata
+and `guards` the display names of the guard chain (global, controller, route).
+
+`prefix` is the resolved `prefix` option (`''` or `/api`), for plugins that serve routes or publish
+URLs. It is readable at any time when the options are an object; when they are a function of the
+container, from the `onBootstrap` of any plugin (before or after `HttpPlugin`'s): the options are
+resolved once per application.
 
 `initRoots()` lists the provider classes the plugin resolves at bootstrap although no compiled
 metadata references them: the classes of `guards`, `interceptors` and `exceptionMappers` (instances
@@ -847,6 +1034,42 @@ const app = await Application.create({
   init: { only: [UserController, ...http.initRoots()] },
 })
 ```
+
+## Plugin routes
+
+Another plugin can ask `HttpPlugin` to serve routes (documentation, status or metrics endpoints) by
+implementing `PluginHttpRoutes`. They are registered on every adapter in the same pipeline as the
+controllers, whatever the plugin order:
+
+```ts
+export class StatusPlugin implements Plugin, PluginHttpRoutes {
+  readonly name = 'status'
+
+  httpRoutes({ prefix, container }: PluginHttpRoutesContext): readonly PluginRoute[] {
+    return [
+      {
+        method: 'GET',
+        path: '/status', // relative to the HttpPlugin prefix, controller path grammar
+        name: 'status', // handler name in HttpPlugin.routes, logs and errors
+        handler: ctx => ({ up: true }), // (ctx: HttpContext) => result, serialised like a controller result
+        meta: [Public.meta()], // route metadata: read by guards, checked by the route decision check
+        guards: [], // extra guards (classes or instances)
+      },
+    ]
+  }
+}
+```
+
+- `httpRoutes()` is called once in `HttpPlugin.onBootstrap`, after `container.init()` and after the
+  compiled routes, with the prefix and the container.
+- A request to a plugin route runs the `http:request` hook in a request scope, the global guards,
+  then the route `guards`, the handler and the exception mappers. Global interceptors do not wrap
+  plugin routes (a response envelope would break a document). The body is read lazily
+  (`ctx.parseBody()`). `GET` routes answer `HEAD`; `ALL` works as for controllers.
+- `meta` entries (`decorator.meta(value)`, one per group) are the route metadata. A required group
+  needs a decision there too: without one the boot fails (ZNIGHT023), with a hint naming the plugin.
+- An invalid route (method, path grammar, name, handler, meta) or a collision with another route is
+  ZNIGHT007 naming the plugin. `HttpPlugin.routes` lists the routes with `source: '<plugin name>'`.
 
 ## Adapters
 
@@ -1007,15 +1230,17 @@ expect(partial.bytes.byteLength).toBe(100)
 | Plugin hook   | What happens                                                                                                                                                         |
 | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `register`    | Declares the request-scoped externals `HttpContext` and `RequestId`, registers the plugin                                                                            |
-| `onBootstrap` | Resolves options, controllers, guards, interceptors and mappers; validates and registers routes                                                                      |
+| `onBootstrap` | Resolves options, controllers, guards, interceptors and mappers; collects plugin routes; checks route decisions (ZNIGHT023); validates and registers routes          |
 | `onStart`     | Listens (logs the address)                                                                                                                                           |
 | `onStop`      | Stops accepting connections, closes idle ones, waits for in-flight requests and streamed or file responses (`drainTimeoutMs`), then closes the remaining connections |
 | `onDispose`   | Closes the server and the adapter                                                                                                                                    |
 
 While draining, responses carry `connection: close`. Singletons (controllers, singleton guards,
 interceptors and mappers) are resolved at bootstrap; request-scoped and transient ones on every
-request. Bootstrap fails with `ZNIGHT007` for invalid or duplicate routes and `ZNIGHT001` for
-controllers, guards or interceptors that are not providers.
+request. Bootstrap fails with `ZNIGHT007` for invalid or duplicate routes, `ZNIGHT001` for
+controllers, guards or interceptors that are not providers, `ZNIGHT005` for invalid options (and
+contradicting route decorator groups) and `ZNIGHT023` for route decisions that are missing or that
+no guard enforces.
 
 A plugin instance serves one application at a time and can serve another one once the previous
 application is stopped (a `HttpPlugin.configure()` shared by the tests of a file); using it in two
@@ -1083,7 +1308,10 @@ accepted too. `file?: File` / `File | undefined` makes an upload optional (`requ
   another extension (a `@Consumer`), HTTP decorators are reported without suggesting
   `@Controller()`, and those on the parameters of its handlers (`@OnMessage`) are left to that
   extension (`@znight/messaging` reports a `Headers` imported from `@znight/http`), unless the
-  parameter is also read through its decorators or is optional.
+  parameter is also read through its decorators or is optional. Route decorator groups: invalid
+  `createRouteDecorator` options (at the usage, related to the definition), two decisions of one
+  group on a class or a method, two definitions of one key with different options, decorators of
+  one group disagreeing on `required` (at the second definition).
 - **ZNIGHT007** (invalid route): path grammar (base path, route path and their combination); a
   `:param` not consumed by `@Param('param')` (a `@Param()`, `@Ctx()` or `@Req()` parameter consumes
   them all); a `@Param('x')` without `:x` in the path; a `@Param` / `@Headers` type that cannot be
@@ -1094,6 +1322,11 @@ accepted too. `file?: File` / `File | undefined` makes an upload optional (`requ
 - **ZNIGHT003** (scope mismatch): a singleton controller uses a request-scoped guard or interceptor
   (directly or through transient ones). Make the controller request-scoped, or the guard a
   singleton (it receives the `HttpContext` as argument).
+- **ZNIGHT023** (missing route decision): a route without decision of a required group, neither on
+  itself nor on its controller, located at the route decorator and related to the group definition
+  and the controller, with a hint listing the decorators of the group (see
+  [Route decisions](#route-decisions)). The same code fails the boot when no guard enforces a
+  decision.
 
 ```
 ✗ ZNIGHT007: Route GET /users/:id declares ":id" but UserController.find has no @Param('id') parameter
@@ -1107,12 +1340,15 @@ accepted too. `file?: File` / `File | undefined` makes an upload optional (`requ
 ### Route decorators
 
 A decorator is a route metadata decorator when it is a `const` initialised with
-`createRouteDecorator(key)` where `key` is statically evaluable. Its argument is evaluated at build
-time: literals, `const` references (across files and packages), simple expressions, and references
-to exported bindings (classes, objects), which the generated module imports. Without argument the
+`createRouteDecorator(key, options?)` where `key` and `options` (`{ group?, required? }`) are
+statically evaluable (literals, `const` references). Its argument is evaluated at build time:
+literals, `const` references (across files and packages), simple expressions, and references to
+exported bindings (classes, objects), which the generated module imports. Without argument the
 value is `true`. Route decorators must be declared in analysed sources (your application, or a
-provider library published with its sources): from a declaration file (`.d.ts`) the key cannot be
-read and the compiler reports it.
+provider library published with its sources): from a declaration file (`.d.ts`) the key and the
+options cannot be read and the compiler reports it. The compiler knows every definition of the
+analysed sources, applied or not: a required group defined anywhere needs a decision on every
+route.
 
 ### Limits of the compiler
 
@@ -1142,7 +1378,7 @@ extensions: {
         basePath: '/users',                                     // normalizePath(controller path), '/' when absent
         guards: ['src/auth/auth.guard.ts#AuthGuard'],            // @UseGuard on the class, provider tokens, in order
         interceptors: [],                                       // @UseInterceptor on the class
-        meta: { roles: ['admin'] },                             // createRouteDecorator values on the class
+        meta: { roles: ['admin'] },                             // createRouteDecorator values on the class (one per group)
         routes: [
           {
             method: 'GET',                    // 'GET'|'POST'|'PUT'|'PATCH'|'DELETE'|'HEAD'|'OPTIONS'|'ALL'
@@ -1151,7 +1387,7 @@ extensions: {
             handler: 'find',
             status: 202,                      // @HttpCode, omitted when absent
             headers: { 'cache-control': 'no-store' }, // @Header (lower-case names), omitted when absent
-            meta: { public: true },           // route createRouteDecorator values
+            meta: { public: true },           // route createRouteDecorator values (one per group, nearest wins)
             guards: [],                       // @UseGuard on the method
             interceptors: [],                 // @UseInterceptor on the method (top-most first)
             params: [{ index: 0, source: 'param', name: 'id', type: 'number' }],
@@ -1182,6 +1418,9 @@ extensions: {
         ],
       },
     ],
+    // route decorator groups the runtime needs (required, several keys, or named differently from
+    // their key), sorted, keys sorted; omitted when there is none (byte-identical output otherwise)
+    groups: { access: { keys: ['authenticated', 'public', 'roles'], required: true } },
   },
 }
 ```
@@ -1192,7 +1431,13 @@ Rules:
   `mimeTypes`) are omitted when absent (`exactOptionalPropertyTypes`).
 - `meta` values: a `createRouteDecorator` call without argument stores `true`. A decorator is a
   route decorator when its callee is a `const` initialised with a call to
-  `@znight/http#createRouteDecorator`; its `key` (first argument) is static.
+  `@znight/http#createRouteDecorator`; its `key` (first argument) and its options (second
+  argument) are static. A target holds at most one key per group.
+- `groups` (`HttpRouteGroupDefinition`: `{ keys, required }`): a key belongs to one group at most;
+  a key listed nowhere is its own group, not required. The plugin computes the effective metadata
+  of each route once at boot (the controller's entries whose group the route does not decide, then
+  the route's entries). Malformed groups, or two keys of one group on a target, are ZNIGHT007 at
+  boot.
 - `@Validate(S)` applies `S` to the `@Body()` parameter (`@Validate(S)` + `@Body()` ≡ `@Body(S)`);
   `@Validate(S)` + `@Body(S2)` is ZNIGHT005. Without a `@Body()` parameter the body is still
   validated (and discarded): `invoke: async (c, ctx) => { await validate(S, await ctx.parseBody(), 'body'); return c.m() }`.
@@ -1321,6 +1566,25 @@ Tokens: `@znight/http#HttpContext`, `@znight/http#RequestId`, `@znight/http#Http
 schema, or a schema alone; `@UploadedFile`/`@UploadedFiles` a static field and/or static options;
 `@BodyLimit` a static size (class or method).
 
+## Compiler contract for other extensions
+
+Other compiler extensions (`@znight/openapi`) read the data stored by the http extension through
+`ctx.graph.extensions` (`{ name: 'http', stored }`). The types are exported from
+`@znight/http/compiler` and follow the lockstep release line (a matching compiler is guaranteed by
+ZNIGHT018):
+
+| Type                 | Content                                                                                                                                                                                                                                                        |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `HttpControllerData` | `token`, `identity` (canonical identity of the class), `displayName`, `rawBasePath`, `basePath`, `guards` / `interceptors` (`ClassRef`), `meta`, `routes`, `location`, `pathLocation`                                                                          |
+| `HttpRouteData`      | `method`, `rawPath`, `path`, `fullPath` (without prefix), `handler`, `status`, `headers`, `meta`, `guards`, `interceptors`, `params`, `complete` (`false`: skip, http reported an error), `bodySchema`, `bodyLimit`, `rawResponse`, `location`, `pathLocation` |
+| `HttpParamData`      | `index`, `name`, `source`, `key`, `type`, `optional`, `schema` (`ValueRef`), `coercion` (`ParamCoercion`: plan and cast), `upload`, `defaultValue` (statically evaluable default value: `page = 1` → `1`, absent otherwise), `location`                        |
+| `UploadData`         | `field`, `multiple`, `required`, `maxSize`, `maxFiles`, `mimeTypes`, `cast`                                                                                                                                                                                    |
+| `MetaEntry`          | `key`, `value` (`StaticValue`), `group`, `required`, `decorator` (name of the `const`), `identity` (canonical identity of the decorator `const`: `src/auth/access.ts#Public`), `definition` and `location`                                                     |
+
+Controllers are stored in identity order of the classes; sort them by `token` for deterministic
+output. The effective metadata of a route is the controller's entries whose `group` has no entry on
+the route, then the route's entries.
+
 ## Writing an adapter
 
 An adapter implements `HttpAdapter` (exported types): it routes requests to the handlers given by
@@ -1340,8 +1604,10 @@ interface HttpAdapter {
 - Translate `route.path` with `@znight/http/path` (`toFastifyPath`, `toHonoPath`, `toRegExpSource`)
   or match it with `matchRoutePath` / the segment trie. Routes arrive sorted (HEAD first, most
   specific first), ready for first-match routers.
-- Build an `AdapterRequest` (`method`, raw `url`, lower-case `headers`, `readBody(limit)`, native
-  `raw`/`rawResponse`) and write the `AdapterReply` (`status`, `headers` — already validated, every
+- Build an `AdapterRequest` (`method`, raw `url`, lower-case `headers`, `ip`, `readBody(limit)`,
+  native `raw`/`rawResponse`; also `remoteAddress`, the socket peer, **never** read from headers,
+  where `trustProxy` starts walking `x-forwarded-for`, and `encrypted` for TLS connections, which
+  gives `ctx.protocol`) and write the `AdapterReply` (`status`, `headers` — already validated, every
   name and value can be sent —, `body`: bytes, a stream or `null`; write nothing when `raw`).
   Never rethrow a failure to write a reply into the framework's error handler (the request would be
   served twice): release the body and answer a plain 500.
@@ -1368,8 +1634,9 @@ interface HttpAdapter {
 
 ## Limitations
 
-- No built-in CORS, compression, static files or cookies parsing yet: use the native ecosystem
-  through the Fastify / Express / Hono adapters (their middleware runs before Znight routes).
+- No built-in compression, static files or cookies parsing yet: use the native ecosystem through
+  the Fastify / Express / Hono adapters (their middleware runs before Znight routes).
+- No per-route CORS settings, no Private Network Access, and the `Forwarded` header is not read.
 - Request bodies read with `@Body()` and uploaded files are buffered in memory (within the limits):
   stream large bodies with `ctx.bodyStream()` or upload to object storage (see
   [Large files](#large-files)). There is no streaming API for multipart parts yet.

@@ -28,7 +28,10 @@ export interface HttpRouteInfo {
   readonly controller: Token
   /** Handler method name. */
   readonly handler: string
-  /** Controller metadata merged with route metadata (`createRouteDecorator`). */
+  /**
+   * Effective route metadata (`createRouteDecorator`): the controller's entries, except those of a
+   * group the route decides itself, then the route's entries (the nearest decision wins).
+   */
   readonly meta: Readonly<Record<string, unknown>>
 }
 
@@ -71,8 +74,17 @@ export interface HttpContext {
   readonly response: unknown
   /** Adapter name (`node`, `fastify`, `express`, `hono`). */
   readonly adapter: string
-  /** Remote address, when the adapter knows it. */
+  /**
+   * Client address, when the adapter knows it. With the plugin option `trustProxy`, the address
+   * found in `x-forwarded-for` behind the trusted proxies; otherwise the adapter's address (the
+   * socket peer, or what Fastify / Express derive from their own proxy settings).
+   */
   readonly ip: string | undefined
+  /**
+   * `https` when the connection uses TLS, or, behind a trusted proxy (`trustProxy`), when the
+   * leftmost `x-forwarded-proto` says so; `http` otherwise.
+   */
+  readonly protocol: 'http' | 'https'
   /** Headers added to the response, whatever its outcome (errors included). */
   readonly responseHeaders: Readonly<Record<string, HeaderValue>>
   /** A request header (case-insensitive name). */
@@ -115,6 +127,7 @@ export class RequestContext implements HttpContext {
   readonly response: unknown
   readonly adapter: string
   readonly ip: string | undefined
+  readonly protocol: 'http' | 'https'
   readonly #source: AdapterRequest
   readonly #plan: BodyPlan
   readonly #rawQuery: string
@@ -137,6 +150,8 @@ export class RequestContext implements HttpContext {
       readonly route: HttpRouteInfo | undefined
       readonly params: Readonly<Record<string, string>>
       readonly body: BodyPlan
+      /** Client address and protocol (`trustProxy`); default: the adapter's `ip` and `encrypted`. */
+      readonly client?: { readonly ip: string | undefined; readonly protocol: 'http' | 'https' }
     },
   ) {
     this.#source = source
@@ -153,7 +168,9 @@ export class RequestContext implements HttpContext {
     this.request = source.raw
     this.response = source.rawResponse
     this.adapter = init.adapter
-    this.ip = source.ip
+    const connection = source.encrypted === true ? 'https' : 'http'
+    this.ip = init.client === undefined ? source.ip : init.client.ip
+    this.protocol = init.client === undefined ? connection : init.client.protocol
   }
 
   get query(): Readonly<QueryRecord> {

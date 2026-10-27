@@ -1,0 +1,125 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`TypeHelpers.shape() describes classes: own and inherited fields, parameter properties, toJSON 1`] = `
+"@src/model.ts#Stats
+src/model.ts#Stats (class) = { total: bigint; byGenre: opaque(non-json: Map<string, number>); callback: opaque(function: () => void); pattern?: opaque(non-json: RegExp) }
+! non-json at src/model.ts#Stats Stats.byGenre: Map<string, number>
+! function at src/model.ts#Stats Stats.callback: () => void
+! non-json at src/model.ts#Stats Stats.pattern: RegExp
+! bigint at src/model.ts#Stats Stats.total: bigint"
+`;
+
+exports[`TypeHelpers.shape() on aliases applies aliases structurally (snapshot) 1`] = `
+"## BookSummary
+@src/model.ts#BookSummary
+src/model.ts#BookSummary (alias) = { readonly id: number; title: string }
+
+## BookPatch
+@src/model.ts#BookPatch
+src/model.ts#BookPatch (alias) = { title?: string; subtitle?: string; author?: null | string; tags?: string[]; published?: date; site?: url; rating?: 1 | 2 | 3; meta?: { [string]: string }; status?: @src/model.ts#BookStatus; genre?: string }
+src/model.ts#BookStatus (enum) = "draft" | "published"
+
+## Ratings
+@src/model.ts#Ratings
+src/model.ts#Ratings (alias) = { high: number; low: number }
+
+## Figure
+@src/model.ts#Figure
+src/model.ts#Figure (alias) = { kind: "circle"; radius: number } | { kind: "square"; side: number }
+
+## Tree
+@src/model.ts#Tree
+src/model.ts#Tree (alias) = { value: number; children: @src/model.ts#Tree[] }
+
+## Json
+@src/model.ts#Json
+src/model.ts#Json (alias) = boolean | null | number | @src/model.ts#Json[] | string | { [string]: @src/model.ts#Json }
+
+## Tuple
+@src/model.ts#Tuple
+src/model.ts#Tuple (alias) = [string, number?, ...boolean[]]
+
+## Branded
+@src/model.ts#Branded
+src/model.ts#Branded (alias) = string
+
+## Keys
+@src/model.ts#Keys
+src/model.ts#Keys (alias) = "createdAt" | "id"
+
+## TitleType
+@src/model.ts#TitleType
+src/model.ts#TitleType (alias) = string
+
+## Mapped
+@src/model.ts#Mapped
+src/model.ts#Mapped (alias) = { readonly a?: number; readonly b?: number }
+
+## Plain
+@src/model.ts#Plain
+src/model.ts#Author (interface) = { id: string; createdAt: date; name: string; country?: string }
+src/model.ts#Plain (alias) = @src/model.ts#Simplify<src/model.ts#Author>
+src/model.ts#Simplify<src/model.ts#Author> (alias) = { id: string; createdAt: date; name: string; country?: string }
+
+## Strict
+@src/model.ts#Strict
+src/model.ts#Strict (alias) = { id: string; createdAt: date; note: string }
+
+## NoNull
+@src/model.ts#NoNull
+src/model.ts#NoNull (alias) = string
+
+## OnlyStrings
+@src/model.ts#OnlyStrings
+src/model.ts#OnlyStrings (alias) = "a" | "b"
+
+## WithoutB
+@src/model.ts#WithoutB
+src/model.ts#WithoutB (alias) = "a" | "c"
+
+## Cond<string>
+@src/model.ts#Cond<string>
+src/model.ts#Cond<string> (alias) = opaque(conditional: T extends string ? 'yes' : 'no')
+! conditional at src/model.ts#Cond<string> Cond<string>: T extends string ? 'yes' : 'no'
+
+## Merged
+@src/model.ts#Merged
+src/model.ts#Merged (alias) = { id: string; createdAt: date; name: string }
+
+## Callable
+@src/model.ts#Callable
+src/model.ts#Callable (alias) = opaque(function: (): void;)
+! function at src/model.ts#Callable Callable: (): void;
+
+## Grow<string>
+@src/model.ts#Grow<string>
+src/model.ts#Grow<string> (alias) = { next: @src/model.ts#Grow<string[]> }
+src/model.ts#Grow<string[]> (alias) = { next: @src/model.ts#Grow<string[][]> }
+src/model.ts#Grow<string[][]> (alias) = { next: opaque(recursive: Grow) }
+! recursive at src/model.ts#Grow<string[][]> Grow<string[][]>.next: Grow
+
+## LoopA
+@src/model.ts#LoopA
+src/model.ts#LoopA (interface) = { b: string; a: string }
+
+## Shelf
+@src/model.ts#Shelf
+src/model.ts#Shelf (class) = { readonly createdBy: string; readonly id: number; owner?: string; readonly name: string; label: string; opened: date }
+
+## Money
+@src/model.ts#Money
+src/model.ts#Money (class) = string
+
+## Euro
+@src/model.ts#Euro
+src/model.ts#Euro (class) = string
+
+## Raw
+@src/model.ts#Raw
+src/model.ts#Raw (class) = opaque(to-json: toJSON)
+! to-json at src/model.ts#Raw Raw: toJSON
+
+## Level
+@src/model.ts#Level
+src/model.ts#Level (enum) = 0 | 5 | 6"
+`;

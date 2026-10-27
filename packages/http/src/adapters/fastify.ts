@@ -26,7 +26,7 @@ import Fastify, {
 
 import { toFastifyPath } from '../path.ts'
 import { discardStream } from '../stream.ts'
-import { ConnectionTracker, nodeBodyStream, normalizeNodeHeaders, readNodeBody } from './node-io.ts'
+import { ConnectionTracker, isEncrypted, nodeBodyStream, normalizeNodeHeaders, readNodeBody } from './node-io.ts'
 import { injectResponse, normalizeInject, serverAddress, toBuffer } from './shared.ts'
 
 /** Options of {@link fastifyAdapter}. */
@@ -218,6 +218,8 @@ function adapterRequest(request: FastifyRequest, reply: FastifyReply | undefined
     url: request.raw.url ?? request.url,
     headers: normalizeNodeHeaders(request.headers),
     ip: request.ip,
+    remoteAddress: request.raw.socket?.remoteAddress,
+    encrypted: isEncrypted(request.raw),
     raw: request,
     rawResponse: reply,
     readBody: (limit: number): Promise<Uint8Array> => {

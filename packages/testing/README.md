@@ -172,32 +172,39 @@ await using app = await TestApp.create({
 when the start fails because a port is taken (`EADDRINUSE` anywhere in the `cause` chain), the error
 carries a hint naming these options.
 
-| Option      | Type                              | Description                                                                                                                                                                                                                            |
-| ----------- | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `metadata`  | `ZnightMetadata`                  | **Required.** The generated metadata.                                                                                                                                                                                                  |
-| `plugins`   | `Plugin[]`                        | Plugins, as in `Application.create`.                                                                                                                                                                                                   |
-| `providers` | `Map` / `[key, value][]` / record | Values for externals (`Logger`, `ConfigSource`...), as in `Application.create`.                                                                                                                                                        |
-| `overrides` | `Map` / `[key, value][]` / record | Values or provider definitions replacing providers, applied last. Overridden providers are instantiated at boot.                                                                                                                       |
-| `only`      | `'all'` \| `(Class \| Token)[]`   | Providers instantiated at boot (with their dependencies), plus the overrides and the plugin roots (below). Default: HTTP controllers (with their guards and interceptors) and message consumers, or every provider when there is none. |
-| `start`     | `boolean`                         | Run `app.start()` (plugins listen/subscribe). Default `true`; `false` stops after `onBootstrap`.                                                                                                                                       |
-| `logger`    | `CoreLogger`                      | Default: a console logger writing warnings and errors only.                                                                                                                                                                            |
-| `shutdown`  | `{ timeoutMs?, hookTimeoutMs? }`  | Shutdown timeouts.                                                                                                                                                                                                                     |
+| Option      | Type                              | Description                                                                                                                                                                                                                                                                                   |
+| ----------- | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `metadata`  | `ZnightMetadata`                  | **Required.** The generated metadata.                                                                                                                                                                                                                                                         |
+| `plugins`   | `Plugin[]`                        | Plugins, as in `Application.create`.                                                                                                                                                                                                                                                          |
+| `providers` | `Map` / `[key, value][]` / record | Values for externals (`Logger`, `ConfigSource`...), as in `Application.create`.                                                                                                                                                                                                               |
+| `overrides` | `Map` / `[key, value][]` / record | Values or provider definitions replacing providers, applied last. Overridden providers are instantiated at boot.                                                                                                                                                                              |
+| `only`      | `'all'` \| `(Class \| Token)[]`   | Providers instantiated at boot (with their dependencies), plus the overrides and the plugin roots (below). Default: the entry points of the metadata (HTTP controllers with their guards and interceptors, message consumers, hosts of scheduled jobs), or every provider when there is none. |
+| `start`     | `boolean`                         | Run `app.start()` (plugins listen/subscribe). Default `true`; `false` stops after `onBootstrap`.                                                                                                                                                                                              |
+| `logger`    | `CoreLogger`                      | Default: a console logger writing warnings and errors only.                                                                                                                                                                                                                                   |
+| `shutdown`  | `{ timeoutMs?, hookTimeoutMs? }`  | Shutdown timeouts.                                                                                                                                                                                                                                                                            |
 
 Keys of `providers` and `overrides` may be classes, tokens, aliases or unique display names
 (`'UserRepository'`), like in `TestBed`; other strings are used as tokens (values for tokens
 registered at runtime by plugins).
 
-Limiting the boot to the controllers' closure keeps tests fast and lets them ignore unrelated
+Limiting the boot to the closure of the entry points keeps tests fast and lets them ignore unrelated
 providers (and their missing externals). Other providers are still created on first use (synchronous
-factories only).
+factories only). The hosts of scheduled jobs (`@Cron`, `@Interval`, `@Timeout` of
+`@znight/schedule`) are entry points even when the test does not run the scheduler, so a test that
+only exercises HTTP routes can pass `SchedulePlugin.configure({ enabled: false })` and still trigger
+a job through the registry.
 
-Providers a plugin resolves while it bootstraps without the metadata referencing them (the global
-`guards`, `interceptors` and `exceptionMappers` of `HttpPlugin.configure({...})`) are instantiated at
-boot too, with their dependencies, when the plugin lists them in an `initRoots()` method, as
-`HttpPlugin` does (see [Compiler contract](#compiler-contract)). Options computed from the container
-(`HttpPlugin.configure(c => ({...}))`) cannot be listed before the boot: when such a provider (or one
-of its dependencies) has an async factory, the boot fails with `ZNIGHT015` ("cannot create ... on
-demand: its factory is async"); add it to `only`, or pass `only: 'all'`:
+Providers a plugin resolves while it bootstraps without the metadata making them entry points (the
+global `guards`, `interceptors` and `exceptionMappers` of `HttpPlugin.configure({...})`) are
+instantiated at boot too, with their dependencies, when the plugin lists them in the optional
+`initRoots(context)` method of `Plugin` (`@znight/core`), as `HttpPlugin` does (see
+[Compiler contract](#compiler-contract)). These plugin roots complete the entry points and never
+restrict the boot by themselves: without any entry point, every provider is created.
+
+Options computed from the container (`HttpPlugin.configure(c => ({...}))`) cannot be listed before
+the boot: when such a provider (or one of its dependencies) has an async factory, the boot fails
+with `ZNIGHT015` ("cannot create ... on demand: its factory is async"); add it to `only`, or pass
+`only: 'all'`:
 
 ```ts
 await using app = await TestApp.create({
@@ -207,18 +214,32 @@ await using app = await TestApp.create({
 })
 ```
 
-| Member              | Description                                                                                    |
-| ------------------- | ---------------------------------------------------------------------------------------------- |
-| `inject(request)`   | In-memory request through the HTTP plugin: `{ method = 'GET', url, headers?, body?, query? }`. |
-| `get(key)`          | `app.container.get(key)` (class, token, alias or display name).                                |
-| `close()`           | Stops the application (idempotent). Also `await using app = await TestApp.create(...)`.        |
-| `app` / `container` | The `Application` and its `Container`.                                                         |
+| Member              | Description                                                                                                              |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `inject(request)`   | In-memory request through the HTTP plugin: `{ method = 'GET', url, headers?, body?, query?, cookies?, signedCookies? }`. |
+| `get(key)`          | `app.container.get(key)` (class, token, alias or display name).                                                          |
+| `close()`           | Stops the application (idempotent). Also `await using app = await TestApp.create(...)`.                                  |
+| `app` / `container` | The `Application` and its `Container`.                                                                                   |
 
-`inject()` resolves with `{ status, headers, body, bytes, json() }` (`body` decoded as UTF-8,
-`bytes` the raw body, for downloads); it rejects with `ZNIGHT001` when the application has no HTTP
-plugin and with `ZNIGHT021` once closed. The plugin encodes the request `body`: strings and bytes as
-is, a `FormData` as `multipart/form-data` (files included), a `Blob` / `File` with its type, other
-values as JSON.
+`inject()` resolves with `{ status, headers, body, bytes, cookies, json() }` (`body` decoded as
+UTF-8, `bytes` the raw body, for downloads, `cookies` the `set-cookie` headers parsed by name); it
+rejects with `ZNIGHT001` when the application has no HTTP plugin and with `ZNIGHT021` once closed.
+The plugin encodes the request `body`: strings and bytes as is, a `FormData` as
+`multipart/form-data` (files included), a `Blob` / `File` with its type, other values as JSON.
+
+Cookies make round trips: `cookies` sends values in a `cookie` header (after any `cookie` header of
+`headers`), `signedCookies` sends values the HTTP plugin signs with its current secret first (a valid
+`@SignedCookie`), and each `response.cookies[name]` (`SetCookieInfo`: `value`, `raw`, `expires`,
+`maxAge`, `domain`, `path`, `secure`, `httpOnly`, `sameSite`, `partitioned`, `priority`) can be sent
+back as is:
+
+```ts
+const login = await app.inject({ method: 'POST', url: '/auth/login', body: { email, password } })
+expect(login.cookies['session']).toMatchObject({ httpOnly: true, secure: true, sameSite: 'lax' })
+
+const me = await app.inject({ url: '/auth/me', cookies: { session: login.cookies['session']?.value ?? '' } })
+const forged = await app.inject({ url: '/auth/me', signedCookies: { session: 'u-1' } })
+```
 
 ```ts
 import { readFile } from 'node:fs/promises'
@@ -355,17 +376,20 @@ without importing any feature package:
 | `extensions.config.configs[].{ token, prefix, fields[].{ property, type, default } }`              | `TestBed` configuration instances            |
 | `extensions.http.controllers[].{ token, guards, interceptors, routes[].{ guards, interceptors } }` | `TestApp` boot roots                         |
 | `extensions.messaging.consumers[].token`                                                           | `TestApp` boot roots                         |
+| `extensions.schedule.jobs[].token`                                                                 | `TestApp` boot roots                         |
 
 Runtime contract with `@znight/http`: the plugin named `'http'` exposes
-`inject(request: { method: string; url: string; headers?; body?; query? }): Promise<{ status: number; headers; body: string; bytes?: Uint8Array; json<T>(): T }>`
-(`HttpInjector`, `HttpInjectResult`), dispatching in memory; `TestApp` derives `bytes` from `body`
-when a plugin does not return them.
+`inject(request: { method: string; url: string; headers?; body?; query?; cookies?; signedCookies? }): Promise<{ status: number; headers; body: string; bytes?: Uint8Array; cookies?: Record<string, SetCookieInfo>; json<T>(): T }>`
+(`HttpInjector`, `HttpInjectResult`), dispatching in memory. `TestApp` forwards every request field
+as is (signing `signedCookies` is the plugin's job), returns the plugin's response as is when it has
+`bytes` and `cookies`, and otherwise derives `bytes` from `body` and returns no cookies (`{}`).
 
-Runtime contract with every plugin (`PluginInitRoots`): an optional `initRoots(): readonly ProviderKey[]`
-method returns the providers (classes or tokens) the plugin resolves in `onBootstrap` that the
-metadata does not reference, typically the classes given in its options. `TestApp.create()` calls it
-once, before creating the application, and adds the keys that designate providers of the metadata
-to the providers instantiated at boot (other keys are ignored: the plugin reports them); it rejects
-with a `TypeError` when the result is not an array. `HttpPlugin` returns the classes of its
-`guards`, `interceptors` and `exceptionMappers` options (nothing when the options are a function of
-the container).
+Runtime contract with every plugin: the optional `initRoots(context: { metadata }): readonly ProviderKey[]`
+member of `Plugin` (`@znight/core`; `PluginInitRoots` names a plugin implementing it) returns the
+providers (classes or tokens) the plugin resolves at boot that the metadata does not make entry
+points: the classes given in its options, or providers it derives from its own metadata section
+(`context.metadata`). `TestApp.create()` calls it once, before creating the application, and adds
+the keys that designate providers of the metadata to the providers instantiated at boot (other keys
+are ignored: the plugin reports them); it rejects with a `TypeError` when the result is not an
+array. `HttpPlugin` returns the classes of its `guards`, `interceptors` and `exceptionMappers`
+options (nothing when the options are a function of the container).

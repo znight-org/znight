@@ -115,6 +115,12 @@ export interface ProvidersFile {
   readonly bindings: readonly LibraryBinding[]
   /** Data stored by compiler extensions (`ctx.store()`), by extension name. */
   readonly extensions: Readonly<Record<string, readonly EncodedValue[]>>
+  /**
+   * Tokens of the providers declared as roots by extensions (`AnalyzeContext.addRoot`: scheduled job
+   * hosts), sorted. Optional (absent when there is none, and in fragments of earlier compilers):
+   * the application keeps them under `prune` and does not report them as unused.
+   */
+  readonly roots?: readonly string[]
 }
 
 /** Hooks of {@link encodeValue} for the values that need the project. */

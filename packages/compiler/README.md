@@ -427,11 +427,12 @@ in `0.x` (`0.1.x`), the same major from `1.0`. Otherwise ZNIGHT018 points at the
 `package.json`.
 
 **Unused providers** (`reportUnused`, `prune`). Roots are: providers registered by compiler
-extensions (controllers, consumers, config classes...), providers with an `onStart` / `onReady` /
-`onStop` hook, and providers referenced as a value in your code outside of decorators and types
-(`app.container.get(UserService)`, `overrides` entries — referencing an abstract class or interface
-counts for its aliased provider). Everything reachable from a root is used. `prune` drops the
-others from the generated module.
+extensions (controllers, consumers, config classes...), classes declared as roots by compiler
+extensions (the hosts of scheduled jobs, also in compiled libraries), providers with an `onStart` /
+`onReady` / `onStop` hook, and providers referenced as a value in your code outside of decorators
+and types (`app.container.get(UserService)`, `overrides` entries — referencing an abstract class or
+interface counts for its aliased provider). Everything reachable from a root is used. `prune` drops
+the others from the generated module.
 
 ## Options
 
@@ -597,8 +598,10 @@ Besides its own generated module (handy for the library's tests), this writes
 `dist/znight.providers.json` (`schemaVersion: 1`): every provider with its package identity and
 import route (`{ specifier: '@acme/auth', exportName: 'JwtService' }`), scope, qualifier, primary,
 async/dispose, heritage closure, lifecycle hooks, injection points (types + qualifier + optional),
-interceptor bindings with their options, and the data stored by compiler extensions (references to
-values become package exports). Reference it from the library's `package.json`:
+interceptor bindings with their options, the data stored by compiler extensions (references to
+values become package exports) and, when there are some, the `roots` declared by extensions
+(`addRoot`: a job host of the library survives `prune` in the application). Reference it from the
+library's `package.json`:
 
 ```jsonc
 "znight": { "apiVersion": 1, "providers": "./dist/znight.providers.json" }
@@ -660,18 +663,21 @@ export default {
 } satisfies CompilerExtension<Route>
 ```
 
-| API                                                            | Purpose                                                                                                                                                               |
-| -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `decorators: Record<identity, { targets, params, rest? }>`     | owned decorators; targets and arguments are validated, arguments evaluated (`static` / `value`)                                                                       |
-| `analyzeClass(cls, ctx)`                                       | called for every class carrying one of the extension's decorators, in identity order                                                                                  |
-| `ClassInfo`                                                    | identity, import route, decorators (`ArgInfo { value, ref, location, text }`), constructor (inherited, substituted), methods, properties, heritage closure, lifecycle |
-| `ctx.registerProvider(cls, { scope, name, primary, factory })` | registers a provider; `factory` = custom factory with injected `deps` and a `generate` callback                                                                       |
-| `ctx.resolveClassRef(arg, { from, role })`                     | binds a class reference to a token (auto-registers helper classes)                                                                                                    |
-| `ctx.bindInjection(request, { from })`                         | binds a type with the resolution rules; read the result with `binding(handle)`                                                                                        |
-| `ctx.addDependency(from, to)`                                  | runtime dependency resolved by the plugin (ZNIGHT003, ZNIGHT019)                                                                                                      |
-| `ctx.report(diagnostic)`, `ctx.store(data)`                    | diagnostics; data for `validate` / `generate`                                                                                                                         |
-| `validate(ctx)`                                                | after binding: the full `ApplicationGraph`                                                                                                                            |
-| `generate(ctx)`                                                | returns a `GenNode`: the extension's `metadata.extensions[name]`                                                                                                      |
+| API                                                            | Purpose                                                                                                                                                                                                                      |
+| -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `decorators: Record<identity, { targets, params, rest? }>`     | owned decorators; targets and arguments are validated, arguments evaluated (`static` / `value`)                                                                                                                              |
+| `analyzeClass(cls, ctx)`                                       | called for every class carrying one of the extension's decorators, in identity order                                                                                                                                         |
+| `ClassInfo`                                                    | identity, import route, decorators (`ArgInfo { value, ref, location, text }`, `typeArgs`), constructor (inherited, substituted), methods, properties, heritage closure, lifecycle, JSDoc ([member details](#member-details)) |
+| `ctx.registerProvider(cls, { scope, name, primary, factory })` | registers a provider; `factory` = custom factory with injected `deps` and a `generate` callback                                                                                                                              |
+| `ctx.resolveClassRef(arg, { from, role })`                     | binds a class reference to a token (auto-registers helper classes)                                                                                                                                                           |
+| `ctx.bindInjection(request, { from })`                         | binds a type with the resolution rules; read the result with `binding(handle)`                                                                                                                                               |
+| `ctx.addDependency(from, to)`                                  | runtime dependency resolved by the plugin (ZNIGHT003, ZNIGHT019)                                                                                                                                                             |
+| `ctx.addRoot(cls, { reason?, location? })`                     | `cls` is an entry point of the plugin (a job host): a root of ZNIGHT019 and `prune`, auto-registered as a singleton when nothing registers it ([roots](#roots))                                                              |
+| `ctx.definitionsOf(callee)`                                    | top-level `const`s initialised with a call to `callee`, applied or not ([definitions](#definitions)); also in `validate`                                                                                                     |
+| `ctx.types`                                                    | `format`, `serialize`, `equals`, `stripNullish`, `awaited` on `TypeInfo`, and `shape(target, options)` ([type shapes](#type-shapes)); in every context                                                                       |
+| `ctx.report(diagnostic)`, `ctx.store(data)`                    | diagnostics; data for `validate` / `generate`                                                                                                                                                                                |
+| `validate(ctx)`                                                | after binding: the full `ApplicationGraph`                                                                                                                                                                                   |
+| `generate(ctx)`                                                | returns a `GenNode`: the extension's `metadata.extensions[name]`                                                                                                                                                             |
 
 Code is generated with **nodes, never strings**, so an extension cannot break the module syntax:
 
@@ -691,6 +697,129 @@ An extension that throws, returns a forged object instead of a node, or produces
 through `code` is reported as ZNIGHT018 naming it; an import that cannot be routed (not exported,
 type used as a value, package not installed) is ZNIGHT005 naming it.
 
+All the additions below belong to extension `apiVersion: 1` (lockstep releases guarantee a matching
+compiler, ZNIGHT018 otherwise).
+
+### Member details
+
+- **JSDoc**: `ClassInfo.doc`, `MethodInfo.doc`, `PropertyInfo.doc` and `ParameterInfo.doc`
+  (parameter properties) are the nearest `/** ... */` comment before the declaration (only
+  whitespace, other comments, decorators and `export` / `default` / `declare` / `const` in
+  between), or `undefined`: `DocComment { text, summary, description, tags, location }`. `text` is
+  everything before the first block tag; `summary` its first paragraph (a wrapped sentence is
+  joined into one line); `description` the rest; `tags` the block tags in order,
+  `{ name, text, location }` (`@param search Text` → `{ name: 'param', text: 'search Text' }`;
+  continuation lines keep their line breaks and indentation, so `@example` code survives, also with
+  `@` lines inside a fenced block).
+- **Decorator type arguments**: `DecoratorInfo.typeArgs` resolves the type arguments of the call
+  (`@ApiResponse<Book[]>(200)` → `[Book[]]`). They are erased at runtime, but the compiler reads
+  them, and `{ decorator, typeArgument }` is a [shape target](#type-shapes).
+- **Parameter default values**: `ParameterInfo.initializer` is the default value (`limit = 20`)
+  evaluated as a `value` argument (`evaluated` + `value`, `ref` for an exported binding, `error`
+  for `= new Date()`; nothing is reported), `undefined` without default.
+
+```ts
+validate(ctx) {
+  const method = ctx.classInfo(token)?.methods.find(m => m.name === 'list')
+  method?.doc?.summary // 'List books'
+  method?.doc?.tags.filter(tag => tag.name === 'param') // [{ name: 'param', text: 'search Case-insensitive search.' }]
+  method?.params[1]?.initializer?.value // 20
+}
+```
+
+### Type shapes
+
+`ctx.types.shape(target, options?)` gives the structure of a type annotation, what a value of that
+type looks like once serialised as JSON, for schema generators (`@znight/openapi`). It works on the
+declarations, from sources and from `.d.ts` files alike (the same library gives identical shapes),
+so it keeps what `TypeInfo` loses: object literal types, and the names of aliases.
+
+| Target                                       | Annotation                                                               |
+| -------------------------------------------- | ------------------------------------------------------------------------ |
+| `{ returnOf: MethodInfo }`                   | the return type, a top-level `Promise<T>` unwrapped                      |
+| `{ parameter: ParameterInfo }`               | a method or constructor parameter (inherited constructors substituted)   |
+| `{ property: PropertyInfo }`                 | a class field                                                            |
+| `{ decorator: DecoratorInfo, typeArgument }` | a type argument of a decorator call                                      |
+| `{ type: TypeInfo }`                         | an already resolved type (aliases expanded, object literal types opaque) |
+
+`ShapeResult` is `{ root, named, issues }`. A `Shape` is one of:
+
+| TypeScript                                                                                                                                         | Shape                                                                                                                                                                 |
+| -------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `string`, `number`, `boolean`, `null`; `undefined` / `void`; `unknown` / `any`; `never`                                                            | `{ kind: 'string' }`... `'undefined'`, `'unknown'`, `'never'`                                                                                                         |
+| literal types, template literals without substitution                                                                                              | `{ kind: 'literal', value }` (other template literals: `string`)                                                                                                      |
+| `Date`, `URL`                                                                                                                                      | `'date'`, `'url'` (their `toJSON()`)                                                                                                                                  |
+| typed arrays, `ArrayBuffer`, `DataView`, `Buffer`, `Blob`, `File`, `ReadableStream`, `Readable`                                                    | `'binary'`                                                                                                                                                            |
+| `bigint`                                                                                                                                           | `'bigint'`, and an issue (`JSON.stringify` throws)                                                                                                                    |
+| `T[]`, `readonly T[]`, `Array<T>`, `ReadonlyArray<T>`; tuples `[A, B?, ...C[]]`                                                                    | `array { items }`; `tuple { items, rest?, minItems }`                                                                                                                 |
+| object literal types, interfaces (`extends` flattened, merged declarations), index signatures, `Record<K, V>`                                      | `object { properties, additional? }`; a property is `{ name, shape, optional, readonly, doc, location }`                                                              |
+| classes                                                                                                                                            | the instance fields and parameter properties, inherited ones first (no methods, accessors, static, `#private` or `private` members); a `toJSON(): X` method gives `X` |
+| unions, intersections                                                                                                                              | normalised like `TypeInfo`; objects intersected are merged, `string & { __brand }` is `string`                                                                        |
+| `Partial`, `Required`, `Readonly`, `Pick`, `Omit`, `NonNullable`, `Exclude`, `Extract`, `Awaited`, `keyof`, `T[K]`, mapped types over literal keys | applied structurally (homomorphic mapped types keep the property order and modifiers)                                                                                 |
+| interfaces, classes, type aliases, enums                                                                                                           | `{ kind: 'named', key }`: the structure is in `named.get(key)` (`NamedShape`), recursion goes through it                                                              |
+| a schema alias (`z.output<typeof S>`), or an alias of one                                                                                          | `{ kind: 'schema', ref, io }` (with `options.schemaAliases`)                                                                                                          |
+| a type in `options.keep`                                                                                                                           | `{ kind: 'reference', identity, name, typeArgs, explicitTypeArgs }`, not expanded                                                                                     |
+| functions, symbols, unbound type parameters, conditional types, `Map`, `Set`, `RegExp`, `Error`, nested `Promise`...                               | `{ kind: 'opaque', text, reason }`, and an issue                                                                                                                      |
+- **Named shapes.** `NamedShape { key, identity, name, declaration, typeArgs, shape, doc, location }`.
+  The key is the identity followed by the serialized type arguments, default ones filled in
+  (`src/page.ts#Page<src/book.ts#Book>`). `result.named` holds every named shape the root
+  references, transitively (structures and type arguments), sorted by key; a declaration only used
+  structurally (`Partial<Book>`, `extends`) is not listed, its properties are copied. Enums are the
+  union of their member values, in declaration order. An alias
+  whose structure is a schema or a kept reference is transparent (`type CreateBook = z.output<typeof
+  CreateBook>` is the schema itself).
+- **Issues.** `{ reason, path, named, text, location }` for every `opaque` part and every `bigint`
+  the shapes of the result contain (a `typeof S` consumed by a schema alias is not one), where
+  `path` is readable (`ShelfStats.total`, `items[]`, `[0]`, `[string]`) and `named` is the key of
+  the named shape whose declaration contains it. The extension decides what they mean (a warning,
+  an error).
+- **Options.** `schemaAliases` (identity → `'input' | 'output'`: `{ 'zod#output': 'output',
+  'zod#infer': 'output', 'zod#input': 'input', 'valibot#InferOutput': 'output', 'valibot#InferInput':
+  'input' }` — the identities of the installed libraries), `schemaMembers` (`{ infer: 'output',
+  inferIn: 'input' }` for ArkType's `typeof S.infer`), `keep` (identities kept as references, such
+  as `'@znight/http#HttpResponse'` or `'globalThis#AsyncIterable'`) and `jsdoc` (default `true`).
+- **Cost.** Named shapes are computed once per compile and per options (the same `NamedShape` and
+  issue objects are returned to every caller); roots are cheap. The files read are part of
+  `watchFiles`, so editing an interface of another file recompiles.
+
+```ts
+validate(ctx) {
+  const { root, named, issues } = ctx.types.shape(
+    { returnOf: method },
+    { schemaAliases: { 'zod#output': 'output' }, keep: ['@znight/http#HttpResponse'] },
+  )
+  // root: { kind: 'named', key: 'src/books/book.ts#Page<src/books/book.ts#Book>' }
+  for (const issue of issues) if (issue.reason === 'bigint') ctx.report({ ... })
+}
+```
+
+### Roots
+
+`ctx.addRoot(cls, { reason?, location? })` declares a class used by the extension's plugin at
+runtime, such as the host of a `@Cron` job, whose class is otherwise injected nowhere. Its provider is
+a root of ZNIGHT019 and `prune`. When no provider decorator (core or extension) registers the class
+by the end of the analysis, it is registered as a singleton with constructor injection
+(`registeredBy: 'auto'`, like guards), so `@Injectable({ scope })` stays the way to choose another
+scope. Registration problems (abstract class, not exported) are reported at `location` (default:
+the extension's first decorator on the class), named after `reason`. The roots are listed in
+`ApplicationGraph.roots` (`{ token, origin, reason, location }`, sorted) and recorded in compiled
+libraries.
+
+### Definitions
+
+`ctx.definitionsOf(callee)` lists the top-level `const` declarations of the scanned files
+(application and source libraries) initialised with a call to the function `callee`, given by
+canonical identity, whether they are applied or not:
+
+```ts
+const groups = ctx.definitionsOf('@znight/http#createRouteDecorator')
+// [{ identity: 'src/auth/access.ts#Public', name, displayName, file, location, call,
+//    args: [ArgInfo('public'), ArgInfo({ group: 'access', required: true })], typeArgs, doc, exported }]
+```
+
+Arguments are evaluated as `value` arguments (spreads of evaluable arrays expanded) without
+reporting anything. The list is sorted by identity and computed once per compile and callee.
+
 ## Compiler contract
 
 The generated module calls **no helper of `@znight/compiler`**: it imports `@znight/core` (types),
@@ -698,8 +827,9 @@ the application's providers and the helpers exported by feature packages. The st
 this package are:
 
 - the **compiler extension API**, version `EXTENSION_API_VERSION = 1` (`CompilerExtension`,
-  `DecoratorSpec`, `ClassInfo`, `ArgInfo`, `AnalyzeContext`, `ValidateContext`, `GenerateContext`,
-  `GenNode`), exported as types from the root entry;
+  `DecoratorSpec`, `ClassInfo`, `ArgInfo`, `DocComment`, `AnalyzeContext`, `ValidateContext`,
+  `GenerateContext`, `GenNode`, `TypeHelpers` with `Shape` / `ShapeResult`, `DefinitionInfo`,
+  `RootNode`), exported as types from the root entry; it only grows within a version;
 - the **package manifest** (`package.json#znight`, `apiVersion: 1`);
 - the **generated module** (`__ZNIGHT_METADATA__: ZnightMetadata`, metadata `version: 1`, spec §3);
 - the **compiled providers file** (`znight.providers.json`, `PROVIDERS_SCHEMA_VERSION = 1`);

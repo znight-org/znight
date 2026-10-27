@@ -46,6 +46,7 @@ export {
   type InjectRequest,
   type InjectResponse,
   type PluginInitRoots,
+  type SetCookieInfo,
   TestApp,
   type TestAppOptions,
 } from './test-app.ts'

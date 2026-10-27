@@ -16,8 +16,20 @@ export interface AdapterRequest {
   readonly url: string
   /** Request headers with lower-case names (repeated headers joined with `, `). */
   readonly headers: Readonly<Record<string, string | undefined>>
-  /** Remote address, when known. */
+  /**
+   * Client address, when known: the socket peer, or the address the server framework derives from
+   * its own proxy settings (Fastify `trustProxy`, Express `trust proxy`). This is `ctx.ip` unless
+   * the plugin option `trustProxy` is set.
+   */
   readonly ip: string | undefined
+  /**
+   * Address of the socket peer, **never** taken from headers: where the plugin starts walking
+   * `x-forwarded-for` with `trustProxy`. Optional (`ip` is used without it); the built-in adapters
+   * set it.
+   */
+  readonly remoteAddress?: string | undefined
+  /** `true` when the connection uses TLS (`ctx.protocol` without a trusted proxy). Optional. */
+  readonly encrypted?: boolean
   /** Native request object (`@Req()`). */
   readonly raw: unknown
   /** Native response object (`@Res()`). */

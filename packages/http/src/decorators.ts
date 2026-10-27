@@ -295,14 +295,63 @@ export function Validate(_schema: StandardSchemaV1): MethodMarker {
 /** Arguments of a route decorator: optional when `T` accepts `undefined` or is `true` (flag decorators). */
 export type RouteDecoratorArgs<T> = [T] extends [true] ? [value?: T] : undefined extends T ? [value?: T] : [value: T]
 
-/** A user-defined route metadata decorator created with {@link createRouteDecorator}. */
-export interface RouteDecorator<T> {
-  (...args: RouteDecoratorArgs<T>): ClassMarker & MethodMarker
+/** Options of {@link createRouteDecorator} (static). */
+export interface RouteDecoratorOptions {
+  /**
+   * Decision group. Decorators of a group are alternatives: one per controller or route, and the
+   * route's decision replaces the controller's. Default: the key (the decorator is its own group).
+   * A letter followed by letters, digits, `_`, `.` or `-`.
+   */
+  readonly group?: string
+  /**
+   * Every route must carry a decision of the group: ZNIGHT023 at build time when a route has none,
+   * and at boot when no guard of its chain enforces it (see {@link GuardClass}). All the decorators
+   * of a group must agree. Default `false`.
+   */
+  readonly required?: boolean
+}
+
+/** The data part of a route decorator: what guards list in `static enforces`. */
+export interface RouteDecoratorInfo {
   /** Key of the value in `route.meta`. */
   readonly key: string
-  /** The value of the current route (route metadata wins over controller metadata), if set. */
-  get(ctx: HttpContext): T | undefined
+  /** Decision group (`options.group ?? key`). */
+  readonly group: string
+  /** Every route must carry a decision of the group. */
+  readonly required: boolean
 }
+
+/**
+ * A route metadata entry given as data rather than as a decorator: the `meta` of plugin routes
+ * (`[Public.meta()]`). Built by {@link RouteDecorator.meta}.
+ */
+export interface RouteMetaEntry<T = unknown> {
+  readonly key: string
+  readonly value: T
+  /** Decision group. Default: the key. */
+  readonly group?: string
+  /** Default `false`. */
+  readonly required?: boolean
+}
+
+/** A user-defined route metadata decorator created with {@link createRouteDecorator}. */
+export interface RouteDecorator<T> extends RouteDecoratorInfo {
+  (...args: RouteDecoratorArgs<T>): ClassMarker & MethodMarker
+  /**
+   * The value of the current route, if set. Reads the effective metadata: the route's decision of
+   * a group wins over the controller's.
+   */
+  get(ctx: HttpContext): T | undefined
+  /**
+   * The same metadata as data (`{ key, value, group, required }`), for routes that are not compiled
+   * controllers (plugin routes: `OpenApiPlugin.configure({ meta: [Public.meta()] })`). The value is
+   * `true` when omitted, like `@Public()`.
+   */
+  meta(...args: RouteDecoratorArgs<T>): RouteMetaEntry<T>
+}
+
+/** Grammar of a decision group name (internal; the compiler extension has the same rule). */
+export const GROUP_NAME: RegExp = /^[A-Za-z][\w.-]*$/
 
 /**
  * Creates a metadata decorator for controllers and routes. The compiler stores its argument
@@ -310,24 +359,55 @@ export interface RouteDecorator<T> {
  * `meta[key]`, read by guards and interceptors through `ctx.route.meta` or `decorator.get(ctx)`.
  *
  * ```ts
- * export const Roles = createRouteDecorator<readonly string[]>('roles')
- * export const Public = createRouteDecorator('public') // flag: @Public()
+ * export const Public = createRouteDecorator('public', { group: 'access', required: true })
+ * export const Authenticated = createRouteDecorator('authenticated', { group: 'access', required: true })
+ * export const Roles = createRouteDecorator<readonly string[]>('roles', { group: 'access', required: true })
  *
- * @Roles(['admin'])
- * @Delete('/:id')
- * remove(@Param('id') id: string) {}
+ * @Controller('/books')
+ * @Roles(['reader']) // the decision of every route of the controller...
+ * export class BookController {
+ *   @Get('/:id/cover')
+ *   @Public() // ...unless the route has its own decision of the group
+ *   cover() {}
+ * }
  *
  * // in a guard
  * if (Public.get(ctx)) return true
  * const roles = Roles.get(ctx) ?? []
  * ```
  *
+ * Decorators of one `group` are alternatives: two of them on the same class or method are
+ * ZNIGHT005, and the route's decision replaces the controller's (without `group`, each decorator is
+ * its own group: the route value wins over the controller value). With `required: true`, a route
+ * without decision fails the build (ZNIGHT023).
+ *
  * @param key static: unique metadata key.
+ * @param options static: `{ group?, required? }`.
  */
-export function createRouteDecorator<T = true>(key: string): RouteDecorator<T> {
+export function createRouteDecorator<T = true>(key: string, options?: RouteDecoratorOptions): RouteDecorator<T> {
+  if (typeof key !== 'string' || key === '') {
+    throw new TypeError(`createRouteDecorator(): the key must be a non-empty string (received ${String(key)})`)
+  }
+  if (options !== undefined && (options === null || typeof options !== 'object')) {
+    throw new TypeError(`createRouteDecorator('${key}'): options must be an object { group?, required? }`)
+  }
+  const group = options?.group ?? key
+  if (typeof group !== 'string' || !GROUP_NAME.test(group)) {
+    throw new TypeError(
+      `createRouteDecorator('${key}'): "group" must be a name made of letters, digits, _ . - starting with a letter (received ${String(group)})`,
+    )
+  }
+  const required = options?.required ?? false
+  if (typeof required !== 'boolean') {
+    throw new TypeError(`createRouteDecorator('${key}'): "required" must be a boolean (received ${String(required)})`)
+  }
   const decorator = (..._args: RouteDecoratorArgs<T>): ClassMarker & MethodMarker => classOrMethodMarker
   return Object.assign(decorator, {
     key,
+    group,
+    required,
     get: (ctx: HttpContext): T | undefined => ctx.route?.meta[key] as T | undefined,
+    meta: (...args: RouteDecoratorArgs<T>): RouteMetaEntry<T> =>
+      Object.freeze({ key, value: (args.length === 0 ? true : args[0]) as T, group, required }),
   })
 }

@@ -21,6 +21,7 @@
  * compiler bug reported with the name of the extension that produced the faulty section.
  */
 import type { DependencyRef } from '@znight/core'
+import type { TypeHelpers } from '../extensions/api.ts'
 import type { LoadedExtension } from '../extensions/loader.ts'
 import type { ApplicationGraph, InterceptedMethodNode, ProviderNode } from '../graph/types.ts'
 import type { Diagnostic, Project } from '../project/index.ts'
@@ -30,6 +31,7 @@ import type { Owner } from './module.ts'
 import { ErrorCode, METADATA_VERSION } from '@znight/core'
 import { parseSync } from 'oxc-parser'
 
+import { createTypeHelpers } from '../extensions/contexts.ts'
 import { createGenBuilders } from '../extensions/generate.ts'
 import { DiagnosticBag, relativePath } from '../project/index.ts'
 import { ExtensionGenerateContext, GraphIndex, importNode } from './context.ts'
@@ -71,6 +73,8 @@ export interface ContainerInput {
   readonly mode: CompileMode
   /** `@znight/compiler` version written in the header and `metadata.compiler`. */
   readonly version: string
+  /** Type helpers of the analysis (`AnalysisResult.types`); default: new helpers for `project`. */
+  readonly types?: TypeHelpers
 }
 
 /** Output of {@link generateContainer}. */
@@ -90,6 +94,7 @@ export function generateContainer(input: ContainerInput): ContainerOutput {
   module.names.reserve('d')
   const index = new GraphIndex(graph)
   const stored = new Map(graph.extensions.map(entry => [entry.name, entry.stored]))
+  const types = input.types ?? createTypeHelpers(project)
 
   // One context per extension, shared by its custom factories and its section (constants dedupe).
   let currentOwner: Owner = CORE_OWNER
@@ -104,6 +109,7 @@ export function generateContainer(input: ContainerInput): ContainerOutput {
         stored: stored.get(extension) ?? [],
         owner: () => currentOwner,
         report,
+        types,
       })
       contexts.set(extension, context)
     }

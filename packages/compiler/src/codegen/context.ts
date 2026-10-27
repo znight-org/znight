@@ -10,7 +10,6 @@ import type { ResolvedOptions } from '../options.ts'
 import type { Diagnostic } from '../project/index.ts'
 import type { ModuleBuilder, Owner } from './module.ts'
 
-import { TYPE_HELPERS } from '../extensions/contexts.ts'
 import { createGenBuilders, freeze, isBuiltNode } from '../extensions/generate.ts'
 import { isBareSpecifier, ValueRef } from '../project/index.ts'
 import { isSafeIdentifier } from './syntax.ts'
@@ -46,7 +45,7 @@ export class GraphIndex {
 export class ExtensionGenerateContext implements GenerateContext<unknown> {
   readonly extension: string
   readonly options: ResolvedOptions
-  readonly types: TypeHelpers = TYPE_HELPERS
+  readonly types: TypeHelpers
   readonly graph: ApplicationGraph
   readonly stored: readonly unknown[]
   readonly lit: GenBuilders['lit']
@@ -71,6 +70,8 @@ export class ExtensionGenerateContext implements GenerateContext<unknown> {
     /** Owner of the nodes built through this context (changes between factories and the section). */
     readonly owner: () => Owner
     readonly report: (diagnostic: Diagnostic) => void
+    /** Type helpers of the analysis (shapes computed during validation are reused). */
+    readonly types: TypeHelpers
   }) {
     const builders = createGenBuilders()
     this.lit = builders.lit
@@ -83,6 +84,7 @@ export class ExtensionGenerateContext implements GenerateContext<unknown> {
     this.arrow = builders.arrow
     this.code = builders.code
     this.extension = input.extension
+    this.types = input.types
     this.options = input.module.project.options
     this.graph = input.index.graph
     this.stored = input.stored

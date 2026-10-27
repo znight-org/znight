@@ -98,3 +98,12 @@ export function readMessagingRoots(metadata: ZnightMetadata): Token[] {
   }
   return roots
 }
+
+/** Hosts of scheduled jobs (`extensions.schedule.jobs[].token`), disabled jobs included (they can be triggered). */
+export function readScheduleRoots(metadata: ZnightMetadata): Token[] {
+  const roots: Token[] = []
+  for (const job of arrayOf(extension(metadata, 'schedule')?.['jobs'])) {
+    if (isRecord(job) && typeof job['token'] === 'string') roots.push(job['token'])
+  }
+  return roots
+}
