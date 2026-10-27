@@ -1,0 +1,42 @@
+{
+  "name": "@znight-examples/storefront-api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "znight generate",
+    "dev": "znight dev",
+    "build": "znight build",
+    "start": "znight start",
+    "typecheck": "znight generate && tsc --noEmit",
+    "test": "bun test --conditions=@znight/source",
+    "test:e2e": "ZNIGHT_E2E=1 bun test --conditions=@znight/source --timeout 300000 test/e2e.test.ts",
+    "openapi": "znight openapi",
+    "openapi:check": "znight openapi --check",
+    "client:generate": "openapi-typescript openapi.json -o src/client/schema.d.ts"
+  },
+  "dependencies": {
+    "@znight/core": "workspace:*",
+    "@znight/http": "workspace:*",
+    "@znight/openapi": "workspace:*",
+    "@znight/config": "workspace:*",
+    "@znight/observability": "workspace:*",
+    "hono": "4.13.14",
+    "@hono/node-server": "2.1.5",
+    "zod": "catalog:",
+    "valibot": "1.5.0",
+    "@valibot/to-json-schema": "1.8.0"
+  },
+  "devDependencies": {
+    "@znight/compiler": "workspace:*",
+    "@znight/cli": "workspace:*",
+    "@znight/testing": "workspace:*",
+    "vite": "catalog:",
+    "typescript": "catalog:",
+    "@types/bun": "catalog:",
+    "@types/node": "catalog:",
+    "openapi-typescript": "7.13.0",
+    "openapi-fetch": "0.17.0",
+    "@seriousme/openapi-schema-validator": "2.11.0"
+  }
+}
