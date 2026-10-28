@@ -81,7 +81,9 @@ download.bytes // Uint8Array: the raw body
   `cookie` header, `signedCookies` are signed by the plugin first; `response.cookies` holds the
   parsed `set-cookie` headers by name (`{}` without any).
 - `injectSse(request)` opens an event stream (`@Sse` routes, `HttpResponse.sse()`) in memory and
-  reads it like `EventSource`: `status`, `headers` and `cookies` once it opened, then `next()`,
+  reads it like `EventSource`: `status`, `headers` and `cookies` once it opened (at its first
+  chunk, or after 2 000 ms for a stream that sends nothing yet; it rejects, naming the request,
+  when no response headers arrive within 2 000 ms), then `next()`,
   `take(n)` or `for await` for the events (each with `event`, `data`, `id` and `json()`),
   `reconnect()` with `last-event-id`, and `close()` (or `await using`) to disconnect.
   `injectStream(request)` resolves at the response headers with the body as a `ReadableStream`;
@@ -95,8 +97,9 @@ hub.publish({ orderId: 'o-1', sequence: 42, type: 'status', status: 'paid' })
 expect(await stream.next()).toMatchObject({ event: 'status', id: '42' })
 ```
 
-A plugin named `'http'` that does not implement `injectSse()` / `injectStream()` (an older
-`@znight/http`) fails with [`ZNIGHT001`](/reference/error-codes#znight001).
+A plugin named `'http'` that does not implement `injectSse()` / `injectStream()` (another plugin
+than `HttpPlugin` registered under that name) fails with
+[`ZNIGHT001`](/reference/error-codes#znight001).
 
 ## Keeping metadata fresh
 

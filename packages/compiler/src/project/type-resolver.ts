@@ -3,17 +3,20 @@
  *
  * Type references are resolved through imports, barrels, namespaces and packages to canonical
  * identities; type aliases are expanded with their type arguments substituted; default type
- * arguments are filled from the declaration. Aliases supplied at runtime (manifest `provides`,
+ * arguments are filled from the declaration. An enum member type (`Kind.Cat`, `ns.Kind.Cat`) is the
+ * literal of the member, as in the shapes API. Aliases supplied at runtime (manifest `provides`,
  * `options.externals`: `RequestId = string & {...}`) are expanded too, unless
  * {@link ResolveTypeOptions.externalAliases} keeps them as references (injection points).
  */
 import type {
   Class,
+  Expression,
   TSInterfaceDeclaration,
   TSTupleElement,
   TSType,
   TSTypeAliasDeclaration,
   TSTypeAnnotation,
+  TSTypeName,
   TSTypeParameter,
   TSTypeParameterDeclaration,
 } from 'oxc-parser'
@@ -24,6 +27,7 @@ import type { Span } from './location.ts'
 import type { ScopeRef, SymbolResolution, SymbolResolver } from './symbols.ts'
 import type { OpaqueReason, TupleElement, TypeInfo } from './types.ts'
 
+import { Evaluator } from './evaluator.ts'
 import { GLOBAL_IDENTITY_PREFIX } from './identity.ts'
 import { declarationKey } from './symbols.ts'
 import {
@@ -121,11 +125,19 @@ export class TypeResolver {
   readonly #host: ProjectHost
   readonly #symbols: SymbolResolver
   readonly #identities: IdentityResolver
+  readonly #evaluator: Evaluator
 
-  constructor(host: ProjectHost, symbols: SymbolResolver, identities: IdentityResolver) {
+  /** @param evaluator evaluates enum members (`Kind.Cat`); the compile's evaluator shares its memo */
+  constructor(
+    host: ProjectHost,
+    symbols: SymbolResolver,
+    identities: IdentityResolver,
+    evaluator: Evaluator = new Evaluator(host, symbols, identities),
+  ) {
     this.#host = host
     this.#symbols = symbols
     this.#identities = identities
+    this.#evaluator = evaluator
   }
 
   /**
@@ -313,6 +325,12 @@ export class TypeResolver {
           return this.#opaque(node, context, 'this')
         }
         const symbol = this.#symbols.resolveEntity(context.scope, name, 'type')
+        if (symbol.kind === 'unresolved' && name.type === 'TSQualifiedName') {
+          const member = this.#enumMember(name, context)
+          if (member) {
+            return member
+          }
+        }
         return this.#fromSymbol(symbol, node.typeArguments?.params ?? [], context.scope.file.textOf(node), context)
       }
       case 'TSThisType':
@@ -342,6 +360,37 @@ export class TypeResolver {
       default:
         return this.#opaque(node, context, 'unsupported')
     }
+  }
+
+  /**
+   * `Kind.Cat` (an enum member type; `ns.Kind.Cat` and enums declared in a namespace included): the
+   * literal value of the member, `undefined` when the left side is not an enum declaring it, or
+   * when the enum cannot be evaluated (the reference stays opaque `unresolved`).
+   */
+  #enumMember(name: Extract<TSTypeName, { type: 'TSQualifiedName' }>, context: Context): TypeInfo | undefined {
+    const owner = this.#symbols.resolveEntity(context.scope, name.left, 'any')
+    const declaration =
+      owner.kind === 'declaration' ? owner.declarations.find(candidate => candidate.kind === 'enum') : undefined
+    const file = declaration ? this.#host.getFile(declaration.file) : undefined
+    if (!declaration || !file) {
+      return undefined
+    }
+    // the enum object, evaluated in its own scope (memoized by the compile's evaluator)
+    const reference = {
+      type: 'Identifier',
+      name: declaration.localName,
+      start: declaration.span.start,
+      end: declaration.span.end,
+    } as unknown as Expression
+    const evaluation = this.#evaluator.evaluate({ file, namespace: declaration.namespace }, reference, {
+      refs: 'none',
+    })
+    if (evaluation.kind !== 'value' || typeof evaluation.value !== 'object' || evaluation.value === null) {
+      return undefined
+    }
+    const members = evaluation.value as Readonly<Record<string, unknown>>
+    const value = Object.hasOwn(members, name.right.name) ? members[name.right.name] : undefined
+    return typeof value === 'string' || typeof value === 'number' ? literalType(value) : undefined
   }
 
   #literal(node: Extract<TSType, { type: 'TSLiteralType' }>, context: Context): TypeInfo {

@@ -450,27 +450,54 @@ export class OpenApiPlugin implements Plugin, PluginHttpRoutes {
     this.#checkPrefix(declared ?? [], prefix)
   }
 
-  /** The servers of a prebuilt file against the HTTP prefix (the file may be emitted without `--prefix`). */
+  /**
+   * The servers of a prebuilt file against the HTTP prefix (the file may be emitted without the
+   * prefix, or with servers of another deployment): ZNIGHT030 when it declares no servers, when a
+   * relative server does not end with the prefix, or when no server ends with it (`servers: []`,
+   * absolute servers of another path). Runtime `servers` replace the file's and skip this check.
+   */
   #checkFileServers(file: string, servers: readonly ServerObject[] | undefined, prefix: string): void {
     if (prefix === '' || prefix === '/') return
     if (servers === undefined) {
       this.#logger?.warn(
         `ZNIGHT030: ${file} declares no servers, but the HTTP prefix is "${prefix}": it is served with the server "${prefix}", and clients generated from the file would call the wrong paths`,
-        { hints: [`Emit it with the prefix: znight openapi --prefix ${prefix}`] },
+        {
+          hints: [
+            `Emit it with the prefix: znight openapi --prefix ${prefix}, znight build --openapi --openapi-prefix ${prefix}, or openapi({ prefix: '${prefix}' }) in vite.config`,
+          ],
+        },
       )
       return
     }
-    this.#checkPrefix(servers, prefix)
+    // a hand-edited file may hold anything: only well-formed servers count
+    const declared = Array.isArray(servers) ? servers.filter(server => typeof server?.url === 'string') : []
+    // a relative server not ending with the prefix is reported on its own
+    if (this.#checkPrefix(declared, prefix) > 0) return
+    if (declared.some(server => reflectsPrefix(server.url, prefix))) return
+    const listed = declared.length === 0 ? '[]' : declared.map(server => `"${server.url}"`).join(', ')
+    this.#logger?.warn(
+      `ZNIGHT030: ${file} declares no server ending with the HTTP prefix "${prefix}" (servers: ${listed}): clients generated from the file would call the wrong paths`,
+      {
+        hints: [
+          `Declare a server ending with "${prefix}" (@OpenApiDocument({ servers: [{ url: '${prefix}' }] })) and emit the file again`,
+          'Behind a gateway that rewrites the paths, replace the servers at runtime: OpenApiPlugin.configure({ servers })',
+        ],
+      },
+    )
   }
 
-  #checkPrefix(servers: readonly ServerObject[], prefix: string): void {
+  /** Warns about each relative server that does not end with the HTTP prefix; returns how many. */
+  #checkPrefix(servers: readonly ServerObject[], prefix: string): number {
+    let mismatched = 0
     for (const server of servers) {
       if (server.url.startsWith('/') && !server.url.replace(/\/$/, '').endsWith(prefix)) {
+        mismatched++
         this.#logger?.warn(
           `ZNIGHT030: the OpenAPI server "${server.url}" does not end with the HTTP prefix "${prefix}": generated clients would call the wrong paths`,
         )
       }
     }
+    return mismatched
   }
 
   #resolve(): Resolved {
@@ -748,6 +775,27 @@ export function resolvePluginOptions(options: OpenApiPluginOptions): Resolved {
     guards,
     cacheControl,
   }
+}
+
+/**
+ * Whether a server URL ends with the HTTP prefix: a relative URL (`/api`, `/v2/api/`), or the path
+ * of an absolute one (`https://api.example.com/api`). A URL with variables (`{basePath}`) or that
+ * cannot be parsed is not judged.
+ */
+function reflectsPrefix(url: string, prefix: string): boolean {
+  if (url.includes('{')) return true
+  let path = url
+  if (/^[a-z][a-z\d+.-]*:/i.test(url)) {
+    try {
+      path = new URL(url).pathname
+    } catch {
+      return true
+    }
+  }
+  return path
+    .replace(/[?#].*$/, '')
+    .replace(/\/+$/, '')
+    .endsWith(prefix.replace(/\/+$/, ''))
 }
 
 function isJson(value: unknown): boolean {

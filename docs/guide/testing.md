@@ -359,6 +359,12 @@ test('the digest is sent at 08:00 in Paris', async () => {
 })
 ```
 
+Advancing waits for the runs it started, real I/O included (a database, `fetch`, the file system). A
+run that makes no progress for `settleTimeoutMs` of real time (1 000 ms by default:
+`createTestClock(start, { settleTimeoutMs })`) is not waited for again during that call: it waits
+for a later timer, such as its `maxDuration`, or for the test. Lower it in tests that keep runs
+pending on purpose.
+
 Tests that do not exercise the schedule pass `SchedulePlugin.configure({ enabled: false })` and can
 still run a job on demand with `app.get(SchedulerRegistry).trigger(name)`. See
 [@znight/schedule](/packages/schedule#observability-and-testing).

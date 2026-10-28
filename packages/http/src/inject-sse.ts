@@ -1,7 +1,10 @@
 /**
  * `injectSse()`: an in-memory `EventSource` for tests, on top of `injectStream()`. Events are read
  * only when asked for (`next()`, `take()`, iteration, `done`), so a test controls the pace of the
- * client.
+ * client. Opening never waits forever ({@link OPEN_TIMEOUT_MS} per step): without response headers
+ * it fails (the request is aborted); without a first chunk (an `@Sse` stream sends `retry` or a
+ * comment at once, a hand-written or proxied one may stay quiet) the stream is open anyway, and the
+ * read goes on in the background.
  */
 import type { InjectStreamOptions, InjectStreamRequest, InjectStreamResponse } from './adapter.ts'
 import type { SetCookieInfo } from './cookies.ts'
@@ -43,27 +46,69 @@ export interface InjectSseResponse extends AsyncIterable<SseMessage>, AsyncDispo
 }
 
 const DEFAULT_TIMEOUT_MS = 2_000
+/** How long opening waits for the response headers, then for the first chunk of an event stream (ms). */
+const OPEN_TIMEOUT_MS = 2_000
 const DECODER = new TextDecoder()
 
 type InjectStream = (request: InjectStreamOptions) => Promise<InjectStreamResponse>
 
-/** Opens an event stream with `injectStream` (adds `accept: text/event-stream` when absent). */
+/**
+ * Opens an event stream with `injectStream` (adds `accept: text/event-stream` when absent), waiting
+ * at most `openTimeoutMs` for the response headers, then at most `openTimeoutMs` for the first chunk.
+ */
 export async function openInjectSse(
   injectStream: InjectStream,
   request: InjectStreamOptions,
+  openTimeoutMs: number = OPEN_TIMEOUT_MS,
 ): Promise<InjectSseResponse> {
   if (request === null || typeof request !== 'object') throw new TypeError('injectSse() expects a request object')
   const headers: Record<string, string> = { ...request.headers }
   if (!Object.keys(headers).some(name => name.toLowerCase() === 'accept')) headers['accept'] = 'text/event-stream'
   const sent: InjectStreamRequest = { ...request, method: request.method ?? 'GET', headers }
-  const response = await injectStream(sent)
+  const response = await answered(injectStream, sent, openTimeoutMs)
   if (!isEventStreamType(response.headers['content-type'])) {
     const body = await readText(response.body)
-    return new SseClient(injectStream, sent, response, body)
+    return new SseClient(injectStream, sent, response, body, openTimeoutMs)
   }
-  const client = new SseClient(injectStream, sent, response, '')
+  const client = new SseClient(injectStream, sent, response, '', openTimeoutMs)
+  // the first chunk makes `retry` and `comments` known at once; a quiet stream must not hang the test
   await client.ready()
   return client
+}
+
+/**
+ * `injectStream(request)`, waiting at most `ms` for the response headers. Past it, the request is
+ * aborted (a late response is cancelled: the server sees a client disconnect) and opening fails
+ * with an error naming the request, instead of hanging the test.
+ */
+async function answered(
+  injectStream: InjectStream,
+  request: InjectStreamRequest,
+  ms: number,
+): Promise<InjectStreamResponse> {
+  const abort = new AbortController()
+  const signal = request.signal === undefined ? abort.signal : AbortSignal.any([request.signal, abort.signal])
+  const pending = injectStream({ ...request, signal })
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<undefined>(resolve => {
+    timer = setTimeout(() => resolve(undefined), ms)
+  })
+  const response = await Promise.race([pending, timeout]).finally(() => clearTimeout(timer))
+  if (response !== undefined) return response
+  const message = `injectSse(): no response from ${describe(request)} within ${ms} ms`
+  abort.abort(new Error(message))
+  void pending.then(
+    late => late.body.cancel().catch(() => undefined),
+    () => undefined,
+  )
+  throw new Error(
+    `${message}: the handler has not answered, or the adapter holds the response headers until the first byte of the body`,
+  )
+}
+
+/** `GET /orders/o-1/events`. */
+function describe(request: InjectStreamRequest): string {
+  return `${(request.method ?? 'GET').toUpperCase()} ${request.url}`
 }
 
 async function readText(body: ReadableStream<Uint8Array>): Promise<string> {
@@ -83,20 +128,30 @@ class SseClient implements InjectSseResponse {
   readonly body: string
   readonly #injectStream: InjectStream
   readonly #request: InjectStreamRequest
+  readonly #openTimeoutMs: number
   readonly #parser = new SseParser()
   readonly #items: AsyncIterableIterator<SseItem> | undefined
   readonly #events: SseMessage[] = []
   readonly #comments: string[] = []
   #retry: number | undefined
+  /** Whether an item (event, comment, `retry`) was read since the stream opened. */
+  #received = false
   #ended: boolean
   #failure: unknown
   #reading: Promise<void> | undefined
   #closing: Promise<void> | undefined
   #draining: Promise<void> | undefined
 
-  constructor(injectStream: InjectStream, request: InjectStreamRequest, response: InjectStreamResponse, body: string) {
+  constructor(
+    injectStream: InjectStream,
+    request: InjectStreamRequest,
+    response: InjectStreamResponse,
+    body: string,
+    openTimeoutMs: number,
+  ) {
     this.#injectStream = injectStream
     this.#request = request
+    this.#openTimeoutMs = openTimeoutMs
     this.status = response.status
     this.headers = response.headers
     this.cookies = response.cookies
@@ -129,9 +184,12 @@ class SseClient implements InjectSseResponse {
     return JSON.parse(this.body) as T
   }
 
-  /** Reads the first item (the preamble every Znight event stream starts with): headers and `retry` are known. */
+  /**
+   * Reads the first item (the preamble every `@Sse` stream starts with, so that `retry` is known),
+   * waiting at most the open timeout: the read of a quiet stream goes on in the background.
+   */
   async ready(): Promise<void> {
-    await this.#read()
+    await this.#readWithin(this.#openTimeoutMs)
   }
 
   async next(options: InjectSseWaitOptions = {}): Promise<SseMessage> {
@@ -148,7 +206,8 @@ class SseClient implements InjectSseResponse {
       }
       const remaining = deadline - Date.now()
       if (remaining <= 0 || !(await this.#readWithin(remaining))) {
-        throw new Error(`injectSse(): no event received within ${timeoutMs} ms from ${this.#describe()}`)
+        const quiet = this.#received ? '' : ' (the stream has sent nothing since it opened)'
+        throw new Error(`injectSse(): no event received within ${timeoutMs} ms from ${this.#describe()}${quiet}`)
       }
     }
   }
@@ -179,7 +238,7 @@ class SseClient implements InjectSseResponse {
     }
     // EventSource only sends a non-empty last event id
     if (this.lastEventId !== '') headers['last-event-id'] = this.lastEventId
-    return openInjectSse(this.#injectStream, { ...this.#request, headers })
+    return openInjectSse(this.#injectStream, { ...this.#request, headers }, this.#openTimeoutMs)
   }
 
   [Symbol.asyncIterator](): AsyncIterator<SseMessage> {
@@ -238,12 +297,13 @@ class SseClient implements InjectSseResponse {
       return
     }
     const item = result.value
+    this.#received = true
     if (item.type === 'comment') this.#comments.push(item.text)
     else if (item.type === 'retry') this.#retry = item.retry
     else this.#events.push({ event: item.event, data: item.data, id: item.id, json: item.json })
   }
 
   #describe(): string {
-    return `${(this.#request.method ?? 'GET').toUpperCase()} ${this.#request.url}`
+    return describe(this.#request)
   }
 }

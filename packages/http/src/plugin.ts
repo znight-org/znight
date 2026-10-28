@@ -431,7 +431,9 @@ export class HttpPlugin implements Plugin {
    * Opens an event stream in memory (`accept: text/event-stream`) and reads its events like
    * `EventSource`: `next()`, `take()`, `comments`, `retry`, `lastEventId`, `reconnect()`, `close()`
    * (the server sees a client disconnect). A response that is not an event stream (404, 204...) is
-   * read to its end (`body`).
+   * read to its end (`body`). Resolves at the first chunk of the stream (an `@Sse` stream sends
+   * `retry` or a comment at once), or after 2 000 ms for a stream that sends nothing yet; rejects,
+   * naming the request (which is aborted), when no response headers arrive within 2 000 ms.
    *
    * ```ts
    * await using stream = await http.injectSse({ url: '/orders/o-1/events' })

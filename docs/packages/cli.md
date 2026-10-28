@@ -17,16 +17,17 @@ in your project and only loads them for the commands that need them (`generate`,
 
 ## Commands
 
-| Command                       | Description                                                                                   |
-| ----------------------------- | --------------------------------------------------------------------------------------------- |
-| `znight new [name]`           | Create a project (interactive, or from flags)                                                 |
-| `znight generate`             | Write the generated container (`src/.znight/container.generated.ts`)                          |
-| `znight generate --check`     | Exit with code 1 when a generated file is missing or stale, naming each one (CI)              |
-| `znight generate --watch`     | Keep the generated file up to date (for `tsc --watch` and editors)                            |
-| `znight g <schematic> <name>` | Generate a `service`, `controller`, `consumer`, `config`, `guard`, `interceptor` or `factory` |
-| `znight dev`                  | Vite build in watch mode; restarts the process after every successful rebuild                 |
-| `znight build`                | Production build (`vite build`, `src/main.ts` → `dist/main.js`)                               |
-| `znight start`                | Run the production build (`--runtime node` or `bun`)                                          |
+| Command                       | Description                                                                                                  |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `znight new [name]`           | Create a project (interactive, or from flags)                                                                |
+| `znight generate`             | Write the generated container (`src/.znight/container.generated.ts`)                                         |
+| `znight generate --check`     | Exit with code 1 when a generated file is missing or stale, naming each one (CI)                             |
+| `znight generate --watch`     | Keep the generated file up to date (for `tsc --watch` and editors)                                           |
+| `znight g <schematic> <name>` | Generate a `service`, `controller`, `consumer`, `config`, `guard`, `interceptor`, `factory` or `job`         |
+| `znight dev`                  | Vite build in watch mode; restarts the process after every successful rebuild                                |
+| `znight build`                | Production build (`vite build`, `src/main.ts` → `dist/main.js`); `--openapi` also writes `dist/openapi.json` |
+| `znight start`                | Run the production build (`--runtime node` or `bun`)                                                         |
+| `znight openapi`              | Write the OpenAPI document (`openapi.json`); `--check` exits with code 1 when it is stale (CI)               |
 
 `znight <command> --help` prints the options of a command. Exit codes: `0` success, `1` failure,
 `2` invalid usage, `130` cancelled.
@@ -40,8 +41,8 @@ npx @znight/cli new my-service --pm bun --adapter fastify --features all
 ```
 
 The CLI asks for the name, the package manager (`bun`, `npm`, `pnpm`, `yarn`), the HTTP adapter
-(`node`, `fastify`, `express`, `hono`), the features (`config`, `observability`, `messaging`) and
-whether to install the dependencies and initialise git. The project has a sample greeting API, its
+(`node`, `fastify`, `express`, `hono`), the features (`config`, `observability`, `messaging`,
+`schedule`, `openapi`) and whether to install the dependencies and initialise git. The project has a sample greeting API, its
 tests (`bun test` for Bun projects, Vitest otherwise), `vite.config.ts` with the `znight()` plugin
 and a `znight.config.ts` holding the compiler options, shared by the Vite plugin, the Bun preload
 and `znight generate`. Bun projects run the application on Bun: their `dev` and `start` scripts pass
@@ -58,10 +59,17 @@ npx znight g controller users/user
 
 npx znight g interceptor timing --aop --dry-run
 # prints a method interceptor (@Intercept) instead of writing it
+
+npx znight g job reports/digest
+# creates src/reports/digest.jobs.ts (DigestJobs), its @Cron job named 'reports.digest.daily'
 ```
 
 Generated files are plain TypeScript with the right decorators: there is nothing to register
-afterwards, the compiler discovers them. Options: `--path`, `--flat`, `--force`, `--dry-run`.
+afterwards, the compiler discovers them. Options: `--path`, `--flat`, `--force`, `--dry-run`. Job
+names must be unique in the application
+([`ZNIGHT041`](/reference/error-codes#znight041)), so the job of `g job` is named after the
+directories of its file under `src/` and its name: `g job digest` gives `digest.daily`,
+`g job digest --path src/emails` gives `emails.digest.daily`.
 
 ## Generate the container
 
@@ -107,9 +115,15 @@ providers: a restart is fast and always consistent.
 
 ```sh
 npx znight build                 # vite build with your Vite config; compiler errors fail the build
+npx znight build --openapi --openapi-prefix /api # also dist/openapi.json, servers: [{ url: '/api' }]
 npx znight start                 # node --enable-source-maps dist/main.js, NODE_ENV=production
 npx znight start --runtime bun
 ```
+
+`--openapi` emits the OpenAPI document after the bundle (`@znight/openapi` installed); pass the
+`prefix` of `HttpPlugin` with `--openapi-prefix` so that the file has the `servers` of the
+document the application serves. `znight openapi` writes it on its own (`--prefix`, `--check`):
+see [@znight/openapi](/packages/openapi#emitting-openapi-json).
 
 The `root` of your Vite config is resolved against the project root (`--root`), like the Vite CLI
 run in the project directory; `znight dev` and `znight generate` do the same.

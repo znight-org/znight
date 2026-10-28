@@ -1077,14 +1077,15 @@ instances (Redis, NATS...) is application code.
 
 ### Proxies, compression and timeouts
 
-| Concern                               | What Znight does                                                                                                                                                                                                                                                                  |
-| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Headers not flushed, proxy buffering  | The first chunk is written at once; `x-accel-buffering: no` (nginx)                                                                                                                                                                                                               |
-| Caching proxies, CDNs                 | `cache-control: no-cache, no-transform`. Cloudflare streams `text/event-stream`; its 100 s idle limit is covered by heartbeats                                                                                                                                                    |
-| Compression middleware                | `no-transform` is honoured by Express `compression()` and `hono/compress` (which also skips `text/event-stream`). Fastify sends event streams through `reply.hijack()`: no `onSend` hook (`@fastify/compress`, ETag) ever touches them; headers set by `onRequest` hooks are kept |
-| `Bun.serve()` `idleTimeout` (10 s)    | `honoAdapter().listen()` lifts it while the stream is sent. With `adapter.fetch` in your own `Bun.serve()`, keep `heartbeat` below `idleTimeout` (the 8 s default does)                                                                                                           |
-| Node.js socket timeouts               | `server.timeout` / `setTimeout()` / Fastify `connectionTimeout` (and Bun's `node:http` emulation) never cut a quiet event stream: the adapters call `response.setTimeout(0)` for it                                                                                               |
-| HTTP/1.1 browser limit (6 per origin) | Serve HTTP/2 at the edge, or multiplex topics on one stream. Nothing connection-specific is sent: streams work through h2 proxies                                                                                                                                                 |
+| Concern                               | What Znight does                                                                                                                                                                                                                                                                                                                       |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Headers not flushed, proxy buffering  | The first chunk is written at once; `x-accel-buffering: no` (nginx)                                                                                                                                                                                                                                                                    |
+| Caching proxies, CDNs                 | `cache-control: no-cache, no-transform`. Cloudflare streams `text/event-stream`; its 100 s idle limit is covered by heartbeats                                                                                                                                                                                                         |
+| Compression middleware                | `no-transform` is honoured by Express `compression()` and `hono/compress` (which also skips `text/event-stream`). Fastify sends event streams through `reply.hijack()`: no `onSend` hook (`@fastify/compress`, ETag) ever touches them; headers set by `onRequest` hooks are kept                                                      |
+| Hand-written and proxied streams      | Any streamed `text/event-stream` body (`return fetch(upstream)`, `HttpResponse.stream(body, { contentType: 'text/event-stream' })`) is sent as an event stream: headers at once (even before a quiet stream's first byte, on Fastify too), no socket timeout, no `onSend` hook. `@Sse` adds the framing, heartbeats and graceful close |
+| `Bun.serve()` `idleTimeout` (10 s)    | `honoAdapter().listen()` lifts it while the stream is sent. With `adapter.fetch` in your own `Bun.serve()`, keep `heartbeat` below `idleTimeout` (the 8 s default does)                                                                                                                                                                |
+| Node.js socket timeouts               | `server.timeout` / `setTimeout()` / Fastify `connectionTimeout` (and Bun's `node:http` emulation) never cut a quiet event stream: the adapters call `response.setTimeout(0)` for it                                                                                                                                                    |
+| HTTP/1.1 browser limit (6 per origin) | Serve HTTP/2 at the edge, or multiplex topics on one stream. Nothing connection-specific is sent: streams work through h2 proxies                                                                                                                                                                                                      |
 
 **Credentials.** `EventSource` cannot send an `Authorization` header and tokens in the query string
 leak into logs: authenticate event streams with a cookie (`new EventSource(url, { withCredentials:
@@ -1776,7 +1777,7 @@ await stream.close() // the server sees a client disconnect: ctx.signal aborts, 
 
 | Member                         | Description                                                                                |
 | ------------------------------ | ------------------------------------------------------------------------------------------ |
-| `status`, `headers`, `cookies` | Available once the stream opened (the first chunk was read)                                |
+| `status`, `headers`, `cookies` | Available once the stream opened (see below)                                               |
 | `body`, `json()`               | `''` for an event stream; otherwise the whole body (an error, a 204...)                    |
 | `next({ timeoutMs? })`         | The next event (comments skipped); rejects on timeout (2 000 ms) or when the stream ended  |
 | `take(count, { timeoutMs? })`  | The next `count` events                                                                    |
@@ -1785,6 +1786,14 @@ await stream.close() // the server sees a client disconnect: ctx.signal aborts, 
 | `done`                         | Resolves when the server ends the stream (the remaining events stay available to `next()`) |
 | `close()`, `reconnect()`       | Disconnects (idempotent; also `await using`); reconnects with `last-event-id`              |
 | `[Symbol.asyncIterator]`       | Every event until the end of the stream                                                    |
+
+Opening never hangs. `injectSse()` resolves at the first chunk of the stream: an `@Sse` stream sends
+`retry` or a comment at once, so `retry` is known right after. A stream that sends nothing yet (a
+hand-written `ReadableStream`, a quiet proxied upstream) is open after 2 000 ms anyway, and
+`next()` reads what it sends later (its timeout message says when the stream has sent nothing since
+it opened). Without response headers within 2 000 ms (a handler that never answers), `injectSse()`
+rejects with `injectSse(): no response from GET /orders/o-1/events within 2000 ms` and aborts the
+request.
 
 Events are read only when asked for, so a test controls the pace of the client. `injectStream()`
 resolves at the response headers with `{ status, headers, cookies, body: ReadableStream }`
@@ -2270,7 +2279,8 @@ interface HttpAdapter {
   disconnects before the response was fully written (on the next microtask when that already
   happened), never after a complete response. Without it, `ctx.signal` only aborts when the reply
   body is cancelled or an event stream is closed by the server.
-- `AdapterReply.eventStream` marks a long-lived event stream: do not apply idle or inactivity
+- `AdapterReply.eventStream` marks a long-lived event stream (any streamed `text/event-stream`
+  body): send the headers without waiting for the first chunk, do not apply idle or inactivity
   timeouts to the response while it is sent (`response.setTimeout(0)`, Bun's `server.timeout()`),
   write each chunk as soon as it is read, and keep compression and payload-rewriting hooks away
   from it (Fastify: `reply.hijack()`).

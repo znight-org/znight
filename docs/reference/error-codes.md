@@ -44,7 +44,7 @@ allocated in order inside a block, so the numbering has gaps between blocks.
 | [ZNIGHT032](#znight032) | Unrepresentable type                                | warning / error (error with `strict`)                | build                      |
 | [ZNIGHT033](#znight033) | Duplicate operation id                              | error                                                | build                      |
 | [ZNIGHT034](#znight034) | Schema name conflict                                | error                                                | build, startup, runtime    |
-| [ZNIGHT035](#znight035) | Inconsistent operation                              | error / warning                                      | build                      |
+| [ZNIGHT035](#znight035) | Inconsistent operation                              | error / warning                                      | build, startup, runtime    |
 | [ZNIGHT036](#znight036) | Invalid security requirement                        | error / warning                                      | build                      |
 | [ZNIGHT037](#znight037) | Schema conversion failed                            | error (warning with `unrepresentable: 'warn'`)       | build, startup, runtime    |
 | [ZNIGHT040](#znight040) | Invalid schedule                                    | error / warning                                      | build, startup, runtime    |
@@ -721,8 +721,10 @@ to the controller.
 decision of every required group, and each decision must be enforced by a guard of the route's chain
 (global, controller or route guards) listing the group's decorators in its static `enforces`. This
 catches a forgotten `guards: [AuthGuard]` in an entrypoint or a test, and routes the compiler did
-not check (the routes of other plugins, which take their decisions from `meta`). All routes are
-reported in one error:
+not check (the routes of other plugins, which take their decisions from `meta`). Decisions of a
+group that is not required (`@RateLimit()`) are checked as soon as a guard class of the application
+declares the group in its `enforces`, even a guard registered in no chain: forgetting it everywhere
+is reported, with a hint naming that guard. All routes are reported in one error:
 
 ```txt
 ZNIGHT023: HttpPlugin: No guard enforces the required "access" group on 9 routes: GET /books (BookController.list), POST /books (BookController.create), ...
@@ -775,9 +777,12 @@ export class BookController {
 (`OpenApiPlugin serves its routes through HttpPlugin, which is not registered`), metadata without
 an OpenAPI section (`The metadata has no OpenAPI section (metadata.extensions.openapi)`: import
 `@znight/openapi` in a scanned file and regenerate), a prebuilt `document: { file }` that is not an
-OpenAPI 3.1 document, and `yaml` or `assets: 'local'` without the optional package they need. Two warnings: declared relative `servers` that do not end with the HTTP
-prefix, and a prebuilt document (`document: { file }`) generated from other metadata than the
-running application's.
+OpenAPI 3.1 document, and `yaml` or `assets: 'local'` without the optional package they need.
+Warnings: declared relative `servers` (or those of a prebuilt file) that do not end with the HTTP
+prefix, a prebuilt document (`document: { file }`) generated from other metadata than the running
+application's, and a prebuilt document without `servers` under an HTTP prefix: it is served with
+`[{ url: prefix }]`, but clients generated from the file would call the wrong paths (emit it with
+`znight openapi --prefix /api` or `znight build --openapi --openapi-prefix /api`).
 
 ## ZNIGHT031: Undocumented response {#znight031}
 
@@ -857,9 +862,13 @@ the same name in different folders collide.
 ## ZNIGHT034: Schema name conflict {#znight034}
 
 Two different schemas would get the same name in `components.schemas`. At build time, two
-declarations with the same name (two `Book` interfaces in different modules); when the document is
-assembled, a schema hoisted from the `$defs` of a converted schema, or the `XInput` variant of a
-schema, that clashes with another component.
+declarations with the same name (two `Book` interfaces in different modules), or a declaration named
+like an exported schema (except `export interface User extends z.infer<typeof User> {}`, documented
+by the schema `User`); when the document is assembled, two different schemas of one direction
+(request or response) under one name: a definition hoisted from the `$defs` of a converted schema
+(named after its id, `.meta({ id: 'Address' })`), or the `XInput` variant of a schema, that clashes
+with another component. Anonymous definitions (Zod's `__schema0`) are scoped to their schema and
+never clash.
 
 ```ts
 // src/catalog/book.ts
@@ -892,15 +901,18 @@ are reserved while standard error responses are on.
 
 The documentation contradicts what the route does.
 
-| Situation                                                                                  | Severity |
-| ------------------------------------------------------------------------------------------ | -------- |
-| A response body declared on 204 or 304                                                     | error    |
-| A success status other than the route's (`@HttpCode`, else 201 for POST and 200 otherwise) | error    |
-| `@ApiQuery('x')` next to `@Query('x')`, `@ApiBody` next to `@Body(S)`                      | error    |
-| `@ApiHeader('Accept')`, `'Content-Type'` or `'Authorization'`                              | error    |
-| A handler parameter reading one of these headers (`@Headers('authorization')`)             | warning  |
-| `@ApiBody` on a GET or HEAD route                                                          | warning  |
-| `@ApiExclude()` together with other `@Api*` decorators                                     | warning  |
+| Situation                                                                                     | Severity |
+| --------------------------------------------------------------------------------------------- | -------- |
+| A response body declared on 204 or 304 (`@ApiResponse<T>(204)`)                               | error    |
+| A handler returning a body with `@HttpCode(204)` or `@HttpCode(304)` (the body is never sent) | error    |
+| A success status other than the route's (`@HttpCode`, else 201 for POST and 200 otherwise)    | error    |
+| `@ApiQuery('x')` next to `@Query('x')`, `@ApiBody` next to `@Body(S)`                         | error    |
+| `@ApiHeader('Accept')`, `'Content-Type'` or `'Authorization'`                                 | error    |
+| A handler parameter reading one of these headers (`@Headers('authorization')`)                | warning  |
+| `@ApiBody` on a GET or HEAD route                                                             | warning  |
+| `@ApiExclude()` together with other `@Api*` decorators                                        | warning  |
+| Routes of one path that name its parameters differently (`/:id`, `/:bookId`): one template    | warning  |
+| A whole-object `@Query(S)` property that another parameter already documents (assembly)       | warning  |
 
 ```ts
 @Delete('/:id')
@@ -1074,7 +1086,8 @@ job declaring `lock: true`.
 **How to fix**: configure a store shared by the instances
 (`SchedulePlugin.configure({ lock: { store: new PostgresLockStore(db) } })`: the
 [`@znight/schedule` README](../../packages/schedule/README.md#one-runner-across-instances)
-describes the contract, the conformance scenarios and a Redis store), or `memoryLockStore()` for a
+describes the contract, the conformance scenarios and tested Postgres and Redis recipes), or
+`memoryLockStore()` for a
 single instance and tests. Remove `lock: true` if every instance may run the job.
 
 ## ZNIGHT044: Job aborted {#znight044}

@@ -329,9 +329,19 @@ schemes (ZNIGHT036).
 | `guards`          | `[]`              | Extra guards of the docs routes (global guards still run first)                                              |
 | `cacheControl`    | `'no-cache'`      | `cache-control` of the document (revalidated with the ETag)                                                  |
 
-² `info`, `servers`, `filter` and `transform` apply to the file as to a build. A file without
-`servers` gets `[{ url: prefix }]` under an HTTP prefix, with a ZNIGHT030 warning: emit it with
-`znight openapi --prefix /api` so that clients generated from the file call the right paths.
+² `info`, `servers`, `filter` and `transform` apply to the file as to a build. Under an HTTP
+prefix, the servers of the file are checked (ZNIGHT030 warnings), so that clients generated from
+the file call the right paths:
+
+- a file without `servers` is served with `[{ url: prefix }]`: emit it with the prefix
+  (`znight openapi --prefix /api`, `znight build --openapi --openapi-prefix /api`, or
+  `openapi({ prefix: '/api' })` in `vite.config`);
+- a relative server that does not end with the prefix (`/v1` under `/api`) is reported;
+- so is a file where no server ends with the prefix: `servers: []` (served as is), or only
+  absolute servers of another path (`https://api.example.com`). A relative server, an absolute one
+  whose path ends with the prefix (`https://api.example.com/api`) or one with variables is enough.
+  Behind a gateway that rewrites the paths, give the plugin its own `servers`: they replace those
+  of the file and only they are checked.
 
 ```ts
 OpenApiPlugin.configure(container => ({
@@ -391,7 +401,17 @@ znight openapi --check              # CI: exit 1 when the file is missing or sta
 znight openapi --prefix /api        # servers default when @OpenApiDocument declares none
 znight openapi --runtime bun        # load the modules with Bun (default: the runtime running the CLI)
 znight build --openapi              # after the bundle: dist/openapi.json, next to dist/main.js
+znight build --openapi --openapi-prefix /api # the same, under HttpPlugin.configure({ prefix: '/api' })
 ```
+
+Pass the `prefix` of `HttpPlugin.configure()` to every command that emits the file served with
+`document: { file }`: `--prefix` (`znight openapi`), `--openapi-prefix` (`znight build`, it needs
+`--openapi`: a usage error otherwise), or `prefix` (the `openapi()` Vite plugin). It becomes the
+`servers` of the document when `@OpenApiDocument` declares none, so the file and a build at boot
+serve the same document; without it, the plugin warns (ZNIGHT030) and serves the file with
+`[{ url: prefix }]`, but clients generated from the file call the wrong paths. When the Vite config
+registers its own `openapi()`, `znight build --openapi=<path>` and `--openapi-prefix` do not apply
+(the CLI warns): set `openapi({ output, prefix })` there.
 
 ```ts
 // vite.config.ts
@@ -404,7 +424,8 @@ export default defineConfig({
   plugins: [
     znight(options),
     // after the bundle is written (and after each good rebuild of znight dev); default output: dist/openapi.json
-    openapi({ output: ['openapi.json', 'dist/openapi.json'], check: process.env['CI'] === 'true' }),
+    // prefix: the prefix of HttpPlugin.configure() (servers default when @OpenApiDocument declares none)
+    openapi({ output: ['openapi.json', 'dist/openapi.json'], prefix: '/api', check: process.env['CI'] === 'true' }),
   ],
 })
 ```

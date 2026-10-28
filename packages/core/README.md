@@ -322,8 +322,14 @@ without depending on each other:
 `runId`, `trigger` (`schedule` / `start` / `manual` / `queued`), `scheduledAt` (epoch ms),
 `context` (the `JobContext`), `startTime`, and, once settled, `outcome` (`completed` / `failed` /
 `skipped` / `not-acquired`), `error` and `aborted` (`timeout` / `lock-lost` / `removed` /
-`shutdown`). Executed runs are wrapped with `hooks.run`, then emitted; occurrences that did not run
-are only emitted.
+`shutdown`). Runs handed to the job are wrapped with `hooks.run`, then emitted; occurrences that
+never reach the wrappers (`context` is `undefined`) are only emitted. Listeners always see the final
+`outcome`. Wrappers do not: it is `undefined` until the job settles (`completed` when `next()`
+resolves, `failed` with `error` when the job threw), and stays `undefined` when the job did not
+start: a wrapper vetoed the run (returned without calling `next()`), the run was dropped while the
+wrappers waited (job removed or paused, scheduler stopping), or a wrapper threw first (`next()`
+rejects). The producer settles it after `hooks.run` (`skipped`, or `failed` for a wrapper that
+threw), so a wrapper that reports it reads `event.outcome ?? (nextRejected ? 'failed' : 'skipped')`.
 
 Other packages declare their hooks by augmenting `ZnightHooks`:
 

@@ -455,11 +455,12 @@ export class Project implements ProjectHost {
   #createServices(): Services {
     const symbols = new SymbolResolver(this)
     const identities = new IdentityResolver(this, symbols)
+    const evaluator = new Evaluator(this, symbols, identities)
     return {
       symbols,
       identities,
-      types: new TypeResolver(this, symbols, identities),
-      evaluator: new Evaluator(this, symbols, identities),
+      types: new TypeResolver(this, symbols, identities, evaluator),
+      evaluator,
       routes: new RouteResolver(this, symbols, identities),
     }
   }

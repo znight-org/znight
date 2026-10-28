@@ -255,6 +255,57 @@ describe('SseSession', () => {
     await stream.reader.cancel()
   })
 
+  it('keeps one reaction on a quiet read, however many heartbeats are sent (no leak)', async () => {
+    let reactions = 0
+    /** Counts the reactions attached to the read (and to the promises derived from it). */
+    class Watched<T> extends Promise<T> {
+      // biome-ignore lint/suspicious/noThenProperty: a Promise subclass counting its reactions
+      override then<A = T, B = never>(
+        onFulfilled?: ((value: T) => A | PromiseLike<A>) | null,
+        onRejected?: ((reason: unknown) => B | PromiseLike<B>) | null,
+      ): Promise<A | B> {
+        reactions++
+        return super.then(onFulfilled, onRejected)
+      }
+    }
+    let release: (result: IteratorResult<SseEvent>) => void = () => undefined
+    let reads = 0
+    const source = {
+      [Symbol.asyncIterator]: () => ({
+        next: () => {
+          reads++
+          return new Watched<IteratorResult<SseEvent>>(resolve => {
+            release = resolve
+          })
+        },
+        return: () => Promise.resolve({ done: true as const, value: undefined }),
+      }),
+    }
+    const stream = open(source, { heartbeat: 1 })
+    expect(await stream.read()).toBe(':\n\n')
+    for (let beat = 0; beat < 50; beat++) expect(await stream.read()).toBe(':\n\n')
+    expect(reads).toBe(1)
+    // the outcome mapping and the single recording reaction (it was one more per heartbeat)
+    expect(reactions).toBe(2)
+    release({ done: false, value: { data: 'late' } })
+    expect(await stream.read()).toBe('data: late\n\n')
+    await stream.reader.cancel()
+  })
+
+  it('an item read while the pull was woken up (graceful close) is still sent', async () => {
+    const { state, source } = gatedSource()
+    const stream = open(source, { heartbeat: 1_000, graceMs: 30, random: () => 0, stopTimeoutMs: 30 })
+    expect(await stream.read()).toBe(':\n\n')
+    const next = stream.read()
+    await sleep(5)
+    // the read settles and the wake-up races it in the same tick
+    state.release()
+    stream.session.close('shutdown')
+    expect(await next).toBe('data: 1\n\n')
+    expect(await stream.rest()).toEqual(['retry: 3000\n\n'])
+    state.release()
+  })
+
   it('never inserts a heartbeat inside raw bytes that do not end at an event boundary', async () => {
     let release: () => void = () => undefined
     async function* upstream(): AsyncGenerator<Uint8Array> {

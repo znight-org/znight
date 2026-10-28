@@ -1,0 +1,19 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`the OpenAPI document documents every operation with an id, a tag and its security 1`] = `
+[
+  "GET /admin/stats → admin.stats [Admin] security: apiKey, access: roles admin",
+  "POST /carts → cart.create [Carts] security: bearer, access: roles customer",
+  "GET /carts/{id} → cart.get [Carts] security: bearer, access: roles customer",
+  "POST /carts/{id}/items → cart.addItem [Carts] security: bearer, access: roles customer",
+  "POST /orders → order.place [Orders] security: bearer, access: roles customer",
+  "GET /orders/export → order.export [Orders] security: apiKey, access: roles admin",
+  "GET /orders/{id} → order.get [Orders] security: bearer, access: roles customer",
+  "GET /products → product.list [Catalog] security: public, access: public",
+  "POST /products → product.create [Catalog] security: apiKey, access: roles catalog",
+  "POST /products/validate → product.validate [Catalog] security: apiKey, access: roles catalog",
+  "GET /products/{id} → product.get [Catalog] security: public, access: public",
+  "GET /products/{id}/image → product.image [Catalog] security: public, access: public",
+  "PUT /products/{id}/image → product.uploadImage [Catalog] security: apiKey, access: roles catalog",
+]
+`;

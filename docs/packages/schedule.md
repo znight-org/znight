@@ -160,7 +160,7 @@ SchedulePlugin.configure(container => {
   const config = container.get(ScheduleConfig)
   return {
     enabled: config.enabled, // SCHEDULE_ENABLED=false on web-only replicas
-    lock: { store: new PostgresLockStore(container.get(Database)), ttl: '30s' },
+    lock: { store: new PostgresLockStore(container.get(Database)), ttl: '30s' }, // a recipe: see below
     jobs: { 'digest.daily': { cron: config.digestCron } }, // validated at boot
   }
 })
@@ -178,7 +178,10 @@ implements one method, `acquire(key, { owner, occurrence, ttlMs })`, which claim
 job and returns a lease to extend and release. `memoryLockStore()` serves a single process and
 tests; for a fleet, implement the interface on a database or Redis shared by the instances (the
 [package README](../../packages/schedule/README.md) describes the contract and the conformance
-scenarios a store must pass). A job declaring `lock: true` without a store fails the boot
+scenarios a store must pass; the package tests a Postgres recipe,
+[`postgres-lock-store.ts`](../../packages/schedule/test/integration/postgres-lock-store.ts), and a
+Redis one, [`redis-lock-store.ts`](../../packages/schedule/test/integration/redis-lock-store.ts), to
+copy into your application). A job declaring `lock: true` without a store fails the boot
 ([`ZNIGHT043`](/reference/error-codes#znight043)).
 
 ## Dynamic jobs
@@ -235,7 +238,9 @@ test('a manual run goes through the whole pipeline', async () => {
 ```
 
 A virtual clock makes time-based tests deterministic: time only moves when the test advances it,
-and advancing waits for the runs it started. The test clock, a `JobContext` factory for unit tests
+and advancing waits for the runs it started, real I/O included (a run that makes no progress for
+`settleTimeoutMs` of real time, 1 000 ms by default, is no longer waited for:
+`createTestClock(start, { settleTimeoutMs })`). The test clock, a `JobContext` factory for unit tests
 and the conformance scenarios of lock stores are described in the
 [package README](../../packages/schedule/README.md).
 

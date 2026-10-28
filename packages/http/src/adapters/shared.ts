@@ -141,7 +141,7 @@ export function injectResponse(
 }
 
 /** Whether a `content-type` is `text/event-stream`. */
-export function isEventStreamType(contentType: string | string[] | undefined): boolean {
+export function isEventStreamType(contentType: string | readonly string[] | undefined): boolean {
   if (typeof contentType !== 'string') return false
   const semicolon = contentType.indexOf(';')
   return (semicolon === -1 ? contentType : contentType.slice(0, semicolon)).trim().toLowerCase() === 'text/event-stream'

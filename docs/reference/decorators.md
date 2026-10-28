@@ -90,7 +90,10 @@ omitted) and store it in the route metadata. Decorators sharing a `group` are al
 class or method ([`ZNIGHT005`](/reference/error-codes#znight005) otherwise), and the method's
 decision replaces the class's. With `required: true`, every route needs a decision of the group
 ([`ZNIGHT023`](/reference/error-codes#znight023)), and guards declare the decorators they enforce
-in a static `enforces` array, checked at boot.
+in a static `enforces` array, checked at boot: a decision of a required group, or of a group a
+guard class of the application enforces, needs such a guard in the chain of its route. A `group` is
+a name of letters, digits, `_`, `.` and `-` starting with a letter; without `group`, any non-empty
+key is its own group (`'auth:public'`).
 
 ```ts
 export const Public = createRouteDecorator('public', { group: 'access', required: true })

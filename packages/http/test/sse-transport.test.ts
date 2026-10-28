@@ -38,6 +38,20 @@ class StreamController {
   text(): string {
     return 'x'.repeat(4_096)
   }
+  /** A hand-written event stream (what `return fetch(upstream)` gives): one event, a pause of `ms`, one event. */
+  proxied(ctx: HttpContext): Response {
+    const ms = Number(ctx.query['ms'] ?? 1_500)
+    const encoder = new TextEncoder()
+    const body = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        controller.enqueue(encoder.encode('data: before\n\n'))
+        await delay(ms)
+        controller.enqueue(encoder.encode('data: after\n\n'))
+        controller.close()
+      },
+    })
+    return new Response(body, { headers: { 'content-type': 'text/event-stream' } })
+  }
 }
 
 const meta = metadata({ [t('StreamController')]: provider(StreamController) }, [
@@ -47,6 +61,7 @@ const meta = metadata({ [t('StreamController')]: provider(StreamController) }, [
     route('beat', '/beat', (c: StreamController, ctx) => c.pause(ctx), { sse: { heartbeat: 1_000 } }),
     route('text', '/text', (c: StreamController) => c.text()),
     route('plain', '/plain', () => HttpResponse.stream([new TextEncoder().encode('plain')].values() as never)),
+    route('proxied', '/proxied', (c: StreamController, ctx) => c.proxied(ctx)),
   ]),
 ])
 
@@ -100,6 +115,11 @@ describe('compression middleware', () => {
     expect(response.headers.get('content-type')).toBe('text/event-stream; charset=utf-8')
     expect(await response.text()).toBe(':\n\ndata: tick 1\n\ndata: tick 2\n\ndata: tick 3\n\n')
     expectOneByOne(await timedEvents(`${String(app.http.address)}/ticks`))
+    // a hand-written event stream (a proxied upstream) too: no onSend hook may buffer or rewrite it
+    const proxied = await fetch(`${String(app.http.address)}/proxied?ms=10`)
+    expect(proxied.headers.get('x-on-send')).toBeNull()
+    expect(proxied.headers.get('x-from-hook')).toBe('yes')
+    expect(await proxied.text()).toBe('data: before\n\ndata: after\n\n')
     await app.stop()
   })
 })
@@ -154,8 +174,13 @@ describe('idle timeouts', () => {
   for (const adapter of timed) {
     it(`${adapter.name}: a socket timeout does not cut a quiet event stream`, async () => {
       const app = await createApp(meta, { adapter: adapter.create() })
-      const events = await timedEvents(`${String(app.http.address)}/pause?ms=1500`)
+      const [events, proxied] = await Promise.all([
+        timedEvents(`${String(app.http.address)}/pause?ms=1500`),
+        // a hand-written event stream is an event stream too (it was cut after 1 s)
+        timedEvents(`${String(app.http.address)}/proxied?ms=1500`),
+      ])
       expect(events.map(event => event.data)).toEqual(['before', 'after'])
+      expect(proxied.map(event => event.data)).toEqual(['before', 'after'])
       await app.stop()
     }, 10_000)
   }

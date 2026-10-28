@@ -91,7 +91,9 @@ export interface AdapterReply {
   /** The handler wrote the response itself through `@Res()`: write nothing. */
   readonly raw?: boolean
   /**
-   * The body is a long-lived event stream (`text/event-stream`). Adapters MUST NOT apply idle or
+   * The body is a long-lived event stream (a streamed `text/event-stream` body: `@Sse`,
+   * `HttpResponse.sse()`, a proxied `fetch()` response...). Adapters MUST send the headers without
+   * waiting for the first chunk (a quiet stream may send nothing for a while), MUST NOT apply idle or
    * inactivity timeouts to the response while it is sent, and MUST write each chunk as soon as it is
    * read (no buffering, no compression).
    */

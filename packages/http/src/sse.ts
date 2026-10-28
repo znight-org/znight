@@ -296,7 +296,12 @@ export class SseSession {
   readonly #host: SseHost
   readonly #run: ContextRunner
   #reader: SourceReader | undefined
+  /** The source read in progress, kept across heartbeats until its item is consumed. */
   #pending: Promise<Settled> | undefined
+  /** What {@link #pending} settled with, until {@link #pull} consumes it. */
+  #settled: Settled | undefined
+  /** Resolves the race waiting for {@link #pending} (one at a time). */
+  #onSettled: (() => void) | undefined
   #controller: ReadableStreamDefaultController<Uint8Array> | undefined
   /** `open` → `closing` (graceful close running) → `ended`. */
   #phase: 'open' | 'closing' | 'ended' = 'open'
@@ -363,10 +368,10 @@ export class SseSession {
   async #pull(controller: ReadableStreamDefaultController<Uint8Array>): Promise<void> {
     for (;;) {
       if (this.#phase === 'ended') return
-      const pending = this.#next()
+      this.#next()
       const heartbeat =
         this.#phase === 'open' && this.#settings.heartbeat > 0 && this.#atBoundary ? this.#settings.heartbeat : 0
-      const outcome = await this.#race(pending, heartbeat)
+      const outcome = await this.#race(heartbeat)
       // closed or cancelled while waiting
       if (this.#isEnded()) return
       if (outcome === 'heartbeat') {
@@ -375,6 +380,7 @@ export class SseSession {
       }
       if (outcome === 'wake') continue
       this.#pending = undefined
+      this.#settled = undefined
       if (outcome.kind === 'done') {
         await this.#finish()
         return
@@ -413,9 +419,13 @@ export class SseSession {
     }
   }
 
-  /** The next item of the source: the pending read (kept across heartbeats) or a new one. */
-  #next(): Promise<Settled> {
-    if (this.#pending !== undefined) return this.#pending
+  /**
+   * Starts the next read of the source, unless one is pending (it is kept across heartbeats). The
+   * read gets one reaction for its whole life, which records its outcome: a quiet source does not
+   * accumulate a reaction per heartbeat.
+   */
+  #next(): void {
+    if (this.#pending !== undefined) return
     const pending = this.#run(() => {
       try {
         return this.#readerOf().next()
@@ -427,26 +437,33 @@ export class SseSession {
       (error: unknown): Settled => ({ kind: 'error', error }),
     )
     this.#pending = pending
-    return pending
+    void pending.then(outcome => {
+      if (this.#pending !== pending) return
+      this.#settled = outcome
+      this.#onSettled?.()
+    })
   }
 
-  /** Waits for the item, a heartbeat delay (`0`: none) or a wake-up (close, cancel). */
-  #race(pending: Promise<Settled>, heartbeat: number): Promise<Settled | 'heartbeat' | 'wake'> {
+  /** Waits for the pending item, a heartbeat delay (`0`: none) or a wake-up (close, cancel). */
+  #race(heartbeat: number): Promise<Settled | 'heartbeat' | 'wake'> {
+    // settled while nobody waited (after a heartbeat or a wake-up): kept until consumed
+    if (this.#settled !== undefined) return Promise.resolve(this.#settled)
     return new Promise(resolve => {
       let timer: ReturnType<typeof setTimeout> | undefined
-      let settled = false
-      const wake = (): void => settle('wake')
+      let done = false
       const settle = (outcome: Settled | 'heartbeat' | 'wake'): void => {
-        // the pending read outlives a heartbeat: a later settlement of an old race is ignored
-        if (settled) return
-        settled = true
+        if (done) return
+        done = true
         clearTimeout(timer)
         if (this.#wake === wake) this.#wake = undefined
+        if (this.#onSettled === settled) this.#onSettled = undefined
         resolve(outcome)
       }
+      const wake = (): void => settle('wake')
+      const settled = (): void => settle(this.#settled as Settled)
       if (heartbeat > 0) timer = unref(setTimeout(() => settle('heartbeat'), timerDelay(heartbeat)))
       this.#wake = wake
-      void pending.then(settle)
+      this.#onSettled = settled
     })
   }
 

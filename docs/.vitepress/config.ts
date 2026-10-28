@@ -159,6 +159,7 @@ function sidebarGuide(): DefaultTheme.SidebarItem[] {
       items: [
         { text: 'Testing', link: '/guide/testing' },
         { text: 'Security', link: '/guide/security' },
+        { text: 'Scheduling', link: '/guide/scheduling' },
         { text: 'Deployment', link: '/guide/deployment' },
         { text: 'Migrating from NestJS', link: '/guide/migrating-from-nestjs' },
       ],

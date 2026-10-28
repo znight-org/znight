@@ -11,6 +11,7 @@ import type { BodyPlan } from './uploads.ts'
 
 import { displayName } from '@znight/core'
 
+import { isEventStreamType } from './adapters/shared.ts'
 import { type HttpRouteInfo, RequestContext, type RequestId } from './context.ts'
 import { DEFAULT_COOKIE_SETTINGS, serializeWith } from './cookie-settings.ts'
 import { corsReplyHeaders, isPreflight, mergeVary, preflightHeaders } from './cors.ts'
@@ -813,11 +814,19 @@ export class Pipeline {
   }
 }
 
-/** The reply handed to the adapter (internal fields of the serialised reply left out). */
+/**
+ * The reply handed to the adapter (internal fields of the serialised reply left out). A streamed
+ * `text/event-stream` body is an event stream whatever produced it (`@Sse`, `HttpResponse.sse()`, a
+ * proxied `fetch()` response, `HttpResponse.stream()`): the adapter sends its headers at once, even
+ * before a quiet stream's first byte, and lifts idle timeouts.
+ */
 function adapterReply(serialized: SerializedReply, body: ReplyBody, blob?: Blob): AdapterReply {
   const reply: AdapterReply = { status: serialized.status, headers: serialized.headers, body }
   if (blob !== undefined) return { ...reply, blob }
-  return serialized.sse === undefined ? reply : { ...reply, eventStream: true }
+  const eventStream =
+    serialized.sse !== undefined ||
+    (body instanceof ReadableStream && isEventStreamType(serialized.headers['content-type']))
+  return eventStream ? { ...reply, eventStream: true } : reply
 }
 
 /**

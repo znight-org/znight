@@ -31,6 +31,23 @@ bun install
 | `bun run docs:dev`         | Documentation site in development mode                                                                                  |
 | `bun run docs:build`       | Build the documentation site (fails on dead links)                                                                      |
 
+## Run an example
+
+The example applications (`examples/*`) use the `znight` CLI and the production build, which load
+the packages' `dist`. Build the framework once, then run an example in development mode:
+
+```sh
+bun install
+bun run build
+cd examples/rest-api
+bun run dev
+```
+
+`dev` rebuilds and restarts the application on every change, with `NODE_ENV=development` (each
+example ships a `.env.development` with development credentials). Every example README lists its
+endpoints with `curl` commands. If `znight` reports that `dist/cli.mjs` is missing, run
+`bun run build` again from the repository root.
+
 ## Repository layout
 
 ```txt

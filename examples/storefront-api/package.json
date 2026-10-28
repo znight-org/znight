@@ -5,15 +5,16 @@
   "type": "module",
   "scripts": {
     "generate": "znight generate",
-    "dev": "znight dev",
+    "dev": "NODE_ENV=development znight dev",
     "build": "znight build",
     "start": "znight start",
     "typecheck": "znight generate && tsc --noEmit",
-    "test": "bun test --conditions=@znight/source",
-    "test:e2e": "ZNIGHT_E2E=1 bun test --conditions=@znight/source --timeout 300000 test/e2e.test.ts",
-    "openapi": "znight openapi",
-    "openapi:check": "znight openapi --check",
-    "client:generate": "openapi-typescript openapi.json -o src/client/schema.d.ts"
+    "test": "bun run openapi:check && bun test --conditions=@znight/source",
+    "test:e2e": "ZNIGHT_E2E=1 bun test --conditions=@znight/source --timeout 300000 e2e.test.ts",
+    "openapi": "znight openapi --converters src/openapi.converters.ts",
+    "openapi:check": "znight openapi --check --converters src/openapi.converters.ts",
+    "client:generate": "openapi-typescript openapi.json -o src/client/schema.d.ts --default-non-nullable false",
+    "client:check": "openapi-typescript openapi.json -o src/client/schema.d.ts --default-non-nullable false --check"
   },
   "dependencies": {
     "@znight/core": "workspace:*",

@@ -1,0 +1,2 @@
+# dist/ and src/.znight/ are ignored at the repository root. openapi.json and src/client/schema.d.ts
+# are generated too, but committed on purpose: they are the contract (see README.md).

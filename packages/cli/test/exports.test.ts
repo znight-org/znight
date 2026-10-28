@@ -33,7 +33,7 @@ describe('public entry', () => {
   it('declares the znight binary, built from src/cli.ts with its shebang', () => {
     const root = join(import.meta.dir, '..')
     const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
-    expect(manifest.bin).toEqual({ znight: './dist/cli.mjs' })
+    expect(manifest.bin).toEqual({ znight: './bin/znight.mjs' })
     expect(readFileSync(join(root, 'tsdown.config.ts'), 'utf8')).toContain("'src/cli.ts'")
     expect(readFileSync(join(root, 'src/cli.ts'), 'utf8')).toStartWith('#!/usr/bin/env node\n')
   })

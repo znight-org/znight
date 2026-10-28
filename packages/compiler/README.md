@@ -734,13 +734,13 @@ type looks like once serialised as JSON, for schema generators (`@znight/openapi
 declarations, from sources and from `.d.ts` files alike (the same library gives identical shapes),
 so it keeps what `TypeInfo` loses: object literal types, and the names of aliases.
 
-| Target                                       | Annotation                                                               |
-| -------------------------------------------- | ------------------------------------------------------------------------ |
-| `{ returnOf: MethodInfo }`                   | the return type, a top-level `Promise<T>` unwrapped                      |
-| `{ parameter: ParameterInfo }`               | a method or constructor parameter (inherited constructors substituted)   |
-| `{ property: PropertyInfo }`                 | a class field                                                            |
-| `{ decorator: DecoratorInfo, typeArgument }` | a type argument of a decorator call                                      |
-| `{ type: TypeInfo }`                         | an already resolved type (aliases expanded, object literal types opaque) |
+| Target                                       | Annotation                                                                                                        |
+| -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `{ returnOf: MethodInfo }`                   | the return type, a top-level `Promise<T>` unwrapped                                                               |
+| `{ parameter: ParameterInfo }`               | a method or constructor parameter (inherited constructors substituted)                                            |
+| `{ property: PropertyInfo }`                 | a class field                                                                                                     |
+| `{ decorator: DecoratorInfo, typeArgument }` | a type argument of a decorator call                                                                               |
+| `{ type: TypeInfo }`                         | an already resolved type (aliases expanded, enum members such as `Kind.Cat` literal, object literal types opaque) |
 
 `ShapeResult` is `{ root, named, issues }`. A `Shape` is one of:
 

@@ -304,6 +304,67 @@ describe('a prebuilt document file', () => {
     expect((await again.inject({ method: 'GET', url: '/api/openapi.json' })).body).toBe(built.json)
     expect(quiet.lines.filter(line => line.startsWith('warn'))).toEqual([])
   })
+
+  it('warns (ZNIGHT030) when no server of the file ends with the HTTP prefix', async () => {
+    const built = await buildOpenApiDocument(metadata)
+    const withServers = (name: string, servers: unknown): string => {
+      const file = path.join(directory, name)
+      fs.writeFileSync(file, JSON.stringify({ ...built.document, servers }, null, 2))
+      return file
+    }
+    const warnings = async (file: string, plugin: Record<string, unknown> = {}): Promise<string[]> => {
+      const logger = recordingLogger()
+      await using app = await create(
+        OpenApiPlugin.configure({ document: { file }, ...plugin }),
+        { prefix: '/api' },
+        logger,
+      )
+      expect((await app.inject({ method: 'GET', url: '/api/openapi.json' })).status).toBe(200)
+      return logger.lines.filter(line => line.startsWith('warn ZNIGHT030') && !line.includes('stale'))
+    }
+    const none = (file: string, listed: string): string =>
+      `warn ZNIGHT030: ${file} declares no server ending with the HTTP prefix "/api" (servers: ${listed}): clients generated from the file would call the wrong paths`
+    // servers: [] is served as is (the prefix rule only fills missing servers): clients call /books
+    const empty = withServers('empty.json', [])
+    expect(await warnings(empty)).toEqual([none(empty, '[]')])
+    // absolute servers of another path
+    const absolute = withServers('absolute.json', [
+      { url: 'https://api.example.com' },
+      { url: 'https://staging.example.com/v1/' },
+    ])
+    expect(await warnings(absolute)).toEqual([
+      none(absolute, '"https://api.example.com", "https://staging.example.com/v1/"'),
+    ])
+    // a malformed servers member is ignored, not a crash
+    const malformed = withServers('malformed.json', [{ description: 'no url' }])
+    expect(await warnings(malformed)).toEqual([none(malformed, '[]')])
+    // one relative server not ending with the prefix: reported on its own, once
+    const relative = withServers('relative.json', [{ url: '/v1' }])
+    expect(await warnings(relative)).toEqual([
+      'warn ZNIGHT030: the OpenAPI server "/v1" does not end with the HTTP prefix "/api": generated clients would call the wrong paths',
+    ])
+    // one server reflecting the prefix is enough: relative, absolute with the prefix, or templated
+    for (const servers of [
+      [{ url: 'https://api.example.com' }, { url: '/api/' }],
+      [{ url: 'https://api.example.com/api' }],
+      [{ url: 'https://api.example.com/v2/api/' }],
+      [{ url: '{scheme}://api.example.com/{base}' }],
+    ]) {
+      expect(await warnings(withServers('reflected.json', servers))).toEqual([])
+    }
+    // runtime servers replace the file's: they are what is checked (a gateway that rewrites paths)
+    expect(await warnings(absolute, { servers: [{ url: 'https://gateway.example.com' }] })).toEqual([])
+  })
+
+  it('does not check the servers of a file without an HTTP prefix', async () => {
+    const file = path.join(directory, 'no-prefix.json')
+    const built = await buildOpenApiDocument(metadata)
+    fs.writeFileSync(file, JSON.stringify({ ...built.document, servers: [] }, null, 2))
+    const logger = recordingLogger()
+    await using app = await create(OpenApiPlugin.configure({ document: { file } }), {}, logger)
+    expect((await app.inject({ method: 'GET', url: '/openapi.json' })).status).toBe(200)
+    expect(logger.lines.filter(line => line.startsWith('warn ZNIGHT030') && !line.includes('stale'))).toEqual([])
+  })
 })
 
 describe('lifecycle and options', () => {

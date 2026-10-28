@@ -528,13 +528,13 @@ application provider, e.g. `class AppLogger implements CoreLogger`) nor package-
 | ZNIGHT020 | The generated module is imported (transitively) by a provider module (ESM cycle → TDZ crash), also through a path alias before the file exists                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | error                                          |
 | ZNIGHT021 | Lifecycle hook, plugin hook or shutdown step failed or timed out (runtime)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | error                                          |
 | ZNIGHT022 | Syntax error: a scanned source file could not be parsed (reported first; the file is skipped, analysis continues)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | error                                          |
-| ZNIGHT023 | Missing route decision: a route has no effective decision of a required route decorator group (build), or a decision that no guard of its chain enforces (boot, every route in one error; one warning per group with `enforcement: 'warn'`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | error / warning                                |
-| ZNIGHT030 | Invalid OpenAPI definition (`@OpenApiDocument` options or a second one, `@Api*` outside a controller or route handler, invalid static values, malformed `securityScheme()`; at boot: invalid `OpenApiPlugin` options, missing `extensions.openapi`, no `http` plugin; warnings: servers not reflecting the prefix, stale prebuilt file)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | error / warning                                |
+| ZNIGHT023 | Missing route decision: a route has no effective decision of a required route decorator group (build), or a decision that no guard of its chain enforces, of a required group or of a group a guard class of the application enforces (boot, every route in one error; one warning per group with `enforcement: 'warn'`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | error / warning                                |
+| ZNIGHT030 | Invalid OpenAPI definition (`@OpenApiDocument` options or a second one, `@Api*` outside a controller or route handler, invalid static values, malformed `securityScheme()`; at boot: invalid `OpenApiPlugin` options, missing `extensions.openapi`, no `http` plugin; warnings: servers not reflecting the prefix, stale prebuilt file, prebuilt file without servers under a prefix)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | error / warning                                |
 | ZNIGHT031 | Undocumented response: the success response of a route cannot be documented and no `@ApiResponse` covers it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | warning (error with `strict`)                  |
 | ZNIGHT032 | Unrepresentable type: no JSON Schema, or not serialised as declared (`bigint` in a JSON response is always an error)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | warning / error (error with `strict`)          |
 | ZNIGHT033 | Duplicate OpenAPI operation id                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | error                                          |
-| ZNIGHT034 | Schema name conflict: two declarations or schemas for one component name (compile time, or at assembly for hoisted `$defs`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | error                                          |
-| ZNIGHT035 | Inconsistent operation: the documentation contradicts the route (a body on 204/304, another success status, `@ApiQuery`/`@ApiBody` duplicating the signature; warnings: `@ApiBody` on GET/HEAD, `@ApiExclude` with other `@Api*`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | error / warning                                |
+| ZNIGHT034 | Schema name conflict: two declarations or schemas for one component name (compile time, a declaration named like a schema included; or at assembly, two schemas of one io under one name: hoisted `$defs` ids, `XInput` variants)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | error                                          |
+| ZNIGHT035 | Inconsistent operation: the documentation contradicts the route (a body on 204/304, `@HttpCode(204)` or `304` with a body, another success status, `@ApiQuery`/`@ApiBody` duplicating the signature; warnings: `@ApiBody` on GET/HEAD, `@ApiExclude` with other `@Api*`, routes of one path naming their parameters differently, a whole-object parameter property documented twice at assembly)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | error / warning                                |
 | ZNIGHT036 | Invalid security requirement (not a `securityScheme()`, scopes on a scheme without scopes, undeclared OAuth2 scopes, one scheme name for two definitions, invalid `decisions[].when` / `scopes: 'value'`; warning: a decision never applied)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | error / warning                                |
 | ZNIGHT037 | Schema conversion failed while the document is assembled (boot, emission, tests): no converter, a converter throwing or returning a non-object, a whole-object `@Query(S)`/`@Param(S)`/`@Headers(S)` schema that is not an object                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | error (warning with `unrepresentable: 'warn'`) |
 | ZNIGHT040 | Invalid schedule: cron expression (syntax, range, never fires, `@reboot`), duration, time zone, job options, job method signature; at boot: `SchedulePlugin` options, `jobs` overrides, metadata, a zone unknown to the runtime's `Intl`; at runtime: `parseCron`, `parseDuration`, `registry.add*`, `reschedule`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | error / warning                                |
@@ -622,14 +622,17 @@ field cannot be combined with other upload parameters (ZNIGHT005); upload parame
 the text fields.
 
 Cookies (RFC 0006): `@Cookie('name') v: T` is coerced like `@Headers` (label `cookie "name"`, whose
-messages never echo the value) or validated with `schema`; `@Cookie()` / `@Cookie(S)` injects every
+messages never echo the value) or validated with `schema` (the issues of a `cookie "name"` or
+`cookies` validation are redacted: message `Invalid value`, path reduced to its keys, since some
+libraries quote the value in both); `@Cookie()` / `@Cookie(S)` injects every
 cookie (`Record<string, string>`: another declared type without schema is ZNIGHT017).
 `@SignedCookie('name', S?)` requires a name (ZNIGHT005) and injects the verified value of a signed
 cookie with the same rules. Parameter sources `cookie` / `signedCookie` (§9.1).
 
 `@Sse` (RFC 0006): `@Sse(path?, options?)` or `@Sse(options)` declares a `GET` route (`sse` in its
 metadata, `{}` without options; `heartbeat: false` is stored as `0`). Options are integers:
-`heartbeat` ≥ 1 000 or `false`, `retry` ≥ 0, `maxDuration` ≥ 1 000; anything else, an unknown key or a
+`heartbeat` from 1 000 to 2 147 483 647 (2^31 − 1, the longest timer) or `false`, `retry` ≥ 0,
+`maxDuration` from 1 000 to 2 147 483 647 (about 24.8 days); anything else, an unknown key or a
 second argument after options is ZNIGHT005. `@Sse` cannot be combined with another route decorator
 on the same method, `@HttpCode` (an event stream answers 200), `@Header('content-type')` or `@Res()`,
 and a handler whose (awaited) return type is a string, number, boolean or literal is an error
@@ -639,8 +642,10 @@ sends `GET` without body; `fetch()` clients streaming a `POST` use `@Post()` and
 `HttpResponse.sse()`).
 
 Route decorators (RFC 0001): `createRouteDecorator(key, options?)` takes a non-empty key and static
-options `{ group?, required? }` (`group` matches `/^[A-Za-z][\w.-]*$/`, default the key; `required`
-default `false`); invalid values throw a `TypeError` when the module loads, and the compiler reports
+options `{ group?, required? }` (`required` default `false`; `group` default the key). The grammar
+`/^[A-Za-z][\w.-]*$/` applies to an explicit `group` only: a decorator without `group` (or whose
+`group` is its key) is its own group, named after its key, whatever the key (`'auth:public'`,
+`'app/tag'`). Invalid values throw a `TypeError` when the module loads, and the compiler reports
 them as ZNIGHT005. The decorator carries `key`, `group`, `required` (`RouteDecoratorInfo`), `get(ctx)`
 (the effective value of the current route) and `meta(value?)` (the same metadata as data, `{ key,
 value, group, required }`, for plugin routes, §9.1). Decorators of a group are alternatives: one
@@ -1089,6 +1094,16 @@ interface DecoratorSpec {
     generics, the usual utility types (`Partial`, `Required`, `Readonly`, `Pick`, `Omit`, `Record`,
     `NonNullable`, `Exclude`, `Extract`, `Awaited`), `keyof`, indexed access and mapped types over
     literal keys are applied structurally.
+  - Enums are the union of their member values, in declaration order; an enum member type
+    (`Kind.Cat`, also through a namespace import or an enum declared in a namespace) is the literal
+    of its value (an unknown member: `opaque`, reason `unresolved`). Key positions (`Record<K, V>`,
+    mapped types, the keys of `Pick` / `Omit`, the index of `T[K]`) and the members filtered by
+    `Exclude`, `Extract` and `NonNullable` go through the members of enums and of aliases of
+    unions, literals or primitives: `Record<Genre, number>` has one required property per member,
+    `{ [K in Genre]?: T }` one optional property per member, `Exclude<Status, 'deleted'>` drops the
+    member. A filter that removes nothing keeps the named shape (`NonNullable<Pet>` stays `Pet`);
+    `Record<never, T>` (or an empty enum) is `{}`. **Impl.** the `{ type: TypeInfo }` target keeps
+    `Kind.Cat` opaque (`unresolved`).
   - Options: `schemaAliases` (identity → `'input' | 'output'`, matched before alias expansion, also
     through aliases of them), `schemaMembers` (members meaning the type of a schema value, ArkType
     `typeof S.infer`), `keep` (identities kept as `reference`), `jsdoc` (default `true`).
@@ -1375,7 +1390,10 @@ class Hooks {
   are listeners.
 - `run()` resolves with `fn`'s result; values returned by wrappers are ignored; when a wrapper does
   not call `next()`, the operation does not run and `run()` resolves `undefined` (a `schedule:run`
-  wrapper vetoes the run that way: outcome `skipped`).
+  wrapper vetoes the run that way: outcome `skipped`). The producer sets the outcome of a vetoed
+  run once `run()` resolved: inside the wrappers, after `next()` returned, `outcome` is still
+  `undefined` for a veto (or for a wrapper that threw before the job), and observers read it as
+  `skipped` (`failed` when `next()` rejected).
 - Registration is copy-on-write: emitting allocates nothing.
 
 ### 8.4 AOP
@@ -1589,8 +1607,9 @@ read in the async context of the handler (request-scoped providers and tracing k
   key in `groups`, else the key itself; without groups this is the former key-by-key merge). It is
   computed once at boot and frozen; `ctx.route.meta`, `decorator.get(ctx)` and `HttpPlugin.routes`
   read it. `httpMetadata()` validates `groups` (an object of `{ keys, required }`: non-empty unique
-  string keys, a boolean, a key in at most one group) and hand-written metadata with two keys of one
-  group on the same target: ZNIGHT007.
+  string keys, a boolean, a key in at most one group; a group name follows the group grammar of §5
+  unless the group is named after its single key) and hand-written metadata with two keys of one
+  group on the same target: ZNIGHT007. Plugin route `meta` entries follow the same naming rule.
 - **Boot check of decisions** (normative). In `onBootstrap`, once the routes are registered, every
   controller route (HEAD and trailing-slash variants ignored) and every plugin route is checked:
   - its **chain classes** are the classes of its guards: a global guard given as a class, or the
@@ -1599,22 +1618,33 @@ read in the async context of the handler (request-scoped providers and tracing k
     its declaration); a guard without class (built by a factory) enforces nothing. The static
     `enforces` of each chain class MUST be an array of `{ key: string, group: string, required:
     boolean }` (ZNIGHT005 naming the guard), consistent with `groups` (ZNIGHT005);
+  - the **guard classes of the application** are the classes of `metadata.providers` with a
+    `canActivate()` method on their prototype, in a chain or not: the shape of their `enforces` is
+    validated the same way (ZNIGHT005), and their groups only become known (a guard registered
+    nowhere neither declares its groups nor makes them required), so that a decision whose guard was
+    forgotten in every chain (a second entrypoint, a worker, a test) is reported instead of being
+    silently unenforced;
   - `enforced(route)` = the groups listed by its chain classes; `known` = the groups enforced by any
-    chain; `required` = the required groups of `groups`, plus the groups of `enforces` entries and of
-    plugin route `meta` entries with `required: true` (a group can be known at boot only, e.g. an
-    auth package shared between services); `decided(route)` = the groups of its effective metadata;
+    chain or by any guard class of the application; `required` = the required groups of `groups`,
+    plus the required groups declared by the `enforces` of chain classes and by plugin route `meta`
+    entries (a group can be known at boot only, e.g. an auth package shared between services);
+    `decided(route)` = the groups of its effective metadata;
   - problems: `required − decided(route)` (no decision) and `(decided(route) ∩ (required ∪ known)) −
-    enforced(route)` (a decision no guard enforces). With `enforcement: 'error'` (default) every
-    problem goes into **one** ZNIGHT023 `ZnightError` listing the routes by group, with hints (the
-    plugin of a plugin route, `enforcement: 'warn'` for tests); with `'warn'`, one `logger.warn` per
-    group.
+    enforced(route)` (a decision no guard of its chain enforces, a non-required group such as
+    `@RateLimit()` included). With `enforcement: 'error'` (default) every problem goes into **one**
+    ZNIGHT023 `ZnightError` listing the routes by group, with hints (the plugin of a plugin route,
+    the guard classes of the application enforcing the group, `enforcement: 'warn'` for tests);
+    with `'warn'`, one `logger.warn` per group.
 - **CORS** (option `cors`, off by default; policy in `cors.ts`, identical on every adapter). Options
   `{ origin, credentials?, methods?, allowHeaders?, exposeHeaders?, maxAge? }` are validated at boot
   (ZNIGHT005): `origin` is required (`'*'`, an origin, a `RegExp`, a list of them, or a possibly
   async function); a string other than `'*'` MUST equal `new URL(value).origin` with `http:` or
   `https:` (no path, trailing slash or default port); `'null'` is refused; a `RegExp` is anchored
-  with `^` and `$` around every alternative and has no `g` / `y` flag; `credentials: true` is refused
-  with `'*'` and with `allowHeaders: '*'`; methods and header names are HTTP tokens; `maxAge` is an
+  with `^` and `$` around every alternative and has no `g` / `y` flag; a policy is a **wildcard**
+  policy when `'*'` is the origin or one of the origins of a list (`['*']` behaves like `'*'`);
+  `credentials: true` is refused with a wildcard policy, with `allowHeaders: '*'` and with `'*'` in
+  the `methods`, `allowHeaders` and `exposeHeaders` lists (on credentialed requests browsers read
+  it as a method or header named `*`); methods and header names are HTTP tokens; `maxAge` is an
   integer in 0..86400 (default 600); `exposeHeaders` defaults to the request id header.
   - The origin decision is made once per request carrying `origin`, before the hook runs: exact
     match, anchored `RegExp` test, or the awaited function (a throw or rejection denies, logged at
@@ -1626,14 +1656,19 @@ read in the async context of the handler (request-scoped providers and tracing k
     `access-control-allow-origin` (`*` for the wildcard, else the request origin),
     `access-control-allow-credentials` (with `credentials`), `access-control-allow-methods`
     (`methods`, else the methods of `allow`), `access-control-allow-headers` (`allowHeaders`, else
-    the requested list when it is a valid token list), `access-control-max-age`, `allow` and
+    the requested list when it is a valid token list; `*`, alone or listed, gets `, authorization`
+    appended when the browser asks for `authorization`, which `*` never covers),
+    `access-control-max-age`, `allow` and
     `vary: origin, access-control-request-method, access-control-request-headers`. `event.route`
     is `undefined` for a preflight.
   - Every other reply to an allowed origin (2xx, guard 401/403, 404, 405, 413, 500, automatic
     `OPTIONS`, redirects) gets `access-control-allow-origin`, `access-control-allow-credentials` and
-    `access-control-expose-headers` unless already set; `vary: origin` is merged, token by token,
-    into every reply unless `origin` is exactly `'*'`. A denied origin on a request that is not a
-    preflight is served normally, without CORS headers. `@Res()` raw replies are not touched.
+    `access-control-expose-headers` unless already set, and `vary: origin` is merged, token by
+    token, into every reply. With a wildcard policy every reply that is not a preflight gets
+    `access-control-allow-origin: *` (and `access-control-expose-headers`), with or without an
+    `origin` request header, and no `vary: origin`: the reply does not depend on the request, so a
+    cached reply serves CORS and non-CORS requests alike. A denied origin on a request that is not
+    a preflight is served normally, without CORS headers. `@Res()` raw replies are not touched.
 - **Security headers** (option `securityHeaders`, default `true`): `content-security-policy:
   default-src 'none'; frame-ancestors 'none'`, `x-frame-options: DENY`, `x-content-type-options:
   nosniff`, `referrer-policy: no-referrer`; opt-in `strict-transport-security` (`true`:
@@ -1670,27 +1705,37 @@ read in the async context of the handler (request-scoped providers and tracing k
   only, pairs trimmed, quoted values unquoted, `%` sequences decoded (malformed: kept raw); pairs
   without `=` or with an empty name are ignored; the first occurrence of a name wins; repeated
   `cookie` fields are joined with `; `. `ctx.cookies` is a frozen prototype-less record parsed on
-  first access, in linear time. Response: `ctx.setCookie(name, value, options?)` /
+  first access, in linear time (each character is scanned at most twice, even for a header made of
+  `;` without `=`). Response: `ctx.setCookie(name, value, options?)` /
   `ctx.clearCookie(name, options?)` validate everything at call time (`TypeError` / `RangeError`) and
   feed the context jar, sent with **every** reply of the request (errors, guard rejections, redirects,
-  automatic `OPTIONS`); `HttpResponse.withCookie()` / `withoutCookie()` validate what does not
-  depend on the plugin at call time and the rest when the reply is serialised (a violation: a plain
-  500 logged as `Invalid cookie "x": …`). Serialisation (RFC 6265bis): name an RFC 9110 token, value
-  canonically percent-encoded (`encode(decode(v)) === v`), `name=value` ≤ 4096 bytes after signing,
-  `Domain` / `Path` ≤ 1024 bytes; `SameSite=None` and `Partitioned` require `Secure`; the prefixes
-  `__Secure-`, `__Host-` (`Secure`, `Path=/`, no `Domain`), `__Http-` and `__Host-Http-` (also
-  `HttpOnly`) are enforced, case-insensitively. Defaults `Path=/; Secure; HttpOnly; SameSite=Lax`,
-  host-only, merged with `cookies.defaults`. A reply carries one jar keyed by (name, domain, path):
-  a later cookie of the same key replaces the earlier one in place, the `HttpResponse` jar wins over
-  the context jar, and `set-cookie` holds the raw values first (`@Header`, `ctx.setHeader()` /
-  `appendHeader()`, `HttpResponse` headers, a Web `Response`), then the jar, one field line per
-  cookie on every adapter. Once the headers are sent (a running event stream), `setCookie()` /
-  `clearCookie()` throw. Signed cookies: `<encoded value>.<base64url(HMAC-SHA256(secret,
-  "<name>=<encoded value>"))>`, verified in constant time against every secret of
-  `cookies.secrets` (each ≥ 32 bytes, no duplicate; the first signs); an invalid signature makes the
-  cookie absent. A compiled route reading `@SignedCookie` without secrets fails the boot (ZNIGHT006);
-  `ctx.signedCookie()` and `{ signed: true }` without secrets throw. `plugin.signCookie(name, value)`
-  returns the signed wire value.
+  automatic `OPTIONS`, and the fallback reply of an `http:request` hook wrapper that failed before
+  `next()`, which goes through the same header and cookie checks, so an exception mapper's
+  `HttpResponse` keeps its cookies); `HttpResponse.withCookie()` / `withoutCookie()` validate what
+  does not depend on the plugin at call time and the rest when the reply is serialised (a violation:
+  a plain 500 logged as `Invalid cookie "x": …`). Serialisation (RFC 6265bis): name an RFC 9110
+  token, value canonically percent-encoded (`encode(decode(v)) === v`), `name=value` ≤ 4096 bytes
+  after signing, `Domain` / `Path` ≤ 1024 bytes; `expires` in the years 1601 to 9999 (other years
+  are a `TypeError` suggesting `maxAge`: browsers ignore them); `SameSite=None` and `Partitioned`
+  require `Secure`; the prefixes `__Secure-`, `__Host-` (`Secure`, `Path=/`, no `Domain`),
+  `__Http-` and `__Host-Http-` (also `HttpOnly`) are enforced, case-insensitively. Defaults
+  `Path=/; Secure; HttpOnly; SameSite=Lax`, host-only, merged with `cookies.defaults`; `domain:
+  null` on a cookie makes it host-only whatever the defaults, and a `__Host-` cookie never takes the
+  default `domain` nor `path` (its own options are still checked: an explicit incompatible `domain`
+  or `path` throws). A reply carries one jar keyed by (name, domain, path; a `null` domain is
+  host-only): a later cookie of the same key replaces the earlier one in place, the `HttpResponse`
+  jar wins over the context jar, and `set-cookie` holds the raw values first (`@Header`,
+  `ctx.setHeader()` / `appendHeader()`, `HttpResponse` headers, a Web `Response`), then the jar, one
+  field line per cookie on every adapter. Cookies set on the native response by middleware before
+  the Znight route (Express `res.cookie()`, Fastify hooks `reply.header('set-cookie', …)`, Hono
+  `setCookie(c, …)`) are kept before the reply's own on every adapter, event streams included. Once
+  the headers are sent (a running event stream), `setCookie()` / `clearCookie()` throw. Signed
+  cookies: `<encoded value>.<base64url(HMAC-SHA256(secret, "<name>=<encoded value>"))>`, verified
+  in constant time against every secret of `cookies.secrets` (each ≥ 32 bytes, no duplicate; the
+  first signs); an invalid signature makes the cookie absent. A compiled route reading
+  `@SignedCookie` without secrets fails the boot (ZNIGHT006); `ctx.signedCookie()` and
+  `{ signed: true }` without secrets throw. `plugin.signCookie(name, value)` returns the signed
+  wire value.
 - **Server-Sent Events** (RFC 0006; `sse.ts`). An `@Sse` route's awaited result that is an
   `AsyncIterable`, a non-string `Iterable` or a `ReadableStream` (of `SseEvent` objects, or
   `Uint8Array` chunks written as is) is served as an event stream; an `HttpResponse` or a Web
@@ -1702,20 +1747,25 @@ read in the async context of the handler (request-scoped providers and tracing k
   `content-type: text/event-stream; charset=utf-8` last; never `content-length`. Each event is one
   chunk (WHATWG framing: comment lines, `id`, `event`, `retry`, one `data:` line per line of the
   data, CR / LF / CRLF split; non-string data through `JSON.stringify`; `event` without `data` gets
-  an empty `data:`; an invalid item is a `TypeError` that stops the source). Lifecycle (normative):
-  the first chunk (`retry: N`, else the comment `:`) is written without reading the source; the
-  source is pulled once per chunk the client reads (no read-ahead); a heartbeat comment is sent after
-  `heartbeat` ms without an event, never inside raw bytes that do not end at an event boundary; a
+  an empty `data:`; an invalid item is a `TypeError` that stops the source, and so is an `SseEvent`
+  that follows raw bytes not ending at an event boundary, which it would merge into). Lifecycle
+  (normative): the first chunk (`retry: N`, else the comment `:`) is written without reading the
+  source; the source is pulled once per chunk the client reads (no read-ahead); a heartbeat comment
+  is sent after `heartbeat` ms without an event, never inside raw bytes that do not end at an event
+  boundary (the boundary is tracked across chunks, a CRLF split between two chunks included); a
   source error ends the response cleanly and is logged; a client disconnect aborts `ctx.signal`
   (`client`) and stops the source (`return()` / `cancel()`), the scope closing once it stopped or
   after 5 s with a warning; `maxDuration` and shutdown close gracefully: `ctx.signal` aborts
   (`expired` / `shutdown`), the source is still read for `sse.shutdownGraceMs` (1 000), then
-  `retry: R` with R drawn in `[r, 2r]` (r = the `retry` option, else 3 000) ends the stream; `HEAD`
-  sends the headers and never reads the source. `http:request` resolves when the stream opens; the
-  request scope and the in-flight count last until it ends. Guards run once, before the stream;
-  exception mappers only apply before it starts. `plugin.streams` counts the open streams.
-  `EventChannel` (bounded `capacity`, `overflow` `drop-oldest` / `drop-newest` / `close`, `signal`)
-  bridges push sources; `encodeSseEvent()` and `parseSseStream()` (WHATWG parsing) are exported.
+  `retry: R` with R drawn in `[r, 2r]` (r = the `retry` option, else 3 000) ends the stream, written
+  only at an event boundary (after an unterminated raw event the stream ends without it); `HEAD`
+  sends the headers and never reads the source. Every timer is capped at 2^31 − 1 ms (the options
+  are validated against it; the session caps its delays as a backstop). `http:request` resolves when
+  the stream opens; the request scope and the in-flight count last until it ends. Guards run once,
+  before the stream; exception mappers only apply before it starts. `plugin.streams` counts the open
+  streams. `EventChannel` (bounded `capacity`, `overflow` `drop-oldest` / `drop-newest` / `close`,
+  `signal`) bridges push sources; `encodeSseEvent()` and `parseSseStream()` (WHATWG parsing) are
+  exported.
 - **`ctx.signal`** exists on every route (created on first access): it aborts when the client
   disconnects before the response was written (`AdapterRequest.onAbort`), when the response body is
   cancelled, or when the server closes an event stream; never after a normal completion. Its reason
@@ -1727,8 +1777,9 @@ read in the async context of the handler (request-scoped providers and tracing k
   `nodeAdapter()`, `3000`, `0.0.0.0`, `strict`, `false`, 1 MiB, the upload limits above,
   `x-request-id`, 4 000 ms, no CORS, `true`, `false`, `'error'`, no secrets and the secure cookie
   defaults, `{ heartbeat: 8000, shutdownGraceMs: 1000 }`); `cookies` is `{ secrets?, defaults? }`,
-  `sse` is `{ heartbeat?, retry?, shutdownGraceMs? }` with `shutdownGraceMs` < `drainTimeoutMs`
-  (invalid values and unknown keys: ZNIGHT005); class refs are resolved with `container.tokenOf`.
+  `sse` is `{ heartbeat?, retry?, shutdownGraceMs? }` (`heartbeat` from 1 000 to 2^31 − 1 ms or
+  `false`, `shutdownGraceMs` from 0 to 2^31 − 1 ms and < `drainTimeoutMs`; invalid values and
+  unknown keys: ZNIGHT005); class refs are resolved with `container.tokenOf`.
   The options are resolved once per application. The instance exposes
   `inject`, `injectStream`, `injectSse`, `streams`, `signCookie`, `address`, `adapter`, `inflight`,
   `prefix` (the resolved prefix, `''` or `/api`:
@@ -1790,7 +1841,7 @@ interface AdapterReply {
   body: ReplyBody // bytes, a stream (files too) or null
   blob?: Blob // the file `body` streams, for adapters able to send it natively
   raw?: boolean
-  eventStream?: boolean // text/event-stream: no idle timeout, no buffering, no compression
+  eventStream?: boolean // a streamed text/event-stream body: headers at once, no idle timeout, no buffering, no compression
 }
 interface InjectRequest {
   method
@@ -1821,7 +1872,11 @@ interface InjectStreamResponse {
 ```
 
 Adapters only route and translate I/O; everything else is done by the plugin so every adapter
-behaves the same. An adapter without `streamBody` gets multipart uploads buffered before parsing. A
+behaves the same. A reply is an event stream (`eventStream`) when its body is a stream with a
+`text/event-stream` content type, whatever produced it (`@Sse`, `HttpResponse.sse()`, a proxied
+`fetch()` response, `HttpResponse.stream()`): the adapter sends its headers without waiting for the
+first chunk (a quiet stream may send nothing for a while). An adapter without `streamBody` gets
+multipart uploads buffered before parsing. A
 stream body MUST be read to its end or cancelled (client gone, HEAD...), since the request scope and
 the in-flight count stay open until then. Files (and every `Blob` result) are such streams, reading
 the `Blob` given in `reply.blob` with its `content-length`: an adapter MAY send that `Blob` natively
@@ -1836,7 +1891,10 @@ Fastify's 415; Express answers 500 with an explicit log entry when a body parser
 the body; `honoAdapter({ app?, serveOptions? })` passes `serveOptions` to `Bun.serve()` with
 `maxRequestBodySize` unlimited by default (the plugin enforces the body limits) and lifts Bun's
 `idleTimeout` while a streamed response is sent; on `Bun.serve()` a file is handed to Bun, which
-opens it at once, and the scope closes then.
+opens it at once, and the scope closes then. On `@hono/node-server`, a reply whose client already
+left (an async step before the handler returned) has its body discarded, and a stream body nobody
+locked is cancelled when the response closes unfinished: the server would neither read nor cancel
+it, and the event source, the request scope and the in-flight count would stay open.
 
 `inject` is in-memory (fastify `inject`, hono `request`, node and express via `light-my-request`, an
 optional peer): strings and bytes are sent as is (`text/plain` / `application/octet-stream` without
@@ -1847,10 +1905,16 @@ optional peer): strings and bytes are sent as is (`text/plain` / `application/oc
 `cookies` (`parseSetCookie`). An event stream (`text/event-stream`) makes `inject` reject with a hint
 instead of waiting for its end. `HttpPlugin.injectStream(request)` (method defaulting to `GET`)
 resolves at the response headers; `HttpPlugin.injectSse(request)` builds on it and reads the stream
-like `EventSource`: `status`, `headers`, `cookies` once the first chunk was read, `body` / `json()`
-for a reply that is not an event stream, events read only when asked for (`next({ timeoutMs })`,
-2 000 ms by default, `take(n)`, async iteration), `comments`, `lastEventId`, `retry`, `done`,
-`close()` (a client disconnect; also `await using`) and `reconnect()` (the same request plus
+like `EventSource`. Opening never waits forever: without response headers within 2 000 ms the
+request is aborted (the server sees a client disconnect) and `injectSse` rejects, naming the
+request. Otherwise it resolves once the first chunk was read (the preamble of an `@Sse` stream, so
+`retry` is known), or after 2 000 ms more for a stream that sends nothing yet (still read in the
+background: a quiet stream never hangs the test). It exposes `status`, `headers`, `cookies`;
+`body` / `json()` for a reply that is not an event stream; events read only when asked for
+(`next({ timeoutMs })`, 2 000 ms by default, rejecting with `no event received`, plus `the stream
+has sent nothing since it opened` for a quiet one; `take(n)`, async iteration); `comments`,
+`lastEventId`, `retry`, `done`, `close()` (a client disconnect; also `await using`) and
+`reconnect()` (the same request plus
 `last-event-id`). The adapters that write to a Node.js response (node, express, fastify through
 `reply.hijack()`, Hono on `@hono/node-server`) disable the socket timeout of an event stream
 (`setTimeout(0)`), and `honoAdapter().listen()` lifts `Bun.serve()`'s `idleTimeout` while it is
@@ -2119,7 +2183,12 @@ injected into the message headers) and `schedule:run` (one span `schedule <job>`
 the root of a new trace except for manual triggers; the `schedule_*` metrics: runs, duration,
 lateness, active runs, last success, with the `job` label capped at `maxJobs` then `_OTHER`; one log
 entry per run, written inside its span), and listens to `schedule:run` for the occurrences that did
-not execute (counters, `job skipped` / `job not acquired` entries). Inside a run, the logger adds
+not execute (counters, `job skipped` / `job not acquired` entries). A run vetoed by a
+`schedule:run` wrapper (§8.3) is `skipped` wherever that wrapper sits relative to the plugin's own:
+a `job skipped` entry at `warn` without `durationMs` nor `err`, counted `skipped` but neither timed
+nor recorded as a success (`last success` keeps aging, so a staleness alert keeps firing), and, when
+its span is already open, a span with outcome `skipped` and status `UNSET`; a wrapper that throws
+before the job is `failed`. Inside a run, the logger adds
 `job` and `runId` (from the request-scoped `@znight/schedule#JobContext`; `logging.jobContext`).
 Each part can be turned off: `metrics: false`, `tracing: false`, `logging.requests` /
 `logging.messages` / `logging.jobs: false`, and per hook (`tracing.http`, `metrics.messaging`,
@@ -2197,19 +2266,47 @@ interface OpenApiMetadata {
   stands for one parameter per property of an object schema. The `$znight` key is reserved
   (ZNIGHT030).
 - Inference (normative summary): one operation per route and method (`@All`: GET, POST, PUT, PATCH,
-  DELETE; automatic HEAD / OPTIONS are not documented); `:id` → `{id}`, `*` → `{wildcard}`; paths
-  never contain the HTTP prefix. Parameters from `@Param` / `@Query` / `@Headers` / `@Cookie` /
-  `@SignedCookie` (`in: cookie`) with the schema of their coercion plan and default value, or the
+  DELETE; automatic HEAD / OPTIONS are not documented); `:id` → `{id}`, `*` → `{wildcard}`
+  (`{wildcard_1}` when the path has a `:wildcard` parameter, `{wildcard_2}` when it also has
+  `:wildcard_1`, and so on); paths never contain the HTTP prefix. Routes of one path whose
+  templates differ only by their parameter names (`/books/:id`, `/books/:bookId`) are documented
+  under one template, OpenAPI forbidding two templates of one path: the first in code-point order,
+  or the template of a whole-path `@Param(S)` schema (such operations keep theirs), the path
+  parameters renamed by position, with a ZNIGHT035 warning. Parameters from `@Param` / `@Query` /
+  `@Headers` / `@Cookie` / `@SignedCookie` (`in: cookie`) with the schema of their coercion plan and default value, or the
   **input** schema of their Standard Schema. Request bodies from `@Body(S)` / `@Validate(S)` (input
-  schema) or the declared type, uploads as `multipart/form-data`. The success status is `@HttpCode`,
-  else 201 for POST, else 200 (204 for `void`); its content comes from the annotated return type
-  (`Promise` unwrapped, `HttpResponse<T>` as `T`, schema output aliases such as `z.output<typeof S>`
-  as the **output** schema, `string` as `text/plain`, bytes and streams as
-  `application/octet-stream`, `@Sse` routes as `text/event-stream` with `x-znight-event-schema`);
-  no annotation, `unknown`, a bare `HttpResponse`, a Web `Response` or `@Res()` is ZNIGHT031 unless
-  `@ApiResponse` documents it. Standard errors: 400 on routes that coerce or validate, 413 on routes
-  reading a body, 415 on upload routes, `HttpErrorBody` for declared 4XX / 5XX responses without
-  schema.
+  schema) or the declared type, uploads as `multipart/form-data`.
+- Success response (normative summary): the status is `@HttpCode`, else 201 for POST, else 200
+  (204 when nothing but `void` / `undefined` / `never` is returned). The annotated return type
+  (`Promise` unwrapped) is read member by member: `HttpResponse<T>` members are documented as `T`
+  (`HttpResponse<A> | HttpResponse<B> | C` as `A | B | C`, repetitions removed) and make the status
+  dynamic, so `@ApiResponse` may declare other 2XX statuses; an `undefined` member adds an empty 204
+  response (not on POST nor with `@HttpCode`; `@ApiResponse(204)` is then accepted). The media
+  types are the serialiser's: strings, string literals and string enums are `text/plain`, the other
+  members `application/json` (a mixed union such as `string | null` gets both media types, each with
+  its members); schema output aliases such as `z.output<typeof S>` give the **output** schema;
+  a single bytes, `Blob` or stream type (or `HttpResponse<FileBody>`) is
+  `application/octet-stream`; `@Sse` routes and a single `AsyncIterable` are `text/event-stream`
+  with `x-znight-event-schema`; `HttpResponse<SseBody>` (`HttpResponse.sse()`) is a 200 (even on
+  POST, unless `@HttpCode`) `text/event-stream` response (an event stream or another body:
+  ZNIGHT031). A body on a bodyless status (`@HttpCode(204)`, `304`, 1xx) is a ZNIGHT035 error and
+  the content is dropped; `HEAD` operations never have content. No annotation, `unknown`, a bare
+  `HttpResponse`, a Web `Response` or `@Res()` is ZNIGHT031 unless `@ApiResponse` documents it.
+  Standard errors: 400 on routes that coerce or validate, 413 on routes reading a body, 415 on
+  upload routes, `HttpErrorBody` for declared 4XX / 5XX responses without schema.
+- Components (compile time): a named declaration is named after it, a generic instantiation after
+  the names of its arguments (`Page<Book>` → `Page_Book`); an argument that does not name itself
+  (an object literal, a tuple, an opaque type, a generic reference) adds the first 8 hexadecimal
+  characters of the SHA-256 of the instantiation key (`Page<{ id: string }>` →
+  `Page_object_1a2b3c4d`), and so does an instantiation whose name another instantiation of the
+  same declaration already has (`Box<Book[]>`, `Box<BookArray>`). Once every operation is built,
+  a declaration named like a Standard Schema slot is ZNIGHT034 whatever the route order, except a
+  declaration merged with the schema it is inferred from (`const User = z.object(…)` and
+  `interface User extends z.infer<typeof User> {}`: one identity), documented by the schema (its
+  output variant). A union of objects with a required string literal property of distinct values is a
+  `oneOf`, with a `discriminator` (and its `mapping`) only when every member is a named component
+  (tools would read the values as component names otherwise). A `bigint` first met in a request
+  (warning) is reported again as an error when a response returns it.
 - Security, first rule that applies: `@ApiSecurity` of the route, of the controller, the first
   `decisions` entry whose route decorator is in the effective metadata (`scopes: 'value'` turns a
   static string array value into scopes), else the document `security`.
@@ -2217,14 +2314,26 @@ interface OpenApiMetadata {
 
 `buildOpenApiDocument(metadata, options?)` (normative, pure, async) assembles the document: (1)
 converts each schema slot with the first converter that answers (the `converters` option, then
-Standard JSON Schema, then the `@valibot/to-json-schema` fallback), input and output separately;
-failures are collected into one ZNIGHT037 (or `{}` and a warning with `unrepresentable: 'warn'`);
-(2) names the converted schemas (`X`, plus `XInput` when input and output differ) and hoists their
-`$defs` into `components.schemas` (a name clash: ZNIGHT034); (3) adds the standard error
-components; (4) replaces the placeholders; (5) builds the operations and applies `filter`, pruning
-unreferenced components; (6) builds the root (`info` merged with the option, `servers`: the option,
-else the declared servers, else `[{ url: prefix }]`, plus `x-znight-fingerprint`) and applies
-`transform`; (7) deep-freezes it and
+Standard JSON Schema, then the `@valibot/to-json-schema` fallback, its options passed as
+`libraryOptions`), input and output separately; dates are `date-time` strings in responses (Zod
+`z.date()`, Valibot `v.date()`: `Date.prototype.toJSON`) and for coerced Zod dates in requests
+(`z.coerce.date()`); failures are collected into one ZNIGHT037 (or `{}` and a warning with
+`unrepresentable: 'warn'`); (2) names the converted schemas: each one is split into its root and
+its `$defs` / `definitions` (at any depth), hoisted into `components.schemas` with every local
+reference rewritten (`#` is the document in OpenAPI). A definition with a library id
+(`.meta({ id: 'Address' })`) is named after it; anonymous definitions (Zod's `__schemaN` of a
+recursive schema) are scoped to their slot (`Tree_schema0`); a root that only references one
+definition (`{ $ref: '#/$defs/X' }`) is unwrapped when X is anonymous or named after the slot (a
+root `.meta({ id })` equal to the export name), and stays an alias of X otherwise. Every name, slot
+or definition, gets an `XInput` variant when its input and output JSON Schemas differ, directly or
+through a definition it references (propagated to a fixed point); two different schemas of one io
+under one name (or a clash with a TypeScript component) are ZNIGHT034; (3) adds the standard error
+components; (4) replaces the placeholders: a property of a whole-object parameter schema that an
+explicit parameter or another expansion of the operation already documents (same location and
+name, header names case-insensitive) is dropped, with one ZNIGHT035 warning; (5) builds the
+operations and applies `filter`, pruning unreferenced components; (6) builds the root (`info`
+merged with the option, `servers`: the option, else the declared servers, else
+`[{ url: prefix }]`, plus `x-znight-fingerprint`) and applies `transform`; (7) deep-freezes it and
 serialises `json` (`JSON.stringify(document, null, 2)` plus a newline). It returns `{ document,
 json, warnings, stats }`. The same function runs at boot, in `znight openapi` and in tests, so the
 served document and the emitted file are byte-identical.
@@ -2237,21 +2346,35 @@ served document and the emitted file are byte-identical.
   ZNIGHT030): `path` (`/openapi.json`), `yaml` (optional peer `yaml`), the UI page at `uiPath`
   (`/docs`, Scalar or Swagger UI, local assets under `${uiPath}/_assets/` or a pinned CDN with
   Subresource Integrity, `assets: 'auto' | 'local' | 'cdn'`) with its own
-  `content-security-policy` (inline script allowed by hash). The routes take `meta` (route
-  decisions, checked by the ZNIGHT023 boot check) and `guards`, and are listed with
-  `source: 'openapi'`.
+  `content-security-policy` (inline script allowed by hash, `connect-src` limited to the origins of
+  the served document's servers in every build mode: with `'first-request'` the first request of
+  the page builds the document; when the build fails, the page allows the declared servers, static
+  or from the `servers` option, and is not cached). The installed UI package is found from
+  `@znight/openapi`, then from the working directory, through `<package>/package.json` when it
+  resolves, else in the `node_modules` directories of the resolution paths (the manifest `name`
+  checked), so a package whose exports map hides its manifest (`@scalar/api-reference`) is found on
+  Node.js as on Bun. The routes take `meta` (route decisions, checked by the ZNIGHT023 boot check)
+  and `guards`, and are listed with `source: 'openapi'`.
 - The document is built in `onBootstrap` (`build: 'boot'`, a failure fails the boot) or on the first
   request (`'first-request'`: one shared promise, retried after a failure); with
   `document: { file }` it serves a prebuilt file instead (its `x-znight-fingerprint` differing from
-  the metadata's is a ZNIGHT030 warning). Bodies are precomputed bytes with a strong ETag
+  the metadata's is a ZNIGHT030 warning). The runtime options apply to a file as to a build:
+  `filter` (operations matched by path and method, an operation unknown to the metadata kept; empty
+  paths, unused tags and unreferenced components pruned), `info`, `servers`, else `[{ url: prefix }]`
+  when the file declares no servers, then `transform`; the file is served byte for byte when none
+  of them applies. Under an HTTP prefix, a file without `servers` is a ZNIGHT030 warning (emit it
+  with `znight openapi --prefix` or `znight build --openapi-prefix`), and relative servers of the
+  file that do not end with the prefix are one too. Bodies are precomputed bytes with a strong ETag
   (`if-none-match` → 304, `HEAD` included) and `cache-control` (`no-cache`). `enabled: false` serves
   and builds nothing.
 - Emission (`@znight/openapi/emit`, used by `znight openapi`, `znight build --openapi` and the
   `openapi()` Vite plugin of `@znight/openapi/vite`): compiles the application like `znight
   generate`, loads the generated module in a child process (Bun: the compiler preload; Node.js: a
   Vite server in middleware mode) without instantiating anything (`NODE_ENV` defaults to
-  `production`), runs `buildOpenApiDocument` and writes the outputs atomically, only when they
-  changed (`check`: never writes, reports stale files). `@znight/openapi/testing` exports
+  `production`), runs `buildOpenApiDocument` (with the HTTP `prefix` of the options: `znight openapi
+  --prefix`, `znight build --openapi-prefix`, `openapi({ prefix })`, so that the file has the
+  `servers` of the served document) and writes the outputs atomically, only when they changed
+  (`check`: never writes, reports stale files). `@znight/openapi/testing` exports
   `validateResponse(document, { method, path, response })` (optional peer `@cfworker/json-schema`).
 
 ### 9.6 Schedule (`@znight/schedule`)
@@ -2296,14 +2419,22 @@ interface ScheduleMetadata {
 - `onReady` arms the scheduler when `enabled` (jobs never run against a half-started application),
   runs the `runOnStart` jobs and logs the next occurrence; its timer keeps the process alive.
 - **Occurrences** (normative): one timer for every job, capped at 60 s and resynchronised with the
-  wall clock, a heap ordered by time then name. A cron job fires at the first matching wall-clock
+  wall clock, a heap ordered by time then name, indexed by job (at most one entry per job: `remove`,
+  `pause` and `reschedule` take it out at once, so nothing retains a removed job until its old
+  deadline). A cron job fires at the first matching wall-clock
   second after the previous occurrence, in its zone (an IANA name, `UTC`, `local` read once at boot,
   or a fixed offset, kept as written): a local time skipped by a DST gap fires once at the first
-  instant after the gap; a repeated local time fires at its first occurrence only, unless the hour
-  field matches every hour. Day of month and day of week are OR-ed when both are restricted.
-  Intervals fire at the multiples of `every` since the Unix epoch; a timeout fires once, `delay`
-  after the scheduler started. A late wake-up runs a job once, for its latest missed occurrence; an
-  occurrence never runs twice in a process.
+  instant after the gap (also when the search starts in the last second before it), and `matches()`
+  agrees with `next()`: the end of a gap is an occurrence of the wall times it skips; a repeated
+  local time fires at its first occurrence only, unless the hour field matches every hour. Day of
+  month and day of week are OR-ed when both are restricted. In the day of week, `a/s` runs up to
+  Saturday and `7/s` is Sunday alone; `SUN` closing a range is 7 (`FRI-SUN`) except after Sunday
+  (`SUN-SUN`, `0-SUN`: Sunday, like `0-0`). Occurrences before 1970 are computed like any other
+  (`next()`, `nextRuns()`, `matches()`). Zones are shared by the identifier `Intl` resolves a name to
+  and only the last 256 spellings are remembered, so zone names from user input keep memory
+  bounded. Intervals fire at the multiples of `every` since the Unix epoch; a timeout fires once,
+  `delay` after the scheduler started. A late wake-up runs a job once, for its latest missed
+  occurrence; an occurrence never runs twice in a process.
 - **A run**: the overlap policy first (`skip`: outcome `skipped`; `queue`: one pending run, the
   latest occurrence; `allow`: concurrent, implies no lock), then the lock, then a new container scope
   seeded with its `JobContext` (`job`, `runId`, `trigger`, `scheduledAt`, `startedAt`, `previous`,
@@ -2311,28 +2442,46 @@ interface ScheduleMetadata {
   `hooks.run('schedule:run', event, invoke)` (§8.3); every occurrence is then emitted.
   `maxDuration` aborts `ctx.signal` with a `JobAbortedError` (ZNIGHT044, `reason: 'timeout'`)
   without freeing the slot. `HttpContext`, `RequestId` and `InboundMessage` do not exist in a run.
+  A run **starts** when its job is called. Once its lease is acquired, and again when the hook
+  wrappers call `next()` (both may wait), a run is dropped when its signal was aborted, the
+  scheduler is stopping or disposed, the job was removed, or it was paused (manual runs excepted):
+  outcome `skipped` (with `aborted` when its signal was aborted), logged at `debug`, its lease
+  released (its job never started), and no timer is armed after the dispose. `pause()` also drops
+  the queued occurrence of an `overlap: 'queue'` job; a queued `trigger()` still runs.
 - **Locks** (normative): with a store, jobs are locked unless `lock: false` or `overlap: 'allow'`.
   `acquire(key, { owner, occurrence, ttlMs })` MUST grant a lease only when no lease is live **and**
   no later-or-equal occurrence of the key was claimed (occurrence fencing: clock skew between
   instances never runs an occurrence twice); a refusal is the outcome `not-acquired`. The lease is
-  extended every `ttl / 3`; a lost lease aborts the run (`lock-lost`); a store failure fails closed
-  (outcome `failed`, no run); `release()` keeps the occurrence claimed. `memoryLockStore()` serves
-  one process; `lockStoreScenarios` (`@znight/schedule/testing`) is the conformance suite of a store.
+  extended every `ttl / 3`, one extension at a time; it is lost when `extend()` answers `false`, or
+  `ttl` after the call of the last successful extension, even while an extension hangs (a
+  partitioned client queuing commands): the run is then aborted (`lock-lost`). A store failure
+  fails closed (outcome `failed`, no run), and so does an `acquire()` that does not answer within
+  `ttl` (a lease granted later is released at once); a `release()` that does not answer within `ttl`
+  is logged at `warn` and frees the job (the lease expires). `release()` keeps the occurrence
+  claimed. `memoryLockStore()` serves one process; `lockStoreScenarios`
+  (`@znight/schedule/testing`) is the conformance suite of a store, and the package tests a Postgres
+  and a Redis recipe against it (`test/integration`, `ZNIGHT_INTEGRATION=1`).
 - **Shutdown**: `onStop` disarms the timer, drops queued runs, aborts every running run's signal at
   once (`shutdown`) and waits up to `drainTimeoutMs`; runs still in flight are abandoned (logged):
-  their leases are neither released nor extended. A `stop()` called from inside a run does not wait
+  their leases are neither released nor extended (a run whose job had not started yet, still
+  waiting for its lease, is dropped and releases it). A `stop()` called from inside a run does not wait
   for it. `onDispose` clears the timers and unbinds the registry. List `SchedulePlugin` before
   `HttpPlugin`: plugins stop in reverse order, so HTTP drains first.
 - `SchedulerRegistry`: `jobs()`, `get(name)`, `has(name)`, `addCron` / `addInterval` /
   `addTimeout(name, schedule, handler, options?)` (validated at once: ZNIGHT040, ZNIGHT041,
-  ZNIGHT043), `remove(name, { abort? })`, `trigger(name)` (the whole pipeline, its own scope, even
+  ZNIGHT043), `remove(name, { abort? })` (runs not started yet are dropped, a running run goes on
+  unless `abort`), `trigger(name)` (the whole pipeline, its own scope, even
   with `enabled: false`; resolves with the `JobRunResult`, never rejects for a job failure), `idle()`;
-  each `ScheduledJob` has `pause()`, `resume()`, `reschedule()` (same kind), `trigger()`,
-  `nextRun`, `lastRun`, `nextRuns(count)`. Reschedules and dynamic jobs are not persisted.
+  each `ScheduledJob` has `pause()`, `resume()`, `reschedule()` (same kind; a timeout is armed
+  again at `max(now + delay, last occurrence + 1 ms)`, also from its own run, and a `done` job is
+  scheduled again), `trigger()`, `nextRun`, `lastRun`, `nextRuns(count)`. Reschedules and dynamic
+  jobs are not persisted.
 - `parseCron(expression, { timeZone? })` (`next`, `nextRuns`, `matches`) and `parseDuration` expose
   the engine (ZNIGHT040 as `InvalidScheduleError` with `field`, `start`, `end`).
-  `@znight/schedule/testing` exports `createTestClock()` (virtual time: `advance`, `advanceTo`,
-  waiting for the runs it starts), `createJobContext()` and `lockStoreScenarios`.
+  `@znight/schedule/testing` exports `createTestClock(start?, { settleTimeoutMs? })` (virtual time:
+  `advance`, `advanceTo`, waiting for the runs it starts, real I/O included; a run that makes no
+  progress for `settleTimeoutMs` of real time, default 1 000, is not waited for again during that
+  call), `createJobContext()` and `lockStoreScenarios`.
 
 ## 10. Testing (`@znight/testing`)
 
@@ -2409,7 +2558,8 @@ res.json()
   `injectStream(request)` and `injectSse(request)` (method defaulting to `GET`, plus an optional
   `signal`) delegate structurally to the `injectStream` / `injectSse` of the plugin named `http`
   (§9.1: the response at its headers with a `ReadableStream` body; an event stream read in memory
-  like `EventSource`); a plugin without them is ZNIGHT001 with the hint `@znight/http ≥ 0.2`.
+  like `EventSource`); a plugin without them is ZNIGHT001, hinting to register
+  `HttpPlugin.configure({ adapter })` from `@znight/http` ≥ 0.1.0 (the release of `@znight/testing`).
   Default logger: console at `warn`.
 - Metadata helpers for hand-written tests: `createMetadata(record)`, `defineTestMetadata(spec)`
   (class-first, tokens `test#Name`), `testToken`, `override(key, value)`, `overrideFactory(key,
@@ -2421,9 +2571,9 @@ res.json()
 | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `znight new [name]`           | Scaffold a project, interactively or from `-y/--yes`, `--pm <bun\|npm\|pnpm\|yarn>` (default: the package manager running the CLI, else `bun` under Bun, else `npm`), `--adapter <node\|fastify\|express\|hono>` (default `node`), `--features <config,observability,messaging,schedule,openapi\|all\|none>` (default `config,observability`; `schedule` adds `SchedulePlugin` before `HttpPlugin`, a sample job and its test on a virtual clock; `openapi` adds `OpenApiPlugin` after `HttpPlugin`, `src/api.ts` with `@OpenApiDocument` and the `openapi` / `openapi:check` scripts), `--no-install`, `--no-git`, `--dir`, `--force`; `.` scaffolds into the current directory. Bun projects test with `bun test` + preload, others with Vitest, and run the application on Bun (`dev` / `start` scripts with `--runtime bun`: `bun run` honours the `node` shebang of the binary); the compiler options live in `znight.config.ts`, imported by `vite.config.ts` (`znight(options)`) and read by the preload and `znight generate`; the `TestApp` test configures `ObservabilityPlugin` with `metrics: { server: false }`                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `znight generate`             | Write the generated container (compiler `generate`); `--check` (exit 1 when stale, never writes; names every missing or out-of-date file, the module first, then the library manifest in library mode: the compiler's `staleFiles` when it reports them, else a comparison of the outputs with the disk), `-w/--watch` (incremental), `--root`, `--config`, `--config-loader <bundle\|runner\|native>`. Compiler options: `znight.config.*` / `ZNIGHT_CONFIG` (`loadZnightConfig()`, Vite not loaded; skipped with `--config`), else the options the `znight()` plugin compiles with: the Vite config is resolved like `znight build` does (`vite.resolveConfig`, `NODE_ENV` restored afterwards) and the CLI reads `plugin.api.options` (or `api.getOptions()`) with the `root`, `aliases` and `runtimeConditions` of `plugin.api.compiler.options` (without it, the Vite root and the string `resolve.alias` entries), else the defaults. Compiles in `serve` mode. `--watch` watches what the Vite plugin and the Bun preload watch: the `include` directories of the project and of its source libraries, the project root and the directories of `watchFiles`, recomputed after each compile (one watcher per target, real POSIX paths); only changes that can change the result compile (parseable sources, `.js` included; resolution config files; known files), and a directory created, deleted or moved under an include root triggers a rescan (`mv src/users src/accounts` → the old files removed, the new directory added). Stops on `SIGINT`, `SIGTERM`, `SIGHUP` and, on POSIX, `SIGQUIT` |
-| `znight g <schematic> <name>` | `service`, `controller`, `consumer`, `config`, `guard` (with a commented `static enforces` line for route decisions), `interceptor` (`--aop` for a method interceptor), `factory`, `job` (`j`: `<name>.jobs.ts` with a `<Name>Jobs` class and a `@Cron` method); `--path`, `--flat`, `-f/--force`, `-d/--dry-run`, `--root`. Aliases `generate <schematic>` and `generate:<schematic>`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `znight g <schematic> <name>` | `service`, `controller`, `consumer`, `config`, `guard` (with a commented `static enforces` line for route decisions), `interceptor` (`--aop` for a method interceptor), `factory`, `job` (`j`: `<name>.jobs.ts` with a `<Name>Jobs` class and a `@Cron` method named `<qualified>.daily`, where `<qualified>` is the directories of the file relative to `src/` (or to the project root for a `--path` outside it) and the kebab name, without the directory named after it: `g job reports/digest` → `reports.digest.daily`, `--path src/emails` → `emails.digest.daily`, so job names stay unique); `--path`, `--flat`, `-f/--force`, `-d/--dry-run`, `--root`. Aliases `generate <schematic>` and `generate:<schematic>`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `znight dev`                  | `vite build --watch` (no Vite dev server) and a full process restart after every successful rebuild — no partial HMR of providers: SIGTERM, `--kill-timeout` (5 000 ms) then SIGKILL, `--debounce`d (100 ms) and never overlapping restarts; a failed build keeps the last good process, and so does a failed compilation: the watch build succeeds with the error module, so the CLI reads `plugin.api.result.ok` of `znight()` once the bundle is written, does not restart (a pending restart is cancelled) and reports `Compilation failed` (printing the diagnostics itself with `--log-level silent`). Termination: `SIGINT` (Ctrl+C), `SIGTERM`, `SIGHUP` (terminal closed: nothing more is printed) and, on POSIX, `SIGQUIT` close the watcher and stop the application gracefully (`SIGINT` after Ctrl+C, `SIGTERM` otherwise); a second signal kills it (130). The application runs detached, in its own session and process group, so it receives exactly one signal and never the terminal's. It runs with `NODE_ENV=development` unless the variable was set when the CLI started (the environment is copied before Vite, whose build sets `NODE_ENV`, runs). Also `--runtime <auto\|node\|bun>` (`auto`: the runtime running the CLI, i.e. Node.js under `bun run` / `bunx`, whose `node` shebang Bun honours: pass `--runtime bun`), `--entry` (default: the entry chunk of the build), `--inspect`, `--clear`, `--mode` (`development`), `--log-level` (`warn`), `--root`, `--config`, `--config-loader`; arguments after `--` go to the application                                       |
-| `znight build`                | `vite build` with the Vite config (`--mode` default `production`, `--log-level`, `--root`, `--config`, `--config-loader`); compiler errors fail the build. `--openapi[=<path>]` adds the `openapi()` Vite plugin of `@znight/openapi` when the config registers none: the document is emitted after the bundle, to `dist/openapi.json` or the given path. `build`, `dev` and `generate` resolve the Vite root like the Vite CLI run in the project directory: the `root` of the config file, relative to the project root (`--root`), set by a `config` hook in `order: 'pre'` (an inline `root` would override the config file's), else the project root; the config file is searched in the project root, in Vite's order                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `znight build`                | `vite build` with the Vite config (`--mode` default `production`, `--log-level`, `--root`, `--config`, `--config-loader`); compiler errors fail the build. `--openapi[=<path>]` adds the `openapi()` Vite plugin of `@znight/openapi` when the config registers none: the document is emitted after the bundle, to `dist/openapi.json` or the given path; `--openapi-prefix <path>` (with `--openapi` only, else a usage error; a path starting with `/`) passes the HTTP prefix of `HttpPlugin`, the `servers` default of the document, like `znight openapi --prefix`; when the Vite config registers its own `openapi()`, `--openapi=<path>` and `--openapi-prefix` do not apply and a warning says so. `build`, `dev` and `generate` resolve the Vite root like the Vite CLI run in the project directory: the `root` of the config file, relative to the project root (`--root`), set by a `config` hook in `order: 'pre'` (an inline `root` would override the config file's), else the project root; the config file is searched in the project root, in Vite's order                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `znight start`                | Run the build (`--entry`, default `dist/main.js` then `dist/main.mjs`; `--runtime <auto\|node\|bun>`; arguments after `--` go to the application) with `NODE_ENV` defaulting to `production`; when the runtime running the CLI provides `process.execve` (POSIX), the CLI `execve`s into the application runtime (same PID, signals, exit code), otherwise it forwards `SIGINT`, `SIGTERM` and `SIGHUP` and returns the child's code (`128 + n` on signal)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `znight openapi`              | Write the OpenAPI document of the application with `@znight/openapi` (`emitOpenApi`, §9.5): `-o/--output <file>` (repeatable, default `openapi.json`; `.yaml` / `.yml` write YAML), `--check` (exit 1 when an output is missing or stale, never writes), `--prefix` (the `servers` default), `--runtime <auto\|node\|bun>` (the runtime loading the application modules in a child process), `--converters <file>` (a module default-exporting `SchemaConverter[]`), `--root`, `--config`, `--config-loader`. Compile errors are printed and exit 1 before any module runs; outputs are written only when they change                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 

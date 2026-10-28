@@ -292,6 +292,10 @@ Durations: a non-negative integer number of milliseconds once converted, at most
   `*` or `?`.
 - Errors with a hint: 7 fields (year), `W`, `LW`, `L-n`, `H`, `?` outside the day fields, a step of
   0, a reversed range, `@reboot` ("use `runOnStart: true` or `@Timeout(0)`").
+- **As implemented** (v0.1, after the wave 6 review): in the day of week, `a/s` runs from `a` to
+  Saturday, and `7/s` (Sunday written 7) is Sunday alone, never an empty set. `SUN` closing a range
+  is 7 (`FRI-SUN`), except after Sunday: `SUN-SUN` and `0-SUN` are Sunday alone, like `0-0`
+  (`0-7` in digits stays the whole week).
 
 The engine is public, so applications can validate user input with the same rules (the example
 validates monitor schedules with it):
@@ -796,7 +800,11 @@ for (const scenario of lockStoreScenarios) {
 
 - `createTestClock(start = '2026-01-01T00:00:00Z')` returns a `ScheduleClock` with `date`,
   `advance(duration)` and `advanceTo(date)`. Both fire the due timers in order, and **wait for the
-  runs they started to settle** before going on, so assertions need no sleep.
+  runs they started to settle** before going on, so assertions need no sleep. **As implemented**
+  (v0.1, after the wave 6 review): the wait covers real I/O (a database, `fetch`, the file
+  system) and is measured in real time: a run that makes no progress for `settleTimeoutMs`
+  (`createTestClock(start, { settleTimeoutMs })`, 1 000 ms by default) is not waited for again
+  during that call.
 - `createJobContext(init?)` builds a `JobContext` for unit tests, with an `abort(reason)` helper.
 - `TestApp` (prerequisite §9) adds job hosts to the default roots. Tests that do not exercise the
   schedule pass `enabled: false`. With a test clock, time never moves by itself, but `runOnStart`
@@ -1136,6 +1144,13 @@ against a half-started application, and a `stop()` during the start never arms a
   occurrences not greater than the last one run are ignored.
 - The next occurrence is armed when an occurrence **fires**, not when its run settles, so a slow run
   never delays the schedule (overlap decides, §7.5).
+- **As implemented** (v0.1, after the wave 6 review): a local time skipped by a DST gap also fires
+  when the search starts in the last second before the gap, and `matches()` agrees with `next()`
+  (the end of a gap is an occurrence of the wall times it skips). Occurrences before 1970 are
+  computed like any other. Zones are shared by the identifier `Intl` resolves a name to, and only
+  the last 256 spellings are remembered. The deadline heap holds at most one entry per job:
+  `remove`, `pause` and `reschedule` take it out at once. A timeout rescheduled from its own run is
+  armed again at `max(now + delay, last occurrence + 1 ms)`.
 
 ### 7.4 The run pipeline (normative)
 
@@ -1161,6 +1176,13 @@ occurrence due (job, scheduledAt, trigger)
   observer, as messaging does.
 - Skipped runs are logged at `warn`, since a job slower than its period is a problem worth seeing.
   Refused leases are logged at `debug`: they are normal with replicas.
+- **As implemented** (v0.1, after the wave 6 review): a run starts when its job is called. Once its
+  lease is acquired, and again when the wrappers call `next()`, a run is dropped when its signal was
+  aborted, the scheduler is stopping or disposed, the job was removed, or it was paused (manual runs
+  excepted): outcome `skipped` (with `aborted` when its signal was aborted), logged at `debug`, its
+  lease released. `pause()` also drops the queued occurrence of an `overlap: 'queue'` job; a queued
+  manual `trigger()` still runs. Inside the wrappers, `outcome` of a vetoed run is `undefined` until
+  `hooks.run` resolved: observers read it as `skipped` (`failed` when `next()` rejected).
 
 ### 7.5 Overlap
 
@@ -1196,6 +1218,12 @@ Manual triggers follow the job's policy: under `skip`, `trigger()` resolves
   `false`, or `ttl` elapsed since the last successful extension), `ctx.signal` is aborted with
   `lock-lost` and logged at `warn`. The run is not killed.
 - **Store failures fail closed.** No lease, no run: outcome `failed` with the store error.
+- **As implemented** (v0.1, after the wave 6 review): one extension at a time, and the lease is
+  lost `ttl` after the call of the last successful extension even while an extension hangs (a
+  partitioned client queuing commands). An `acquire()` that does not answer within `ttl` fails
+  closed (a lease granted later is released at once); a `release()` that does not answer within
+  `ttl` is logged at `warn` and frees the job. The package tests a Postgres and a Redis recipe
+  against `lockStoreScenarios` (`test/integration`, `ZNIGHT_INTEGRATION=1`).
 - **Release** happens when the run settles, except for runs abandoned at shutdown (§7.7).
 - `lockStoreScenarios` (§4.8) checks these semantics for any store: claim/refuse, monotonic
   occurrences, expiry, extend after expiry and takeover, stale release, and ten concurrent claims of

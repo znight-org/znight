@@ -1,0 +1,21 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`access matrix 1`] = `
+[
+  "GET /admin/export → roles admin | exporter [AuthGuard, RateLimitGuard, CsrfGuard]",
+  "GET /admin/notes → roles admin [AuthGuard, RateLimitGuard, CsrfGuard]",
+  "GET /health → public [AuthGuard, RateLimitGuard, CsrfGuard]",
+  "GET /me → authenticated [AuthGuard, RateLimitGuard, CsrfGuard]",
+  "GET /notes → authenticated [AuthGuard, RateLimitGuard, CsrfGuard]",
+  "POST /notes → roles editor, 30 per 60 s [AuthGuard, RateLimitGuard, CsrfGuard]",
+  "DELETE /notes/:id → authenticated [AuthGuard, RateLimitGuard, CsrfGuard, NoteOwnerPolicy]",
+  "GET /notes/:id → authenticated [AuthGuard, RateLimitGuard, CsrfGuard, NoteOwnerPolicy]",
+  "PATCH /notes/:id → authenticated [AuthGuard, RateLimitGuard, CsrfGuard, NoteOwnerPolicy]",
+  "DELETE /session → authenticated [AuthGuard, RateLimitGuard, CsrfGuard]",
+  "GET /session → authenticated [AuthGuard, RateLimitGuard, CsrfGuard]",
+  "POST /session → public, 5 per 60 s [AuthGuard, RateLimitGuard, CsrfGuard]",
+  "GET /status → public [AuthGuard, RateLimitGuard, CsrfGuard]",
+  "GET /status/details → roles admin [AuthGuard, RateLimitGuard, CsrfGuard]",
+  "POST /webhooks/billing → public, 120 per 60 s [AuthGuard, RateLimitGuard, CsrfGuard, WebhookSignatureGuard]",
+]
+`;

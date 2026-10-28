@@ -231,7 +231,7 @@
       "name": "@znight/cli",
       "version": "0.1.0",
       "bin": {
-        "znight": "./dist/cli.mjs",
+        "znight": "./bin/znight.mjs",
       },
       "dependencies": {
         "@clack/prompts": "^1.8.1",

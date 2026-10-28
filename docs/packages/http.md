@@ -390,8 +390,12 @@ const roles = Roles.get(ctx) // the effective value: ['admin'] on /stats/summary
   controller's: a route without one fails the build
   ([`ZNIGHT023`](/reference/error-codes#znight023)).
 - A guard lists the decorators it enforces (`static enforces = [Public, Roles]`): at boot, every
-  route deciding a required (or enforced) group must have such a guard in its chain, otherwise the
-  application does not start (`ZNIGHT023`, or one warning per group with `enforcement: 'warn'`).
+  route deciding a required group, or a group that a guard class of the application enforces (even
+  a guard registered in no chain, so a forgotten `RateLimitGuard` is caught), must have such a
+  guard in its chain, otherwise the application does not start (`ZNIGHT023`, or one warning per
+  group with `enforcement: 'warn'`).
+- Without `group`, any non-empty key is valid (`'auth:public'`); an explicit `group` is a name of
+  letters, digits, `_`, `.` and `-` starting with a letter.
 - `HttpPlugin.routes` lists the effective `meta` and the guard chain of every route: snapshot it to
   review access changes.
 
@@ -422,15 +426,19 @@ CORS is handled by the plugin, the same way on every adapter (the built-in node 
 - **Other replies to an allowed origin** (errors, `404`, `405` and redirects included) get
   `access-control-allow-origin`, `access-control-allow-credentials` and
   `access-control-expose-headers` (the request id header by default); `vary: origin` is merged into
-  every reply.
+  every reply. With `origin: '*'` (or `'*'` in a list), every reply gets
+  `access-control-allow-origin: *`, with or without an `Origin` header, and no `vary: origin`: a
+  cached reply then serves CORS and non-CORS requests alike.
 - A denied origin is served normally, without CORS headers: CORS decides what a page may read, it is
   not access control.
 
 `origin` is `'*'`, an origin, an anchored `RegExp`, a list of them or a function. Options are checked
 at boot ([`ZNIGHT005`](/reference/error-codes#znight005)): an origin written with a path or a
-trailing slash, an unanchored `RegExp`, `'*'` or `allowHeaders: '*'` with `credentials`. Other
-options: `methods`, `allowHeaders`, `exposeHeaders`, `maxAge` (600 s). With Fastify, Express or
-Hono, use either this option or their CORS middleware, not both.
+trailing slash, an unanchored `RegExp`, `'*'` or `allowHeaders: '*'` with `credentials`, and
+`'*'` in the `methods`, `allowHeaders` or `exposeHeaders` lists with `credentials` (browsers read it
+literally there). Other options: `methods`, `allowHeaders` (`'*'` never covers `Authorization`: it
+is named in the preflight answer when the browser asks for it), `exposeHeaders`, `maxAge` (600 s).
+With Fastify, Express or Hono, use either this option or their CORS middleware, not both.
 
 ## Security headers
 
@@ -503,8 +511,9 @@ export class PrefsController {
 
 When a name repeats, the first cookie wins (browsers send the most specific path first). An
 invalid value answers 400 (`Invalid cookie "visits": expected a number`) and the message never
-echoes the value: cookies outlive deployments, so give the ones that may go stale a schema with a
-fallback, as above.
+echoes the value (the issues of a schema read `Invalid value`: some libraries quote the value in
+them): cookies outlive deployments, so give the ones that may go stale a schema with a fallback, as
+above.
 
 ### Setting cookies
 
@@ -516,30 +525,35 @@ return HttpResponse.ok({ id: user.id }).withCookie('__Host-uid', user.id, { sign
 return HttpResponse.noContent().withoutCookie('session')
 ```
 
-| Option                    | Default | Description                                                           |
-| ------------------------- | ------- | --------------------------------------------------------------------- |
-| `maxAge`, `expires`       | —       | Lifetime in seconds, or an absolute `Date`. Default: a session cookie |
-| `domain`, `path`          | —, `/`  | Default: a host-only cookie for the whole site                        |
-| `secure`                  | `true`  | Sent over HTTPS only (and `http://localhost`)                         |
-| `httpOnly`                | `true`  | Not readable from JavaScript                                          |
-| `sameSite`                | `'lax'` | `'strict'`, `'lax'` or `'none'` (requires `secure`)                   |
-| `partitioned`, `priority` | —       | CHIPS partitioned cookie (requires `secure`), Chromium `Priority`     |
-| `signed`                  | `false` | Signs the value with the first secret of `cookies.secrets`            |
+| Option                    | Default | Description                                                                |
+| ------------------------- | ------- | -------------------------------------------------------------------------- |
+| `maxAge`, `expires`       | —       | Lifetime in seconds, or an absolute `Date`. Default: a session cookie      |
+| `domain`, `path`          | —, `/`  | Default: a host-only cookie for the whole site (`domain: null`: host-only) |
+| `secure`                  | `true`  | Sent over HTTPS only (and `http://localhost`)                              |
+| `httpOnly`                | `true`  | Not readable from JavaScript                                               |
+| `sameSite`                | `'lax'` | `'strict'`, `'lax'` or `'none'` (requires `secure`)                        |
+| `partitioned`, `priority` | —       | CHIPS partitioned cookie (requires `secure`), Chromium `Priority`          |
+| `signed`                  | `false` | Signs the value with the first secret of `cookies.secrets`                 |
 
 What the plugin guarantees:
 
 - **Secure defaults**: `Path=/; Secure; HttpOnly; SameSite=Lax`, host-only. Change them for the
-  whole application with the plugin option `cookies.defaults`, and per cookie with the options.
+  whole application with the plugin option `cookies.defaults`, and per cookie with the options:
+  `domain: null` keeps one cookie host-only under a default `domain`, and a `__Host-` cookie never
+  takes the default `domain` or `path`.
 - **Strict serialisation**: a cookie browsers would drop silently (a name that is not a token,
-  more than 4096 bytes, `SameSite=None` or `partitioned` without `secure`, an invalid `__Secure-`,
-  `__Host-`, `__Http-` or `__Host-Http-` cookie) throws where it is set. `ctx.setCookie()` checks
+  more than 4096 bytes, an `expires` outside the years 1601 to 9999, `SameSite=None` or
+  `partitioned` without `secure`, an invalid `__Secure-`, `__Host-`, `__Http-` or `__Host-Http-`
+  cookie) throws where it is set. `ctx.setCookie()` checks
   everything at call time; `withCookie()` checks what depends on the plugin (defaults, signing)
   when the response is sent, and a violation answers a logged 500.
 - **Which cookies are sent**: the cookies of `ctx.setCookie()` / `ctx.clearCookie()` go with every
   response of the request, errors and redirects included (a guard can clear a cookie, then throw a
   401); those of the `HttpResponse` replace them for the same name, domain and path. Each cookie is
-  its own `set-cookie` line on every adapter. A `@Res()` handler writes its own response: no cookie
-  is added. Setting a cookie once an event stream has started throws.
+  its own `set-cookie` line on every adapter. Cookies your middleware set before the Znight route
+  (Express `res.cookie()`, a Fastify hook, Hono `setCookie(c, ...)`) are kept, before these. A
+  `@Res()` handler writes its own response: no cookie is added. Setting a cookie once an event
+  stream has started throws.
 - `serializeCookie()`, `serializeClearCookie()`, `parseCookieHeader()` and `parseSetCookie()` are
   exported for gateways and tests.
 
@@ -631,11 +645,11 @@ export class OrderEventsController {
   streaming for `fetch()` clients, 200 by default).
 - `encodeSseEvent()` and `parseSseStream()` (a `ReadableStream` to its events) are exported.
 
-| Option        | Default                           | Description                                                                   |
-| ------------- | --------------------------------- | ----------------------------------------------------------------------------- |
-| `heartbeat`   | plugin `sse.heartbeat` (8 000 ms) | Keep-alive comment after this many ms without an event (≥ 1 000), or `false`  |
-| `retry`       | plugin `sse.retry` (none)         | Client reconnection delay, sent first                                         |
-| `maxDuration` | none                              | Ends the stream gracefully after this many ms (≥ 1 000): rebalancing, re-auth |
+| Option        | Default                           | Description                                                                                              |
+| ------------- | --------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `heartbeat`   | plugin `sse.heartbeat` (8 000 ms) | Keep-alive comment after this many ms without an event (1 000 to 2^31 − 1), or `false`                   |
+| `retry`       | plugin `sse.retry` (none)         | Client reconnection delay, sent first                                                                    |
+| `maxDuration` | none                              | Ends the stream gracefully after this many ms (1 000 to 2^31 − 1, about 24.8 days): rebalancing, re-auth |
 
 ### Stream lifecycle
 
@@ -681,7 +695,10 @@ const resumed = await stream.reconnect() // sends last-event-id: 42, like EventS
 ```
 
 Events are read only when asked for (`next()`, `take(n)`, `for await`), so the test sets the pace
-of the client; `close()` (or the end of the `await using` block) is a client disconnect.
+of the client; `close()` (or the end of the `await using` block) is a client disconnect. Opening
+never hangs a test: `injectSse()` resolves at the first chunk of the stream, or after 2 000 ms for a
+stream that sends nothing yet (a hand-written or proxied one), and rejects, naming the request, when
+the response headers do not arrive within 2 000 ms.
 
 ## Request context
 

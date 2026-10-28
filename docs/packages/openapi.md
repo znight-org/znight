@@ -61,6 +61,18 @@ Return types must be **annotated**: the compiler reads types, it does not infer 
 bodies. A route whose success response cannot be documented is
 [`ZNIGHT031`](/reference/error-codes#znight031), unless an `@ApiResponse` covers it.
 
+The success response follows what the serialiser sends:
+
+- strings, string literals and string enums are `text/plain`, the rest `application/json` (a
+  `string | null` return gets both);
+- `HttpResponse<A> | HttpResponse<B>` documents `A | B`, its status chosen at runtime (declare the
+  other 2XX with `@ApiResponse`);
+- `T | undefined` adds an empty `204`, which the runtime sends for `undefined` (not on POST nor
+  with `@HttpCode`);
+- `HttpResponse.sse()` is a `200` `text/event-stream` response, even on POST (unless `@HttpCode`);
+- a body with `@HttpCode(204)` or `304` is an error
+  ([`ZNIGHT035`](/reference/error-codes#znight035)): the body would never be sent.
+
 ## Documenting operations
 
 ```ts
@@ -177,8 +189,18 @@ an API change shows up in the pull request diff; clients are generated from the 
 znight openapi                      # writes openapi.json at the project root
 znight openapi -o docs/openapi.yaml # YAML, chosen by the extension (needs yaml)
 znight openapi --check              # CI: exit 1 when the file is missing or stale; never writes
+znight openapi --prefix /api        # servers default when @OpenApiDocument declares none
 znight build --openapi              # after the bundle: dist/openapi.json, next to dist/main.js
+znight build --openapi --openapi-prefix /api # the same, with the HTTP prefix as servers default
 ```
+
+Paths in the document never contain the HTTP prefix: it belongs to `servers`. When `HttpPlugin`
+has a `prefix` and `@OpenApiDocument` declares no `servers`, pass the prefix when you emit the file
+(`--prefix` for `znight openapi`, `--openapi-prefix` for `znight build --openapi`, `prefix` for the
+`openapi()` Vite plugin): the file then has the `servers` of the document the application serves,
+and clients generated from it call the right paths. `--openapi-prefix` needs `--openapi`, and when
+your Vite config registers its own `openapi()` plugin, the CLI warns that the flags do not apply:
+set `openapi({ output, prefix })` there instead.
 
 Emission compiles the application like `znight generate` (compile errors stop it before any module
 runs), then loads the generated module in a child process and assembles the document with the same
@@ -192,8 +214,10 @@ In production, serve the emitted file to skip the schema conversion at boot:
 OpenApiPlugin.configure({ document: { file: new URL('./openapi.json', import.meta.url) } })
 ```
 
-A file emitted from another build of the application is reported at boot
-([`ZNIGHT030`](/reference/error-codes#znight030) warning).
+The plugin options `info`, `servers`, `filter` and `transform` apply to the file as to a build. A
+file emitted from another build of the application is reported at boot, and so is a file without
+`servers` under an HTTP prefix: it is then served with `[{ url: prefix }]`
+([`ZNIGHT030`](/reference/error-codes#znight030) warnings).
 
 ## Testing
 
