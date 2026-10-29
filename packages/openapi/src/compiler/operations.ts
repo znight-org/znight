@@ -936,6 +936,7 @@ class OperationBuilder {
 
   #success(httpMethod: string): SuccessModel {
     const { route, method } = this.#source
+    const example = exampleBodyType(this.#source.controller.displayName)
     const post = httpMethod === 'POST'
     const statusFor = (empty: boolean): number => {
       if (route.status !== undefined) return route.status
@@ -955,14 +956,14 @@ class OperationBuilder {
     if (route.rawResponse) {
       return undocumentable(
         'the handler writes the response itself (@Res())',
-        [`Declare it: @ApiResponse<Body>(${statusFor(false)})`],
+        [`Declare it: @ApiResponse<${example}>(${statusFor(false)})`],
         true,
       )
     }
     if (method?.returnType === undefined) {
       return undocumentable('the handler has no return type annotation', [
-        `Annotate the return type: ${method?.async === true ? 'Promise<Body>' : 'Body'}`,
-        `Or declare it: @ApiResponse<Body>(${statusFor(false)})`,
+        `Annotate the return type with the body type: ${handlerKey(route.handler)}(): ${method?.async === true ? `Promise<${example}>` : example}`,
+        `Or declare it: @ApiResponse<${example}>(${statusFor(false)})`,
       ])
     }
     const result = this.#input.schemas.shape({ returnOf: method })
@@ -980,8 +981,8 @@ class OperationBuilder {
           return undocumentable(
             'HttpResponse has no body type',
             [
-              'Give the body type: Promise<HttpResponse<BookResponse>>',
-              `Or declare it: @ApiResponse<BookResponse>(${statusFor(false)})`,
+              `Give the body type: Promise<HttpResponse<${example}>>`,
+              `Or declare it: @ApiResponse<${example}>(${statusFor(false)})`,
             ],
             true,
           )
@@ -996,14 +997,14 @@ class OperationBuilder {
     if (defined.some(member => member.kind === 'reference' && member.identity === 'globalThis#Response')) {
       return undocumentable(
         'a Web Response has no body type',
-        [`Declare it: @ApiResponse<Body>(${statusFor(false)})`],
+        [`Declare it: @ApiResponse<${example}>(${statusFor(false)})`],
         true,
       )
     }
     if (defined.some(member => member.kind === 'unknown')) {
       return undocumentable(
         `the return type is ${method.returnType.kind === 'primitive' ? method.returnType.name : 'unknown'}`,
-        ['Give a precise return type', `Or declare it: @ApiResponse<Body>(${statusFor(false)})`],
+        ['Give a precise return type', `Or declare it: @ApiResponse<${example}>(${statusFor(false)})`],
         dynamic,
       )
     }
@@ -1460,4 +1461,15 @@ function compareStatuses(a: string, b: string): number {
     return /X/.test(status) ? 1 : 0
   }
   return rank(a) - rank(b) || compareStrings(a, b)
+}
+
+/** A handler name as written in a class body: `get`, or `'get-item'` for a quoted key. */
+function handlerKey(name: string): string {
+  return /^[A-Za-z_$][\w$]*$/.test(name) ? name : `'${name.replace(/['\\]/g, '\\$&')}'`
+}
+
+/** The body type named by the hints (`ItemController` → `ItemResponse`): an example, never a literal `Body`. */
+function exampleBodyType(controller: string): string {
+  const base = controller.replace(/Controller$/, '')
+  return base === '' ? 'ResponseBody' : `${base}Response`
 }

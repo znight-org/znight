@@ -367,6 +367,24 @@ describe('boot check (ZNIGHT023)', () => {
     )
   })
 
+  it('names a guard after the group when no guard of the application enforces it', async () => {
+    const meta = appMetadata()
+    const { [t('AuthGuard')]: _, ...providers } = meta.providers
+    const error = await bootError({ ...meta, providers })
+    expect(error.code).toBe(ErrorCode.MissingRouteDecision)
+    expect(error.hints).toContain(
+      'Register a guard declaring `static enforces` with the decorators of the "access" group (authenticated, public, roles), e.g. HttpPlugin.configure({ guards: [AccessGuard] })',
+    )
+  })
+
+  it('names a guard after a group that is not an identifier', async () => {
+    const groups = { ...ACCESS_GROUPS, 'rate-limit': { keys: ['rateLimit'], required: true } }
+    const error = await bootError(appMetadata({ groups }), { guards: [AuthGuard] })
+    expect(error.hints).toContain(
+      'Register a guard declaring `static enforces` with the decorators of the "rate-limit" group (rateLimit), e.g. HttpPlugin.configure({ guards: [RateLimitGuard] })',
+    )
+  })
+
   it('fails when only some chains enforce the group', async () => {
     const error = await bootError(appMetadata({ routeGuards: [t('AuthGuard')] }))
     expect(error.code).toBe(ErrorCode.MissingRouteDecision)
@@ -420,6 +438,10 @@ describe('boot check (ZNIGHT023)', () => {
       'ZNIGHT023: HttpPlugin: No guard enforces the "rateLimit" group on 1 route: GET /books (BookController.list)',
     )
     expect(failure.hints).toContain('Guards of the application enforcing the "rateLimit" group: RateLimitGuard')
+    // the example names the guard of this group, not the access guard
+    expect(failure.hints).toContain(
+      'Register a guard declaring `static enforces` with the decorators of the "rateLimit" group (rateLimit), e.g. HttpPlugin.configure({ guards: [RateLimitGuard] })',
+    )
     const app = await createApp(meta, { guards: [AuthGuard, RateLimitGuard] }, { start: false })
     await app.stop()
     // only its groups become known: an unused guard class does not make its required groups required

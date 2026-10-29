@@ -82,7 +82,10 @@ describe('try breaking it', () => {
         /^warning ZNIGHT031 src\/catalog\/product\.controller\.ts:\d+ The 200 response of GET \/products\/:id \(ProductController\.get\) cannot be documented: the handler has no return type annotation$/,
       ),
     ])
-    expect(diagnostics[0]?.hints?.join('\n')).toContain('@ApiResponse')
+    expect(diagnostics[0]?.hints).toEqual([
+      'Annotate the return type with the body type: get(): ProductResponse',
+      'Or declare it: @ApiResponse<ProductResponse>(200)',
+    ])
   })
 
   it('ZNIGHT032: a bigint in a JSON response is an error (JSON.stringify throws on it)', async () => {

@@ -93,7 +93,9 @@ The [full contributing guide](./docs/contributing/index.md#repository-layout) de
 - **Tests are required.** Every change comes with tests, and a bug fix starts with a failing one.
   Tests live in `packages/<pkg>/test/**/*.test.ts` and use `bun:test`, with fixtures in
   `test/fixtures/`. Slow suites are opt-in: `ZNIGHT_INTEGRATION=1` (real brokers), `ZNIGHT_CLI_E2E=1`
-  (a scaffolded application) and `ZNIGHT_E2E=1` (the examples end to end, after `bun run build`).
+  (a scaffolded application) and `ZNIGHT_E2E=1` (the examples end to end, after `bun run build`; the
+  `client:check` of `examples/storefront-api` runs `npm exec`, so the first run needs npm and the
+  registry).
 - **Biome formats and lints everything.** `bun run check` must pass; `bun run check:fix` fixes most
   problems.
 - **Package sources run as is on Node.js 24 and Bun.** In `packages/*/src`, relative imports use the

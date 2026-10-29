@@ -112,16 +112,29 @@ describe('ZNIGHT031 UndocumentedResponse', () => {
   any() { return 1 }
   @Get('/web')
   @ApiResponse<{ ok: boolean }>(200)
-  web(): Response { return new Response() }`),
+  web(): Response { return new Response() }
+  @Get('/quoted')
+  async 'get-item'() { return 1 }`),
     )
     expect(lines).toEqual([
       'warning ZNIGHT031 src/controller.ts:7:9 The 201 response of POST /items (ItemController.create) cannot be documented: HttpResponse has no body type',
       'warning ZNIGHT031 src/controller.ts:9:3 The 200 response of GET /items/raw (ItemController.raw) cannot be documented: the handler writes the response itself (@Res())',
       'warning ZNIGHT031 src/controller.ts:11:3 The 200 response of GET /items/any (ItemController.any) cannot be documented: the handler has no return type annotation',
+      'warning ZNIGHT031 src/controller.ts:16:9 The 200 response of GET /items/quoted (ItemController.get-item) cannot be documented: the handler has no return type annotation',
     ])
-    expect(diagnostics[0]?.hints).toEqual([
-      'Give the body type: Promise<HttpResponse<BookResponse>>',
-      'Or declare it: @ApiResponse<BookResponse>(201)',
+    // the hints name a type after the controller, never a literal placeholder
+    expect(diagnostics.map(diagnostic => diagnostic.hints)).toEqual([
+      ['Give the body type: Promise<HttpResponse<ItemResponse>>', 'Or declare it: @ApiResponse<ItemResponse>(201)'],
+      ['Declare it: @ApiResponse<ItemResponse>(200)'],
+      [
+        'Annotate the return type with the body type: any(): ItemResponse',
+        'Or declare it: @ApiResponse<ItemResponse>(200)',
+      ],
+      // a quoted handler name stays a valid method signature
+      [
+        "Annotate the return type with the body type: 'get-item'(): Promise<ItemResponse>",
+        'Or declare it: @ApiResponse<ItemResponse>(200)',
+      ],
     ])
   })
 

@@ -8,7 +8,7 @@ import type { HttpRouteDefinition, HttpUploadDefinition } from './metadata.ts'
 import type { FileRule, MultipartPolicy } from './multipart.ts'
 import type { ByteSize } from './size.ts'
 
-import { BadRequestException } from './exceptions.ts'
+import { BadRequestException, issue } from './exceptions.ts'
 
 /** Options of `@UploadedFile` (static: evaluated at build time). */
 export interface UploadedFileOptions {
@@ -147,11 +147,12 @@ function missing(ctx: HttpContext, field: string | undefined, multiple: boolean)
   if (field === undefined) return new BadRequestException(`Missing ${what}`)
   const body = ctx.body
   if (body !== null && typeof body === 'object' && Object.hasOwn(body, field)) {
-    return new BadRequestException(`Expected a file in field ${JSON.stringify(field)}, received a text value`, {
-      field,
-    })
+    return new BadRequestException(
+      `Expected a file in field ${JSON.stringify(field)}, received a text value`,
+      issue(field, 'Expected a file, received a text value'),
+    )
   }
-  return new BadRequestException(`Missing ${what} ${JSON.stringify(field)}`, { field })
+  return new BadRequestException(`Missing ${what} ${JSON.stringify(field)}`, issue(field, `Missing ${what}`))
 }
 
 /** The helpers of the generated code (`import { uploads } from '@znight/http'`). */

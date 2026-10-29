@@ -444,6 +444,7 @@ export default defineConfig({
     znight(options),
     // after the bundle is written (and after each good rebuild of znight dev); default output: dist/openapi.json
     // prefix: the prefix of HttpPlugin.configure() (servers default when @OpenApiDocument declares none)
+    // check (CI): openapi.json must be up to date (never written); dist/openapi.json is always written
     openapi({ output: ['openapi.json', 'dist/openapi.json'], prefix: '/api', check: process.env['CI'] === 'true' }),
   ],
 })

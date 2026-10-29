@@ -91,18 +91,24 @@ describe('uploads helpers', () => {
       expect(error).toBeInstanceOf(BadRequestException)
       return [error.message, error.details]
     }
-    expect(await missing(() => uploads.file(ctx({}), 'avatar'))).toEqual(['Missing file "avatar"', { field: 'avatar' }])
-    expect(await missing(() => uploads.files(ctx({}), 'docs'))).toEqual(['Missing files "docs"', { field: 'docs' }])
+    expect(await missing(() => uploads.file(ctx({}), 'avatar'))).toEqual([
+      'Missing file "avatar"',
+      [{ path: 'avatar', message: 'Missing file' }],
+    ])
+    expect(await missing(() => uploads.files(ctx({}), 'docs'))).toEqual([
+      'Missing files "docs"',
+      [{ path: 'docs', message: 'Missing files' }],
+    ])
     expect(await missing(() => uploads.file(ctx({}), undefined))).toEqual(['Missing file', undefined])
     expect(await missing(() => uploads.files(ctx({}, undefined), undefined))).toEqual(['Missing files', undefined])
     expect(await missing(() => uploads.file(ctx({}, { avatar: 'text' }), 'avatar'))).toEqual([
       'Expected a file in field "avatar", received a text value',
-      { field: 'avatar' },
+      [{ path: 'avatar', message: 'Expected a file, received a text value' }],
     ])
     // inherited keys are not fields
     expect(await missing(() => uploads.file(ctx({}), 'constructor'))).toEqual([
       'Missing file "constructor"',
-      { field: 'constructor' },
+      [{ path: 'constructor', message: 'Missing file' }],
     ])
   })
 })

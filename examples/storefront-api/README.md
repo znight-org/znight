@@ -54,19 +54,19 @@ bun run dev          # or: npm run dev
 debug logs and three sample products. The API listens on <http://localhost:3000>, its reference on
 <http://localhost:3000/docs>.
 
-| Script            | bun                       | npm / Node.js             | Does                                                                                  |
-| ----------------- | ------------------------- | ------------------------- | ------------------------------------------------------------------------------------- |
-| `dev`             | `bun run dev`             | `npm run dev`             | `znight dev`: build in watch mode, restart on change                                  |
-| `build`           | `bun run build`           | `npm run build`           | `znight build`: `dist/main.js` and `dist/openapi.json` (fails on any DI or API error) |
-| `start`           | `bun run start`           | `npm run start`           | `znight start`: runs `dist/main.js` with `NODE_ENV=production`                        |
-| `test`            | `bun run test`            | —                         | `openapi:check`, then unit, HTTP, contract and document tests (`bun test`)            |
-| `test:e2e`        | `bun run test:e2e`        | —                         | builds, runs the bundle on Node.js **and** Bun with the typed client, emits on both   |
-| `typecheck`       | `bun run typecheck`       | `npm run typecheck`       | generates the container, then `tsc --noEmit` (the typed client included)              |
-| `generate`        | `bun run generate`        | `npm run generate`        | writes `src/.znight/container.generated.ts` (`--check` in CI)                         |
-| `openapi`         | `bun run openapi`         | `npm run openapi`         | `znight openapi`: writes `openapi.json`                                               |
-| `openapi:check`   | `bun run openapi:check`   | `npm run openapi:check`   | exits with code 1 when `openapi.json` is missing or stale (CI)                        |
-| `client:generate` | `bun run client:generate` | `npm run client:generate` | `openapi-typescript`: `openapi.json` → `src/client/schema.d.ts`                       |
-| `client:check`    | `bun run client:check`    | `npm run client:check`    | exits with code 1 when `schema.d.ts` is stale (CI)                                    |
+| Script            | bun                       | npm / Node.js             | Does                                                                                                |
+| ----------------- | ------------------------- | ------------------------- | --------------------------------------------------------------------------------------------------- |
+| `dev`             | `bun run dev`             | `npm run dev`             | `znight dev`: build in watch mode, restart on change                                                |
+| `build`           | `bun run build`           | `npm run build`           | `znight build`: `dist/main.js` and `dist/openapi.json` (fails on any DI or API error)               |
+| `start`           | `bun run start`           | `npm run start`           | `znight start`: runs `dist/main.js` with `NODE_ENV=production`                                      |
+| `test`            | `bun run test`            | —                         | `openapi:check`, then unit, HTTP, contract and document tests (`bun test`)                          |
+| `test:e2e`        | `bun run test:e2e`        | —                         | builds, runs the bundle on Node.js **and** Bun with the typed client, emits on both, `client:check` |
+| `typecheck`       | `bun run typecheck`       | `npm run typecheck`       | generates the container, then `tsc --noEmit` (the typed client included)                            |
+| `generate`        | `bun run generate`        | `npm run generate`        | writes `src/.znight/container.generated.ts` (`--check` in CI)                                       |
+| `openapi`         | `bun run openapi`         | `npm run openapi`         | `znight openapi`: writes `openapi.json`                                                             |
+| `openapi:check`   | `bun run openapi:check`   | `npm run openapi:check`   | exits with code 1 when `openapi.json` is missing or stale (CI)                                      |
+| `client:generate` | `bun run client:generate` | `npm run client:generate` | `openapi-typescript` (through `npm exec`): `openapi.json` → `src/client/schema.d.ts`                |
+| `client:check`    | `bun run client:check`    | `npm run client:check`    | exits with code 1 when `schema.d.ts` is stale (CI)                                                  |
 
 The production bundle runs on both runtimes, configured by environment variables only:
 
@@ -304,8 +304,9 @@ lets clients be generated without starting anything.
 
 - `bun run openapi` writes it, `bun run openapi:check` fails when it is stale (`bun run test` runs it
   first; run it in CI);
-- `znight build` writes `dist/openapi.json`, served in production, and `openapi.json` too except in
-  CI, where `openapi:check` checks it instead ([`vite.config.ts`](vite.config.ts));
+- `znight build` writes `dist/openapi.json`, served in production, and `openapi.json` too, except in
+  CI (`CI=true`): the build then fails when `openapi.json` is stale, and never writes it
+  ([`vite.config.ts`](vite.config.ts), the `check` option of `openapi()`);
 - [`document.test.ts`](test/document.test.ts) checks that the served document is the committed file,
   byte for byte, and that it is valid OpenAPI 3.1 (`@seriousme/openapi-schema-validator`).
 
@@ -325,6 +326,15 @@ if (data?.payment.method === 'card')
 else console.error(response.status, error?.message) // the error envelope is typed too
 ```
 
+`openapi-typescript` 7 imports the JavaScript API of TypeScript 5, which the `typescript` 7 package
+does not have: the scripts run it with
+`npm exec --package=typescript@5.9.3 --package=openapi-typescript@7.13.0`, which gives it its own
+TypeScript 5 whatever the TypeScript of the project (the first run downloads both from the
+registry). Do the same in a project on TypeScript 7; a project on TypeScript 5 can install
+`openapi-typescript` and run it directly. Prefer `npm exec --package` to `npx -p` in scripts:
+`bun run` turns `npx` into `bun x`, which keeps only the last `-p`, so TypeScript would no longer be
+pinned.
+
 `tsconfig.json` includes `src/client` and the tests: a server change that breaks the contract (a
 renamed field, a removed route) changes `openapi.json`, then `schema.d.ts`, and every caller relying
 on it fails `bun run typecheck` — [`e2e.test.ts`](test/e2e.test.ts) first.
@@ -340,8 +350,8 @@ list honest.
   ```txt
   ⚠ ZNIGHT031: The 200 response of GET /products/:id (ProductController.get) cannot be documented: the handler has no return type annotation
     --> src/catalog/product.controller.ts:91:3
-     = hint: Annotate the return type: Body
-     = hint: Or declare it: @ApiResponse<Body>(200)
+     = hint: Annotate the return type with the body type: get(): ProductResponse
+     = hint: Or declare it: @ApiResponse<ProductResponse>(200)
   ```
 
 - **Return a `bigint`**: `readonly revenueCents: bigint` in `ShopStats`. `JSON.stringify` throws on
@@ -370,24 +380,24 @@ list honest.
 
 ```sh
 bun run test       # openapi:check, then unit, HTTP, contract, document and build-check tests: a few seconds
-bun run test:e2e   # production build, the bundle on Node.js then Bun, emission on both runtimes
+bun run test:e2e   # production build, the bundle on Node.js then Bun, emission on both runtimes, client:check
 ```
 
 `bunfig.toml` preloads `@znight/compiler/bun`, which regenerates the container before the tests.
 
-| File                                                      | Shows                                                                                                                                     |
-| --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| [`auth.guard.test.ts`](test/auth.guard.test.ts)           | `TestBed`: the guard with real `Credentials`, `Lazy<CurrentCustomer>` mocked; challenges, roles, deny by default                          |
-| [`catalog.service.test.ts`](test/catalog.service.test.ts) | `TestBed` with `@Config` values: seeding on start, the Zod output stored, images checked by content                                       |
-| [`order.service.test.ts`](test/order.service.test.ts)     | `TestBed` with a real repository: card and transfer payments, the paged export                                                            |
-| [`converters.test.ts`](test/converters.test.ts)           | the discriminator converter, and why every assembly needs it                                                                              |
-| [`storefront.http.test.ts`](test/storefront.http.test.ts) | `TestApp`: the shop in memory (`app.inject()`, `app.injectStream()`), stock, uploads, ranges, the NDJSON export, authentication           |
-| [`contract.http.test.ts`](test/contract.http.test.ts)     | every documented response of every operation obtained and checked with `validateResponse()`, and a check that none is missing             |
-| [`document.test.ts`](test/document.test.ts)               | the served document is `openapi.json`, valid OpenAPI 3.1; the operations snapshot (ids, tags, security, access); references; client types |
-| [`docs.http.test.ts`](test/docs.http.test.ts)             | `/openapi.json` (ETag, `304`, `HEAD`), `/docs` (CSP hash, pinned CDN with SRI), `DOCS=false`                                              |
-| [`build-check.test.ts`](test/build-check.test.ts)         | "Try breaking it": ZNIGHT031, 032, 033 and 036 through `compile()`                                                                        |
-| [`e2e.test.ts`](test/e2e.test.ts)                         | `ZNIGHT_E2E=1`: `znight build`, the bundle on Node.js then Bun through the typed client, SIGTERM during an upload (drained, exit code 0)  |
-| [`emit.e2e.test.ts`](test/emit.e2e.test.ts)               | `ZNIGHT_E2E=1`: `znight openapi --check`, `--runtime node` and `--runtime bun` write the committed bytes, a stale file fails the check    |
+| File                                                      | Shows                                                                                                                                                                                                 |
+| --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`auth.guard.test.ts`](test/auth.guard.test.ts)           | `TestBed`: the guard with real `Credentials`, `Lazy<CurrentCustomer>` mocked; challenges, roles, deny by default                                                                                      |
+| [`catalog.service.test.ts`](test/catalog.service.test.ts) | `TestBed` with `@Config` values: seeding on start, the Zod output stored, images checked by content                                                                                                   |
+| [`order.service.test.ts`](test/order.service.test.ts)     | `TestBed` with a real repository: card and transfer payments, the paged export                                                                                                                        |
+| [`converters.test.ts`](test/converters.test.ts)           | the discriminator converter, and why every assembly needs it                                                                                                                                          |
+| [`storefront.http.test.ts`](test/storefront.http.test.ts) | `TestApp`: the shop in memory (`app.inject()`, `app.injectStream()`), stock, uploads, ranges, the NDJSON export, authentication                                                                       |
+| [`contract.http.test.ts`](test/contract.http.test.ts)     | every documented response of every operation obtained and checked with `validateResponse()`, and a check that none is missing                                                                         |
+| [`document.test.ts`](test/document.test.ts)               | the served document is `openapi.json`, valid OpenAPI 3.1; the operations snapshot (ids, tags, security, access); references; client types                                                             |
+| [`docs.http.test.ts`](test/docs.http.test.ts)             | `/openapi.json` (ETag, `304`, `HEAD`), `/docs` (CSP hash, pinned CDN with SRI), `DOCS=false`                                                                                                          |
+| [`build-check.test.ts`](test/build-check.test.ts)         | "Try breaking it": ZNIGHT031, 032, 033 and 036 through `compile()`                                                                                                                                    |
+| [`e2e.test.ts`](test/e2e.test.ts)                         | `ZNIGHT_E2E=1`: `znight build`, the bundle on Node.js then Bun through the typed client, SIGTERM during an upload (drained, exit code 0)                                                              |
+| [`emit.e2e.test.ts`](test/emit.e2e.test.ts)               | `ZNIGHT_E2E=1`: `znight openapi --check`, `--runtime node` and `--runtime bun` write the committed bytes, a stale file fails the check; `client:check` (npm and the registry needed on the first run) |
 
 ## In this repository
 
@@ -399,10 +409,5 @@ from its sources; a project created with `znight new` does not need them:
 - `vite.config.ts`: `ssr.external` keeps the linked `@znight/*` packages out of the bundle;
 - `test` scripts pass `--conditions=@znight/source` to `bun test`;
 - the `dev` script sets `NODE_ENV=development` explicitly (see `examples/rest-api`);
-- `client:generate` and `client:check` need the JavaScript API of TypeScript 5, which
-  `openapi-typescript` 7 imports; the monorepo uses TypeScript 7, whose package has none, so they
-  fail here. `schema.d.ts` was generated with TypeScript 5, and `document.test.ts` checks that it
-  declares every path, operation and schema of `openapi.json`. In your project, install
-  `typescript@5` next to `openapi-typescript`;
 - `validateResponse()` needs the optional peer `@cfworker/json-schema`, found here through the
   `@znight/openapi` workspace: add it to your `devDependencies`.

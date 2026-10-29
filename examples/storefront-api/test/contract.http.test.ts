@@ -36,7 +36,7 @@ interface ContractCase {
   readonly check?: (response: InjectResponse, document: OpenApiObject) => void
 }
 
-/** A 400 of a schema (body, `@Param('id', Id)`) lists every problem in `details`. */
+/** A 400 of a schema (body, `@Param('id', Id)`) or of an upload lists every problem in `details`. */
 function listsEveryProblem(response: InjectResponse): void {
   expect(response.json<{ details?: unknown[] }>().details?.length).toBeGreaterThan(0)
 }
@@ -176,6 +176,24 @@ const CASES: readonly ContractCase[] = [
     status: 400,
     when: 'an invalid id',
     request: () => ({ url: '/products/mug/image', headers: catalog, body: imageForm() }),
+    check: listsEveryProblem,
+  },
+  {
+    operation: 'PUT /products/{id}/image',
+    status: 400,
+    when: 'no image',
+    request: () => ({ url: `/products/${MUG}/image`, headers: catalog, body: new FormData() }),
+    check: listsEveryProblem,
+  },
+  {
+    operation: 'PUT /products/{id}/image',
+    status: 400,
+    when: 'a file in another field',
+    request: () => {
+      const form = new FormData()
+      form.append('picture', pngFile())
+      return { url: `/products/${MUG}/image`, headers: catalog, body: form }
+    },
     check: listsEveryProblem,
   },
   {

@@ -101,6 +101,33 @@ describe('emitOpenApi', () => {
     expect(stale.staleFiles).toEqual([path.join(app.root, 'check.json')])
   }, 60_000)
 
+  it('checks the listed outputs and writes the others', async () => {
+    app.write('committed.json', '{}\n')
+    const result = await emitOpenApi({
+      root: app.root,
+      runtime: 'bun',
+      output: ['committed.json', 'build/openapi.json'],
+      check: ['committed.json'],
+      compilerOptions: compilerOptions(app),
+    })
+    expect([result.stale, result.staleFiles, result.written]).toEqual([
+      true,
+      [path.join(app.root, 'committed.json')],
+      [path.join(app.root, 'build/openapi.json')],
+    ])
+    expect(app.read('committed.json')).toBe('{}\n')
+    expect(JSON.parse(app.read('build/openapi.json')).info.title).toBe('Bookshelf API')
+    await expect(
+      emitOpenApi({
+        root: app.root,
+        runtime: 'bun',
+        output: 'committed.json',
+        check: ['other.json'],
+        compilerOptions: compilerOptions(app),
+      }),
+    ).rejects.toThrow('ZNIGHT030: check lists other.json, which is not an output')
+  }, 60_000)
+
   it('loads converters from a module', async () => {
     const result = await emitOpenApi({
       root: app.root,

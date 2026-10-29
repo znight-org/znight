@@ -11,11 +11,12 @@ export default defineConfig({
     znight(options),
     // After the bundle is written, emits the OpenAPI document: `dist/openapi.json` (served in
     // production, see src/main.ts) and `openapi.json` (committed, the source of the typed client).
-    // In CI the committed file is left alone: `bun run openapi:check` fails when it is stale. (The
-    // `check` option would not do here: it never writes, `dist/openapi.json` included.)
+    // In CI (`check`), the committed file is never written: the build fails when it is stale, while
+    // `dist/openapi.json` (inside build.outDir) is still written.
     // `converters` must be the module the application passes to OpenApiPlugin (src/http.ts).
     openapi({
-      output: process.env.CI === 'true' ? 'dist/openapi.json' : ['openapi.json', 'dist/openapi.json'],
+      output: ['openapi.json', 'dist/openapi.json'],
+      check: process.env.CI === 'true',
       converters: 'src/openapi.converters.ts',
     }),
   ],

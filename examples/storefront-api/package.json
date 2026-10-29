@@ -13,8 +13,8 @@
     "test:e2e": "ZNIGHT_E2E=1 bun test --conditions=@znight/source --timeout 300000 e2e.test.ts",
     "openapi": "znight openapi --converters src/openapi.converters.ts",
     "openapi:check": "znight openapi --check --converters src/openapi.converters.ts",
-    "client:generate": "openapi-typescript openapi.json -o src/client/schema.d.ts --default-non-nullable false",
-    "client:check": "openapi-typescript openapi.json -o src/client/schema.d.ts --default-non-nullable false --check"
+    "client:generate": "npm exec --yes --package=typescript@5.9.3 --package=openapi-typescript@7.13.0 -- openapi-typescript openapi.json -o src/client/schema.d.ts --default-non-nullable false",
+    "client:check": "npm exec --yes --package=typescript@5.9.3 --package=openapi-typescript@7.13.0 -- openapi-typescript openapi.json -o src/client/schema.d.ts --default-non-nullable false --check"
   },
   "dependencies": {
     "@znight/core": "workspace:*",
@@ -36,7 +36,6 @@
     "typescript": "catalog:",
     "@types/bun": "catalog:",
     "@types/node": "catalog:",
-    "openapi-typescript": "7.13.0",
     "openapi-fetch": "0.17.0",
     "@seriousme/openapi-schema-validator": "2.11.0"
   }

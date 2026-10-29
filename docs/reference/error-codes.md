@@ -729,6 +729,7 @@ is reported, with a hint naming that guard. All routes are reported in one error
 ```txt
 ZNIGHT023: HttpPlugin: No guard enforces the required "access" group on 9 routes: GET /books (BookController.list), POST /books (BookController.create), ...
   hint: Register a guard declaring `static enforces` with the decorators of the "access" group (public, roles), e.g. HttpPlugin.configure({ guards: [AuthGuard] })
+  hint: Guards of the application enforcing the "access" group: AuthGuard
   hint: Tests that deliberately run without guards can set enforcement: 'warn'
 ```
 

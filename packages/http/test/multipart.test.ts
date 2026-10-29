@@ -407,6 +407,7 @@ describe('limits and upload rules', () => {
     const single = await caught(() => parse(two, 'b', policy([rule()])))
     expect(single).toBeInstanceOf(BadRequestException)
     expect((single as Error).message).toBe('Expected a single file in field "file"')
+    expect((single as HttpException).details).toEqual([{ path: 'file', message: 'Expected a single file' }])
     const many = await caught(() => parse(two, 'b', policy([rule({ multiple: true, maxFiles: 1 })])))
     expect(many).toBeInstanceOf(PayloadTooLargeException)
     expect((many as Error).message).toBe('Too many files in field "file" (at most 1)')
@@ -425,7 +426,10 @@ describe('limits and upload rules', () => {
     const error = await caught(() => parse(data, 'b', policy([rule()])))
     expect(error).toBeInstanceOf(BadRequestException)
     expect((error as Error).message).toBe('Unexpected file field "other"')
-    expect((error as HttpException).details).toEqual({ field: 'other', expected: ['file'] })
+    // 400 details: the issues of a validation error (ValidationErrorBody of @znight/openapi)
+    expect((error as HttpException).details).toEqual([
+      { path: 'other', message: 'Unexpected file field (expected file)' },
+    ])
     expect(parse(data, 'b', policy([rule({ field: undefined })])).files['other']).toHaveLength(1)
   })
 

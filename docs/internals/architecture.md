@@ -1568,9 +1568,12 @@ read in the async context of the handler (request-scoped providers and tracing k
   their upload parameters.
 - Uploads (`multipart/form-data`, RFC 7578): Znight's own streaming parser, shared by every adapter
   (not `Request.formData()`). On upload routes, files are accepted only in the declared fields
-  (400 otherwise, `details.expected`), each `maxSize` / `maxFiles` (413), `mimeTypes` (415, compared
-  with the declared type) is enforced while reading; a second file for `@UploadedFile` → 400;
-  non-multipart non-empty bodies → 415. Other routes accept files of any field within the plugin
+  (400 otherwise), each `maxSize` / `maxFiles` (413), `mimeTypes` (415, compared with the declared
+  type) is enforced while reading; a second file for `@UploadedFile` → 400; non-multipart non-empty
+  bodies → 415. A 400 about a named file field (unexpected field, missing file, text value in a file
+  field, second single file) carries `details: [{ path: <field>, message }]`, the issue shape of
+  `ValidationException`; the 413 of a file carries `{ field, maxSize }` or `{ field, maxFiles }`, the
+  415 of a file `{ field, type, accepted }`. Other routes accept files of any field within the plugin
   `uploads` limits. Plugin-wide limits `uploads: { maxFileSize (10 MiB), maxFiles (10), maxParts
   (1000), maxFieldSize (1 MiB) }`; part headers ≤ 16 KiB. Errors raised while the body is still
   being read carry `connection: close`. Files are standard `File` objects held in memory.
@@ -1591,7 +1594,7 @@ read in the async context of the handler (request-scoped providers and tracing k
   and size, Web `Response` → sent as is.
 - Errors: `HttpException(status, message?, details?, { headers, cause })` and subclasses render
   `{ statusCode, error, message, details? }`; schema failures → 400 (`ValidationException`) with
-  `details: [{ path, message }]`; other errors → `{ statusCode: 500, error: 'Internal Server Error' }`
+  `details: [{ path, message }]`, the shape also used by the upload 400s about a field; other errors → `{ statusCode: 500, error: 'Internal Server Error' }`
   (message only with `exposeErrors: true`), sent to hooks and the logger. An exception mapper
   returning an `HttpResponse` without status keeps the error's status.
 - Response headers are validated by the plugin (after the handler, and after the headers added by
@@ -2373,8 +2376,12 @@ served document and the emitted file are byte-identical.
   Vite server in middleware mode) without instantiating anything (`NODE_ENV` defaults to
   `production`), runs `buildOpenApiDocument` (with the HTTP `prefix` of the options: `znight openapi
   --prefix`, `znight build --openapi-prefix`, `openapi({ prefix })`, so that the file has the
-  `servers` of the served document) and writes the outputs atomically, only when they changed
-  (`check`: never writes, reports stale files). `@znight/openapi/testing` exports
+  `servers` of the served document) and writes the outputs atomically, only when they changed.
+  `check: true` never writes and reports stale or missing outputs; `check: [...]` checks only the
+  listed outputs (relative to the root, each one an output, ZNIGHT030 otherwise) and writes the
+  others. With `check`, the Vite plugin checks the outputs outside `build.outDir` (the committed
+  files) and always writes those inside it (build artifacts, emptied by every build), with a
+  warning when that leaves nothing to check. `@znight/openapi/testing` exports
   `validateResponse(document, { method, path, response })` (optional peer `@cfworker/json-schema`).
 
 ### 9.6 Schedule (`@znight/schedule`)

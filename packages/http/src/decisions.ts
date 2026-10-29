@@ -267,10 +267,12 @@ export function checkDecisions(
       parts.push(
         `no guard enforces the ${required.has(group) ? 'required ' : ''}"${group}" group on ${count(entry.unenforced.length)}: ${entry.unenforced.join(', ')}`,
       )
-      groupHints.push(
-        `Register a guard declaring \`static enforces\` with the decorators of the "${group}" group (${keys.join(', ')}), e.g. HttpPlugin.configure({ guards: [AuthGuard] })`,
-      )
       const guards = [...(enforcers.get(group) ?? [])].sort()
+      // a guard of the application that enforces the group, else a name for the one to write
+      const example = guards[0] ?? guardName(group)
+      groupHints.push(
+        `Register a guard declaring \`static enforces\` with the decorators of the "${group}" group (${keys.join(', ')}), e.g. HttpPlugin.configure({ guards: [${example}] })`,
+      )
       if (guards.length > 0) {
         groupHints.push(`Guards of the application enforcing the "${group}" group: ${guards.join(', ')}`)
       }
@@ -295,6 +297,16 @@ function count(routes: number): string {
 
 function capitalize(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1)
+}
+
+/** A class name for the guard of a group: `rateLimit` → `RateLimitGuard`, `auth:public` → `AuthPublicGuard`. */
+function guardName(group: string): string {
+  const name = group
+    .split(/[^A-Za-z0-9]+/)
+    .map(capitalize)
+    .join('')
+    .replace(/^\d+/, '')
+  return `${name === '' ? 'Decision' : name}Guard`
 }
 
 function malformed(reason: string): ZnightError {

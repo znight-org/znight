@@ -103,5 +103,10 @@ describe('access decisions', () => {
     await expect(boot).rejects.toThrow('No guard enforces the required "access" group on 15 routes')
     // the rate-limited routes are reported too: their decision is enforced by RateLimitGuard only
     await expect(boot).rejects.toThrow('"rateLimit"')
+    // each group's hint names the guard that enforces it
+    const { hints } = (await boot.catch((error: unknown) => error)) as { hints: readonly string[] }
+    expect(hints).toContain(
+      'Register a guard declaring `static enforces` with the decorators of the "rateLimit" group (rateLimit), e.g. HttpPlugin.configure({ guards: [RateLimitGuard] })',
+    )
   })
 })

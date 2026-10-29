@@ -1293,7 +1293,9 @@ The token is `@znight/openapi#OpenApi`. The OpenAPI types are our own (about 300
 4. `buildOpenApiDocument(metadata, { prefix, converters })`. ZNIGHT037/034 make the command exit 1.
 5. Write each output (JSON, or YAML by extension) atomically, only when it changed. With `check`,
    never write. A stale or missing output gives exit 1 and lists the files. The Vite plugin then
-   fails the build, as `generate --check` does.
+   fails the build, as `generate --check` does. **As implemented**, the Vite plugin checks only the
+   outputs outside `build.outDir` (the committed files): those inside are build artifacts, emptied
+   by every build, so it always writes them (`emitOpenApi({ check: [...] })` checks a subset).
 
 ## 8. Runtime architecture
 

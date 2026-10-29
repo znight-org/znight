@@ -1,7 +1,7 @@
 /**
  * `@znight/openapi/vite`: the `openapi()` Vite plugin. After `vite build` / `znight build` wrote the
  * bundle (and after each good rebuild of `znight dev`), it emits the OpenAPI document with
- * `emitOpenApi()`; with `check`, a missing or stale output fails the build.
+ * `emitOpenApi()`; with `check`, a missing or stale committed output fails the build.
  *
  * ```ts
  * export default defineConfig({
@@ -21,7 +21,11 @@ export const OPENAPI_PLUGIN_NAME = 'znight:openapi'
 export interface OpenApiVitePluginOptions {
   /** Output files, relative to the Vite root (`.yaml` / `.yml` write YAML). Default: `<build.outDir>/openapi.json`. */
   readonly output?: string | readonly string[]
-  /** Never write: fail the build when an output is missing or stale (CI). Default `false`. */
+  /**
+   * CI: never write the outputs outside `build.outDir` (the committed files), fail the build when one
+   * is missing or stale. The outputs inside `build.outDir` are build artifacts, written by every
+   * build. Default `false`.
+   */
   readonly check?: boolean
   /** HTTP prefix (`servers` default when `@OpenApiDocument` declares none). */
   readonly prefix?: string
@@ -67,6 +71,13 @@ export function openapi(options: OpenApiVitePluginOptions = {}): Plugin {
         options.output === undefined
           ? [join(resolve(root, config.build.outDir), 'openapi.json')]
           : (typeof options.output === 'string' ? [options.output] : options.output).map(file => resolve(root, file))
+      const outDir = resolve(root, config.build.outDir)
+      const checked = options.check === true ? outputs.filter(file => !isInside(outDir, file)) : []
+      if (options.check === true && checked.length === 0) {
+        this.warn(
+          '[znight:openapi] check: every output is in build.outDir, written by each build: nothing is checked (add the committed file to output)',
+        )
+      }
       const compilerRoot = api?.compiler?.options?.root
       const given =
         typeof api?.options === 'object' && api.options !== null ? (api.options as Record<string, unknown>) : undefined
@@ -74,7 +85,7 @@ export function openapi(options: OpenApiVitePluginOptions = {}): Plugin {
       const result = await emitOpenApi({
         root,
         output: outputs,
-        ...(options.check === undefined ? {} : { check: options.check }),
+        ...(checked.length === 0 ? {} : { check: checked }),
         ...(options.prefix === undefined ? {} : { prefix: options.prefix }),
         ...(options.runtime === undefined ? {} : { runtime: options.runtime }),
         ...(options.converters === undefined ? {} : { converters: options.converters }),
@@ -107,4 +118,9 @@ export function openapi(options: OpenApiVitePluginOptions = {}): Plugin {
     },
   }
   return plugin
+}
+
+function isInside(directory: string, file: string): boolean {
+  const path = relative(directory, file)
+  return path !== '' && !path.startsWith('..') && !isAbsolute(path)
 }

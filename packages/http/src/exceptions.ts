@@ -112,6 +112,14 @@ export class ValidationException extends BadRequestException {
   }
 }
 
+/**
+ * The `details` of a 400 raised by the framework for one invalid input (a multipart field...): the
+ * shape of the issues of {@link ValidationException}, documented by `@znight/openapi`.
+ */
+export function issue(path: string, message: string): readonly ValidationIssueDetail[] {
+  return [{ path, message }]
+}
+
 /** Converts a Standard Schema issue to `{ path, message }` (`path` dotted, `''` for the root). */
 export function toIssueDetail(issue: StandardSchemaV1Issue): ValidationIssueDetail {
   return { path: formatIssuePath(issue.path), message: issue.message }

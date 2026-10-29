@@ -152,9 +152,9 @@ describe('the OpenAPI document', () => {
 
   /**
    * `src/client/schema.d.ts` is generated from `openapi.json` by openapi-typescript (`bun run
-   * client:generate`, checked by `bun run client:check`). This repository uses TypeScript 7, whose
-   * package has no JavaScript API, so openapi-typescript cannot run here: this test keeps the
-   * committed file honest on what matters to callers (every path, operation and schema).
+   * client:generate`, checked by `client:check` in the end-to-end tests: it runs through
+   * `npm exec`, which needs the registry). Offline, this test keeps the committed file honest on what
+   * matters to callers (every path, operation and schema).
    */
   it('was turned into the client types of src/client/schema.d.ts', () => {
     const types = readFileSync(new URL('../src/client/schema.d.ts', import.meta.url), 'utf8')

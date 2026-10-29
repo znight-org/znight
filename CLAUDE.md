@@ -329,9 +329,12 @@ and docs updated with the code.
   `test:e2e` of the examples, and again after changing a package they use. In-repo Vite configs keep
   the linked `@znight/*` packages in `ssr.external`.
 - **TypeScript 7 has no JavaScript API.** `tsc` is the native compiler; tools that import the
-  TypeScript 5 JS API (`openapi-typescript`, ts-morph, typedoc...) do not work in the repository (see
-  `examples/storefront-api`, whose `client:generate` needs `typescript@5`). The Znight compiler uses
-  oxc, never the TypeScript API.
+  TypeScript 5 JS API (`openapi-typescript`, ts-morph, typedoc...) fail with the `typescript` 7
+  package. Run them with their own TypeScript 5, outside the workspace's dependencies (see
+  `client:generate` in `examples/storefront-api`:
+  `npm exec --package=typescript@5.9.3 --package=openapi-typescript@... --`; not `npx -p`, which
+  `bun run` turns into `bun x`, which keeps only the last `-p`).
+  The Znight compiler uses oxc, never the TypeScript API.
 - **Generated code must stay strict-clean.** It must type-check under `strict`, `noUnusedLocals`,
   `noUnusedParameters`, `noPropertyAccessFromIndexSignature`, `exactOptionalPropertyTypes` and
   `verbatimModuleSyntax` (`packages/compiler/test/codegen/typecheck.test.ts`), stay byte-identical

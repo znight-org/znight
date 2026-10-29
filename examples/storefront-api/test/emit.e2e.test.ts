@@ -2,7 +2,8 @@
  * Emission of the document (opt-in, `ZNIGHT_E2E=1`, `bun run test:e2e`): `znight openapi` compiles
  * the application, loads its generated module in a child process (Node.js: a Vite server; Bun: the
  * compiler preload) and assembles the document. Whatever the runtime, the file must be byte for byte
- * the committed `openapi.json`, since clients are generated from it.
+ * the committed `openapi.json`, since clients are generated from it, and the committed client types
+ * must be what openapi-typescript generates from it (`client:check`).
  */
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -52,6 +53,17 @@ describe.skipIf(!ENABLED)('znight openapi', () => {
       TIMEOUT,
     )
   }
+
+  it(
+    'client:check passes: src/client/schema.d.ts is the openapi-typescript output of openapi.json',
+    async () => {
+      // npm exec gives openapi-typescript its own TypeScript 5 (this repository uses TypeScript 7)
+      const check = await run('npm', ['run', 'client:check'])
+
+      if (check.code !== 0) throw new Error(`client:check failed:\n${check.output}`)
+    },
+    TIMEOUT,
+  )
 
   it(
     'fails the check of a stale document',

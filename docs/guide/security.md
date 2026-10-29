@@ -166,6 +166,8 @@ entrypoint, a worker or a test:
 ZNIGHT023: HttpPlugin: No guard enforces the required "access" group on 15 routes: GET /admin/notes (AdminController.all), GET /admin/export (AdminController.export), ...; no guard enforces the "rateLimit" group on 3 routes: POST /notes (NoteController.create), ...
   hint: Register a guard declaring `static enforces` with the decorators of the "access" group (authenticated, public, roles), e.g. HttpPlugin.configure({ guards: [AuthGuard] })
   hint: Guards of the application enforcing the "access" group: AuthGuard
+  hint: Register a guard declaring `static enforces` with the decorators of the "rateLimit" group (rateLimit), e.g. HttpPlugin.configure({ guards: [RateLimitGuard] })
+  hint: Guards of the application enforcing the "rateLimit" group: RateLimitGuard
 ```
 
 - The `enforces` that counts is the one of the compiled guard class (or of the class of a global

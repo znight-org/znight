@@ -7,8 +7,8 @@
  * 2. `compile()` in `serve` mode: errors stop everything before any module runs;
  * 3. a **child process** loads the generated module (Bun: the compiler preload; Node.js: a Vite
  *    server in middleware mode) and runs `buildOpenApiDocument`;
- * 4. each output is written atomically, only when it changed; with `check`, nothing is written and
- *    stale or missing outputs are reported.
+ * 4. each output is written atomically, only when it changed; a checked output (`check`) is never
+ *    written: when it is missing or stale, it is reported.
  */
 import type { Diagnostic } from '@znight/compiler'
 import type { OpenApiWarning } from '../build.ts'
@@ -34,8 +34,12 @@ export interface EmitOpenApiOptions {
   readonly root?: string
   /** Output files, relative to `root`; `.yaml` / `.yml` write YAML (optional peer `yaml`). Default `'openapi.json'`. */
   readonly output?: string | readonly string[]
-  /** Never write: report missing or stale outputs (`stale`, `staleFiles`). */
-  readonly check?: boolean
+  /**
+   * Never write: report missing or stale outputs (`stale`, `staleFiles`). `true` checks every output;
+   * a list checks only these outputs (relative to `root`, each one an `output`) and writes the others
+   * as usual (the `openapi()` Vite plugin checks the committed file and writes the build output).
+   */
+  readonly check?: boolean | readonly string[]
   /** The HTTP prefix: `servers` defaults to `[{ url: prefix }]` when `@OpenApiDocument` declares none. */
   readonly prefix?: string
   /** Default `'auto'`. */
@@ -59,9 +63,9 @@ export interface EmitOpenApiOptions {
 export interface EmitOpenApiResult {
   /** `false` when the compile failed (see `diagnostics`): nothing ran and nothing was written. */
   readonly ok: boolean
-  /** Outputs written (absolute paths); always empty with `check`. */
+  /** Outputs written (absolute paths); never a checked output. */
   readonly written: readonly string[]
-  /** `check`: an output is missing or differs. */
+  /** `check`: a checked output is missing or differs (listed in `staleFiles`). */
   readonly stale: boolean
   readonly staleFiles: readonly string[]
   /** The document (`undefined` when the compile failed). */
@@ -99,6 +103,7 @@ export async function emitOpenApi(options: EmitOpenApiOptions = {}): Promise<Emi
   const outputs = (typeof options.output === 'string' ? [options.output] : (options.output ?? ['openapi.json'])).map(
     file => resolve(root, file),
   )
+  const checked = checkedOutputs(root, outputs, options.check)
   const runtime = resolveRuntime(options.runtime ?? 'auto')
   const compiler = (await importFromProject(root, '@znight/compiler')) as CompilerModule
   const viteConfig = findViteConfig(root, options.config)
@@ -144,23 +149,43 @@ export async function emitOpenApi(options: EmitOpenApiOptions = {}): Promise<Emi
   for (const output of outputs) {
     contents.set(output, /\.ya?ml$/i.test(output) ? await toYaml(document) : result.json)
   }
-  const staleFiles = outputs.filter(output => readText(output) !== contents.get(output))
+  const changed = outputs.filter(output => readText(output) !== contents.get(output))
+  const staleFiles = changed.filter(output => checked.has(output))
   const written: string[] = []
-  if (options.check !== true) {
-    for (const output of staleFiles) {
-      writeAtomically(output, contents.get(output) ?? '')
-      written.push(output)
-    }
+  for (const output of changed) {
+    if (checked.has(output)) continue
+    writeAtomically(output, contents.get(output) ?? '')
+    written.push(output)
   }
   return {
     ...base,
     ok: true,
     written,
-    stale: options.check === true && staleFiles.length > 0,
-    staleFiles: options.check === true ? staleFiles : [],
+    stale: staleFiles.length > 0,
+    staleFiles,
     document,
     warnings: result.warnings,
   }
+}
+
+/** The outputs that `check` checks (absolute paths). */
+function checkedOutputs(
+  root: string,
+  outputs: readonly string[],
+  check: EmitOpenApiOptions['check'],
+): ReadonlySet<string> {
+  if (check === undefined || check === false) return new Set()
+  if (check === true) return new Set(outputs)
+  const checked = new Set(check.map(file => resolve(root, file)))
+  const unknown = check.filter(file => !outputs.includes(resolve(root, file)))
+  if (unknown.length > 0) {
+    throw new ZnightError(
+      ErrorCode.InvalidOpenApiDefinition,
+      `check lists ${unknown.join(', ')}, which ${unknown.length > 1 ? 'are not outputs' : 'is not an output'}`,
+      { hints: ['check: true checks every output; a list names outputs (relative to the root)'] },
+    )
+  }
+  return checked
 }
 
 function resolveRuntime(runtime: EmitRuntime): 'node' | 'bun' {

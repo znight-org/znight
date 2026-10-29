@@ -2,7 +2,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { znight } from '@znight/compiler'
-import { build } from 'vite'
+import { build, createLogger } from 'vite'
 
 import { openapi } from '../src/vite.ts'
 import { cleanupApps, fixtureApp } from './support/apps.ts'
@@ -11,7 +11,7 @@ import { afterAll, describe, expect, test as it } from 'bun:test'
 afterAll(cleanupApps)
 
 describe('openapi() Vite plugin', () => {
-  it('emits dist/openapi.json after the bundle, then fails a check when the file is stale', async () => {
+  it('emits dist/openapi.json after the bundle; check fails on a stale committed file, never on dist', async () => {
     const app = fixtureApp('bookshelf')
     const config = (plugins: unknown[]) =>
       ({
@@ -32,6 +32,28 @@ describe('openapi() Vite plugin', () => {
     await expect(build(config([openapi({ runtime: 'bun', output: 'openapi.json', check: true })]))).rejects.toThrow(
       'openapi.json is missing or out of date',
     )
+    // CI from a clean checkout: the committed file is checked, the build output written
+    const outputs = ['openapi.json', 'dist/openapi.json']
+    app.write('openapi.json', emitted)
+    fs.rmSync(path.join(app.root, 'dist'), { recursive: true, force: true })
+    await build(config([openapi({ runtime: 'bun', output: outputs, check: true })]))
+    expect(app.read('dist/openapi.json')).toBe(emitted)
+    app.write('openapi.json', '{}\n')
+    await expect(build(config([openapi({ runtime: 'bun', output: outputs, check: true })]))).rejects.toThrow(
+      'openapi.json is missing or out of date',
+    )
+    expect(app.read('openapi.json')).toBe('{}\n')
+    // every output in build.outDir: nothing to check, dist/openapi.json is written, a warning says so
+    const warnings: string[] = []
+    const customLogger = {
+      ...createLogger('silent'),
+      warn: (message: string) => void warnings.push(message),
+      warnOnce: (message: string) => void warnings.push(message),
+    }
+    fs.rmSync(path.join(app.root, 'dist'), { recursive: true, force: true })
+    await build({ ...config([openapi({ runtime: 'bun', check: true })]), customLogger })
+    expect(app.read('dist/openapi.json')).toBe(emitted)
+    expect(warnings.filter(warning => warning.includes('nothing is checked'))).toHaveLength(1)
     // a second instance (znight build --openapi on a config that has one) does nothing
     const first = openapi({ runtime: 'bun', output: 'first.json' })
     await build(config([first, openapi({ runtime: 'bun', output: 'second.json' })]))

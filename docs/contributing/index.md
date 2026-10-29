@@ -103,8 +103,9 @@ When an implementation needs to deviate, update the specification in the same ch
 - **Tests** live in `packages/<pkg>/test/**/*.test.ts` and use `bun:test`; fixtures in
   `test/fixtures/`. Slow tests are opt-in: `ZNIGHT_INTEGRATION=1` (real brokers),
   `ZNIGHT_CLI_E2E=1` (a scaffolded application, end to end), `ZNIGHT_E2E=1` (the examples end to end
-  and the golden test, after `bun run build`). `tests/boundaries.test.ts` enforces the package
-  boundaries of the specification (§2).
+  and the golden test, after `bun run build`; the `client:check` of `examples/storefront-api` runs
+  `npm exec`, so the first run needs npm and the registry). `tests/boundaries.test.ts` enforces the
+  package boundaries of the specification (§2).
 - **Integrations** (fastify, amqplib, prom-client...) are optional peer dependencies, loaded from subpath
   exports.
 - **Generated-code contract**: every helper the compiler-generated code calls is exported from the

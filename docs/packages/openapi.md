@@ -207,7 +207,10 @@ Emission compiles the application like `znight generate` (compile errors stop it
 runs), then loads the generated module in a child process and assembles the document with the same
 function as the plugin: nothing is instantiated, and the file is byte-identical on Node.js and Bun.
 The `openapi()` Vite plugin of `@znight/openapi/vite` does the same after each build, and
-`emitOpenApi()` of `@znight/openapi/emit` is the programmatic API.
+`emitOpenApi()` of `@znight/openapi/emit` is the programmatic API. With
+`openapi({ output: ['openapi.json', 'dist/openapi.json'], check: process.env['CI'] === 'true' })`,
+a CI build fails when the committed `openapi.json` is stale and never writes it, while
+`dist/openapi.json` (inside `build.outDir`, a build artifact) is always written.
 
 In production, serve the emitted file to skip the schema conversion at boot:
 

@@ -622,7 +622,7 @@ declared fields. Errors:
 | `400`  | a required file is missing                                          | `Missing file "avatar"` / `Missing files "documents"`                                    |
 | `400`  | a text value was sent in a file field                               | `Expected a file in field "avatar", received a text value`                               |
 | `400`  | a second file for `@UploadedFile`                                   | `Expected a single file in field "avatar"`                                               |
-| `400`  | a file in an undeclared field                                       | `Unexpected file field "other"` (`details.expected` lists the fields)                    |
+| `400`  | a file in an undeclared field                                       | `Unexpected file field "other"` (the issue lists the expected fields)                    |
 | `400`  | a malformed body (boundary, part headers, truncated body)           | `Invalid multipart body: ...`                                                            |
 | `413`  | a file above `maxSize`                                              | `File in field "avatar" exceeds the maximum size of 2 MiB`                               |
 | `413`  | more than `maxFiles` files                                          | `Too many files in field "documents" (at most 5)`                                        |
@@ -630,7 +630,9 @@ declared fields. Errors:
 | `415`  | a refused media type                                                | `Unsupported file type "text/plain" in field "avatar" (accepted: image/png, image/jpeg)` |
 | `415`  | a non-empty body that is not `multipart/form-data`                  | `Expected a multipart/form-data body (received "application/json")`                      |
 
-`details` carries the field and the limit (`{ field: 'avatar', maxSize: 2097152 }`). Errors raised
+The `details` of a `400` list the issue like a validation error does
+(`[{ path: 'avatar', message: 'Missing file' }]`, the `ValidationErrorBody` of `@znight/openapi`);
+those of a `413` or `415` carry the field and the limit (`{ field: 'avatar', maxSize: 2097152 }`). Errors raised
 while the body is still being sent carry `connection: close`: the rest of the body is discarded and
 the connection closed after the response.
 
