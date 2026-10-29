@@ -33,8 +33,8 @@ JVM world, brought to TypeScript.
    from the source code, and the Vite plugin strips them from the bundle.
 3. **Flat DI.** One container, no modules. Providers are discovered by scanning your sources (and
    provider libraries).
-4. **Composable.** HTTP, messaging, configuration and observability are separate packages, each made
-   of marker decorators, a compiler extension and a runtime plugin.
+4. **Composable.** HTTP, OpenAPI, messaging, scheduling, configuration and observability are separate
+   packages, each made of marker decorators, a compiler extension and a runtime plugin.
 5. **Runtime agnostic.** Runtime packages run on Node.js 24+ and Bun 1.3+ (ESM only), using standard
    APIs only.
 6. **Fast.** The compiler is built on [oxc](https://oxc.rs) with per-file caches; the runtime creates
@@ -72,26 +72,33 @@ plugins, guards and interceptors, testing utilities with auto-mocking.
 
 - [`@znight/compiler`](/packages/compiler) analyses the code and generates `__ZNIGHT_METADATA__`.
 - [`@znight/core`](/packages/core) executes it: container, scopes, lifecycle, plugins, hooks, AOP.
-- Feature packages ([HTTP](/packages/http), [messaging](/packages/messaging),
-  [config](/packages/config), [observability](/packages/observability)) add decorators, a compiler
-  extension and a runtime plugin each.
+- Feature packages ([HTTP](/packages/http), [OpenAPI](/packages/openapi),
+  [messaging](/packages/messaging), [scheduling](/packages/schedule), [config](/packages/config),
+  [observability](/packages/observability)) add decorators, a compiler extension and a runtime plugin
+  each.
+- [`@znight/testing`](/packages/testing) and [`@znight/cli`](/packages/cli) cover tests, scaffolding
+  and the development loop.
 
 ## When to use Znight
 
-Znight is a good fit for HTTP APIs, message consumers and workers, serverless functions where cold
-starts matter, and teams that want NestJS-style structure without modules and runtime reflection.
+Znight is a good fit for HTTP APIs, message consumers, scheduled jobs and workers, serverless
+functions where cold starts matter, and teams that want NestJS-style structure without modules and
+runtime reflection.
 
 It is not a frontend framework, and it does not try to hide the build step: the compiler is part of
-your toolchain (through Vite, the CLI or the Bun preload).
+your toolchain (through Vite, the CLI or the Bun preload). It does not ship an ORM either: you
+provide the database client of your choice, and Znight wires it ([Data access](./data-access)).
 
 ## Project status
 
 ::: warning Before 1.0
 Znight is preparing its first release (`v0.1`). Every package is implemented and tested on Node.js
-24 and Bun: the runtime, the compiler (Vite plugin, Bun preload, CLI), HTTP, messaging,
-configuration, observability and the testing utilities, with runnable example applications in the
-repository. Until 1.0, minor versions may still change APIs. Feedback and contributions are welcome
-on [GitHub](https://github.com/znight-org/znight).
+24 and Bun: the runtime, the compiler (Vite plugin, Bun preload, CLI), HTTP (with access decisions,
+CORS and security headers, files, cookies and Server-Sent Events), OpenAPI, messaging, scheduling,
+configuration, observability and the testing utilities, with seven runnable
+[example applications](/examples). WebSocket gateways and GraphQL are planned for v0.2 (see the
+[roadmap](/roadmap)). Until 1.0, minor versions may still change APIs. Feedback and contributions
+are welcome on [GitHub](https://github.com/znight-org/znight).
 :::
 
 ## Next steps
@@ -99,4 +106,5 @@ on [GitHub](https://github.com/znight-org/znight).
 - [Getting started](./getting-started): create your first application.
 - [Dependency injection](./dependency-injection): providers, interfaces, qualifiers, factories.
 - [The compiler](./compiler): what happens at build time, options and the generated module.
+- [Examples](/examples): complete applications, from a REST API on Drizzle to an uptime monitor.
 - [Migrating from NestJS](./migrating-from-nestjs): a decorator-by-decorator mapping.

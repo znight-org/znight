@@ -259,9 +259,9 @@ export class ProductService {
 - Options are evaluated at build time, so they are literals or exported constants
   (`{ ttlMs: PRODUCT_TTL_MS }`).
 
-A dedicated `@znight/cache` package is on the roadmap. Until it lands, this recipe is the
-recommended way to cache method results; declare a shorthand such as `@Cached()` for it in a package
-manifest ([below](#shorthand-decorators-in-your-own-packages)).
+A dedicated `@znight/cache` package is on the [roadmap](/roadmap#znight-cache). Until it lands,
+this recipe is the recommended way to cache method results; declare a shorthand such as `@Cached()`
+for it in a package manifest ([below](#shorthand-decorators-in-your-own-packages)).
 
 ### Rewriting arguments
 

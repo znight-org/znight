@@ -1,6 +1,8 @@
 # @znight/openapi
 
-OpenAPI 3.1 for [Znight](../../README.md) HTTP applications, without describing the API twice.
+OpenAPI 3.1 for [Znight](../../README.md) HTTP applications, generated at build time from your
+controllers, without describing the API twice.
+
 Paths, parameters, coercion types, defaults, request and response bodies, uploads, statuses,
 headers and access decisions come from the code that already runs: the route table of
 `@znight/http`, the handler signatures, their **annotated return types**, their JSDoc and your
@@ -18,13 +20,30 @@ Standard Schemas (Zod, Valibot, ArkType...). A few `@Api*` decorators add what c
   way on the node, Fastify, Express and Hono adapters, on Node.js and Bun.
 
 ```sh
-bun add @znight/openapi
-bun add @scalar/api-reference   # optional: serve the UI from node_modules instead of the pinned CDN
-bun add yaml                    # optional: YAML output
-bun add -d @cfworker/json-schema # optional: validateResponse() in tests
+# bun
+bun add @znight/core @znight/http @znight/openapi
+bun add -d @znight/compiler vite
+bun add @scalar/api-reference     # optional: serve the UI from node_modules instead of the pinned CDN
+bun add yaml                      # optional: YAML output
+bun add @valibot/to-json-schema   # optional: Valibot schemas
+bun add -d @cfworker/json-schema  # optional: validateResponse() in tests
+
+# npm
+npm install @znight/core @znight/http @znight/openapi
+npm install -D @znight/compiler vite
+npm install @scalar/api-reference     # optional: serve the UI from node_modules instead of the pinned CDN
+npm install yaml                      # optional: YAML output
+npm install @valibot/to-json-schema   # optional: Valibot schemas
+npm install -D @cfworker/json-schema  # optional: validateResponse() in tests
 ```
 
-Runs on Node.js >= 24 and Bun >= 1.3 (ESM only). `@znight/http` is a required peer dependency.
+Runs on Node.js >= 24 and Bun >= 1.3 (ESM only). `@znight/http` is a required peer dependency; the
+others are optional (`swagger-ui-dist` serves Swagger UI from `node_modules`, `vite` is needed by
+the `openapi()` Vite plugin).
+
+**Documentation:** [`@znight/openapi`](https://github.com/znight-org/znight/blob/main/docs/packages/openapi.md).
+**Example:** [`storefront-api`](https://github.com/znight-org/znight/tree/main/examples/storefront-api)
+(Zod and Valibot schemas, a committed `openapi.json` checked in CI, a typed client generated from it).
 
 - [Quick start](#quick-start)
 - [The document](#the-document)

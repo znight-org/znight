@@ -1262,4 +1262,5 @@ OAuth2 and OIDC clients, SAML, WebAuthn, built-in rate limiting, per-route CORS,
 header, request signing and mTLS (terminate TLS at the proxy). A `@znight/security` package will be
 considered once the same authenticator code is copied across several real applications, or when
 features need types owned by the framework (a principal propagated to message consumers, for
-example). It would be built on the primitives of this page.
+example). It would be built on the primitives of this page; the [roadmap](/roadmap#considered) lists
+the criteria.

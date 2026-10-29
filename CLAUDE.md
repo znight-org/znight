@@ -1,548 +1,361 @@
-# CLAUDE.md - Znight Framework
+# CLAUDE.md
 
-## Vision
+Guidance for AI coding agents (and humans) working on the Znight repository. It is short on purpose:
+it tells you how the repository works today and points to the documents that hold the details.
 
-Znight est un framework Node.js/TypeScript inspiré de NestJS et Spring Boot, avec une différence majeure : **la résolution des dépendances se fait à la compilation, pas au runtime**.
+Everything in this repository is written in **English**: code, comments, documentation, commit
+messages, pull requests and this file. Znight is an open-source project.
 
-L'approche est similaire à Micronaut (Java) : un plugin Vite analyse le code TypeScript via AST, extrait toutes les métadonnées, valide le graphe de dépendances, et génère un container optimisé. Résultat : **zéro reflect-metadata, zéro overhead runtime, erreurs à la compilation**.
+## What Znight is
 
----
+Znight is a TypeScript backend framework in the spirit of NestJS and Spring Boot, with one major
+difference: **dependencies are resolved at build time, not at runtime**. A compiler (a Vite plugin,
+also driven by the `znight` CLI and usable as a Bun preload) parses the application with oxc, binds
+every constructor parameter to a provider, validates the whole graph and generates a plain
+TypeScript module. At runtime the container only calls the generated factories, in an order computed
+ahead of time. It is the approach of Micronaut and Dagger, brought to TypeScript: no
+`reflect-metadata`, no `emitDecoratorMetadata`, wiring errors at build time.
 
-## Principes Fondamentaux
+- Repository: <https://github.com/znight-org/znight> (MIT), npm scope `@znight`.
+- Version `0.1.0`, every `@znight/*` package versioned in lockstep, **not published yet**.
+- Runtime packages run on Node.js >= 24 and Bun >= 1.3, ESM only.
 
-1. **Compile-time DI** - Pas de reflection au runtime, tout est résolu par le compiler
-2. **Flat DI** - Pas de modules imbriqués comme NestJS, un container global avec des scopes
-3. **Convention over Configuration** - Defaults intelligents, config minimale
-4. **Composable** - Chaque feature est un plugin indépendant (HTTP, Messaging, etc.)
-5. **Adapter-agnostic** - Choix libre entre Fastify/Express/Hono, RabbitMQ/SQS/Kafka, etc.
-6. **Observable by default** - Logging, metrics, tracing intégrés
-7. **Enterprise-ready** - Facile de créer des libs, microservices, workers
+## Principles
 
----
+Every change must keep these. A change that bends one starts with an RFC (see [RFCs](#rfcs)).
 
-## Avantages vs NestJS/Spring Boot
+1. **Compile-time DI.** Whatever can be resolved at build time is: providers, bindings (interfaces
+   through `implements`, qualifiers, factories, optional, lazy and multi dependencies), scopes,
+   routes, consumers, config fields, jobs. No reflection, no runtime type lookup.
+2. **Decorators are markers.** Every Znight decorator is a no-op at runtime. The compiler reads it
+   from the AST; the Vite plugin strips it from the bundle.
+3. **Flat DI.** One global container, no modules: providers are discovered by scanning the
+   application and its provider libraries. Scopes are `singleton` (default), `request` and
+   `transient`; a singleton never depends on a request-scoped provider (ZNIGHT003, `Lazy<T>` is the
+   escape hatch).
+4. **Convention over configuration.** `znight()` without options builds a server application from
+   `src/main.ts`; an interface with one implementation is bound without annotation; config
+   properties map to environment variables by name.
+5. **Composable.** Each feature is a package made of marker decorators, a compiler extension
+   (`@znight/<pkg>/compiler`, discovered through `package.json#znight`) and a runtime plugin
+   (`XxxPlugin.configure()`). Install only what you use.
+6. **Adapter-agnostic.** HTTP on the built-in `node:http` server, Fastify, Express or Hono;
+   messaging on RabbitMQ, SQS, Kafka or in memory. Same behaviour on every adapter, on Node.js and
+   Bun. Integrations are optional peer dependencies behind subpath exports.
+7. **Observable by default.** `@znight/observability` wires logs, metrics and traces into every HTTP
+   request, message delivery and scheduled run.
+8. **Fail loudly, early, precisely.** A misconfiguration detectable at build time is a `ZNIGHTxxx`
+   diagnostic with a location and a hint. Runtime errors carry a code, the dependency path and the
+   original `cause`.
+9. **Enterprise-ready.** Provider libraries (source or compiled), monorepos, microservices, workers,
+   graceful shutdown, deterministic generated code that you can read and step through.
 
-| Runtime DI (NestJS/Spring)          | Compile-Time DI (Znight)       |
-| ----------------------------------- | ------------------------------ |
-| Reflection au runtime = lent        | Tout résolu à la compilation   |
-| Erreurs DI découvertes au boot      | Erreurs DI à la compilation    |
-| `reflect-metadata` = magic          | Code généré = transparent      |
-| Cold start lent (serverless killer) | Cold start instantané          |
-| Tree-shaking impossible             | Dead code elimination possible |
-| Modules imbriqués complexes         | Flat, simple, auto-découverte  |
+## Current state
 
----
+### v0.1 (in this repository)
 
-## Architecture du Monorepo (Nx + pnpm)
+| Package                 | What it is                                                                                                                                                                       |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@znight/core`          | Container, application lifecycle, plugins, hooks, AOP (method interceptors), scopes, marker decorators, error catalogue                                                          |
+| `@znight/compiler`      | Analysis, binding, validation, code generation; programmatic API, Vite plugin (`znight()`), Bun preload (`@znight/compiler/bun`)                                                 |
+| `@znight/http`          | Controllers, Standard Schema validation, guards, interceptors, uploads, streams, cookies, SSE, route decisions, CORS, security headers; `/node`, `/fastify`, `/express`, `/hono` |
+| `@znight/openapi`       | OpenAPI 3.1 document built at compile time, served with Scalar or Swagger UI, emitted by `znight openapi` (RFC 0002)                                                             |
+| `@znight/messaging`     | Consumers, retries, dead letters; `/memory`, `/rabbitmq`, `/sqs`, `/kafka` drivers                                                                                               |
+| `@znight/schedule`      | `@Cron`, `@Interval`, `@Timeout`, `SchedulerRegistry`, lock stores, virtual clock for tests (RFC 0004)                                                                           |
+| `@znight/config`        | Typed config classes loaded from env, `.env`, JSON/YAML, Vault, AWS Secrets Manager                                                                                              |
+| `@znight/observability` | Pino logger, Prometheus metrics (prom-client), OpenTelemetry tracing, `@Logged`, `@Traced`, `@Metric`                                                                            |
+| `@znight/testing`       | `TestBed` (auto-mocked dependencies), `TestApp` (in-memory end-to-end tests), mocks and spies                                                                                    |
+| `@znight/cli`           | The `znight` binary: `new`, `generate`, `g`, `dev`, `build`, `start`, `openapi`                                                                                                  |
 
+Release tooling (CI, Changesets, a `RELEASING.md` procedure) is being set up in pull request #1 and
+is not merged yet.
+
+### Product decisions
+
+Respect them; do not reopen them in passing.
+
+- **No `@znight/security` package in v0.1** (RFC 0001). Security lives in `@znight/http`: route
+  decision groups (`createRouteDecorator(key, { group, required })`, guards declaring
+  `static enforces`) checked at build time (ZNIGHT023) and at boot, CORS, security headers and
+  `trustProxy`. JWT, API keys, rate limiting, CSRF and the like are recipes in
+  `docs/guide/security.md`, compiled and tested in `examples/secure-api`.
+- **Caching**: `@znight/cache` is on the roadmap. Today, caching is a method interceptor (the
+  "Cache" recipe of `docs/guide/aop.md`).
+- **Data layer**: Znight deliberately leaves the ORM choice to developers. For SQL, Drizzle is
+  strongly recommended: `examples/rest-api` shows Drizzle on PGlite, provided through
+  `@Factory`/`@Provides` (guide: `docs/guide/data-access.md`). SQL helper decorators or annotations
+  (entities, columns, repositories, queries) are explicitly **not** on the roadmap.
+- **Built-in sessions and server-side MVC** (a session store, templates, views) are out of scope.
+  Signed cookies are built in, and `examples/secure-api` shows a cookie-session recipe.
+- **WebSocket and GraphQL** are deferred to v0.2 (RFC 0003, RFC 0005); their error code blocks are
+  reserved.
+
+### Roadmap
+
+The roadmap page is [`docs/roadmap.md`](docs/roadmap.md): planned for v0.2, `@znight/websocket`
+(RFC 0003) and `@znight/graphql` (RFC 0005); planned without a date or an RFC yet, `@znight/cache`;
+then what is considered and what is not planned. RFC statuses live in
+[`rfcs/README.md`](rfcs/README.md). There is no TODO list in this file: read the roadmap, the RFCs
+and the GitHub issues before starting a feature, and keep the roadmap page up to date when a
+decision changes.
+
+## Stack
+
+| Area                  | Choice                                                                                                  |
+| --------------------- | ------------------------------------------------------------------------------------------------------- |
+| Workspace             | Bun 1.4 workspaces + catalogs (`package.json#workspaces`); `bunfig.toml` pins exact versions on install |
+| Runtimes              | Node.js >= 24 (`.nvmrc`), Bun >= 1.3; ESM only                                                          |
+| Language              | TypeScript 7 (native `tsc`, `--noEmit` only), `experimentalDecorators`                                  |
+| Compiler internals    | `oxc-parser`, `oxc-resolver`, `magic-string`, `tinyglobby`, `picocolors`                                |
+| Application build     | Vite 8 with the `znight()` plugin; Bun preload `@znight/compiler/bun` for `bun test` / `bun --watch`    |
+| Package build         | tsdown (ESM `.mjs` + `.d.mts`, entries in each `tsdown.config.ts`)                                      |
+| Lint and format       | Biome 2.6 (`biome.jsonc`); husky + lint-staged run `biome check --write` on staged files                |
+| Tests                 | `bun test` (`bun:test`); Testcontainers for broker integration tests                                    |
+| Documentation         | VitePress 1.6 (`docs/`)                                                                                 |
+| HTTP (optional peers) | built-in `node:http`, Fastify 5, Express 5, Hono 4 (+ `@hono/node-server` on Node.js)                   |
+| Validation            | any Standard Schema library (Zod 4 in the examples, Valibot, ArkType...)                                |
+| Messaging (peers)     | `amqplib`, `@aws-sdk/client-sqs`, `@platformatic/kafka`                                                 |
+| Observability         | `pino`, `@opentelemetry/api`; optional `prom-client`, `pino-pretty`                                     |
+| CLI                   | `citty`, `@clack/prompts`                                                                               |
+
+## Repository layout
+
+```txt
+packages/<pkg>/          one folder per @znight/* package
+  src/                   sources; index.ts is the runtime entry, compiler/ the compiler extension
+  test/                  bun:test tests, fixtures/, own tsconfig.json (Bun types, decorators allowed)
+  README.md              detailed reference: options, "Compiler contract", limitations
+  tsdown.config.ts       build entries (must match package.json#exports)
+packages/compiler/src/   project/ (scan, parse, identities), analysis/, binding/, graph/, validation/,
+                         codegen/, diagnostics/ (formatting), extensions/ (extension API),
+                         shapes/ (type shapes for extensions), library/ (compiled libraries),
+                         vite.ts (Vite plugin), bun.ts (Bun preload)
+examples/                runnable applications with their tests: rest-api, microservice, worker,
+                         secure-api, storefront-api, uptime-monitor, monorepo (packages/shared,
+                         services/users-api, services/notifications-worker)
+docs/                    VitePress site: guide/, packages/, reference/, contributing/, test/,
+                         internals/architecture.md (the normative spec, served at /contributing/architecture)
+rfcs/                    design documents, their status and the error code allocation (README.md)
+scripts/                 brand/ (logo generator), docs/diagrams/ (generates docs/public/diagrams/*.svg)
+tests/                   repository-wide tests: boundaries.test.ts, golden.test.ts, support/
 ```
-znight/
-├── packages/
-│   ├── compiler/                 # Plugin Vite - LE CŒUR DU FRAMEWORK
-│   │   └── src/
-│   │       ├── analyzer/         # Extraction métadonnées via ts-morph
-│   │       ├── generator/        # Génération du container
-│   │       ├── validators/       # Validation compile-time
-│   │       └── utils/            # Formatage erreurs, helpers
-│   │
-│   ├── core/                     # Runtime minimal
-│   │   └── src/
-│   │       ├── container/        # Container DI ultra-léger
-│   │       ├── decorators/       # Decorators markers (@Injectable, etc.)
-│   │       ├── lifecycle/        # Interfaces OnStart, OnStop, OnReady
-│   │       └── plugins/          # Système de plugins
-│   │
-│   ├── http/                     # Plugin HTTP
-│   │   └── src/
-│   │       ├── adapters/         # Fastify, Express, Hono
-│   │       ├── decorators/       # @Controller, @Get, @Post, @Body, etc.
-│   │       └── router/           # Registration des routes
-│   │
-│   ├── messaging/                # Plugin Messaging
-│   │   └── src/
-│   │       ├── drivers/          # RabbitMQ, SQS, Kafka
-│   │       └── decorators/       # @Consumer, @OnMessage, @Retry
-│   │
-│   ├── config/                   # Plugin Configuration
-│   │   └── src/
-│   │       ├── decorators/       # @Config, @Env, @Secret
-│   │       └── loaders/          # Env, files, remote (Vault)
-│   │
-│   ├── observability/            # Plugin Observability
-│   │   └── src/
-│   │       ├── logging/          # Logger structuré (Pino)
-│   │       ├── metrics/          # Prometheus
-│   │       └── tracing/          # OpenTelemetry
-│   │
-│   ├── testing/                  # Utilities de test
-│   │   └── src/
-│   │       ├── testbed/          # TestBed avec auto-mocking
-│   │       └── mocks/            # Mock factories
-│   │
-│   └── cli/                      # CLI scaffolding
-│       └── src/
-│           ├── commands/         # new, generate, dev, build
-│           └── templates/        # Templates de génération
-│
-├── apps/
-│   └── example/                  # App exemple pour tester
-│
-├── docs/
-│   └── assets/                   # Logo, images
-│
-└── .github/
-    └── workflows/                # CI/CD
+
+## How it works
+
+```txt
+src/**/*.ts ─▶ @znight/compiler ─▶ src/.znight/container.generated.ts ─▶ Application.create()
+  scan → parse (oxc, cached by content hash) → per-file facts → canonical identities
+  → class analysis (core + compiler extensions) → merge compiled libraries → bind → validate
+  → emit → re-parse check → write if changed
 ```
 
----
+Tokens are canonical identities: `src/users/user.service.ts#UserService` for an application class,
+`@znight/observability#Logger` for a package export or an external supplied by a plugin. An excerpt
+of a generated module (from the specification, §3.3):
 
-## Comment ça marche
+```ts
+// AUTO-GENERATED by @znight/compiler 0.1.0. Do not edit.
+import type { ZnightMetadata } from '@znight/core'
+import { UserController } from '../users/user.controller.js'
+import { UserService } from '../users/user.service.js'
 
-### 1. Le développeur écrit du code classique
-
-```typescript
-// user.service.ts
-@Injectable()
-export class UserService {
-  constructor(
-    private readonly db: DatabaseClient,
-    private readonly logger: Logger,
-  ) {}
-}
-```
-
-### 2. Le compiler analyse et génère
-
-Le plugin Vite (via ts-morph) parse le TypeScript, extrait les métadonnées, valide, et génère :
-
-```typescript
-// .znight/container.generated.ts (auto-généré)
-export const __ZNIGHT_METADATA__ = {
+export const __ZNIGHT_METADATA__: ZnightMetadata = {
+  version: 1,
+  compiler: '0.1.0',
   providers: {
-    UserService: {
-      class: UserService,
+    ['src/users/user.controller.ts#UserController']: {
       scope: 'singleton',
-      dependencies: ['DatabaseClient', 'Logger'],
-      factory: deps => new UserService(deps.DatabaseClient, deps.Logger),
+      class: UserController,
+      deps: ['src/users/user.service.ts#UserService'],
+      factory: d => new UserController(d[0]),
     },
     // ...
   },
-  resolutionOrder: ['Logger', 'DatabaseConfig', 'DatabaseClient', 'UserService'],
-  // ...
+  resolutionOrder: ['src/app.config.ts#AppConfig', 'src/users/user.service.ts#UserService' /* ... */],
+  externals: [{ token: '@znight/observability#Logger', providedBy: 'ObservabilityPlugin' } /* ... */],
+  extensions: {
+    ['http']: {
+      ['controllers']: [
+        /* routes, each with a generated invoke() */
+      ],
+    },
+  },
 }
 ```
 
-### 3. Le runtime est minimal
+At runtime, `main.ts` imports that module and calls
+`Application.create({ metadata: __ZNIGHT_METADATA__, plugins: [...] })`: plugins `register` (they
+supply the externals of their manifest), `container.init()` instantiates singletons in
+`resolutionOrder` (independent async singletons concurrently), plugins run `onBootstrap`.
+`app.start()` runs `onStart`, the plugins start listening, then `onReady`; SIGINT/SIGTERM trigger a
+graceful `app.stop()`.
 
-```typescript
-// Le container utilise le code pré-généré
-for (const name of metadata.resolutionOrder) {
-  const provider = metadata.providers[name]
-  const deps = this.resolveDependencies(provider.dependencies)
-  this.instances.set(name, provider.factory(deps))
-}
-```
+## Conventions
 
-### 4. Erreurs à la compilation
+### The specification comes first
 
-```bash
-$ vite build
+`docs/internals/architecture.md` is the **normative contract** between the compiler and the runtime
+packages (MUST/SHOULD/MAY; "Impl." paragraphs are implementation-defined). A change to the metadata
+shape, a decorator, a manifest, a compiler extension API, a plugin contract or an error code updates
+the specification **in the same change**. Then update the package README (the detailed user
+reference) and the docs pages. Code samples in Markdown must match the real API: the docs tests check
+every `@znight/*` import of the README files and of the site. Prefer copying samples from tests and
+examples.
 
-✗ ZNIGHT001: Missing provider 'EmailService' required by NotificationService
-  --> src/notification/notification.service.ts:12:5
+### RFCs
 
-✗ ZNIGHT002: Circular dependency: OrderService -> PaymentService -> OrderService
-  --> src/order/order.service.ts:8:3
+A significant change (a new package, a new decorator family, a change of the compiler/runtime
+contract) starts as `rfcs/NNNN-<topic>.md`, with the header table of the existing RFCs (Status, Date,
+Affects, Decision) and a row in `rfcs/README.md`. Implement it only once it is accepted.
 
-Build failed with 2 errors.
-```
+### Package sources
 
----
-
-## Stack Technique
-
-| Composant     | Choix            | Raison                                  |
-| ------------- | ---------------- | --------------------------------------- |
-| Monorepo      | Nx + pnpm        | Scalable, cache, affected               |
-| AST Analysis  | ts-morph         | API haut niveau sur TypeScript compiler |
-| Build         | Vite             | Rapide, plugin system                   |
-| HTTP (perf)   | Fastify          | Performance                             |
-| HTTP (compat) | Express, Hono    | Options                                 |
-| Validation    | Zod              | Type inference                          |
-| Logging       | Pino             | Performance                             |
-| Metrics       | prom-client      | Standard                                |
-| Tracing       | @opentelemetry/* | Standard                                |
-| Testing       | Vitest           | Rapide, TS natif                        |
-| Package build | tsdown           | Rapide, moderne, simple                 |
-
----
-
-## TODO List
-
-### Phase 1 - Compiler Foundation (Priorité HAUTE)
-
-- [ ] Package `@znight/compiler`
-  - [ ] Plugin Vite de base (hook buildStart, handleHotUpdate)
-  - [ ] Analyzer: extraction @Injectable (nom, scope, dependencies, lifecycle)
-  - [ ] Analyzer: extraction @Controller (basePath, routes, params)
-  - [ ] Analyzer: extraction @Consumer (queue, handler, retry)
-  - [ ] Validator: dépendances manquantes (ZNIGHT001)
-  - [ ] Validator: cycles détectés (ZNIGHT002)
-  - [ ] Validator: scope mismatch - singleton dépend de request (ZNIGHT003)
-  - [ ] Validator: duplicate providers (ZNIGHT004)
-  - [ ] Generator: génération du container.generated.ts
-  - [ ] Generator: topological sort pour resolutionOrder
-  - [ ] Utils: formatage des erreurs (picocolors)
-  - [ ] Tests unitaires pour chaque analyzer/validator
-
-### Phase 2 - Core Runtime
-
-- [ ] Package `@znight/core`
-  - [ ] Decorators markers: @Injectable, @Inject, @Optional
-  - [ ] Interfaces lifecycle: OnStart, OnStop, OnReady
-  - [ ] Container runtime minimal
-  - [ ] Gestion des scopes (singleton, request, transient)
-  - [ ] Plugin system (interface Plugin, onBootstrap, onStart, onStop)
-  - [ ] Application.create() bootstrap
-  - [ ] Graceful shutdown (SIGTERM, SIGINT)
-  - [ ] Tests unitaires
-
-### Phase 3 - HTTP Plugin
-
-- [ ] Package `@znight/http`
-  - [ ] Decorators: @Controller, @Get, @Post, @Put, @Delete, @Patch
-  - [ ] Decorators params: @Param, @Query, @Body, @Headers, @Req, @Res
-  - [ ] Decorators middleware: @UseGuard, @UseInterceptor
-  - [ ] Decorator validation: @Validate (intégration Zod)
-  - [ ] Adapter interface
-  - [ ] FastifyAdapter
-  - [ ] ExpressAdapter
-  - [ ] HonoAdapter
-  - [ ] Router: registration automatique depuis metadata
-  - [ ] Guard interface & execution pipeline
-  - [ ] Interceptor interface & execution pipeline
-  - [ ] HttpPlugin.configure()
-  - [ ] Tests e2e
-
-### Phase 4 - Advanced Compiler Features
-
-- [ ] Source maps pour les erreurs (pointer vers le bon fichier/ligne)
-- [ ] Watch mode optimisé (incremental analysis)
-- [ ] Validation des interfaces sans implémentation (ZNIGHT008)
-- [ ] Validation des signatures lifecycle (ZNIGHT009)
-- [ ] Support des génériques dans les providers
-- [ ] Support @Inject avec interface token
-
-### Phase 5 - Config Plugin
-
-- [ ] Package `@znight/config`
-  - [ ] Decorators: @Config, @Env, @Default, @Secret
-  - [ ] Loader: environment variables
-  - [ ] Loader: .env files (dotenv)
-  - [ ] Loader: JSON/YAML files
-  - [ ] Loader: remote (Vault, AWS Secrets Manager)
-  - [ ] Validation au boot (required configs)
-  - [ ] Type-safe config classes
-  - [ ] ConfigPlugin.configure()
-
-### Phase 6 - Observability Plugin
-
-- [ ] Package `@znight/observability`
-  - [ ] Logging
-    - [ ] Logger injectable avec contexte auto (requestId, traceId)
-    - [ ] Pino integration
-    - [ ] Transports: Console, Datadog, CloudWatch
-    - [ ] Decorator @Logged pour log auto des méthodes
-  - [ ] Metrics
-    - [ ] Prometheus integration (prom-client)
-    - [ ] Decorator @Metric pour counters auto
-    - [ ] HTTP metrics automatiques
-    - [ ] Custom metrics API
-  - [ ] Tracing
-    - [ ] OpenTelemetry integration
-    - [ ] Decorator @Traced
-    - [ ] Auto-instrumentation HTTP
-    - [ ] Context propagation
-  - [ ] ObservabilityPlugin.configure()
-
-### Phase 7 - Messaging Plugin
-
-- [ ] Package `@znight/messaging`
-  - [ ] Decorators: @Consumer, @OnMessage, @OnError, @Retry
-  - [ ] MessageBroker interface injectable
-  - [ ] Driver interface
-  - [ ] RabbitMQDriver
-  - [ ] SQSDriver
-  - [ ] KafkaDriver
-  - [ ] Retry avec backoff (fixed, exponential)
-  - [ ] Dead Letter Queue support
-  - [ ] MessagingPlugin.configure()
-  - [ ] Tests avec testcontainers
-
-### Phase 8 - Testing Utilities
-
-- [ ] Package `@znight/testing`
-  - [ ] TestBed.create() avec auto-mocking des dépendances
-  - [ ] Mock factories
-  - [ ] TestApp pour tests e2e HTTP
-  - [ ] app.inject() pour requêtes sans network
-  - [ ] Helpers pour messaging (fake consumers)
-  - [ ] Integration vitest
-
-### Phase 9 - CLI
-
-- [ ] Package `@znight/cli`
-  - [ ] Command: `znight new <project-name>`
-  - [ ] Command: `znight generate service <name>`
-  - [ ] Command: `znight generate controller <name>`
-  - [ ] Command: `znight generate consumer <name>`
-  - [ ] Command: `znight dev` (vite dev avec hot reload)
-  - [ ] Command: `znight build` (vite build)
-  - [ ] Command: `znight start` (run production)
-  - [ ] Templates pour génération
-
-### Phase 10 - Documentation & Examples
-
-- [ ] README.md complet
-- [ ] Documentation site (VitePress?)
-- [ ] Example: Simple REST API
-- [ ] Example: Microservice avec messaging
-- [ ] Example: Worker/Consumer
-- [ ] Example: Monorepo multi-services
-- [ ] Contributing guide
-- [ ] Logo & branding
-
----
-
-## Codes d'Erreur Compiler
-
-| Code      | Description                                             |
-| --------- | ------------------------------------------------------- |
-| ZNIGHT001 | Missing provider - dépendance requise non trouvée       |
-| ZNIGHT002 | Circular dependency - cycle détecté dans le graphe      |
-| ZNIGHT003 | Scope mismatch - singleton dépend de request/transient  |
-| ZNIGHT004 | Duplicate provider - même nom sans @Primary             |
-| ZNIGHT005 | Invalid decorator usage                                 |
-| ZNIGHT006 | Missing required config                                 |
-| ZNIGHT007 | Invalid route definition                                |
-| ZNIGHT008 | Ambiguous injection - multiple candidates sans @Primary |
-| ZNIGHT009 | Invalid lifecycle hook signature                        |
-
----
-
-## API Cible (DX)
-
-### Bootstrap minimal
-
-```typescript
-// main.ts
-import { Application } from '@znight/core'
-import { HttpPlugin } from '@znight/http'
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated'
-
-const app = await Application.create({
-  metadata: __ZNIGHT_METADATA__,
-  plugins: [HttpPlugin.configure({ port: 3000 })],
-})
-
-await app.start()
-```
-
-### Service simple
-
-```typescript
-@Injectable()
-export class UserService {
-  constructor(
-    private readonly db: DatabaseClient,
-    private readonly logger: Logger,
-  ) {}
-
-  async findById(id: string): Promise<User> {
-    this.logger.info('Finding user', { id })
-    return this.db.query('SELECT * FROM users WHERE id = $1', [id])
-  }
-}
-```
-
-### Controller
-
-```typescript
-@Controller('/users')
-export class UserController {
-  constructor(private users: UserService) {}
-
-  @Get('/:id')
-  @UseGuard(AuthGuard)
-  async getUser(@Param('id') id: string): Promise<User> {
-    return this.users.findById(id)
-  }
-
-  @Post('/')
-  @Validate(CreateUserDto)
-  async createUser(@Body() dto: CreateUserDto): Promise<User> {
-    return this.users.create(dto)
-  }
-}
-```
-
-### Consumer
-
-```typescript
-@Consumer('orders')
-export class OrderConsumer {
-  constructor(private orders: OrderService) {}
-
-  @OnMessage()
-  @Retry({ attempts: 3, backoff: 'exponential' })
-  async handleOrder(@Message() msg: OrderCreatedEvent) {
-    await this.orders.process(msg)
-  }
-}
-```
-
-### Config typée
-
-```typescript
-@Config('database')
-export class DatabaseConfig {
-  @Env('DB_HOST')
-  @Default('localhost')
-  host: string
-
-  @Env('DB_PORT')
-  @Default(5432)
-  port: number
-
-  @Secret('DB_PASSWORD')
-  password: string
-}
-```
+- Sources run as is on Node.js 24 (type stripping) and Bun: relative imports use the `.ts` suffix
+  (`import { Container } from './container.ts'`).
+- `erasableSyntaxOnly`: no enums, namespaces, parameter properties or decorators in
+  `packages/*/src` (tests and examples may use them). Use `as const` objects instead of enums.
+- `isolatedDeclarations`: explicit types on every export.
+- `noPropertyAccessFromIndexSignature`: read index signatures with brackets
+  (`process.env['NODE_ENV']`). The base config is strict (`noUncheckedIndexedAccess`,
+  `verbatimModuleSyntax`, `noImplicitOverride`).
+- ESM only, small focused modules, JSDoc on public APIs, no `any` without a justified `biome-ignore`.
+- A new entry point is declared in `tsdown.config.ts` **and** in `package.json#exports`, with the
+  `@znight/source` / `types` / `default` triple.
+- Third-party integrations are **optional peer dependencies** (with exact devDependencies for the
+  tests), behind subpath exports. Optional peers needed by a root entry are loaded lazily
+  (non-literal dynamic import, or `createRequire` for CommonJS). Third-party ranges use carets;
+  `@znight/core` is a `workspace:*` dependency, `@znight/compiler` a `workspace:^` optional peer.
+- Boundaries, enforced by `tests/boundaries.test.ts`: `<pkg>/compiler` entries only `import type`
+  from `@znight/compiler` and never import their package's runtime entry (building must not load
+  fastify, amqplib...); runtime entries never import `./compiler`. Code shared by both sides lives in
+  import-free modules.
+- Every helper the generated code calls is exported from the package root, documented in the
+  "Compiler contract" section of the package README and kept stable.
+- Features plug into the compiler through the package manifest (`package.json#znight`: `apiVersion`,
+  `compiler`, `provides`, `interceptors`; specification §7).
 
 ### Tests
 
-```typescript
-describe('UserService', () => {
-  it('should create user', async () => {
-    const { service, mocks } = await TestBed.create(UserService)
+- `packages/<pkg>/test/**/*.test.ts` with `bun:test`, fixtures in `test/fixtures/`.
+- Opt-in suites: `ZNIGHT_INTEGRATION=1` (real brokers, Docker), `ZNIGHT_CLI_E2E=1` (a scaffolded
+  application end to end), `ZNIGHT_E2E=1` (the examples end to end and the golden test, after
+  `bun run build`).
+- `tests/golden.test.ts` checks that the generated module of every example is byte-identical from
+  sources or from `dist`, on Node.js or Bun, in `build` or `serve` mode: keep code generation
+  deterministic (no timestamps, ordering by canonical identity only).
+- `docs/test` checks the Markdown samples, the root README, the site links, the sidebars and the
+  error reference.
 
-    mocks.get(DatabaseClient).findOne.mockResolvedValue(null)
+### Style and commits
 
-    const user = await service.create({ email: 'test@test.com' })
+- Biome: 2 spaces, 120 columns, single quotes, no semicolons, trailing commas; imports grouped as
+  type imports, then `node:` and packages, then relative paths. `bun run check` must report no error.
+- Conventional Commits: `feat(http): ...`, `fix(compiler): ...`, `docs: ...`.
 
-    expect(user).toBeDefined()
-    expect(mocks.get(DatabaseClient).save).toHaveBeenCalled()
-  })
-})
+### Error codes
+
+- The catalogue is `ErrorCode` (`as const`) + `ERROR_DESCRIPTIONS` in
+  `packages/core/src/errors.ts`, shared by compiler diagnostics and runtime `ZnightError`s.
+- Ranges (`rfcs/README.md`): `ZNIGHT001`–`029` core, compiler and the 0.1 features (http, messaging,
+  config, observability); `030`–`039` openapi; `040`–`049` schedule; `050`–`059` websocket and
+  `060`–`069` graphql (reserved for v0.2). Codes are allocated in order without gaps inside a block
+  and never change meaning. Reuse a lower code when the meaning is the same (a decorator on the
+  wrong target is always ZNIGHT005); one catch-all code per package for invalid usage and options;
+  third-party packages get no code.
+- A new code needs, in the same change: the `ErrorCode` entry and its description, a row in the
+  specification's validation table (§4.8), and in `docs/reference/error-codes.md` a row of the
+  summary table (phases among `build`, `startup`, `runtime`, `shutdown`), a
+  `## ZNIGHTxxx: Title {#znightxxx}` section and the updated range in the frontmatter description.
+  `docs/test/site.test.ts` enforces all of it.
+
+### Documentation site
+
+- Every page has a frontmatter `description` and appears in a sidebar of `docs/.vitepress/config.ts`.
+- Link pages with absolute paths without extension (`/guide/scopes#rules-between-scopes`) and
+  repository files with relative paths (`../../packages/core/src/errors.ts`, rewritten to GitHub).
+- A section documenting an API that is not implemented yet is marked
+  `<!-- TODO(api): verify against implementation -->`; any other `TODO` comment fails the tests.
+
+## Development commands
+
+| Command                    | What it does                                                                           |
+| -------------------------- | -------------------------------------------------------------------------------------- |
+| `bun install`              | Install every workspace (also installs the husky hook)                                 |
+| `bun run build`            | Build every package with tsdown (`dist/`)                                              |
+| `bun run test`             | Tests of `packages/`, `docs/` and `tests/`, packages used from source                  |
+| `bun run test:coverage`    | The same with coverage                                                                 |
+| `bun run test:examples`    | The `test` script of every example                                                     |
+| `bun run test:e2e`         | Build, then the examples, the golden test and the CLI end-to-end test with their flags |
+| `bun run test:integration` | Messaging drivers against real brokers (Docker required)                               |
+| `bun run typecheck`        | `tsc --noEmit` for every workspace (sources and tests) and `tests/`                    |
+| `bun run check`            | Biome lint + format check (`check:fix` to fix, `lint`, `format`)                       |
+| `bun run docs:dev`         | Documentation site in development mode                                                 |
+| `bun run docs:build`       | Production build of the site (fails on dead links)                                     |
+
+Targeted runs: `bun test --conditions=@znight/source ./packages/http` (one package),
+`bunx biome check --diagnostic-level=error <paths>`, `bun run --cwd packages/http typecheck`.
+
+Run an example (the CLI and Vite load the packages' `dist`, so build first):
+
+```sh
+bun install
+bun run build
+bun run --cwd examples/rest-api dev    # rebuilds and restarts on change, NODE_ENV=development
+bun run --cwd examples/rest-api test   # bun test --conditions=@znight/source
 ```
 
----
+Each example README lists its endpoints with `curl` commands.
 
-## Comparaison avec NestJS
+Before calling a change done: `bun run test`, `bun run typecheck`, `bun run check`, the tests of the
+examples you touched, `bun run docs:build` when docs changed, and the specification, package README
+and docs updated with the code.
 
-```typescript
-// ❌ NestJS - Verbose avec modules
-@Module({
-  imports: [TypeOrmModule.forRoot(dbConfig), TypeOrmModule.forFeature([User]), ConfigModule.forRoot(), LoggerModule],
-  controllers: [UserController],
-  providers: [UserService],
-  exports: [UserService],
-})
-export class UserModule {}
+## Known pitfalls
 
-@Module({
-  imports: [UserModule, OrderModule, PaymentModule],
-})
-export class AppModule {}
-```
+- **The `@znight/source` condition.** Each package exports its TypeScript sources under the
+  `@znight/source` condition, before `types`/`default` (`dist`). Without
+  `--conditions=@znight/source`, `bun test` resolves `@znight/*` imports to `dist`, which may be
+  missing or stale. The root scripts and the example `test` scripts pass the flag; do the same.
+- **A `tsconfig.json` type-checking the sources through the condition**
+  (`customConditions: ["@znight/source"]`, like the examples) also needs
+  `allowImportingTsExtensions` (hence `noEmit`), since the sources import each other with `.ts`
+  (TS5097 otherwise).
+- **Generated files are not committed.** `src/.znight/` is gitignored and regenerated by the Vite
+  plugin, the Bun preload (`bunfig.toml` → `[test] preload = ["@znight/compiler/bun"]`) or
+  `znight generate` (`--check` exits 1 when stale). Never edit it by hand, and never import it from a
+  provider module (ZNIGHT020): only `main.ts` and tests import it.
+- **`dist` is needed by the CLI and by Vite.** `packages/cli/bin/znight.mjs` loads `dist/cli.mjs`,
+  and Vite configs load the built packages: run `bun run build` before `dev`, `build`, `start` or
+  `test:e2e` of the examples, and again after changing a package they use. In-repo Vite configs keep
+  the linked `@znight/*` packages in `ssr.external`.
+- **TypeScript 7 has no JavaScript API.** `tsc` is the native compiler; tools that import the
+  TypeScript 5 JS API (`openapi-typescript`, ts-morph, typedoc...) do not work in the repository (see
+  `examples/storefront-api`, whose `client:generate` needs `typescript@5`). The Znight compiler uses
+  oxc, never the TypeScript API.
+- **Generated code must stay strict-clean.** It must type-check under `strict`, `noUnusedLocals`,
+  `noUnusedParameters`, `noPropertyAccessFromIndexSignature`, `exactOptionalPropertyTypes` and
+  `verbatimModuleSyntax` (`packages/compiler/test/codegen/typecheck.test.ts`), stay byte-identical
+  across runs, runtimes and source/dist (golden test), and data keys are emitted as computed string
+  keys (`['findById']`).
+- **Tests and examples may use decorators, package sources may not** (`erasableSyntaxOnly`): the
+  marker decorators are plain functions in `src/`, applied only in user code.
 
-```typescript
-// ✅ Znight - Flat, simple, auto-discovered
-const app = await Application.create({
-  metadata: __ZNIGHT_METADATA__,
-  plugins: [HttpPlugin, DatabasePlugin],
-})
-```
+## Pointers
 
----
-
-## Notes Techniques
-
-### Pourquoi ts-morph ?
-
-ts-morph offre une API haut niveau au-dessus du TypeScript compiler. C'est plus simple que d'utiliser directement `typescript` pour :
-- Parser les decorators
-- Extraire les types des paramètres de constructeur
-- Naviguer dans l'AST
-- Obtenir les informations de position (file, line, column)
-
-### Pourquoi pas reflect-metadata ?
-
-1. **Performance** - La reflection au runtime a un coût
-2. **Cold start** - Critique pour serverless/edge
-3. **Tree-shaking** - Impossible avec metadata runtime
-4. **Debugging** - Le code généré est lisible et debuggable
-5. **Validation** - Erreurs à la compilation, pas au boot
-
-### Gestion des scopes
-
-- **singleton** - Une instance pour toute l'app (default)
-- **request** - Une instance par requête HTTP (via AsyncLocalStorage)
-- **transient** - Nouvelle instance à chaque injection
-
-Règle : un scope plus stable ne peut pas dépendre d'un scope moins stable.
-- ✅ request peut dépendre de singleton
-- ❌ singleton ne peut PAS dépendre de request
-
----
-
-## Ressources & Inspiration
-
-- [Micronaut](https://micronaut.io/) - Compile-time DI en Java
-- [Dagger 2](https://dagger.dev/) - Compile-time DI pour Android
-- [NestJS](https://nestjs.com/) - API et DX à suivre
-- [Spring Boot](https://spring.io/projects/spring-boot) - Conventions et patterns
-- [ts-morph](https://ts-morph.com/) - AST manipulation
-- [Fastify](https://www.fastify.io/) - HTTP performance
-
----
-
-## Commandes de Développement
-
-```bash
-# Install
-pnpm install
-
-# Build all packages
-pnpm build
-
-# Test all packages
-pnpm test
-
-# Dev mode (example app)
-pnpm dev
-
-# Lint
-pnpm lint
-
-# Build specific package
-nx build @znight/compiler
-
-# Test specific package
-nx test @znight/core
-```
-
----
-
-## Prochaines Étapes Immédiates
-
-1. **Créer le repo GitHub** avec la description fournie
-2. **Initialiser le monorepo** avec Nx + pnpm
-3. **Implémenter `@znight/compiler`** - C'est le cœur, la partie la plus challengante
-4. **Écrire des tests** pour valider l'analyse AST
-5. **Créer une app example** pour tester en conditions réelles
-6. **Itérer** sur le compiler avant de passer aux autres packages
-
----
-
-_Last updated: Conversation du jour_
+- Specification: [`docs/internals/architecture.md`](docs/internals/architecture.md). Contributing:
+  [`CONTRIBUTING.md`](CONTRIBUTING.md) (short version) and
+  [`docs/contributing/index.md`](docs/contributing/index.md).
+- Roadmap: [`docs/roadmap.md`](docs/roadmap.md); RFCs: [`rfcs/README.md`](rfcs/README.md) (0001
+  security, 0002 openapi, 0003 websocket, 0004 schedule, 0005 graphql, 0006 cookies and SSE).
+- Guides (`docs/guide/`): introduction, getting-started, project-structure, dependency-injection,
+  scopes, lifecycle, plugins, aop, compiler, data-access, testing, security, scheduling,
+  deployment, migrating-from-nestjs.
+- Reference: `docs/packages/<name>.md` (one page per package), `docs/reference/decorators.md`,
+  `docs/reference/error-codes.md`; the package READMEs (`packages/<name>/README.md`) hold the full
+  details.
+- Examples ([`docs/examples.md`](docs/examples.md) describes them): `rest-api` (Fastify, Drizzle on
+  PGlite, API keys), `microservice` (Hono, RabbitMQ, traces across HTTP and messaging), `worker`
+  (consumers only), `secure-api` (route decisions, JWT, API keys, cookie sessions, signed webhooks:
+  the tested source of the security guide), `storefront-api` (OpenAPI, typed client),
+  `uptime-monitor` (scheduled jobs, SSE: the tested source of the scheduling guide), `monorepo` (a
+  shared provider library and two services).

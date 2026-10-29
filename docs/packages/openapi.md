@@ -22,7 +22,8 @@ inferred.
 
 ```sh
 npm install @znight/openapi
-npm install @scalar/api-reference   # optional: serve the UI from node_modules instead of a pinned CDN
+npm install @scalar/api-reference     # optional: serve the UI from node_modules instead of a pinned CDN
+npm install @valibot/to-json-schema   # optional: Valibot schemas (Zod and ArkType need nothing)
 ```
 
 ```ts [src/main.ts]

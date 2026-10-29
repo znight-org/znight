@@ -1,7 +1,8 @@
 # @znight/schedule
 
-Cron, interval and timeout jobs for [Znight](../../README.md): the `@nestjs/schedule` model, plus what
-a compile-time framework can guarantee.
+Cron, interval and timeout jobs for [Znight](../../README.md), validated at build time.
+
+The `@nestjs/schedule` model, plus what a compile-time framework can guarantee:
 
 - **Checked at build time**: cron expressions, durations, time zones, options, names and method
   signatures are validated by the compiler. A bad field gets a caret under the field itself.
@@ -15,12 +16,24 @@ a compile-time framework can guarantee.
   `@znight/observability`), a virtual clock and manual triggers.
 
 ```sh
-bun add @znight/schedule
+# bun
+bun add @znight/core @znight/schedule
+bun add -d @znight/compiler vite
+
+# npm
+npm install @znight/core @znight/schedule
+npm install -D @znight/compiler vite
 ```
 
-Runs on Node.js >= 24 and Bun >= 1.3 (ESM only). The compiler extension
-(`@znight/schedule/compiler`) is loaded by `@znight/compiler` when the application imports the
-package.
+Runs on Node.js >= 24 and Bun >= 1.3 (ESM only), with no third-party dependency. The compiler
+extension (`@znight/schedule/compiler`) is loaded by `@znight/compiler` when the application imports
+the package.
+
+**Documentation:** [`@znight/schedule`](https://github.com/znight-org/znight/blob/main/docs/packages/schedule.md)
+and the [scheduling guide](https://github.com/znight-org/znight/blob/main/docs/guide/scheduling.md).
+**Example:** [`uptime-monitor`](https://github.com/znight-org/znight/tree/main/examples/uptime-monitor)
+(per-monitor dynamic jobs, a weekday digest in a time zone, a nightly purge, one runner across
+instances, tests on a virtual clock).
 
 ## Quick start
 
@@ -59,7 +72,7 @@ export class DigestJobs {
 import { Application } from '@znight/core'
 import { HttpPlugin } from '@znight/http'
 import { SchedulePlugin } from '@znight/schedule'
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated.ts'
+import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
 
 const app = await Application.create({
   metadata: __ZNIGHT_METADATA__,

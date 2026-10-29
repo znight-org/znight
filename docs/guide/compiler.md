@@ -274,11 +274,11 @@ Diagnostics are printed with a code frame and hints:
 
 ```txt
 ✗ ZNIGHT001: Missing provider for 'EmailService' required by NotificationService
-  --> src/notification/notification.service.ts:12:5
+  --> src/notification/notification.service.ts:12:29
    |
 12 |     private readonly email: EmailService,
    |                             ^^^^^^^^^^^^
-   = hint: Add @Injectable() to EmailService (src/email/email.service.ts:3)
+   = hint: EmailService (src/email/email.service.ts:3) is not a provider: add @Injectable()
 ```
 
 Errors fail the build; warnings (such as [`ZNIGHT017`](/reference/error-codes#znight017) without

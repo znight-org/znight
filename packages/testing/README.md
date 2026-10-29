@@ -1,6 +1,7 @@
 # @znight/testing
 
-Testing utilities for [Znight](../../README.md) applications:
+Testing utilities for [Znight](../../README.md) applications: unit tests with auto-mocked
+dependencies, end-to-end tests with in-memory requests.
 
 - **`TestBed`**: unit tests. Builds one provider with its real (generated) factory and auto-mocks its
   direct dependencies.
@@ -10,10 +11,22 @@ Testing utilities for [Znight](../../README.md) applications:
 - **Deep auto-mocks** and a **Jest-compatible spy**, cooperating with `bun:test`, Vitest and Jest.
 
 ```sh
+# bun
 bun add -d @znight/testing
+
+# npm
+npm install -D @znight/testing
 ```
 
 Runs on Node.js >= 24 and Bun >= 1.3 (ESM only), with any test runner.
+
+**Documentation:** [`@znight/testing`](https://github.com/znight-org/znight/blob/main/docs/packages/testing.md)
+and the [testing guide](https://github.com/znight-org/znight/blob/main/docs/guide/testing.md).
+**Examples:** every [example application](https://github.com/znight-org/znight/tree/main/examples)
+ships its tests (`bun test`): unit tests with `TestBed`, HTTP tests with `TestApp` in
+[`rest-api`](https://github.com/znight-org/znight/tree/main/examples/rest-api), message consumers in
+[`worker`](https://github.com/znight-org/znight/tree/main/examples/worker), event streams and a
+virtual clock in [`uptime-monitor`](https://github.com/znight-org/znight/tree/main/examples/uptime-monitor).
 
 ## Generated metadata first
 
@@ -28,7 +41,7 @@ so make sure it is fresh before the tests run:
 | Anything    | Run `znight generate` before the tests (`"pretest": "znight generate"`), `--check` fails in CI  |
 
 ```ts
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.ts'
+import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
 ```
 
 Without metadata, or for a class missing from it, `TestBed` reports a `ZNIGHT001` naming the class
@@ -41,7 +54,7 @@ the preload / plugin / `pretest` script in place.
 ```ts
 import { describe, expect, test } from 'bun:test'
 import { TestBed } from '@znight/testing'
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.ts'
+import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
 
 describe('UserService', () => {
   test('finds a user', async () => {

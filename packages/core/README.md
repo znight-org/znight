@@ -10,12 +10,27 @@ that plan. There is no `reflect-metadata`, no runtime type lookup, and resolving
 single `Map` lookup.
 
 ```sh
+# bun
 bun add @znight/core
 bun add -d @znight/compiler vite
+
+# npm
+npm install @znight/core
+npm install -D @znight/compiler vite
 ```
 
 Runs on Node.js >= 24 and Bun >= 1.3 (ESM only). Decorators require
 `"experimentalDecorators": true` in your `tsconfig.json`.
+
+**Documentation:** [`@znight/core`](https://github.com/znight-org/znight/blob/main/docs/packages/core.md)
+and the guides on [dependency injection](https://github.com/znight-org/znight/blob/main/docs/guide/dependency-injection.md),
+[scopes](https://github.com/znight-org/znight/blob/main/docs/guide/scopes.md),
+[lifecycle](https://github.com/znight-org/znight/blob/main/docs/guide/lifecycle.md) and
+[data access](https://github.com/znight-org/znight/blob/main/docs/guide/data-access.md).
+**Examples:** every [example application](https://github.com/znight-org/znight/tree/main/examples)
+uses it; [`rest-api`](https://github.com/znight-org/znight/tree/main/examples/rest-api) provides a
+Drizzle database through `@Factory`/`@Provides`, [`monorepo`](https://github.com/znight-org/znight/tree/main/examples/monorepo)
+shares providers through a library package.
 
 ## Quick start
 
@@ -41,7 +56,7 @@ export class UserService implements OnStart {
 // src/main.ts
 import { Application } from '@znight/core'
 import { HttpPlugin } from '@znight/http'
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated.ts'
+import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
 
 const app = await Application.create({
   metadata: __ZNIGHT_METADATA__,
@@ -394,5 +409,6 @@ the [architecture specification](../../docs/internals/architecture.md#48-validat
 The catalogue is shared by the compiler and every first-party package. `ZNIGHT001`–`ZNIGHT029`
 belong to the core, the compiler and the features of the first release (`ZNIGHT023`, a missing
 route decision, is reported by `@znight/http`). From `ZNIGHT030`, each package owns a block of ten:
-`ZNIGHT030`–`039` `@znight/openapi`, `ZNIGHT040`–`049` `@znight/schedule` (`050`–`069` are
-reserved). Inside a block, codes are allocated in order; third-party packages get no `ZNIGHT` code.
+`ZNIGHT030`–`039` `@znight/openapi`, `ZNIGHT040`–`049` `@znight/schedule` (`050`–`059` and
+`060`–`069` are reserved for `@znight/websocket` and `@znight/graphql`, planned for v0.2). Inside a
+block, codes are allocated in order; third-party packages get no `ZNIGHT` code.

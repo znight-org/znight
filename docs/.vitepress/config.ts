@@ -86,6 +86,8 @@ export default defineConfig({
     nav: nav(),
     sidebar: {
       '/guide/': sidebarGuide(),
+      '/examples': sidebarGuide(),
+      '/roadmap': sidebarGuide(),
       '/contributing/': sidebarGuide(),
       '/packages/': sidebarPackages(),
       '/reference/': sidebarReference(),
@@ -111,6 +113,7 @@ export default defineConfig({
 function nav(): DefaultTheme.NavItem[] {
   return [
     { text: 'Guide', link: '/guide/introduction', activeMatch: '^/guide/' },
+    { text: 'Examples', link: '/examples', activeMatch: '^/examples' },
     { text: 'Packages', link: '/packages/', activeMatch: '^/packages/' },
     {
       text: 'Reference',
@@ -124,6 +127,7 @@ function nav(): DefaultTheme.NavItem[] {
     {
       text: `v${version}`,
       items: [
+        { text: 'Roadmap', link: '/roadmap' },
         { text: 'Contributing', link: '/contributing/' },
         { text: 'Releases', link: `${GITHUB_URL}/releases` },
         { text: 'Issues', link: `${GITHUB_URL}/issues` },
@@ -141,6 +145,7 @@ function sidebarGuide(): DefaultTheme.SidebarItem[] {
         { text: 'Introduction', link: '/guide/introduction' },
         { text: 'Getting started', link: '/guide/getting-started' },
         { text: 'Project structure', link: '/guide/project-structure' },
+        { text: 'Examples', link: '/examples' },
       ],
     },
     {
@@ -155,19 +160,21 @@ function sidebarGuide(): DefaultTheme.SidebarItem[] {
       ],
     },
     {
-      text: 'Going further',
+      text: 'Building applications',
       items: [
-        { text: 'Testing', link: '/guide/testing' },
+        { text: 'Data access', link: '/guide/data-access' },
         { text: 'Security', link: '/guide/security' },
         { text: 'Scheduling', link: '/guide/scheduling' },
+        { text: 'Testing', link: '/guide/testing' },
         { text: 'Deployment', link: '/guide/deployment' },
         { text: 'Migrating from NestJS', link: '/guide/migrating-from-nestjs' },
       ],
     },
     {
-      text: 'Contributing',
+      text: 'Project',
       collapsed: true,
       items: [
+        { text: 'Roadmap', link: '/roadmap' },
         { text: 'Contributing guide', link: '/contributing/' },
         { text: 'Architecture', link: '/contributing/architecture' },
       ],

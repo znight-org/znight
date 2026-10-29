@@ -60,11 +60,11 @@ related locations:
 
 ```txt
 ✗ ZNIGHT001: Missing provider for 'EmailService' required by NotificationService
-  --> src/notification/notification.service.ts:12:5
+  --> src/notification/notification.service.ts:12:29
    |
 12 |     private readonly email: EmailService,
    |                             ^^^^^^^^^^^^
-   = hint: Add @Injectable() to EmailService (src/email/email.service.ts:3)
+   = hint: EmailService (src/email/email.service.ts:3) is not a provider: add @Injectable()
 ```
 
 **Runtime errors** are `ZnightError` instances: `error.code` (`'ZNIGHT001'`), `error.hints`, and
@@ -107,7 +107,7 @@ export class NotificationService {
 ```txt
 ✗ ZNIGHT001: Missing provider for 'EmailService' required by NotificationService
   --> src/notification/notification.service.ts:3:39
-   = hint: Add @Injectable() to EmailService (src/email/email.service.ts:1)
+   = hint: EmailService (src/email/email.service.ts:1) is not a provider: add @Injectable()
 ```
 
 The message includes a **near-miss analysis**: a class with the same name in another file (both

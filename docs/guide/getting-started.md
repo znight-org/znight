@@ -33,13 +33,22 @@ bunx @znight/cli new my-service
 :::
 
 In a terminal, the CLI asks for the project name, the package manager, the HTTP adapter (the built-in
-`node:http` server, Fastify, Express or Hono), the features (configuration, observability,
-messaging), and whether to install the dependencies and initialise git. `--yes` takes the defaults
-(`node` adapter, configuration and observability); flags answer the questions up front:
+`node:http` server, Fastify, Express or Hono), the features and whether to install the dependencies
+and initialise git. `--yes` takes the defaults (`node` adapter, configuration and observability);
+flags answer the questions up front:
 
 ```sh
 npx @znight/cli new my-service --yes --adapter fastify --features all
+npx @znight/cli new my-service --yes --features config,observability,schedule,openapi
 ```
+
+| Feature         | Adds                                                                                                           |
+| --------------- | -------------------------------------------------------------------------------------------------------------- |
+| `config`        | [`@znight/config`](/packages/config): a typed `@Config` class read from the environment                        |
+| `observability` | [`@znight/observability`](/packages/observability): JSON request logs; metrics once `prom-client` is installed |
+| `messaging`     | [`@znight/messaging`](/packages/messaging): a consumer and an in-memory broker                                 |
+| `schedule`      | [`@znight/schedule`](/packages/schedule): a cron job and its test on a virtual clock                           |
+| `openapi`       | [`@znight/openapi`](/packages/openapi): `/openapi.json`, the API reference on `/docs`                          |
 
 It creates a small greeting API with its tests:
 
@@ -47,14 +56,21 @@ It creates a small greeting API with its tests:
 my-service/
 ├─ src/
 │  ├─ main.ts                    # Application.create() with the plugins, then start()
-│  └─ app/                       # app.config.ts, greeting.service.ts, greeting.controller.ts,
-│                                # greeting.schemas.ts, health.controller.ts (greeting.consumer.ts)
-├─ test/                         # TestBed (unit) and TestApp (in-memory HTTP) tests
+│  ├─ api.ts                     # @OpenApiDocument: title and tags of openapi.json   (openapi)
+│  └─ app/
+│     ├─ app.config.ts           # @Config('app'): PORT, APP_GREETING                (config)
+│     ├─ greeting.schemas.ts     # Zod schema of the request body
+│     ├─ greeting.service.ts     # @Injectable
+│     ├─ greeting.controller.ts  # GET /greetings/:name, POST /greetings (validated body)
+│     ├─ greeting.consumer.ts    # @Consumer('greetings')                             (messaging)
+│     ├─ health.controller.ts    # GET /health
+│     └─ heartbeat.jobs.ts       # @Cron('* * * * *'): a job every minute             (schedule)
+├─ test/                         # TestBed (unit), TestApp (in-memory HTTP), jobs on a virtual clock
 ├─ vite.config.ts                # plugins: [znight(options)]
 ├─ znight.config.ts              # compiler options, shared with the Bun preload and znight generate
 ├─ bunfig.toml                   # Bun projects: preloads @znight/compiler/bun for bun test
 ├─ tsconfig.json
-└─ package.json                  # scripts: dev, build, start, generate, typecheck, test
+└─ package.json                  # scripts: dev, build, start, generate, typecheck, test (openapi)
 ```
 
 Bun projects test with `bun test` (the preload regenerates the container), the others with Vitest
@@ -405,4 +421,7 @@ The mistake never reaches production. Every code is explained in the
 - [Dependency injection](./dependency-injection): qualifiers, factories, optional and lazy
   dependencies.
 - [HTTP](/packages/http): routing, validation, guards and interceptors.
+- [Data access](./data-access): replace the in-memory repository with a database (Drizzle).
+- [Security](./security): access decisions checked at build time, authentication recipes.
 - [Testing](./testing): unit tests with auto-mocks and end-to-end tests without a network.
+- [Examples](/examples): complete applications to read and run.

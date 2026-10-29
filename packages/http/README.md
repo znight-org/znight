@@ -1,6 +1,9 @@
 # @znight/http
 
-HTTP for [Znight](../../README.md): controllers, routing, parameter coercion, validation with any
+HTTP controllers for [Znight](../../README.md), resolved at build time and served by the built-in
+`node:http` server, Fastify, Express or Hono.
+
+Controllers, routing, parameter coercion, validation with any
 [Standard Schema](https://standardschema.dev) library (Zod, Valibot, ArkType...), file uploads and
 downloads, streaming, cookies (signed or not), Server-Sent Events, guards, interceptors, exception
 mappers, request scopes and graceful shutdown.
@@ -15,11 +18,30 @@ extraction, coercion, validation). At runtime the plugin only registers the gene
 reflection, no metadata lookup per request.
 
 ```sh
-bun add @znight/core @znight/http zod
+# bun
+bun add @znight/core @znight/http zod   # zod, or any Standard Schema library
 bun add -d @znight/compiler vite
+bun add fastify                          # optional: or express, or hono (+ @hono/node-server on Node.js)
+
+# npm
+npm install @znight/core @znight/http zod
+npm install -D @znight/compiler vite
+npm install fastify
 ```
 
 Runs on Node.js >= 24 and Bun >= 1.3 (ESM only). Decorators require `"experimentalDecorators": true`.
+Every adapter is an [optional peer dependency](#optional-peer-dependencies) (`light-my-request` too,
+for `inject()` with the `node` and `express` adapters).
+
+**Documentation:** [`@znight/http`](https://github.com/znight-org/znight/blob/main/docs/packages/http.md)
+and the [security guide](https://github.com/znight-org/znight/blob/main/docs/guide/security.md).
+**Examples:** [`rest-api`](https://github.com/znight-org/znight/tree/main/examples/rest-api) (Fastify,
+API keys), [`secure-api`](https://github.com/znight-org/znight/tree/main/examples/secure-api) (route
+decisions, JWT, cookies, CORS), [`microservice`](https://github.com/znight-org/znight/tree/main/examples/microservice)
+and [`storefront-api`](https://github.com/znight-org/znight/tree/main/examples/storefront-api) (Hono),
+[`uptime-monitor`](https://github.com/znight-org/znight/tree/main/examples/uptime-monitor)
+(Server-Sent Events), [`monorepo`](https://github.com/znight-org/znight/tree/main/examples/monorepo)
+(Express).
 
 - [Quick start](#quick-start)
 - [Controllers and routes](#controllers-and-routes)
@@ -93,7 +115,7 @@ export class UserController {
 // src/main.ts
 import { Application } from '@znight/core'
 import { HttpPlugin } from '@znight/http'
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated.ts'
+import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
 
 const app = await Application.create({
   metadata: __ZNIGHT_METADATA__,
@@ -2294,8 +2316,9 @@ interface HttpAdapter {
 
 - No built-in compression or static files yet: use the native ecosystem through the Fastify /
   Express / Hono adapters (their middleware runs before Znight routes).
-- No sessions, encrypted cookies or CSRF middleware, and no cookie jar in `inject()` (tests pass
-  cookies explicitly).
+- No sessions, encrypted cookies or CSRF middleware (built-in sessions are out of scope: the
+  [security guide](https://github.com/znight-org/znight/blob/main/docs/guide/security.md) has
+  cookie-session and CSRF recipes), and no cookie jar in `inject()` (tests pass cookies explicitly).
 - Event streams: `EventChannel` is in-process (no cross-instance fan-out), hooks measure the time
   to open a stream (no stream-lifetime hook), and there is no built-in cap on open streams (count
   them with `plugin.streams` in a guard).

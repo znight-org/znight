@@ -257,3 +257,5 @@ work they would do in factories (or lazy) for such deployments.
 5. Configuration is validated at boot (`@znight/config`); secrets come from the environment or a
    secret store.
 6. Logs, metrics and traces are wired with [`@znight/observability`](/packages/observability).
+7. With several instances, database migrations run once per release, not at every boot
+   ([Data access](./data-access#migrations)).

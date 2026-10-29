@@ -4,20 +4,31 @@ The `znight` command line of [Znight](../../README.md): create a project, genera
 dependency injection container, run the development loop, build and start the application.
 
 ```sh
-npx @znight/cli new my-service     # or: bunx @znight/cli new, pnpm dlx @znight/cli new
+bunx @znight/cli new my-service    # or: npx @znight/cli new my-service, pnpm dlx @znight/cli new my-service
 cd my-service
-npm run dev
+bun run dev                        # or: npm run dev
 ```
 
 In a project, install it next to its peers (`znight new` does it for you):
 
 ```sh
+# bun
+bun add -d @znight/cli @znight/compiler vite
+
+# npm
 npm install -D @znight/cli @znight/compiler vite
 ```
 
 `vite`, `@znight/compiler` and `@znight/openapi` are (optional) peer dependencies: the CLI always
 uses the versions installed in your project, and only loads them for the commands that need them
 (`generate`, `dev`, `build`, `openapi`). Runs on Node.js >= 24 and Bun >= 1.3.
+
+**Documentation:** [`@znight/cli`](https://github.com/znight-org/znight/blob/main/docs/packages/cli.md)
+and [getting started](https://github.com/znight-org/znight/blob/main/docs/guide/getting-started.md).
+**Examples:** every [example application](https://github.com/znight-org/znight/tree/main/examples)
+runs on the CLI (`generate`, `dev`, `build`, `start` scripts);
+[`storefront-api`](https://github.com/znight-org/znight/tree/main/examples/storefront-api) also
+writes its committed `openapi.json` with `znight openapi` and checks it with `--check`.
 
 - [Commands](#commands)
 - [`znight new`](#znight-new)

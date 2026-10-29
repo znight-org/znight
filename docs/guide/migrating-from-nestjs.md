@@ -62,7 +62,7 @@ walks through a migration.
 | `app.enableCors()`, `helmet()`                     | `cors` and `securityHeaders` options of `HttpPlugin`          | Handled by the plugin on every adapter ([Security](./security)).                            |
 | `@nestjs/swagger` (`@ApiProperty`, `@ApiResponse`) | [`@znight/openapi`](/packages/openapi)                        | Schemas from TypeScript types and JSDoc, checked at build time; no `@ApiProperty`.          |
 
-### Messaging, config, lifecycle
+### Messaging, config, lifecycle, data
 
 | NestJS                                               | Znight                                                                                              |
 | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
@@ -78,6 +78,10 @@ walks through a migration.
 | `Test.createTestingModule({...}).compile()`          | `TestBed.create(Class, { metadata })` / `TestApp.create()`                                          |
 | `.overrideProvider(X).useValue(fake)`                | `overrides: [[X, fake]]`                                                                            |
 | `ScheduleModule.forRoot()`, `@Cron()`, `@Interval()` | [`@znight/schedule`](/packages/schedule): `SchedulePlugin`, `@Cron()`, `@Interval('10s')`           |
+| `TypeOrmModule`, `@InjectRepository(User)`           | A `@Factory()` providing the client, repositories behind interfaces ([Data access](./data-access))  |
+| `CacheModule`, `CacheInterceptor`                    | A method interceptor ([cache recipe](./aop#cache)); `@znight/cache` is planned                      |
+| `@WebSocketGateway()`, `@nestjs/graphql`             | Planned for v0.2 ([roadmap](/roadmap#v0-2)); Server-Sent Events today                               |
+| `express-session`, `@Session()`                      | Not included: signed cookies, and cookie sessions in the [Security guide](./security#csrf)          |
 
 ## Modules → flat DI {#modules-to-flat-di}
 
@@ -139,7 +143,8 @@ const app = await Application.create({
 ```
 
 No `imports`, no `inject` array: call `container.get()` with whatever you need. For providers of your
-own (a database client, an SDK), use a `@Factory()`:
+own (a database client, an SDK), use a `@Factory()` ([Data access](./data-access) has the complete
+pattern, with Drizzle):
 
 ```ts
 @Factory()

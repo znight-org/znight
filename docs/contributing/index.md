@@ -9,11 +9,13 @@ Thanks for your interest in Znight! Issues, discussions and pull requests are we
 
 ## Setup
 
-The repository is a [Bun](https://bun.sh) workspace. You need Bun 1.3+ and Node.js 24+.
+The repository is a [Bun](https://bun.sh) workspace. You need Bun 1.4 (the version pinned in
+`package.json#packageManager`) and Node.js 24+ (`.nvmrc`). Applications built with Znight only need
+Bun 1.3+ or Node.js 24+.
 
 ```sh
 git clone https://github.com/znight-org/znight.git
-cd Znight
+cd znight
 bun install
 ```
 
@@ -43,10 +45,10 @@ cd examples/rest-api
 bun run dev
 ```
 
-`dev` rebuilds and restarts the application on every change, with `NODE_ENV=development` (each
-example ships a `.env.development` with development credentials). Every example README lists its
-endpoints with `curl` commands. If `znight` reports that `dist/cli.mjs` is missing, run
-`bun run build` again from the repository root.
+`dev` rebuilds and restarts the application on every change. The examples that need development
+settings (credentials, sample data) read them from their `.env.development`. Every example README
+lists its endpoints with `curl` commands; [Examples](/examples) describes each one. If `znight`
+reports that `dist/cli.mjs` is missing, run `bun run build` again from the repository root.
 
 ## Repository layout
 
@@ -63,10 +65,20 @@ znight/
 │  ├─ observability/  # logger (pino), metrics (prom-client), tracing (OpenTelemetry)
 │  ├─ testing/        # TestBed, TestApp, mock helpers
 │  └─ cli/            # the znight binary
-├─ examples/          # runnable example applications (rest-api, microservice, worker, monorepo), with their tests
+├─ examples/          # runnable applications with their tests: rest-api, secure-api, storefront-api,
+│                     # uptime-monitor, microservice, worker, monorepo
+├─ rfcs/              # design documents of significant features, with their status
 ├─ tests/             # repository-wide tests: package boundaries, golden test of the examples
+├─ scripts/           # generators of the brand assets and of the documentation diagrams
 └─ docs/              # this site (VitePress); docs/internals holds the architecture specification
 ```
+
+## RFCs
+
+Significant features (a new package, a new cross-package contract) start as an RFC in
+[`rfcs/`](https://github.com/znight-org/znight/tree/main/rfcs), discussed before any implementation.
+Its README lists every RFC with its status and allocates the error code ranges of the packages. The
+[roadmap](/roadmap) summarises where each one stands.
 
 ## The specification comes first
 
@@ -93,7 +105,7 @@ When an implementation needs to deviate, update the specification in the same ch
   `ZNIGHT_CLI_E2E=1` (a scaffolded application, end to end), `ZNIGHT_E2E=1` (the examples end to end
   and the golden test, after `bun run build`). `tests/boundaries.test.ts` enforces the package
   boundaries of the specification (§2).
-- **Integrations** (fastify, amqplib, pino...) are optional peer dependencies, loaded from subpath
+- **Integrations** (fastify, amqplib, prom-client...) are optional peer dependencies, loaded from subpath
   exports.
 - **Generated-code contract**: every helper the compiler-generated code calls is exported from the
   package's root entry, documented in a "Compiler contract" section of its README and kept stable.

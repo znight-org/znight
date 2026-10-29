@@ -1,6 +1,7 @@
 # @znight/observability
 
-Logging, metrics and tracing for [Znight](../../README.md) applications:
+Logging, metrics and tracing for [Znight](../../README.md) applications, wired into every request,
+message and scheduled run by one plugin:
 
 - **Logging**: a structured [pino](https://getpino.io) `Logger`, automatically enriched with the
   current `requestId`, `traceId` and `spanId` (and `job` / `runId` inside a scheduled run);
@@ -18,12 +19,29 @@ Everything is wired by one plugin, and like the rest of Znight, it is resolved a
 `reflect-metadata`, no runtime scanning.
 
 ```sh
-bun add @znight/observability
+# bun
+bun add @znight/core @znight/observability
+bun add -d @znight/compiler vite
 bun add prom-client        # optional: metrics
 bun add -d pino-pretty     # optional: pretty logs in development
+
+# npm
+npm install @znight/core @znight/observability
+npm install -D @znight/compiler vite
+npm install prom-client        # optional: metrics
+npm install -D pino-pretty     # optional: pretty logs in development
 ```
 
-Runs on Node.js >= 24 and Bun >= 1.3 (ESM only).
+Runs on Node.js >= 24 and Bun >= 1.3 (ESM only). Traces are recorded by the OpenTelemetry SDK you
+register (see [Tracing](#tracing)).
+
+**Documentation:** [`@znight/observability`](https://github.com/znight-org/znight/blob/main/docs/packages/observability.md).
+**Examples:** [`microservice`](https://github.com/znight-org/znight/tree/main/examples/microservice)
+(logs, metrics and traces across HTTP and messaging),
+[`rest-api`](https://github.com/znight-org/znight/tree/main/examples/rest-api) (request logs and
+metrics), [`uptime-monitor`](https://github.com/znight-org/znight/tree/main/examples/uptime-monitor)
+(scheduled runs); every other [example](https://github.com/znight-org/znight/tree/main/examples)
+uses it too.
 
 ## Quick start
 
@@ -32,7 +50,7 @@ Runs on Node.js >= 24 and Bun >= 1.3 (ESM only).
 import { Application } from '@znight/core'
 import { HttpPlugin } from '@znight/http'
 import { ObservabilityPlugin } from '@znight/observability'
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated.ts'
+import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
 
 const app = await Application.create({
   metadata: __ZNIGHT_METADATA__,
