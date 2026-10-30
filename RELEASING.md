@@ -158,9 +158,16 @@ files.
 
 ### Authentication and provenance
 
-The publish step authenticates with the **`NPM_TOKEN`** secret of the `npm` environment, an npm
-granular access token (see [npm token](#npm-token)); the script refuses to publish from GitHub
-Actions without it. Locally, it uses your npm login.
+The publish step uses, in this order:
+
+1. the **`NPM_TOKEN`** secret when it is set: an npm granular access token. It is not set: it is
+   only needed to publish [a new package](#a-new-package) for the first time, since npm trusted
+   publishing can only be configured for a package that already exists on the registry;
+2. otherwise **npm trusted publishing** (OIDC), what every release uses: the job has
+   `permissions: id-token: write` and npm ≥ 11.5.1 (Node.js 24) exchanges the GitHub OIDC token for
+   a short-lived publish token. No secret at all. npm checks the repository (`znight-org/znight`),
+   the workflow file (`release.yml`) and the environment (`npm`) against the trusted publisher
+   configured on each package (see [npm setup](#npm-setup)).
 
 **Provenance** (`--provenance`, a signed statement linking each version to its commit and workflow
 run) is attested automatically: the workflow passes the repository visibility to the script
@@ -207,28 +214,53 @@ for the "last updated" date of each page. Locally:
 (export ZNIGHT_DOCS_BASE=/znight/ && bun run docs:build && bun run --cwd docs preview)   # http://localhost:4173/znight/
 ```
 
-## npm token
+## npm setup
 
-Releases publish with an npm **granular access token**, stored as the `NPM_TOKEN` secret of the
-`npm` environment. npm caps tokens that can publish at **90 days**: rotate it before it expires
-(an expired token fails the publish job with E401 or E403; see [Troubleshooting](#troubleshooting)).
+Every `@znight/*` package on npm has:
 
-1. On npmjs.com → _Access Tokens_ → _Generate New Token_ → _Granular Access Token_: name it after
-   the date (e.g. `znight-release-2026-10`), _Bypass two-factor authentication_ **checked** (CI
-   cannot answer a 2FA prompt), _Packages and scopes_ **Read and write** on the `@znight` scope
-   (not a list of packages: a scope-wide token also publishes new packages), expiration **90
-   days**.
-2. Save it in the `npm` environment:
+- a **trusted publisher**: _GitHub Actions_, organization `znight-org`, repository `znight`,
+  workflow `release.yml`, environment `npm`;
+- the publishing access **Require two-factor authentication and disallow tokens**: no token can
+  publish it, trusted publishing keeps working (and a maintainer can still publish by hand with
+  2FA, if ever needed).
+
+No npm token is stored anywhere. [`trust.ts`](scripts/release/trust.ts) configures both, logged in
+to npm with 2FA, in a terminal (npm asks for a one-time password, or opens the browser, on every
+command):
+
+```sh
+npm install -g npm@latest                                # npm trust needs npm >= 11.15
+npm login
+bun scripts/release/trust.ts                             # prints the npm commands
+bun scripts/release/trust.ts --apply --disallow-tokens   # runs them, for every package
+npm trust list @znight/core                              # check one
+```
+
+Or by hand on npmjs.com, for every package: _Settings_ → _Trusted publishing_ → _GitHub Actions_
+(the values above), and _Settings_ → _Publishing access_.
+
+### A new package
+
+A new `packages/*` folder cannot be published by trusted publishing the first time: npm only
+configures a trusted publisher for a package that exists. Its first release goes through a
+short-lived token:
+
+1. On npmjs.com → _Access Tokens_ → _Generate New Token_ → _Granular Access Token_: packages and
+   scopes **Read and write** on the `@znight` scope, _Bypass two-factor authentication_ checked (CI
+   cannot answer a 2FA prompt), expiration **7 days**.
+2. Save it as the **`NPM_TOKEN`** secret of the `npm` environment:
    `gh secret set NPM_TOKEN --env npm --repo znight-org/znight` (or Settings → Environments → `npm`
-   → Environment secrets → `NPM_TOKEN` → Update).
-3. Revoke the previous token on npmjs.com (_Access Tokens_), and note the new expiry date.
+   → Environment secrets).
+3. Release as usual (merge the version pull request, approve). The new package is published with
+   the token; the others keep using trusted publishing.
+4. Configure the new package, then remove the token:
 
-The publishing access of every package (npmjs.com → the package → _Settings_ → _Publishing
-access_) must accept tokens: two-factor authentication **or** a token, not _disallow tokens_, which
-would refuse the release. From the command line: `npm access set mfa=automation @znight/<name>`.
+   ```sh
+   bun scripts/release/trust.ts --apply --disallow-tokens --package @znight/<name>
+   gh secret delete NPM_TOKEN --env npm --repo znight-org/znight
+   ```
 
-**A new package** (a new `packages/*` folder) needs nothing more: the scope-wide token publishes it
-with the next release.
+   and revoke the token on npmjs.com (_Access Tokens_).
 
 ## Owner setup checklist
 
@@ -256,7 +288,8 @@ GitHub (repository `znight-org/znight`, public):
      merge, which you must be able to approve. **Save protection rules**.
   3. _Deployment branches and tags_: **Selected branches and tags** → **Add deployment branch or
      tag rule** → _Ref type_ Branch, pattern `main` → **Add rule**.
-  4. _Environment secrets_ → **Add environment secret**: `NPM_TOKEN`, the [npm token](#npm-token).
+  4. _Environment secrets_: none. `NPM_TOKEN` is only set for the first release of
+     [a new package](#a-new-package), and deleted right after.
 - [ ] **GitHub Pages**: Settings → Pages → _Build and deployment_ → _Source_: **GitHub Actions**
   (instead of _Deploy from a branch_; ignore the suggested workflows). It is saved at once, and
   creates the `github-pages` environment, which deploys from `main` (the release workflow and the
@@ -277,8 +310,10 @@ GitHub (repository `znight-org/znight`, public):
 npm (organization `@znight`):
 
 - [ ] Your npm account has 2FA enabled and can publish to the `@znight` organization.
-- [ ] A granular token on the `@znight` scope in the `NPM_TOKEN` secret, rotated before its 90 days
-  run out; every package accepts granular tokens ([npm token](#npm-token)).
+- [ ] Trusted publishing and _Require two-factor authentication and disallow tokens_ on every
+  package, no `NPM_TOKEN` secret ([npm setup](#npm-setup)).
+- [ ] A new package (a new `packages/*` folder): its first release goes through a token, then it
+  gets its trusted publisher ([A new package](#a-new-package)).
 
 ## Troubleshooting
 
@@ -290,9 +325,9 @@ npm (organization `@znight`):
   pull requests_ ([checklist](#owner-setup-checklist)).
 - **The publish job refuses to start ("no required reviewers")**: add reviewers to the `npm`
   environment, then re-run the job (or run the Release workflow by hand).
-- **`npm publish` E401 / E403 / E404**: the token expired or was revoked, lacks write access to the
-  `@znight` scope, or the package disallows tokens. Fix it ([npm token](#npm-token)), then **Re-run
-  failed jobs** on the Release run.
+- **`npm publish` E404 / E403 with OIDC**: the trusted publisher of that package does not match
+  (owner `znight-org`, repository `znight`, workflow file `release.yml`, environment `npm`, all
+  case-sensitive) or the package has none yet (see [A new package](#a-new-package)).
 - **A release failed halfway** (some versions missing from npm, or every package published but no
   tag, GitHub release or docs): **Re-run failed jobs** on that Release run (within 30 days). The
   approval is asked again; published versions are skipped, then the tag, the GitHub release and the
