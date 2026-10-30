@@ -192,9 +192,12 @@ class FastifyHttpAdapter implements FastifyAdapter {
   async #register(): Promise<void> {
     const routes = this.#routes
     await this.instance.register((child, _options, done) => {
-      // Znight reads and parses bodies itself: accept every content type without consuming it
+      // Znight reads and parses bodies itself: accept every content type without consuming it. The
+      // RegExp parser matches every content type like '*' does, but Fastify caches what a RegExp
+      // matched (it parses the content type again on every request to find the '*' parser)
       child.removeAllContentTypeParsers()
-      child.addContentTypeParser('*', (_request, _payload, done) => done(null, undefined))
+      child.addContentTypeParser('*', ignoreBody)
+      child.addContentTypeParser(/^/, ignoreBody)
       child.addHook('onRequest', this.#onRequest)
       // added last: sees the route options once every other `onRoute` hook changed them
       child.addHook('onRoute', this.#onRoute)
@@ -431,6 +434,11 @@ function laneOf(context: RouteContext, keys: InternalKeys): Lane | null {
   if (context.preParsing !== null || context.preValidation !== null || context.preHandler !== null) return null
   const raw = route.bare && context.onSend === null && context.onResponse === null
   return { handler: route.handler, raw: raw && keys.headers !== null && keys.trailers !== null }
+}
+
+/** The content type parser of the Znight context: the body is left unread (Znight reads it). */
+function ignoreBody(_request: FastifyRequest, _payload: unknown, done: (error: null, body: undefined) => void): void {
+  done(null, undefined)
 }
 
 /** Whether a route option holds hooks (a function or a non-empty array). */
