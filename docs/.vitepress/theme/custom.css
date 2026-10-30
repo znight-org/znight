@@ -189,3 +189,97 @@
 .vp-doc .zn-home-cta p {
   margin: 0;
 }
+
+/* Home: the command that creates an application, under the hero actions */
+.zn-quick-start {
+  width: 100%;
+  max-width: 460px;
+  margin-top: 28px;
+  overflow: hidden;
+  text-align: left;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 12px;
+  background-color: var(--vp-code-block-bg);
+}
+
+.zn-quick-start-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--vp-c-divider);
+}
+
+.zn-quick-start-tabs button {
+  margin-bottom: -1px;
+  padding: 8px 10px;
+  border-bottom: 2px solid transparent;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--vp-c-text-2);
+  transition: color 0.25s;
+}
+
+.zn-quick-start-tabs button:hover,
+.zn-quick-start-tabs button.active {
+  color: var(--vp-c-text-1);
+}
+
+.zn-quick-start-tabs button.active {
+  border-bottom-color: var(--vp-c-brand-1);
+}
+
+.zn-quick-start-command {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 12px 14px 16px;
+}
+
+.zn-quick-start-command code {
+  overflow-x: auto;
+  font-family: var(--vp-font-family-mono);
+  font-size: 14px;
+  white-space: nowrap;
+  color: var(--vp-c-text-1);
+}
+
+.zn-quick-start-prompt {
+  color: var(--vp-c-text-3);
+  user-select: none;
+}
+
+.zn-quick-start-copy {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--vp-c-text-2);
+  background-color: var(--vp-c-bg);
+  transition:
+    color 0.25s,
+    border-color 0.25s;
+}
+
+.zn-quick-start-copy:hover {
+  border-color: var(--vp-c-brand-1);
+  color: var(--vp-c-text-1);
+}
+
+/* the hero is centered below 960px */
+@media (max-width: 959px) {
+  .zn-quick-start {
+    margin-right: auto;
+    margin-left: auto;
+  }
+}
+
+/* a phone wraps the command at its spaces rather than hiding its end */
+@media (max-width: 639px) {
+  .zn-quick-start-command code {
+    font-size: 13px;
+    white-space: normal;
+  }
+}

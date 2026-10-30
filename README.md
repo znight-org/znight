@@ -19,6 +19,7 @@
 </p>
 
 <p align="center">
+  <a href="#quick-start">Quick start</a> ·
   <a href="#a-30-second-tour">Tour</a> ·
   <a href="#getting-started">Getting started</a> ·
   <a href="#packages">Packages</a> ·
@@ -36,6 +37,18 @@ preload) reads your sources, binds every constructor parameter to a provider, va
 graph and generates a plain TypeScript module. At runtime, the container only calls the generated
 factories, in an order computed at build time. It is the approach of [Micronaut](https://micronaut.io)
 and [Dagger](https://dagger.dev), brought to TypeScript.
+
+## Quick start
+
+```sh
+npx @znight/cli new my-service        # npm
+pnpm dlx @znight/cli new my-service   # pnpm
+bunx @znight/cli new my-service       # Bun
+```
+
+The CLI asks for the HTTP adapter and the features, then creates a small API with its tests. In
+`my-service`, `npm run dev` rebuilds and restarts it on every change. The
+[getting started guide](./docs/guide/getting-started.md) walks through every file.
 
 > [!NOTE]
 > Znight `0.1.0` is its first public release, on npm under the `@znight` scope. Every package is
@@ -64,8 +77,64 @@ the [migration guide](./docs/guide/migrating-from-nestjs.md).
 
 ## A 30-second tour
 
-**1. Write classes.** A provider is a class marked `@Injectable()`, and its dependencies are its
-constructor parameters. Interfaces work too: `implements` is all the compiler needs to bind one.
+**1. Bootstrap.** `main.ts` creates the application from the container the compiler generates
+(`src/.znight/container.generated.ts`), with its plugins.
+
+```ts
+// src/main.ts
+import { Application } from '@znight/core'
+import { HttpPlugin } from '@znight/http'
+import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
+
+const app = await Application.create({
+  metadata: __ZNIGHT_METADATA__,
+  plugins: [HttpPlugin.configure({ port: 3000 })], // the built-in node:http server
+})
+
+await app.start() // SIGINT and SIGTERM stop it gracefully
+```
+
+**2. Add a controller.** A controller is a provider whose methods serve routes. `id` arrives as a
+`number`, and `GET /users/abc` is answered with `400 Bad Request`.
+
+```ts
+// src/users/user.controller.ts
+import { Controller, Get, NotFoundException, Param } from '@znight/http'
+import type { User } from './user.repository.js'
+import { UserService } from './user.service.js'
+
+@Controller('/users')
+export class UserController {
+  constructor(private readonly users: UserService) {}
+
+  @Get('/:id')
+  async getUser(@Param('id') id: number): Promise<User> {
+    const user = await this.users.findById(id)
+    if (user === undefined) throw new NotFoundException(`User ${id} not found`)
+    return user
+  }
+}
+```
+
+**3. Write classes.** The controller's `UserService` is a provider too: a class marked
+`@Injectable()`, whose dependencies are its constructor parameters. Interfaces work as well:
+`implements` is all the compiler needs to bind one.
+
+```ts
+// src/users/user.service.ts
+import { Injectable } from '@znight/core'
+import type { User, UserRepository } from './user.repository.js'
+
+@Injectable()
+export class UserService {
+  // An interface: the compiler binds it to InMemoryUserRepository, its only implementation
+  constructor(private readonly users: UserRepository) {}
+
+  findById(id: number): Promise<User | undefined> {
+    return this.users.findById(id)
+  }
+}
+```
 
 ```ts
 // src/users/user.repository.ts
@@ -90,60 +159,6 @@ export class InMemoryUserRepository implements UserRepository {
 }
 ```
 
-```ts
-// src/users/user.service.ts
-import { Injectable } from '@znight/core'
-import type { User, UserRepository } from './user.repository.js'
-
-@Injectable()
-export class UserService {
-  // An interface: the compiler binds it to InMemoryUserRepository, its only implementation
-  constructor(private readonly users: UserRepository) {}
-
-  findById(id: number): Promise<User | undefined> {
-    return this.users.findById(id)
-  }
-}
-```
-
-**2. Add a controller.** Controllers are providers too. `id` arrives as a `number`, and
-`GET /users/abc` is answered with `400 Bad Request`.
-
-```ts
-// src/users/user.controller.ts
-import { Controller, Get, NotFoundException, Param } from '@znight/http'
-import type { User } from './user.repository.js'
-import { UserService } from './user.service.js'
-
-@Controller('/users')
-export class UserController {
-  constructor(private readonly users: UserService) {}
-
-  @Get('/:id')
-  async getUser(@Param('id') id: number): Promise<User> {
-    const user = await this.users.findById(id)
-    if (user === undefined) throw new NotFoundException(`User ${id} not found`)
-    return user
-  }
-}
-```
-
-**3. Bootstrap.** `main.ts` hands the generated metadata to the application, with its plugins.
-
-```ts
-// src/main.ts
-import { Application } from '@znight/core'
-import { HttpPlugin } from '@znight/http'
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
-
-const app = await Application.create({
-  metadata: __ZNIGHT_METADATA__,
-  plugins: [HttpPlugin.configure({ port: 3000 })], // the built-in node:http server
-})
-
-await app.start() // SIGINT and SIGTERM stop it gracefully
-```
-
 **4. Build and run.** The compiler runs inside `vite build`, then Vite bundles the application.
 
 ```sh
@@ -154,55 +169,8 @@ curl http://localhost:3000/users/1
 # {"id":1,"name":"Ada Lovelace"}
 ```
 
-The compiler wrote `src/.znight/container.generated.ts`: plain TypeScript you can read and step
-through. `UserRepository` is bound to `InMemoryUserRepository`, and the route handler is a generated
-function that extracts and coerces its arguments (excerpt):
-
-```ts
-// AUTO-GENERATED by @znight/compiler 0.1.0. Do not edit.
-import type { ZnightMetadata } from '@znight/core'
-import type { HttpContext } from '@znight/http'
-import { coerce } from '@znight/http'
-// ...one import per class: UserController, InMemoryUserRepository, UserService
-
-export const __ZNIGHT_METADATA__: ZnightMetadata = {
-  version: 1,
-  compiler: '0.1.0',
-  providers: {
-    // ...UserController, InMemoryUserRepository
-    ['src/users/user.service.ts#UserService']: {
-      scope: 'singleton',
-      class: UserService,
-      deps: ['src/users/user.repository.ts#InMemoryUserRepository'],
-      factory: d => new UserService(d[0]),
-    },
-  },
-  resolutionOrder: [
-    'src/users/user.repository.ts#InMemoryUserRepository',
-    'src/users/user.service.ts#UserService',
-    'src/users/user.controller.ts#UserController',
-  ],
-  aliases: { ['src/users/user.repository.ts#UserRepository']: 'src/users/user.repository.ts#InMemoryUserRepository' },
-  extensions: {
-    ['http']: {
-      ['controllers']: [
-        {
-          ['token']: 'src/users/user.controller.ts#UserController',
-          ['routes']: [
-            {
-              ['method']: 'GET',
-              ['fullPath']: '/users/:id',
-              // ...
-              ['invoke']: (c: UserController, ctx: HttpContext) =>
-                c.getUser(coerce.number(ctx.params['id'], 'param "id"')),
-            },
-          ],
-        },
-      ],
-    },
-  },
-}
-```
+The generated container is plain TypeScript you can read and step through:
+[see what the compiler writes](./docs/guide/compiler.md#the-generated-module).
 
 **5. Break it.** Comment out `@Injectable()` on `InMemoryUserRepository`, and the build fails
 before anything is deployed:
