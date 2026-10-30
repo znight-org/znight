@@ -1,6 +1,6 @@
 {
   "name": "@znight/openapi",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Znight OpenAPI: OpenAPI 3.1 documents generated at build time from your controllers, served with Scalar or Swagger UI",
   "license": "MIT",
   "author": "Ugho STEPHAN",

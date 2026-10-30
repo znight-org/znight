@@ -1,5 +1,14 @@
 # @znight/openapi
 
+## 0.1.1
+
+### Patch Changes
+
+- Updated dependencies [dc8ac11]
+  - @znight/compiler@0.1.1
+  - @znight/http@0.1.1
+  - @znight/core@0.1.1
+
 ## 0.1.0
 
 ### Initial release
