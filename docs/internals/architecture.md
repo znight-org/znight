@@ -297,8 +297,8 @@ Rules for generated code:
   bare specifiers, then relative paths; for one specifier `import type` comes before the value
   import, and a type and a value import of the same binding are merged. Only imports and constants
   reachable from the emitted metadata are printed. Identifiers are validated and de-duplicated by
-  identity order (`UserService`, `UserService$1`); they never shadow a global (`Date$1`) nor an arrow
-  parameter.
+  identity order (`UserService`, `UserService$1`); they never shadow a global (`Date$1`), an arrow
+  parameter nor a local declared by a block (`GenerateContext.block`, §6.5).
 - **Constants**: `GenerateContext.constant(name, value, { type })` (§6.5) declares a module-level
   `const <name>: <type> = <value>` printed before `__ZNIGHT_METADATA__`, in declaration order,
   de-duplicated like imports (`AppConfig$fields`, `AppConfig$fields$1`). `@znight/config` uses it
@@ -1114,7 +1114,9 @@ interface DecoratorSpec {
     by identity); the files read are part of `watchFiles`. The extension decides the severity of
     issues.
 - `GenerateContext`: pure builders `lit`, `obj`, `arr`, `ref`, `member`, `call`, `construct`,
-  `arrow` (typed parameters), `code` (tagged template escaping every interpolation) — also available
+  `arrow` (typed parameters), `block(locals, statements)` (an arrow body printed one statement per
+  line; its `locals`, the `const`s its statements declare, are reserved like arrow parameters),
+  `code` (tagged template escaping every interpolation) — also available
   as `createGenBuilders()` — plus `importValue` / `importType(ValueRef | ArgInfo | ClassInfo |
   ClassRef | identity)`, `importFrom(bareSpecifier, name, { type? })`, `tokenOf(target)`,
   `binding(handle)`, `provider(token)`, `constant(name, value, { type? })` (§3.3), `report`, and

@@ -394,6 +394,27 @@ describe('code generation builders', () => {
     expect(isGenNode(node)).toBe(true)
   })
 
+  it('builds blocks whose statements receive one parameter node per local', () => {
+    const node = g.block(['a0'], a0 => [g.code`const ${a0} = ${1}`, g.code`return ${a0}`])
+    expect(node).toEqual({
+      kind: 'gen:block',
+      locals: ['a0'],
+      statements: [
+        {
+          kind: 'gen:code',
+          parts: ['const ', ' = ', ''],
+          values: [
+            { kind: 'gen:param', name: 'a0' },
+            { kind: 'gen:literal', value: 1 },
+          ],
+        },
+        { kind: 'gen:code', parts: ['return ', ''], values: [{ kind: 'gen:param', name: 'a0' }] },
+      ],
+    })
+    expect(Object.isFrozen(node)).toBe(true)
+    expect(isGenNode(node)).toBe(true)
+  })
+
   it('builds objects, arrays, literals, construct and code templates', () => {
     expect(g.obj({ a: 1, b: g.arr(['x', null]) })).toEqual({
       kind: 'gen:object',
@@ -439,6 +460,9 @@ describe('code generation builders', () => {
     expect(() => g.lit({ [Symbol('k')]: 1 } as never)).toThrow('symbol keys')
     expect(() => g.arrow(['class'], () => 1)).toThrow('invalid parameter name')
     expect(() => g.arrow(['a', 'a'], () => 1)).toThrow('duplicate')
+    expect(() => g.block(['let'], () => [])).toThrow('invalid local name')
+    expect(() => g.block(['a', 'a'], () => [])).toThrow('duplicate block local')
+    expect(() => g.block([], () => [{} as never])).toThrow('only accept nodes and primitives')
     expect(() =>
       g.obj([
         ['a', 1],

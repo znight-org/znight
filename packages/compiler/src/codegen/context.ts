@@ -56,6 +56,7 @@ export class ExtensionGenerateContext implements GenerateContext<unknown> {
   readonly call: GenBuilders['call']
   readonly construct: GenBuilders['construct']
   readonly arrow: GenBuilders['arrow']
+  readonly block: GenBuilders['block']
   readonly code: GenBuilders['code']
   readonly #module: ModuleBuilder
   readonly #index: GraphIndex
@@ -82,6 +83,7 @@ export class ExtensionGenerateContext implements GenerateContext<unknown> {
     this.call = builders.call
     this.construct = builders.construct
     this.arrow = builders.arrow
+    this.block = builders.block
     this.code = builders.code
     this.extension = input.extension
     this.types = input.types
