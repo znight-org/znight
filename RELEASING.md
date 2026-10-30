@@ -15,8 +15,10 @@ as _CI / …_ in the run) and gates the publication on it. `main` has no CI run 
 
 All jobs run on `ubuntu-latest`, install Bun from `package.json#packageManager` and Node.js 24
 ([`.github/actions/setup`](.github/actions/setup/action.yml)), and cache the Bun install cache by
-`bun.lock`. A new push to a pull request cancels its previous run; runs on `main` are never
-cancelled.
+`bun.lock`. A new push to a pull request cancels its previous CI run; the CI of a push to `main` is
+never cancelled. The version pull request job runs one at a time and keeps only its latest pending
+update: when several pushes land together, a Release run in the middle can end as cancelled (its
+CI still completes), and the next one updates the pull request with every changeset.
 
 ## Pull requests
 
@@ -83,6 +85,7 @@ The e2e job needs the npm registry: the `client:check` of `examples/storefront-a
 ### Running it locally
 
 ```sh
+bun run build                     # typecheck and the example tests call the znight binary (dist)
 bun run check && bun run typecheck && bun run test && bun run test:examples
 bun run test:e2e                  # builds first
 bun run test:integration          # needs Docker
