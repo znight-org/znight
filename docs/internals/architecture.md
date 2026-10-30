@@ -1928,7 +1928,13 @@ locked is cancelled when the response closes unfinished: the server would neithe
 it, and the event source, the request scope and the in-flight count would stay open. There, an
 HTTP/1.1 request is read from the Node.js request (its body, and its headers when none is repeated,
 the case where they equal its Fetch `Headers`), and without other routes or middleware in the Hono
-application a reply whose headers are single strings is handed over as a record, written as is.
+application a reply whose headers are single strings is handed over as a record, written as is. On
+`Bun.serve()`, a body whose `content-length` is declared (no `transfer-encoding`) is read at once
+(`request.bytes()`: Bun's parser reads exactly that length, checked against the limit first), other
+bodies as a stream; without other routes or middleware in the Hono application the `Response` of a
+Znight route is the one Bun sends (a streamed one is prepared at once: native blob, idle timeout),
+otherwise the fetch handler finds its body in the final `Response`. The GET and HEAD routes of a path
+are one Hono route (Hono routes HEAD requests as GET), so a request matches a single handler.
 Fastify gets `text` only for a content type it sends unchanged (it adds a charset to a JSON type
 without one).
 
