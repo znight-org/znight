@@ -1,5 +1,12 @@
 # @znight/messaging
 
+## 0.1.2
+
+### Patch Changes
+
+- @znight/compiler@0.1.2
+  - @znight/core@0.1.2
+
 ## 0.1.1
 
 ### Patch Changes
