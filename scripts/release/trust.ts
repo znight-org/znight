@@ -1,17 +1,20 @@
 /**
  * Configures npm trusted publishing (OIDC) for the publishable packages: the release workflow then
- * publishes without any npm token. A package must already exist on npm to be configured, so a new
- * package is published once with a token first (see RELEASING.md).
+ * publishes without any npm token. A package must already exist on npm to be configured (a new one
+ * has its name reserved first), and a trusted publisher that publishes nothing within 48 hours
+ * expires: run this at most two days before a release (see RELEASING.md, npm setup).
  *
  *   bun scripts/release/trust.ts                                # print the npm commands
  *   bun scripts/release/trust.ts --apply                        # run them (npm >= 11.15, logged in)
  *   bun scripts/release/trust.ts --apply --disallow-tokens      # and refuse token publishing
  *   bun scripts/release/trust.ts --apply --package @znight/xyz  # only this package (repeatable)
  *
- * npm asks for a two-factor confirmation on every command (a one-time password, or the browser), so
- * `--apply` runs in a terminal. `--disallow-tokens` sets the publishing access of each package to
- * "Require two-factor authentication and disallow tokens" (`npm access set mfa=publish`): trusted
- * publishing keeps working, a leaked token cannot publish.
+ * npm asks for two-factor authentication (a one-time password, or the browser), so `--apply` runs in
+ * a terminal. On the first npm page, check "skip two-factor authentication for the next 5 minutes":
+ * the next `npm trust` commands then run without asking. The script waits 2 seconds between
+ * commands, as npm recommends for bulk changes. `--disallow-tokens` sets the publishing access of
+ * each package to "Require two-factor authentication and disallow tokens" (`npm access set
+ * mfa=publish`): trusted publishing keeps working, a leaked token cannot publish.
  *
  * Options: --repo (default znight-org/znight), --file (default release.yml), --environment (default npm).
  */
@@ -21,6 +24,8 @@ import { log, main, run, runOrThrow } from './support.ts'
 import { publishablePackages, REPOSITORY } from './workspace.ts'
 
 const MIN_NPM_FOR_TRUST = '11.15.0'
+/** Pause between npm commands: npm's advice for bulk trust changes, against rate limiting. */
+const BULK_DELAY_MS = 2000
 
 main(async () => {
   const { values } = parseArgs({
@@ -64,16 +69,20 @@ main(async () => {
     return
   }
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    throw new Error('npm asks for a two-factor confirmation on every command: run --apply in a terminal')
+    throw new Error('npm asks for two-factor authentication: run --apply in a terminal')
   }
   const npmVersion = (await runOrThrow('npm', ['--version'])).stdout.trim()
   if (Bun.semver.order(npmVersion, MIN_NPM_FOR_TRUST) < 0) {
     throw new Error(`npm trust needs npm >= ${MIN_NPM_FOR_TRUST}, found ${npmVersion} (npm install -g npm@latest)`)
   }
 
+  log.info('On the first npm page, check "skip two-factor authentication for the next 5 minutes".')
   const failed: string[] = []
+  let first = true
   for (const { name, commands } of plans) {
     for (const args of commands) {
+      if (!first) await Bun.sleep(BULK_DELAY_MS)
+      first = false
       log.step(`npm ${args.join(' ')}`)
       // the terminal is npm's: it prompts for the one-time password or opens the browser
       const result = await run('npm', args, { inherit: true })
