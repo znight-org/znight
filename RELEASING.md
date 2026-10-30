@@ -4,11 +4,11 @@ Maintainer guide: how CI works, how versions are bumped, how packages reach npm 
 documentation reaches GitHub Pages, and what has to be configured on GitHub and npm. Contributors
 only need the [pull request](#pull-requests) part.
 
-| Workflow                                       | When                                                                                       | What                                                                                                                                                   |
-| ---------------------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| [`ci.yml`](.github/workflows/ci.yml)           | every pull request, every push to `main` (through `release.yml`), every Monday, manual run | every check: lint, typecheck, build and pack, unit and example tests, docs build, e2e, Docker integration, packed tarballs                             |
-| [`release.yml`](.github/workflows/release.yml) | every push to `main`, manual run                                                           | CI on the pushed commit; the "chore: version packages" pull request; when a version is missing from npm: **an approval**, publish, tag, GitHub release |
-| [`docs.yml`](.github/workflows/docs.yml)       | after each stable release, manual run                                                      | the documentation site on GitHub Pages                                                                                                                 |
+| Workflow                                       | When                                                                         | What                                                                                                                                                   |
+| ---------------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| [`ci.yml`](.github/workflows/ci.yml)           | every pull request, every push to `main` (through `release.yml`), manual run | every check: lint, typecheck, build and pack, unit and example tests, docs build, e2e, Docker integration, packed tarballs                             |
+| [`release.yml`](.github/workflows/release.yml) | every push to `main`, manual run                                             | CI on the pushed commit; the "chore: version packages" pull request; when a version is missing from npm: **an approval**, publish, tag, GitHub release |
+| [`docs.yml`](.github/workflows/docs.yml)       | after each stable release, manual run                                        | the documentation site on GitHub Pages                                                                                                                 |
 
 A push to `main` starts one workflow, **Release**: it runs CI on the pushed commit (its jobs appear
 as _CI / …_ in the run) and gates the publication on it. `main` has no CI run of its own.
@@ -61,8 +61,7 @@ Versions and changelogs are managed with [Changesets](https://changesets.dev)
 | Packed tarballs (npm / bun) | `bun run release:smoke --pm <npm or bun>`, see [Smoke test](#smoke-test)                                              |
 | all-checks-complete         | waits for every job above and fails unless all of them succeeded                                                      |
 
-It runs on every pull request; on every push to `main`, called by the release workflow; every
-Monday, to catch what changes without a commit (base images, brokers, the npm registry); and on
+It runs on every pull request; on every push to `main`, called by the release workflow; and on
 demand (**Actions → CI → Run workflow**).
 
 `all-checks-complete` is the only check the ruleset of `main` requires, so the ruleset does not

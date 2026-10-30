@@ -2,16 +2,13 @@
 # tests, Docker integration tests and the packed-tarball smoke test. See RELEASING.md.
 #
 # On every pull request; on main, the release workflow runs it on every push (main starts no CI run
-# of its own); every Monday, to catch what changes without a commit (base images, brokers, the npm
-# registry); and on demand. The ruleset of main requires one check: all-checks-complete.
+# of its own); and on demand. The ruleset of main requires one check: all-checks-complete.
 name: CI
 
 on:
   pull_request:
   # the release workflow, on every push to main
   workflow_call:
-  schedule:
-    - cron: "0 4 * * 1" # Mondays, 04:00 UTC
   workflow_dispatch:
 
 permissions:
@@ -19,7 +16,7 @@ permissions:
 
 concurrency:
   # a new push to a pull request cancels its previous run; every other run (called by the release
-  # workflow, scheduled, manual) has a group of its own and is never cancelled
+  # workflow, manual) has a group of its own and is never cancelled
   group: ci-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
