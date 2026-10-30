@@ -2303,6 +2303,10 @@ interface HttpAdapter {
   disconnects before the response was fully written (on the next microtask when that already
   happened), never after a complete response. Without it, `ctx.signal` only aborts when the reply
   body is cancelled or an event stream is closed by the server.
+- `AdapterReply.text` is the string a body was serialised from (JSON, text), next to its UTF-8
+  bytes in `body`: an adapter that writes strings (`ServerResponse.end()`, `new Response()`) may
+  send it instead, which writes the same bytes; on Node.js a string is written with the headers at
+  once, where bytes take a second write.
 - `AdapterReply.eventStream` marks a long-lived event stream (any streamed `text/event-stream`
   body): send the headers without waiting for the first chunk, do not apply idle or inactivity
   timeouts to the response while it is sent (`response.setTimeout(0)`, Bun's `server.timeout()`),
