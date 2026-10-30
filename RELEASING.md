@@ -72,7 +72,9 @@ change when jobs do: a new job is required once it is listed in the `needs` of
 required check would count as passed) and fails unless every one of them succeeded.
 
 The build runs before the typecheck and the tests because the examples call the `znight` binary,
-which loads `packages/cli/dist/cli.mjs`.
+which loads `packages/cli/dist/cli.mjs`. The examples' `test` scripts give each test 30 s instead of
+Bun's 5 s: their tests do real I/O (PGlite, scrypt, the CLI), and the e2e job runs them in parallel
+with the production builds, several times slower than on a laptop.
 
 `release:pack` packs every package exactly as it will be published and verifies the tarballs (see
 [What the release script checks](#what-the-release-script-checks)). In pull requests a missing

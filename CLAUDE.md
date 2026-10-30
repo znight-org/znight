@@ -308,7 +308,7 @@ Run an example (the CLI and Vite load the packages' `dist`, so build first):
 bun install
 bun run build
 bun run --cwd examples/rest-api dev    # rebuilds and restarts on change, NODE_ENV=development
-bun run --cwd examples/rest-api test   # bun test --conditions=@znight/source
+bun run --cwd examples/rest-api test   # bun test --conditions=@znight/source --timeout 30000
 ```
 
 Each example README lists its endpoints with `curl` commands.
