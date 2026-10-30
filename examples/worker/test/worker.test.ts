@@ -184,9 +184,10 @@ describe('reports.generate', () => {
     await publishReport({ ...report, reportId: 'b', notify: undefined }, 'close-february')
     await driver.idle()
 
-    // logged through JobContext.logger: each entry carries the fields of its own message
+    // logged through JobContext.logger: each entry carries the fields of its own message (the two
+    // messages are handled concurrently, `concurrency: 2`, so in any order)
     const started = logged('Generating report')
-    expect(started.map(entry => [entry.reportId, entry.correlationId])).toEqual([
+    expect(started.map(entry => [entry.reportId, entry.correlationId]).sort()).toEqual([
       ['a', 'close-january'],
       ['b', 'close-february'],
     ])
