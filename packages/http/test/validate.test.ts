@@ -94,6 +94,52 @@ describe('validate', () => {
   it('throws a TypeError for non schemas', () => {
     expect(() => validate({} as never, 1, 'body')).toThrow(TypeError)
     expect(() => validate(null as never, 1, 'body')).toThrow('The schema of body is not a Standard Schema v1')
+    // exactly what isStandardSchema rejects
+    for (const schema of [
+      undefined,
+      'x',
+      42,
+      { '~standard': null },
+      { '~standard': 'x' },
+      { '~standard': { version: 2, validate: () => ({ value: 1 }) } },
+      { '~standard': { version: 1, validate: 'x' } },
+    ]) {
+      expect(isStandardSchema(schema)).toBe(false)
+      expect(() => validate(schema as never, 1, 'query')).toThrow(
+        'The schema of query is not a Standard Schema v1 (missing "~standard.validate")',
+      )
+    }
+  })
+
+  it('reads ~standard once and calls validate on it (function schemas included)', async () => {
+    let reads = 0
+    const props = {
+      version: 1 as const,
+      vendor: 'custom',
+      validate(this: unknown, value: unknown) {
+        return this === props ? { value: `${value}!` } : { issues: [{ message: 'unbound' }] }
+      },
+    }
+    const schema = Object.assign(() => undefined, {
+      get '~standard'() {
+        reads++
+        return props
+      },
+    })
+    expect(validate(schema as unknown as StandardSchemaV1<unknown, string>, 'a', 'body')).toBe('a!')
+    expect(reads).toBe(1)
+    // an asynchronous result is a promise of the output (or of the ValidationException)
+    const later: StandardSchemaV1<unknown, string> = {
+      '~standard': {
+        version: 1,
+        vendor: 'custom',
+        validate: async value => (value === 'ok' ? { value: 'done' } : { issues: [{ message: 'nope' }] }),
+      },
+    }
+    const pending = validate(later, 'ok', 'body')
+    expect(pending).toBeInstanceOf(Promise)
+    expect(await pending).toBe('done')
+    await expect(validate(later, 'ko', 'body')).rejects.toThrow(ValidationException)
   })
 })
 

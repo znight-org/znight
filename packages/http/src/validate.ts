@@ -1,12 +1,19 @@
-import { ValidationException } from './exceptions.ts'
-import {
-  type InferSchemaOutput,
-  isStandardSchema,
-  type StandardSchemaV1,
-  type StandardSchemaV1Issue,
-  type StandardSchemaV1Result,
+import type {
+  InferSchemaOutput,
+  StandardSchemaV1,
+  StandardSchemaV1Issue,
+  StandardSchemaV1Props,
+  StandardSchemaV1Result,
 } from './standard-schema.ts'
+
+import { ValidationException } from './exceptions.ts'
 import { isThenable } from './utils.ts'
+
+/**
+ * Whether `value` is a promise-like object (has a callable `then`). Called by the generated
+ * `invoke` functions on the result of {@link validate} (README, "Compiler contract").
+ */
+export { isThenable } from './utils.ts'
 
 /**
  * Validates `value` with a [Standard Schema](https://standardschema.dev) (Zod, Valibot, ArkType...)
@@ -14,7 +21,8 @@ import { isThenable } from './utils.ts'
  * the schema strips them).
  *
  * Returns synchronously when the schema validates synchronously, a promise otherwise (async
- * refinements): generated code always `await`s it.
+ * refinements): generated code calls the handler directly with the value, and `await`s the value
+ * when it is a thenable (`isThenable`).
  *
  * @param location what is validated, used in the error message: `body`, `query`, `query "page"`,
  *   `param "id"`, `headers`, `cookie "sid"`, `cookies`...
@@ -28,12 +36,20 @@ export function validate<S extends StandardSchemaV1>(
   value: unknown,
   location: string,
 ): InferSchemaOutput<S> | Promise<InferSchemaOutput<S>> {
-  if (!isStandardSchema(schema)) {
+  // `~standard` is read once (the same checks as `isStandardSchema`)
+  const props =
+    schema !== null && (typeof schema === 'object' || typeof schema === 'function')
+      ? (schema as { readonly '~standard'?: unknown })['~standard']
+      : undefined
+  if (
+    props === null ||
+    typeof props !== 'object' ||
+    (props as { readonly version?: unknown }).version !== 1 ||
+    typeof (props as { readonly validate?: unknown }).validate !== 'function'
+  ) {
     throw new TypeError(`The schema of ${location} is not a Standard Schema v1 (missing "~standard.validate")`)
   }
-  const result = schema['~standard'].validate(value) as
-    | StandardSchemaV1Result<InferSchemaOutput<S>>
-    | Promise<StandardSchemaV1Result<InferSchemaOutput<S>>>
+  const result = (props as StandardSchemaV1Props<unknown, InferSchemaOutput<S>>).validate(value)
   if (isThenable(result)) return Promise.resolve(result).then(settled => unwrap(settled, location))
   return unwrap(result, location)
 }

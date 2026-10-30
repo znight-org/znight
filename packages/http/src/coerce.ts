@@ -60,7 +60,31 @@ function single(value: unknown, label: string): string {
   throw invalid(label, 'a string', value)
 }
 
+/** Longest run of decimal digits whose value is exact without parsing (`999999999999999` < 2^53). */
+const MAX_FAST_DIGITS = 15
+
+/**
+ * The value of `text` when it is 1 to 15 ASCII decimal digits (the common `/users/42`), `-1`
+ * otherwise. The same number as `Number(text)` for such a string, without the regular expression,
+ * the trim and the parse of the general path.
+ */
+function digitsValue(text: string): number {
+  const length = text.length
+  if (length === 0 || length > MAX_FAST_DIGITS) return -1
+  let result = 0
+  for (let index = 0; index < length; index++) {
+    const digit = text.charCodeAt(index) - 48
+    if (digit < 0 || digit > 9) return -1
+    result = result * 10 + digit
+  }
+  return result
+}
+
 function toNumber(value: unknown, label: string): number {
+  if (typeof value === 'string') {
+    const digits = digitsValue(value)
+    if (digits !== -1) return digits
+  }
   const raw = single(value, label)
   const text = raw.trim()
   if (NUMBER.test(text)) {
@@ -71,6 +95,10 @@ function toNumber(value: unknown, label: string): number {
 }
 
 function toInteger(value: unknown, label: string): number {
+  if (typeof value === 'string') {
+    const digits = digitsValue(value)
+    if (digits !== -1) return digits
+  }
   const raw = single(value, label)
   const text = raw.trim()
   if (INTEGER.test(text)) {
@@ -81,6 +109,9 @@ function toInteger(value: unknown, label: string): number {
 }
 
 function toBoolean(value: unknown, label: string): boolean {
+  // the canonical spellings, without the trim and the lower-casing of the general path
+  if (value === 'true' || value === '1') return true
+  if (value === 'false' || value === '0') return false
   const raw = single(value, label)
   switch (raw.trim().toLowerCase()) {
     case 'true':

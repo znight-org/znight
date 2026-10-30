@@ -52,6 +52,11 @@ function literalOf(node: GenNode | undefined): string {
   return node?.kind === 'gen:literal' ? String(node.value) : ''
 }
 
+/** `code` without the indentation of its lines (compares blocks wherever they are nested). */
+function unindent(code: string): string {
+  return code.replace(/\n[ ]+/g, '\n')
+}
+
 /** Printed `invoke` of a route of the fixture section. */
 function invoke(controller: string, handler: string): string {
   return print(routeOf(controller, handler).get('invoke') as GenNode)
@@ -61,6 +66,7 @@ describe('section of the fixture application', () => {
   it('imports only what the generated code uses', () => {
     expect(section.imports).toEqual([
       'coerce from @znight/http',
+      'isThenable from @znight/http',
       'type HttpContext from @znight/http',
       'type src/health.controller.ts#HealthController',
       'type src/root.controller.ts#RootController',
@@ -171,14 +177,35 @@ describe('section of the fixture application', () => {
         "coerce.optional(ctx.query['tag'], 'query \"tag\"', (v, l) => coerce.array(v, l, coerce.string)), " +
         "coerce.optional(ctx.query['sort'], 'query \"sort\"', (v, l) => coerce.enum(v, l, ['asc', 'desc'])))",
     )
+    // synchronous while validate() returns values; the rest awaited in an async arrow otherwise
     expect(invoke('UserController', 'search')).toBe(
-      "async (c: UserController, ctx: HttpContext) => c.search(await validate(SearchQuery, ctx.query, 'query'))",
+      [
+        '(c: UserController, ctx: HttpContext) => {',
+        "  const a0 = validate(SearchQuery, ctx.query, 'query')",
+        '  if (isThenable(a0)) return (async () => c.search(await a0))()',
+        '  return c.search(a0)',
+        '}',
+      ].join('\n'),
     )
     expect(invoke('UserController', 'create')).toBe(
-      "async (c: UserController, ctx: HttpContext) => c.create(await validate(CreateUser, ctx.body, 'body'))",
+      [
+        '(c: UserController, ctx: HttpContext) => {',
+        "  const a0 = validate(CreateUser, ctx.body, 'body')",
+        '  if (isThenable(a0)) return (async () => c.create(await a0))()',
+        '  return c.create(a0)',
+        '}',
+      ].join('\n'),
     )
     expect(invoke('UserController', 'update')).toBe(
-      `async (c: UserController, ctx: HttpContext) => c.update(await validate(IdParam, ctx.params['id'], 'param "id"'), await validate(UpdateUser, ctx.body, 'body'))`,
+      [
+        '(c: UserController, ctx: HttpContext) => {',
+        `  const a0 = validate(IdParam, ctx.params['id'], 'param "id"')`,
+        "  if (isThenable(a0)) return (async () => c.update(await a0, await validate(UpdateUser, ctx.body, 'body')))()",
+        "  const a1 = validate(UpdateUser, ctx.body, 'body')",
+        '  if (isThenable(a1)) return (async () => c.update(a0, await a1))()',
+        '  return c.update(a0, a1)',
+        '}',
+      ].join('\n'),
     )
     expect(invoke('UserController', 'flags')).toBe(
       `(c: UserController, ctx: HttpContext) => c.flags(ctx.params as never, coerce.boolean(ctx.headers['x-flag'], 'header "x-flag"'), ctx.headers as never)`,
@@ -299,12 +326,86 @@ export class ItemsController {
     })
     const generated = generateSection(await analyzeApp(app.root))
     expect(generated.diagnostics).toEqual([])
-    expect(generated.code).toContain(
-      "invoke: async (c: ItemsController, ctx: HttpContext) => c.create(await validate(Params, ctx.params, 'params'), " +
-        `await validate(Page, ctx.query['page'], 'query "page"'), ctx.body as never, ctx.headers as never, ctx.query as never),`,
+    const rest = 'ctx.body as never, ctx.headers as never, ctx.query as never'
+    expect(unindent(generated.code)).toContain(
+      [
+        'invoke: (c: ItemsController, ctx: HttpContext) => {',
+        "const a0 = validate(Params, ctx.params, 'params')",
+        `if (isThenable(a0)) return (async () => c.create(await a0, await validate(Page, ctx.query['page'], 'query "page"'), ${rest}))()`,
+        `const a1 = validate(Page, ctx.query['page'], 'query "page"')`,
+        `if (isThenable(a1)) return (async () => c.create(a0, await a1, ${rest}))()`,
+        `return c.create(a0, a1, ${rest})`,
+        '},',
+      ].join('\n'),
     )
     expect(generated.imports).toContain('validate from @znight/http')
+    expect(generated.imports).toContain('isThenable from @znight/http')
     expect(generated.imports).not.toContain('coerce from @znight/http')
+  })
+
+  it('evaluates the arguments up to the last validated one in order, inlining @Ctx() and the later ones', async () => {
+    const app = tempApp({
+      'src/schemas.ts': `
+import { z } from 'zod'
+export const Order = z.object({ total: z.number() })
+`,
+      'src/orders.controller.ts': `
+import type { HttpContext } from '@znight/http'
+import { Body, Controller, Ctx, Put, Query, Param } from '@znight/http'
+import { Order } from './schemas.ts'
+@Controller('/orders')
+export class OrdersController {
+  @Put('/:id')
+  update(
+    @Param('id') id: number,
+    @Ctx() ctx: HttpContext,
+    @Body(Order) order: { total: number },
+    @Query('dry') dry?: boolean,
+  ) { return [id, ctx.method, order, dry] }
+}
+`,
+    })
+    const generated = generateSection(await analyzeApp(app.root))
+    expect(generated.diagnostics).toEqual([])
+    const dry = `coerce.optional(ctx.query['dry'], 'query "dry"', coerce.boolean)`
+    expect(unindent(generated.code)).toContain(
+      [
+        'invoke: (c: OrdersController, ctx: HttpContext) => {',
+        // coerced before the body is validated, as written
+        `const a0 = coerce.number(ctx.params['id'], 'param "id"')`,
+        "const a2 = validate(Order, ctx.body, 'body')",
+        `if (isThenable(a2)) return (async () => c.update(a0, ctx, await a2, ${dry}))()`,
+        `return c.update(a0, ctx, a2, ${dry})`,
+        '},',
+      ].join('\n'),
+    )
+  })
+
+  it('keeps @Validate(S) without @Body() async: the body is read in invoke', async () => {
+    const app = tempApp({
+      'src/schemas.ts': `
+import { z } from 'zod'
+export const Ping = z.object({ ping: z.literal(true) })
+export const Page = z.coerce.number().int()
+`,
+      'src/ping.controller.ts': `
+import { Controller, Post, Query, Validate } from '@znight/http'
+import { Page, Ping } from './schemas.ts'
+@Controller('/ping')
+export class PingController {
+  @Post()
+  @Validate(Ping)
+  ping(@Query('page', Page) page: number) { return page }
+}
+`,
+    })
+    const generated = generateSection(await analyzeApp(app.root))
+    expect(generated.diagnostics).toEqual([])
+    expect(generated.code).toContain(
+      "invoke: async (c: PingController, ctx: HttpContext) => { await validate(Ping, await ctx.parseBody(), 'body'); " +
+        `return c.ping(await validate(Page, ctx.query['page'], 'query "page"')) },`,
+    )
+    expect(generated.imports).not.toContain('isThenable from @znight/http')
   })
 
   it('numbers arguments by parameter index', async () => {

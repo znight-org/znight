@@ -64,9 +64,11 @@ describe.skipIf(typeof compile !== 'function')('compiled cookies and SSE applica
     const compact = (text: string): string => text.replace(/\s+/g, '').replace(/,([)\]}])/g, '$1')
     const generated = compact(code)
     expect(generated).toContain(
-      compact(
-        `async (c: PrefsController, ctx: HttpContext) => c.read(await validate(ThemeCookie, ctx.cookies['theme'], 'cookie "theme"'), coerce.optional(ctx.cookies['visits'], 'cookie "visits"', coerce.number))`,
-      ),
+      compact(`(c: PrefsController, ctx: HttpContext) => {
+        const a0 = validate(ThemeCookie, ctx.cookies['theme'], 'cookie "theme"')
+        if (isThenable(a0)) return (async () => c.read(await a0, coerce.optional(ctx.cookies['visits'], 'cookie "visits"', coerce.number)))()
+        return c.read(a0, coerce.optional(ctx.cookies['visits'], 'cookie "visits"', coerce.number))
+      }`),
     )
     expect(generated).toContain(
       compact(

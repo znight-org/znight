@@ -135,7 +135,11 @@ exports[`section of the fixture application prints the whole section 1`] = `
               schema: true,
             },
           ],
-          invoke: async (c: UserController, ctx: HttpContext) => c.search(await validate(SearchQuery, ctx.query, 'query')),
+          invoke: (c: UserController, ctx: HttpContext) => {
+            const a0 = validate(SearchQuery, ctx.query, 'query')
+            if (isThenable(a0)) return (async () => c.search(await a0))()
+            return c.search(a0)
+          },
         },
         {
           method: 'GET',
@@ -174,7 +178,11 @@ exports[`section of the fixture application prints the whole section 1`] = `
               schema: true,
             },
           ],
-          invoke: async (c: UserController, ctx: HttpContext) => c.create(await validate(CreateUser, ctx.body, 'body')),
+          invoke: (c: UserController, ctx: HttpContext) => {
+            const a0 = validate(CreateUser, ctx.body, 'body')
+            if (isThenable(a0)) return (async () => c.create(await a0))()
+            return c.create(a0)
+          },
         },
         {
           method: 'PUT',
@@ -197,7 +205,13 @@ exports[`section of the fixture application prints the whole section 1`] = `
               schema: true,
             },
           ],
-          invoke: async (c: UserController, ctx: HttpContext) => c.update(await validate(IdParam, ctx.params['id'], 'param "id"'), await validate(UpdateUser, ctx.body, 'body')),
+          invoke: (c: UserController, ctx: HttpContext) => {
+            const a0 = validate(IdParam, ctx.params['id'], 'param "id"')
+            if (isThenable(a0)) return (async () => c.update(await a0, await validate(UpdateUser, ctx.body, 'body')))()
+            const a1 = validate(UpdateUser, ctx.body, 'body')
+            if (isThenable(a1)) return (async () => c.update(a0, await a1))()
+            return c.update(a0, a1)
+          },
         },
         {
           method: 'DELETE',

@@ -69,6 +69,7 @@ describe('public entries', () => {
       'isHttpResponse',
       'isJsonType',
       'isStandardSchema',
+      'isThenable',
       'isValidStatus',
       'matchesMediaType',
       'nodeAdapter',
@@ -102,6 +103,7 @@ describe('public entries', () => {
       'string',
     ])
     expect(typeof entry.validate).toBe('function')
+    expect(typeof entry.isThenable).toBe('function')
     expect(Object.keys(entry.uploads).sort()).toEqual(['file', 'files', 'optionalFile', 'optionalFiles'])
     expect(entry.HttpTokens).toEqual({
       Context: '@znight/http#HttpContext',
