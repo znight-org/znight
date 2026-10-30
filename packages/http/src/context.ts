@@ -6,7 +6,7 @@ import type { HeaderValue } from './exceptions.ts'
 import type { MultipartResult } from './multipart.ts'
 import type { BodyPlan } from './uploads.ts'
 
-import { checkContentEncoding, hasBody, parseBody, parseMediaType } from './body.ts'
+import { checkContentEncoding, hasBody, parseBodyBytes, parseMediaType } from './body.ts'
 import { DEFAULT_COOKIE_SETTINGS, missingSecrets, serializeWith, verifySigned } from './cookie-settings.ts'
 import { parseCookieHeader } from './cookies.ts'
 import { UnsupportedMediaTypeException } from './exceptions.ts'
@@ -497,7 +497,7 @@ export class RequestContext implements HttpContext {
       )
     }
     const bytes = await this.rawBody()
-    const body = await parseBody(bytes, contentType, headers['content-encoding'])
+    const body = parseBodyBytes(bytes, contentType, headers['content-encoding'])
     this.#body = body
     return body
   }

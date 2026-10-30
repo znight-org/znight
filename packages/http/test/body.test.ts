@@ -60,6 +60,42 @@ describe('parseMediaType', () => {
     expect(parseMediaType('text/plain; foo')).toEqual({ type: 'text/plain', charset: undefined })
   })
 
+  it('returns the same parse for a value seen before (cached), as a fresh object', () => {
+    const values = [
+      'application/json',
+      'application/json; charset=utf-8',
+      'Application/JSON ;  CHARSET="UTF-8"',
+      'text/plain; charset=iso-8859-1',
+    ]
+    for (const value of values) {
+      const first = parseMediaType(value) as { type: string; charset: string | undefined }
+      const again = parseMediaType(value)
+      expect(again).toEqual(first)
+      expect(again).not.toBe(first)
+      // a caller changing its result changes nothing for the next ones
+      first.type = 'changed/type'
+      first.charset = 'changed'
+      expect(parseMediaType(value)).toEqual(again as object)
+    }
+    expect(parseMediaType('Application/JSON ;  CHARSET="UTF-8"')).toEqual({
+      type: 'application/json',
+      charset: 'utf-8',
+    })
+    expect(parseMediaType('application/json')).toEqual({ type: 'application/json', charset: undefined })
+  })
+
+  it('parses any number of distinct values (the cache is bounded)', () => {
+    for (let index = 0; index < 300; index++) {
+      expect(parseMediaType(`application/x-${index}; charset=X-${index}`)).toEqual({
+        type: `application/x-${index}`,
+        charset: `x-${index}`,
+      })
+    }
+    expect(parseMediaType('application/x-7; charset=X-7')).toEqual({ type: 'application/x-7', charset: 'x-7' })
+    expect(parseMediaType(' ')).toBeUndefined()
+    expect(parseMediaType(' ')).toBeUndefined()
+  })
+
   it('recognises JSON types', () => {
     expect(isJsonType('application/json')).toBe(true)
     expect(isJsonType('application/problem+json')).toBe(true)
