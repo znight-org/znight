@@ -23,7 +23,7 @@ CI still completes), and the next one updates the pull request with every change
 ## Pull requests
 
 `main` is protected: every change, the maintainers' included, goes through a pull request whose CI
-passes: the [ruleset](#owner-setup-checklist) requires one check, `all-checks-complete`, which only
+passes: the [ruleset](#owner-setup-checklist) requires one check, _All Checks Complete_, which only
 passes when every CI job did. Actions minutes are free for public repositories.
 
 A pull request that changes a published package for its users (feature, fix, behaviour or
@@ -61,15 +61,15 @@ Versions and changelogs are managed with [Changesets](https://changesets.dev)
 | E2E (Node 24 + Bun)         | `bun run test:e2e`: every suite starts the production build on Node.js **and** on Bun, so one job covers both         |
 | Integration (Docker)        | `bun run test:integration` (testcontainers: RabbitMQ, LocalStack SQS, Kafka), then the examples' e2e against RabbitMQ |
 | Packed tarballs (npm / bun) | `bun run release:smoke --pm <npm or bun>`, see [Smoke test](#smoke-test)                                              |
-| all-checks-complete         | waits for every job above and fails unless all of them succeeded                                                      |
+| All Checks Complete         | waits for every job above and fails unless all of them succeeded                                                      |
 
 It runs on every pull request; on every push to `main`, called by the release workflow; and on
 demand (**Actions → CI → Run workflow**).
 
-`all-checks-complete` is the only check the ruleset of `main` requires, so the ruleset does not
-change when jobs do: a new job is required once it is listed in the `needs` of
-`all-checks-complete`. The job runs even when a job it waits for failed or was skipped (a skipped
-required check would count as passed) and fails unless every one of them succeeded.
+_All Checks Complete_ (job `all-checks-complete`) is the only check the ruleset of `main` requires,
+so the ruleset does not change when jobs do: a new job is required once it is listed in the `needs`
+of `all-checks-complete`. The job runs even when a job it waits for failed or was skipped (a
+skipped required check would count as passed) and fails unless every one of them succeeded.
 
 The build runs before the typecheck and the tests because the examples call the `znight` binary,
 which loads `packages/cli/dist/cli.mjs`. The examples' `test` scripts give each test 30 s instead of
@@ -277,7 +277,7 @@ GitHub (repository `znight-org/znight`, public):
   _Required approvals_ at **0** while there is a single maintainer (GitHub does not let authors
   approve their own pull requests: with 1 approval and an empty bypass list, nobody can merge their
   own pull request), or keep 1 and add **Repository admin** to the _Bypass list_ in _For pull
-  requests only_ mode; **Require status checks to pass** with one check, **all-checks-complete**
+  requests only_ mode; **Require status checks to pass** with one check, **All Checks Complete**
   (source _GitHub Actions_; it appears in the picker once it has run on a pull request); **Block
   force pushes**; **Restrict deletions**.
 - [ ] **Environment `npm`** (the approval of every release):
