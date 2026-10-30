@@ -44,9 +44,9 @@ and [Dagger](https://dagger.dev), brought to TypeScript.
 </p>
 
 <p align="center">
-  <sub>Medians of 30 runs on an Apple M5 with Node.js 24, HTTP applications on Fastify. Under load, NestJS still
-  serves more requests per second on Node.js: the <a href="./docs/benchmarks.md">benchmarks page</a> has every
-  result and how to reproduce them.</sub>
+  <sub>Medians of 30 runs on an Apple M5 with Node.js 24, HTTP applications on Fastify. Under load, NestJS on Fastify
+  still serves about 10% more requests per second on Node.js: the <a href="./docs/benchmarks.md">benchmarks page</a>
+  has every result and how to reproduce them.</sub>
 </p>
 
 ## Quick start
