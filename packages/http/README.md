@@ -1647,7 +1647,9 @@ handler, and a text reply is written on the raw response exactly as `reply.send(
 hooks always run: with a `preParsing`, `preValidation` or `preHandler` hook (or an `onRoute` hook
 wrapping the handler, a schema, a subscriber of the `fastify.request.handler` tracing channel), the
 request goes through Fastify's whole lifecycle; with an `onSend` or `onResponse` hook, or headers
-and trailers set by an `onRequest` hook, the reply goes through `reply.send()`. Created instances use
+and trailers set by an `onRequest` hook, the reply goes through `reply.send()`. The adapter reads
+these hooks on Fastify's internal route and reply state: should a Fastify release change it, every
+request goes through the lifecycle (slower, same responses). Created instances use
 `exposeHeadRoutes: false` (Znight serves HEAD), a `maxParamLength` of 8 KiB and a
 `frameworkErrors` handler rendering Znight errors (with your own instance, malformed URLs are
 answered by Fastify). `inject()` uses `fastify.inject()`. Event streams are sent through
