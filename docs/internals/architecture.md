@@ -1908,10 +1908,18 @@ once the server holds the blob (its file opened), which releases the request sco
 the file). An adapter MUST NOT rethrow a failure to write a reply into its framework's error handler
 (the request would be served twice): it releases the body and answers a plain 500. When its native
 router misses a request (normalised path...), it calls the fallback handler, which routes the raw
-path. **Impl.** adapter specifics: Fastify hides a `content-type` it cannot parse from its own
-parsers on Znight routes (restored for the plugin), so they answer like the other adapters instead of
-Fastify's 415; Express answers 500 with an explicit log entry when a body parser already consumed
-the body; `honoAdapter({ app?, serveOptions? })` passes `serveOptions` to `Bun.serve()` with
+path. **Impl.** adapter specifics: Fastify serves a Znight route from the `onRequest` hook of the
+Znight context when nothing else would run before the handler (no `preParsing`, `preValidation` or
+`preHandler` hook, schema, later `onRequest` hook, `onRoute` wrapper of the handler, nor
+subscriber of the `fastify.request.handler` tracing channel), so Fastify never parses its content
+type, and then writes a text reply on the raw response as `reply.send()` would (same headers in the
+same order) when no `onSend` or `onResponse` hook runs and no hook set reply headers or trailers (it
+reads Fastify's internal route context and reply state, and takes the lifecycle when they are not
+found); otherwise the request goes through Fastify's lifecycle, where a `content-type` Fastify
+cannot parse is hidden from its parsers on Znight routes (restored for the plugin), so they answer
+like the other adapters instead of Fastify's 415; Express answers 500 with an explicit log entry
+when a body parser already consumed the body; `honoAdapter({ app?, serveOptions? })` passes
+`serveOptions` to `Bun.serve()` with
 `maxRequestBodySize` unlimited by default (the plugin enforces the body limits) and lifts Bun's
 `idleTimeout` while a streamed response is sent; on `Bun.serve()` a file is handed to Bun, which
 opens it at once, and the scope closes then. On `@hono/node-server`, a reply whose client already

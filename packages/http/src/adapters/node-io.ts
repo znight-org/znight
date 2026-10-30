@@ -56,47 +56,84 @@ export function readNodeBody(request: IncomingMessage, limit: number): Promise<U
     request.resume()
     return Promise.reject(payloadTooLarge(limit))
   }
+  // a read in progress (the adapters read a body once: not expected)
+  const reading = (request as ReadingRequest)[BODY_READ]
+  if (reading != null) return reading.promise
   if (consumedElsewhere(request)) return Promise.reject(consumedError())
   if (request.readableEnded) return Promise.resolve(new Uint8Array(0))
   if (request.destroyed) return Promise.reject(new BadRequestException('The request was aborted'))
-  return new Promise((resolve, reject) => {
-    const chunks: Uint8Array[] = []
-    let size = 0
-    const cleanup = (): void => {
-      request.off('data', onData)
-      request.off('end', onEnd)
-      request.off('error', onError)
-      request.off('close', onClose)
-    }
-    const onData = (chunk: Uint8Array | string): void => {
-      const bytes = typeof chunk === 'string' ? Buffer.from(chunk) : chunk
-      size += bytes.byteLength
-      if (size > limit) {
-        cleanup()
-        request.resume() // discard the rest; the 413 response closes the connection
-        reject(payloadTooLarge(limit))
-        return
-      }
-      chunks.push(bytes)
-    }
-    const onEnd = (): void => {
-      cleanup()
-      resolve(concat(chunks, size))
-    }
-    const onError = (error: Error): void => {
-      cleanup()
-      reject(new BadRequestException('Failed to read the request body', undefined, { cause: error }))
-    }
-    const onClose = (): void => {
-      if (request.complete) return
-      cleanup()
-      reject(new BadRequestException('The request was aborted'))
-    }
-    request.on('data', onData)
-    request.on('end', onEnd)
-    request.on('error', onError)
-    request.on('close', onClose)
+  let resolve!: (bytes: Uint8Array) => void
+  let reject!: (error: unknown) => void
+  const promise = new Promise<Uint8Array>((onRead, onError) => {
+    resolve = onRead
+    reject = onError
   })
+  ;(request as ReadingRequest)[BODY_READ] = { limit, chunks: [], size: 0, resolve, reject, promise }
+  if (reading === undefined) {
+    request.on('data', onBodyData)
+    request.on('end', onBodyEnd)
+    request.on('error', onBodyError)
+    request.on('close', onBodyClose)
+  }
+  return promise
+}
+
+/**
+ * The state of the body read by {@link readNodeBody}, on its request: `null` once it is over (the
+ * listeners stay), `undefined` before.
+ */
+const BODY_READ = Symbol('znight.bodyRead')
+
+interface BodyRead {
+  readonly limit: number
+  readonly chunks: Uint8Array[]
+  size: number
+  readonly resolve: (bytes: Uint8Array) => void
+  readonly reject: (error: unknown) => void
+  readonly promise: Promise<Uint8Array>
+}
+
+type ReadingRequest = IncomingMessage & { [BODY_READ]?: BodyRead | null }
+
+// The listeners of readNodeBody: shared functions (`this` is the request), no closure per request.
+// They stay attached once the read is over (removing them costs a lot more than leaving them): they
+// then do nothing. Node.js emits `error` on a destroyed request only when it has listeners, so the
+// `error` listener left behind changes nothing either.
+
+/** Stops reading: returns the state of the read (`undefined` when it is already over). */
+function stopBodyRead(request: ReadingRequest): BodyRead | undefined {
+  const read = request[BODY_READ]
+  if (read == null) return undefined
+  request[BODY_READ] = null
+  return read
+}
+
+function onBodyData(this: ReadingRequest, chunk: Uint8Array | string): void {
+  const read = this[BODY_READ]
+  if (read == null) return
+  const bytes = typeof chunk === 'string' ? Buffer.from(chunk) : chunk
+  read.size += bytes.byteLength
+  if (read.size > read.limit) {
+    stopBodyRead(this)
+    this.resume() // discard the rest; the 413 response closes the connection
+    read.reject(payloadTooLarge(read.limit))
+    return
+  }
+  read.chunks.push(bytes)
+}
+
+function onBodyEnd(this: ReadingRequest): void {
+  const read = stopBodyRead(this)
+  read?.resolve(concat(read.chunks, read.size))
+}
+
+function onBodyError(this: ReadingRequest, error: Error): void {
+  stopBodyRead(this)?.reject(new BadRequestException('Failed to read the request body', undefined, { cause: error }))
+}
+
+function onBodyClose(this: ReadingRequest): void {
+  if (this.complete) return
+  stopBodyRead(this)?.reject(new BadRequestException('The request was aborted'))
 }
 
 /**
@@ -181,10 +218,12 @@ export interface NodeRequestOptions {
 export function nodeAdapterRequest(
   request: IncomingMessage,
   response: ServerResponse,
-  options: NodeRequestOptions = {},
+  options: NodeRequestOptions = NO_OPTIONS,
 ): AdapterRequest {
   return new NodeAdapterRequest(request, response, options)
 }
+
+const NO_OPTIONS: NodeRequestOptions = Object.freeze({})
 
 /** A Node.js request/response pair as an {@link AdapterRequest} (a class: no closure per request). */
 class NodeAdapterRequest implements AdapterRequest {
@@ -269,7 +308,10 @@ export function writeNodeReply(response: ServerResponse, reply: AdapterReply): v
   try {
     // one call (merged over headers set earlier with setHeader(), e.g. by Express middleware); the
     // cookies set earlier are kept before the reply's own (writeHead would replace them)
-    const headers = withNativeCookies(response.getHeader('set-cookie'), reply.headers)
+    const headers =
+      reply.headers['set-cookie'] === undefined
+        ? reply.headers
+        : withNativeCookies(response.getHeader('set-cookie'), reply.headers)
     response.writeHead(reply.status, headers as OutgoingHttpHeaders)
   } catch {
     // invalid header name or value set by user code
@@ -334,44 +376,72 @@ export function writeNodeFailure(response: ServerResponse): void {
   response.end('{"statusCode":500,"error":"Internal Server Error"}')
 }
 
+/** The tracker of a socket (see {@link ConnectionTracker}). */
+const TRACKER = Symbol('znight.tracker')
+/** The number of requests in progress on a tracked socket. */
+const ACTIVE = Symbol('znight.active')
+
+interface TrackedSocket extends Socket {
+  [TRACKER]?: ConnectionTracker
+  [ACTIVE]?: number
+}
+
 /**
  * Tracks the connections of a `node:http` server to close them on shutdown: idle keep-alive
  * connections first (graceful), every connection when forced. `server.closeIdleConnections()` /
- * `closeAllConnections()` are not reliable on every runtime (Bun), so sockets are tracked here.
+ * `closeAllConnections()` are not reliable on every runtime (Bun), so sockets are tracked here. The
+ * count of requests in progress lives on the socket, and one shared `close` listener per response
+ * decrements it (no closure, no map lookup per request).
  */
 export class ConnectionTracker {
-  /** Socket → number of requests in progress. */
-  readonly #sockets = new Map<Socket, number>()
+  readonly #sockets = new Set<TrackedSocket>()
   #closing = false
 
-  constructor(server: Server) {
-    server.on('connection', (socket: Socket) => {
-      this.#sockets.set(socket, 0)
+  /**
+   * `requests: false` when the caller's own `request` listener calls {@link track} for every request
+   * of the server (one listener less to call per request).
+   */
+  constructor(server: Server, options: { readonly requests?: boolean } = {}) {
+    server.on('connection', (socket: TrackedSocket) => {
+      socket[TRACKER] = this
+      socket[ACTIVE] = 0
+      this.#sockets.add(socket)
       socket.once('close', () => this.#sockets.delete(socket))
     })
-    server.on('request', (request: IncomingMessage, response: ServerResponse) => {
-      const socket = request.socket
-      if (!this.#sockets.has(socket)) return
-      this.#sockets.set(socket, (this.#sockets.get(socket) ?? 0) + 1)
-      response.once('close', () => {
-        const active = this.#sockets.get(socket)
-        if (active === undefined) return
-        this.#sockets.set(socket, active - 1)
-        if (active - 1 === 0 && this.#closing) socket.end()
-      })
-    })
+    if (options.requests !== false) {
+      server.on('request', (request: IncomingMessage, response: ServerResponse) => this.track(request, response))
+    }
+  }
+
+  /** Counts a request in progress on its connection, until its response closes (other servers' requests are ignored). */
+  track(request: IncomingMessage, response: ServerResponse): void {
+    const socket = request.socket as TrackedSocket | null
+    if (socket?.[TRACKER] !== this) return
+    socket[ACTIVE] = (socket[ACTIVE] ?? 0) + 1
+    response.on('close', ConnectionTracker.#onResponseClose)
+  }
+
+  /** A response closed (`this`): one request less on its socket, ended when idle while closing. */
+  static readonly #onResponseClose = function (this: ServerResponse): void {
+    // the socket of a finished response is detached: reach it through its request
+    const socket = (this.req as IncomingMessage | undefined)?.socket as TrackedSocket | null | undefined
+    const tracker = socket?.[TRACKER]
+    if (socket == null || tracker === undefined) return
+    const active = (socket[ACTIVE] ?? 1) - 1
+    socket[ACTIVE] = active
+    if (active === 0 && tracker.#closing) socket.end()
   }
 
   /** Ends idle connections now and the others once their requests completed. */
   closeIdle(): void {
     this.#closing = true
-    for (const [socket, active] of this.#sockets) if (active === 0) socket.end()
+    for (const socket of this.#sockets) if (socket[ACTIVE] === 0) socket.end()
   }
 
   /** Destroys every connection. */
   destroyAll(): void {
     this.#closing = true
-    for (const socket of this.#sockets.keys()) socket.destroy()
+    for (const socket of this.#sockets) socket.destroy()
   }
 }
 

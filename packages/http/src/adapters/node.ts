@@ -82,6 +82,8 @@ class NodeHttpAdapter implements NodeAdapter {
   }
 
   readonly handler = (request: IncomingMessage, response: ServerResponse): void => {
+    // the listening server's connections (a request of another server is ignored)
+    this.#tracker?.track(request, response)
     const url = request.url ?? '/'
     const query = url.indexOf('?')
     const handler = this.#routes.find(request.method ?? 'GET', query === -1 ? url : url.slice(0, query))
@@ -101,7 +103,8 @@ class NodeHttpAdapter implements NodeAdapter {
   async listen(port: number, host: string): Promise<HttpServerAddress> {
     const server = this.#server ?? createServer(this.#options.serverOptions ?? {})
     this.#server = server
-    this.#tracker ??= new ConnectionTracker(server)
+    // `handler` counts the requests
+    this.#tracker ??= new ConnectionTracker(server, { requests: false })
     this.#closing = undefined
     if (!server.listeners('request').includes(this.handler)) server.on('request', this.handler)
     await new Promise<void>((resolve, reject) => {
