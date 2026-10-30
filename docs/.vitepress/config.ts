@@ -106,7 +106,7 @@ export default defineConfig({
     externalLinkIcon: true,
     footer: {
       message: `Released under the <a href="${GITHUB_URL}/blob/main/LICENSE">MIT License</a>.`,
-      copyright: 'Copyright © 2025-present Ugho STEPHAN and the Znight contributors',
+      copyright: 'Copyright © 2026-present Ugho STEPHAN and the Znight contributors',
     },
   },
 })
