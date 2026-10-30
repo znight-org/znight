@@ -42,6 +42,10 @@ Versions and changelogs are managed with [Changesets](https://changesets.dev)
 - **Bumps**: until 1.0, a breaking change is a `minor` bump and everything else a `patch`.
 - **No changeset** for docs-, tests-, examples- or CI-only changes. CI posts a warning (never a
   failure) on a pull request that changes packages without a changeset, as a reminder.
+- **Checked**: `bun run release:status` (the _Build & pack_ job) reads every changeset with
+  Changesets' own parser and fails the pull request when one cannot be read (front matter, YAML,
+  version type) or bumps a package that is not published, before it breaks the release workflow on
+  `main`.
 - **Ignored**: the examples (`@znight-examples/*`) and the docs site (`@znight/docs`) are private and
   never versioned or published.
 - Internal dependencies use `workspace:*` / `workspace:^` and third-party versions shared through

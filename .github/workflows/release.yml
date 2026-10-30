@@ -79,9 +79,8 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: package.json
+      # the dependencies: status.ts reads the changesets with @changesets/parse
+      - uses: ./.github/actions/setup
       - name: Versions not on npm yet
         id: status
         run: bun scripts/release/status.ts

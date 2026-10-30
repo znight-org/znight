@@ -5,6 +5,9 @@
     "ignoreUnknown": false,
     "includes": ["**/*", "!node_modules", "!dist", "!junit_reports", "!.nx", "!.yarn", "!rfcs"]
   },
+  // Markdown files may start with a YAML frontmatter block: VitePress pages (docs/) and changesets
+  // (.changeset/*.md). Without this, Biome reads a one-line frontmatter as a heading and breaks it.
+  "markdown": { "parser": { "frontmatter": true } },
   "formatter": {
     "formatWithErrors": false,
     "indentStyle": "space",

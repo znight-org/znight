@@ -9,6 +9,8 @@ change.
 - Examples (`@znight-examples/*`) and the docs site (`@znight/docs`) are private and ignored.
 - While on `0.x`, use `minor` for breaking changes and `patch` for everything else.
 - Docs-, tests-, examples- or CI-only changes need no changeset (CI only reminds you).
+- CI reads every changeset as `changeset version` does and fails on one it cannot read (a broken
+  front matter, an unknown version type, a package that is not published).
 
 When changesets reach `main`, the release workflow opens or updates the "chore: version packages"
 pull request; merging it bumps the versions and writes the changelogs, then the publication waits

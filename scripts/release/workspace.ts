@@ -4,6 +4,7 @@
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { parseChangesetFile } from '@changesets/parse'
 
 /** Repository root. */
 export const ROOT: string = resolve(import.meta.dir, '../..')
@@ -120,26 +121,53 @@ export function lockstepVersion(packages: readonly WorkspacePackage[]): string {
   return version
 }
 
-/**
- * Whether a changeset releases something: its front matter lists at least one package. An empty
- * changeset (`changeset add --empty`) opens no version pull request (changesets/action skips it)
- * and is deleted by the next `changeset version`, so it must not block a release.
- */
-export function releasesSomething(contents: string): boolean {
-  // the delimiters of @changesets/parse; a file without front matter is kept (`changeset` rejects it)
-  const match = /^\s*---([\s\S]*?)\r?\n\s*---/.exec(contents)
-  if (match === null) return true
-  return (match[1] ?? '').split(/\r?\n/).some(line => line.trim() !== '' && !line.trim().startsWith('#'))
+/** A package bumped by a changeset. */
+export interface ChangesetRelease {
+  readonly name: string
+  readonly type: string
 }
 
-/** The pending changesets that release something (`.changeset/*.md` except the README and empty ones). */
+/**
+ * The releases of a changeset, read with Changesets' own parser (`@changesets/parse`, as
+ * `changeset version` reads it). Throws, naming `file`, when the changeset cannot be read (front
+ * matter, YAML, version type) or bumps a package that is not published: such a changeset fails the
+ * pull request that adds it instead of the version job of the release workflow on `main`. An empty
+ * changeset (`changeset add --empty`) has no releases.
+ */
+export function changesetReleases(
+  file: string,
+  contents: string,
+  published: ReadonlySet<string>,
+): readonly ChangesetRelease[] {
+  let releases: readonly ChangesetRelease[]
+  try {
+    releases = parseChangesetFile(contents).releases
+  } catch (error) {
+    throw new Error(`${file}: ${error instanceof Error ? error.message : String(error)}`, { cause: error })
+  }
+  for (const { name } of releases) {
+    if (!published.has(name)) {
+      throw new Error(`${file}: "${name}" is not a published package (${[...published].sort().join(', ')})`)
+    }
+  }
+  return releases
+}
+
+/**
+ * The pending changesets that release something (`.changeset/*.md` except the README), checked by
+ * {@link changesetReleases}. An empty changeset opens no version pull request (changesets/action
+ * skips it) and is deleted by the next `changeset version`, so it must not block a release.
+ */
 export function pendingChangesets(root: string = ROOT): string[] {
   const dir = join(root, '.changeset')
   if (!existsSync(dir)) return []
+  const published = new Set(publishablePackages(root).map(pkg => pkg.name))
   return readdirSync(dir)
     .filter(file => file.endsWith('.md') && file.toLowerCase() !== 'readme.md')
-    .filter(file => releasesSomething(readFileSync(join(dir, file), 'utf8')))
     .sort()
+    .filter(
+      file => changesetReleases(`.changeset/${file}`, readFileSync(join(dir, file), 'utf8'), published).length > 0,
+    )
     .map(file => `.changeset/${file}`)
 }
 

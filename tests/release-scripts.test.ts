@@ -9,10 +9,10 @@ import type { Manifest, WorkspacePackage } from '../scripts/release/workspace.ts
 import { changelogSection, withoutDependencyBumps } from '../scripts/release/notes.ts'
 import { tarballName, verifyTarball } from '../scripts/release/tarball.ts'
 import {
+  changesetReleases,
   distTagFor,
   lockstepVersion,
   publishablePackages,
-  releasesSomething,
   sortByDependencies,
 } from '../scripts/release/workspace.ts'
 import { describe, expect, test as it } from 'bun:test'
@@ -85,11 +85,35 @@ it('lockstepVersion rejects packages at different versions', () => {
   )
 })
 
-it('releasesSomething: an empty changeset (changeset add --empty) releases nothing', () => {
-  expect(releasesSomething("---\n'@znight/http': patch\n---\n\nFix the multipart details\n")).toBe(true)
-  expect(releasesSomething('---\n---\n')).toBe(false)
-  expect(releasesSomething('---\r\n\r\n---\r\n\r\nNothing to release\r\n')).toBe(false)
-  expect(releasesSomething('no front matter')).toBe(true)
+describe('changesetReleases', () => {
+  const published = new Set(['@znight/core', '@znight/http'])
+  const read = (contents: string) => changesetReleases('.changeset/x.md', contents, published)
+
+  it('reads the packages a changeset bumps', () => {
+    expect(read("---\n'@znight/http': patch\n---\n\nFix the multipart details\n")).toEqual([
+      { name: '@znight/http', type: 'patch' },
+    ])
+  })
+
+  it('an empty changeset (changeset add --empty) releases nothing', () => {
+    expect(read('---\n---\n')).toEqual([])
+    expect(read('---\r\n\r\n---\r\n\r\nNothing to release\r\n')).toEqual([])
+  })
+
+  it('rejects a changeset that changeset version cannot read, naming the file', () => {
+    // a one-line front matter that a Markdown formatter read as a setext heading
+    expect(() => read("---\n\n## '@znight/core': patch\n\nFix\n")).toThrow(
+      '.changeset/x.md: could not parse changeset - missing or invalid frontmatter',
+    )
+    expect(() => read('no front matter')).toThrow('missing or invalid frontmatter')
+    expect(() => read("---\n'@znight/core': bugfix\n---\n\nFix\n")).toThrow('invalid version type "bugfix"')
+  })
+
+  it('rejects a package that is not published', () => {
+    expect(() => read("---\n'@znight-examples/worker': patch\n---\n\nFix\n")).toThrow(
+      '.changeset/x.md: "@znight-examples/worker" is not a published package (@znight/core, @znight/http)',
+    )
+  })
 })
 
 it('distTagFor sends prereleases to next', () => {
