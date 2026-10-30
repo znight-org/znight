@@ -6,7 +6,9 @@
  */
 import type { ZnightMetadata } from '@znight/core'
 import type { HttpMetadata, HttpRouteDefinition, InjectRequest, InjectResponse } from '../../src/index.ts'
+import type { TempApp } from './helpers.ts'
 
+import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -14,7 +16,7 @@ import * as compiler from '@znight/compiler'
 import { Application, silentLogger } from '@znight/core'
 
 import { HttpPlugin } from '../../src/index.ts'
-import { cleanupApps, render, tempApp } from './helpers.ts'
+import { cleanupApps, render, TSC, tempApp } from './helpers.ts'
 import { afterAll, beforeAll, describe, expect, test as it } from 'bun:test'
 
 type Compile = (options: Record<string, unknown>) => Promise<{
@@ -26,7 +28,7 @@ type Compile = (options: Record<string, unknown>) => Promise<{
 const compile = (compiler as unknown as { readonly compile?: Compile }).compile
 
 const SCHEMAS = `
-import type { StandardSchemaV1 } from '@znight/http'
+import type { StandardSchemaV1, StandardSchemaV1Result } from '@znight/http'
 
 /** Validations run, in order (read and reset by GET /checks/calls). */
 export const calls: string[] = []
@@ -40,8 +42,9 @@ function schema<T>(name: string, check: (value: unknown) => T | undefined, async
       validate(value: unknown) {
         calls.push(name)
         const output = check(value)
-        const result = output === undefined ? { issues: [{ message: \`invalid \${name}\` }] } : { value: output }
-        return async ? new Promise(resolve => setTimeout(() => resolve(result), 1)) : result
+        const result: StandardSchemaV1Result<T> =
+          output === undefined ? { issues: [{ message: \`invalid \${name}\` }] } : { value: output }
+        return async ? new Promise<StandardSchemaV1Result<T>>(resolve => setTimeout(() => resolve(result), 1)) : result
       },
     },
   }
@@ -67,7 +70,7 @@ export const Deferred = schema('deferred', value =>
 const CONTROLLER = `
 import type { CallHandler, HttpContext, HttpInterceptor } from '@znight/http'
 import { Injectable } from '@znight/core'
-import { Body, Controller, Get, Param, Patch, Post, Put, Query, UseInterceptor } from '@znight/http'
+import { Body, Controller, Ctx, Get, Headers, Param, Patch, Post, Put, Query, UseInterceptor } from '@znight/http'
 import { AsyncId, AsyncName, calls, Deferred, SyncId, SyncName } from './schemas.ts'
 
 @Injectable()
@@ -119,20 +122,34 @@ export class ChecksController {
   deferred(@Query('v', Deferred) v: string) {
     return { v }
   }
+
+  /** Whole records cast to the declared types, @Ctx() inlined, an optional coercion after the validation. */
+  @Post('/mixed/:id')
+  mixed(
+    @Headers() headers: Record<string, string | undefined>,
+    @Ctx() ctx: HttpContext,
+    @Param('id', SyncId) id: number,
+    @Query('flag') flag?: boolean,
+  ) {
+    return { agent: headers['x-agent'] ?? null, method: ctx.method, id, flag: flag ?? null }
+  }
 }
 `
 
 describe.skipIf(typeof compile !== 'function')('generated invoke with validated arguments (e2e)', () => {
   let application: Application
   let http: HttpPlugin
+  let app: TempApp
   let code: string
+  let outFile: string
   let metadata: ZnightMetadata
 
   beforeAll(async () => {
-    const app = tempApp({ 'src/schemas.ts': SCHEMAS, 'src/checks.controller.ts': CONTROLLER })
+    app = tempApp({ 'src/schemas.ts': SCHEMAS, 'src/checks.controller.ts': CONTROLLER })
     const result = await (compile as Compile)({ root: app.root, conditions: ['@znight/source'], mode: 'test' })
     expect(render({ root: app.root, diagnostics: result.diagnostics })).toEqual([])
     code = result.code
+    outFile = result.outFile
     fs.mkdirSync(path.dirname(result.outFile), { recursive: true })
     fs.writeFileSync(result.outFile, result.code)
     metadata = ((await import(pathToFileURL(result.outFile).href)) as { __ZNIGHT_METADATA__: ZnightMetadata })
@@ -166,6 +183,65 @@ describe.skipIf(typeof compile !== 'function')('generated invoke with validated 
   it('generates synchronous arrows (no async keyword at the top level)', () => {
     expect(code).not.toMatch(/\['invoke'\]: async/)
     expect(code).toContain('if (isThenable(a0)) return (async () => c.sync(await a0))()')
+    expect(code).toContain(
+      [
+        "              ['invoke']: (c: ChecksController, ctx: HttpContext) => {",
+        '                const a0 = ctx.headers as never',
+        `                const a2 = validate(SyncId, ctx.params['id'], 'param "id"')`,
+        '                if (isThenable(a2)) return (async () =>',
+        `                  c.mixed(a0, ctx, await a2, coerce.optional(ctx.query['flag'], 'query "flag"', coerce.boolean)))()`,
+        `                return c.mixed(a0, ctx, a2, coerce.optional(ctx.query['flag'], 'query "flag"', coerce.boolean))`,
+        '              },',
+      ].join('\n'),
+    )
+  })
+
+  it('generates a module that type-checks with strict compiler options', () => {
+    app.write(
+      'tsconfig.check.json',
+      JSON.stringify({
+        compilerOptions: {
+          target: 'ES2024',
+          lib: ['ES2024', 'ESNext.Disposable', 'DOM'],
+          module: 'preserve',
+          moduleResolution: 'bundler',
+          customConditions: ['@znight/source'],
+          strict: true,
+          noUnusedLocals: true,
+          noUnusedParameters: true,
+          noPropertyAccessFromIndexSignature: true,
+          exactOptionalPropertyTypes: true,
+          verbatimModuleSyntax: true,
+          experimentalDecorators: true,
+          allowImportingTsExtensions: true,
+          skipLibCheck: true,
+          noEmit: true,
+          types: ['node'],
+        },
+        include: ['src'],
+        files: [path.relative(app.root, outFile)], // `include` skips dot directories (src/.znight)
+      }),
+    )
+    const run = spawnSync(process.execPath, [TSC, '-p', 'tsconfig.check.json', '--listFiles'], {
+      cwd: app.root,
+      encoding: 'utf8',
+    })
+    const output = `${run.stdout}${run.stderr}`
+    expect(run.error).toBeUndefined()
+    expect(output).toContain(outFile)
+    expect(output.split('\n').filter(line => line.startsWith('src/'))).toEqual([])
+  })
+
+  it('passes whole records, the context and coerced values after a validation', async () => {
+    const response = await send({
+      method: 'POST',
+      url: '/checks/mixed/5?flag=1',
+      headers: { 'x-agent': 'probe' },
+    })
+    expect(response.json()).toEqual({ agent: 'probe', method: 'POST', id: 5, flag: true })
+    const invalid = await send({ method: 'POST', url: '/checks/mixed/x?flag=maybe' })
+    expect(invalid.json()).toMatchObject({ message: 'Invalid param "id"' })
+    await calls()
   })
 
   it('returns the handler result synchronously when the schemas validate synchronously', async () => {
