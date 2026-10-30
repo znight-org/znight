@@ -476,7 +476,8 @@ export class Pipeline {
    */
   #fastReply(route: FastRoute, ctx: RequestContext, result: unknown): AdapterReply | undefined {
     const status = result === undefined ? route.emptyStatus : route.jsonStatus
-    if (status === undefined || ctx.hasResponseHeaders || ctx.hasCookies) return undefined
+    // draining since the request started (`connection: close`, see #frameworkHeaders)
+    if (status === undefined || ctx.hasResponseHeaders || ctx.hasCookies || this.draining) return undefined
     const requestId = ctx.requestId
     // a custom generator's id that cannot be sent is left out (see #frameworkHeaders)
     if (!this.#validIds && !isHeaderValue(requestId)) return undefined

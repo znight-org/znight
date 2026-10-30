@@ -12,6 +12,7 @@ import type {
   AdapterRoute,
   HttpAdapter,
   HttpContext,
+  HttpServerAddress,
 } from '../src/index.ts'
 import type { TestApp } from './helpers.ts'
 
@@ -33,8 +34,9 @@ class RecordingAdapter implements HttpAdapter {
 
   setFallbackHandler(): void {}
 
-  listen(port: number, host: string): Promise<never> {
-    return Promise.reject(new Error(`not listening (${host}:${port})`))
+  listen(port: number, host: string): Promise<HttpServerAddress> {
+    const url = `http://${host}:${port}`
+    return Promise.resolve({ host, port, family: 'IPv4', url, toString: () => url })
   }
 
   async close(): Promise<void> {}
@@ -488,6 +490,26 @@ describe('fast lane options', () => {
   it('keeps a request id header named like a security header', async () => {
     const shadowing = await reply({ requestIdHeader: 'x-frame-options' }, { url: '/object' })
     expect(shadowing.headers['x-frame-options']).toMatch(ID)
+  })
+
+  it('asks the client to close the connection when the server started draining during the request', async () => {
+    const adapter = new RecordingAdapter()
+    const app = await createApp(META, { adapter })
+    const handler = adapter.handler('POST', '/validated')
+    const pending = handler(
+      request({
+        method: 'POST',
+        url: '/validated',
+        headers: { 'content-type': 'application/json' },
+        body: '{"name":"Ada"}',
+      }),
+    )
+    const stopped = app.stop()
+    const reply = await pending
+    await stopped
+    expect(reply.status).toBe(201)
+    expect(reply.headers['connection']).toBe('close')
+    expect(Object.keys(reply.headers).at(-1)).toBe('connection')
   })
 
   it('takes the general pipeline with CORS on', async () => {
