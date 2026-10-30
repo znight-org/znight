@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   isJsonType,
+  type MediaType,
   parseBody,
   parseMediaType,
   parseQuery,
@@ -69,13 +70,13 @@ describe('parseMediaType', () => {
     ]
     for (const value of values) {
       const first = parseMediaType(value) as { type: string; charset: string | undefined }
-      const again = parseMediaType(value)
+      const again = parseMediaType(value) as MediaType
       expect(again).toEqual(first)
       expect(again).not.toBe(first)
       // a caller changing its result changes nothing for the next ones
       first.type = 'changed/type'
       first.charset = 'changed'
-      expect(parseMediaType(value)).toEqual(again as object)
+      expect(parseMediaType(value)).toEqual(again)
     }
     expect(parseMediaType('Application/JSON ;  CHARSET="UTF-8"')).toEqual({
       type: 'application/json',
