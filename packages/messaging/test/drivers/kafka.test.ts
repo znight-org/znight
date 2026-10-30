@@ -1,14 +1,15 @@
 /**
  * Kafka driver against a fake `@platformatic/kafka`: what the subscription does with the records its
  * streams emit (rebalances re-fetching from the committed offset, revoked partitions, back-pressure
- * of the main and retry streams, long retry delays). The behaviour of a real cluster is covered by
- * `test/integration/kafka.test.ts`.
+ * of the main and retry streams, long retry delays), and how topics are created (concurrent creations,
+ * transient broker errors). The behaviour of a real cluster is covered by `test/integration/kafka.test.ts`.
  */
 import type { GroupAssignment } from '@platformatic/kafka'
 import type { DriverDelivery, SubscribeOptions } from '../../src/driver.ts'
 
 import { EventEmitter } from 'node:events'
 import * as realKafka from '@platformatic/kafka'
+import { ZnightError } from '@znight/core'
 
 import { MAX_TIMER_DELAY_MS } from '../../src/internal/async.ts'
 import { deferred, memoryLogger } from '../helpers.ts'
@@ -84,16 +85,37 @@ class FakeProducer {
   }
 }
 
+/** Topics the fake admin lists. */
+const listed = new Set<string>()
+/** Topics of each `createTopics` request, in order. */
+const createRequests: string[][] = []
+/** Errors of the next `createTopics` requests, in order (a request succeeds once there is none left). */
+const createFailures: ((topics: readonly string[]) => Error)[] = []
+
 class FakeAdmin {
   listTopics(): Promise<string[]> {
-    return Promise.resolve(['orders', 'znight.orders.retry'])
+    return Promise.resolve([...listed])
   }
-  createTopics(): Promise<void> {
-    return Promise.resolve()
+  createTopics(options: { topics: string[] }): Promise<void> {
+    createRequests.push(options.topics)
+    const failure = createFailures.shift()
+    return failure === undefined ? Promise.resolve() : Promise.reject(failure(options.topics))
   }
   close(): Promise<void> {
     return Promise.resolve()
   }
+}
+
+/** What `Admin.createTopics` rejects with when the broker answers with an error code for some topics. */
+function createTopicsError(results: readonly [topic: string, code: number, message?: string][]): Error {
+  const errors: Record<string, [number, string | null]> = {}
+  for (const [index, [, code, message]] of results.entries()) {
+    if (code !== 0) errors[`/topics/${index}`] = [code, message ?? null]
+  }
+  const response = { topics: results.map(([name, errorCode]) => ({ name, errorCode })) }
+  return new realKafka.MultipleErrors('Creating topics failed.', [
+    new realKafka.ResponseError(19, 7, errors, response), // CreateTopics v7
+  ])
 }
 
 const originalKafka = { ...realKafka }
@@ -146,6 +168,120 @@ beforeEach(() => {
   streams.length = 0
   consumers.length = 0
   commits.length = 0
+  listed.clear()
+  listed.add('orders').add('znight.orders.retry')
+  createRequests.length = 0
+  createFailures.length = 0
+})
+
+describe('topic creation', () => {
+  const dlq = { ...options, deadLetterQueue: 'orders.dlq' }
+
+  async function subscribe(createTopics: boolean | { replicas: number } = true): Promise<unknown> {
+    listed.clear()
+    const driver = kafka({ bootstrapBrokers: ['kafka:9092'], createTopics })
+    await driver.connect({ logger: memoryLogger() })
+    try {
+      const subscription = await driver.subscribe('orders', async () => {}, dlq)
+      await subscription.close()
+      return undefined
+    } catch (error) {
+      return error
+    } finally {
+      await driver.close()
+    }
+  }
+
+  it('counts a topic created concurrently as created, before the listing shows it', async () => {
+    createFailures.push(() =>
+      createTopicsError([
+        ['orders', 0],
+        ['orders.dlq', 36, "Topic 'orders.dlq' already exists."],
+      ]),
+    )
+    expect(await subscribe()).toBeUndefined()
+    expect(createRequests).toEqual([['orders', 'orders.dlq']])
+  })
+
+  it('retries the topics still missing when an existing topic stopped the retries of the client', async () => {
+    // TOPIC_ALREADY_EXISTS (36) is not retriable: the client gives up on the timeout (7) of the other
+    createFailures.push(() =>
+      createTopicsError([
+        ['orders', 36],
+        ['orders.dlq', 7],
+      ]),
+    )
+    const started = Date.now()
+    expect(await subscribe()).toBeUndefined()
+    expect(createRequests).toEqual([['orders', 'orders.dlq'], ['orders.dlq']])
+    expect(Date.now() - started).toBeGreaterThanOrEqual(200)
+  })
+
+  it('accepts topics listed after a request that failed as a whole', async () => {
+    createFailures.push(topics => {
+      for (const topic of topics) listed.add(topic)
+      return new realKafka.NetworkError('Connection closed')
+    })
+    expect(await subscribe()).toBeUndefined()
+    expect(createRequests).toHaveLength(1)
+  })
+
+  it('gives up once the client spent its own retries, with the errors of the broker and the original error as cause', async () => {
+    const errors = [
+      createTopicsError([
+        ['orders', 7],
+        ['orders.dlq', 36],
+      ]),
+      createTopicsError([['orders', 7]]),
+    ]
+    createFailures.push(...errors.map(error => () => error))
+    const failure = await subscribe()
+    expect(failure).toBeInstanceOf(ZnightError)
+    expect((failure as Error).message).toContain(
+      'Kafka: cannot create topic(s) "orders" of OrderConsumer (2 attempts): "orders" REQUEST_TIMED_OUT: The request timed out.',
+    )
+    expect((failure as Error).cause).toBe(errors[1])
+    expect(createRequests).toEqual([['orders', 'orders.dlq'], ['orders']])
+  })
+
+  it('does not multiply the retries of the client: a transient error alone fails at once', async () => {
+    createFailures.push(() =>
+      createTopicsError([
+        ['orders', 7],
+        ['orders.dlq', 0],
+      ]),
+    )
+    const failure = await subscribe()
+    expect((failure as Error).message).toContain('(1 attempt): "orders" REQUEST_TIMED_OUT')
+    expect(createRequests).toHaveLength(1)
+  })
+
+  it('reads only the last attempt of the client', async () => {
+    // a network error of a first attempt, then the topic created concurrently
+    createFailures.push(
+      () =>
+        new realKafka.MultipleErrors('createTopics failed 2 times.', [
+          new realKafka.NetworkError('Connection closed'),
+          createTopicsError([
+            ['orders', 36],
+            ['orders.dlq', 0],
+          ]),
+        ]),
+    )
+    expect(await subscribe()).toBeUndefined()
+    expect(createRequests).toHaveLength(1)
+  })
+
+  it('fails at once on an error that retrying cannot fix', async () => {
+    createFailures.push(() =>
+      createTopicsError([['orders', 38, 'Replication factor: 3 larger than available brokers: 1.']]),
+    )
+    const failure = await subscribe({ replicas: 3 })
+    expect((failure as Error).message).toContain(
+      '(1 attempt): "orders" INVALID_REPLICATION_FACTOR: Replication factor: 3 larger than available brokers: 1.',
+    )
+    expect(createRequests).toHaveLength(1)
+  })
 })
 
 describe('rebalances', () => {

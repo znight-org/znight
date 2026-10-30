@@ -43,7 +43,7 @@ import {
 
 import { brokerUnavailableError, consumerError } from '../errors.ts'
 import { attemptFromHeaders, headerRecord, MessagingHeaders } from '../headers.ts'
-import { errorMessage, MAX_TIMER_DELAY_MS, truncate } from '../internal/async.ts'
+import { errorMessage, MAX_TIMER_DELAY_MS, sleep, truncate } from '../internal/async.ts'
 import { durationOption, MAX_ERROR_HEADER_LENGTH } from './shared.ts'
 
 type KafkaRecord = Message<string, Buffer, string, string>
@@ -83,6 +83,9 @@ export interface KafkaDriverOptions {
 }
 
 const DEFAULT_MAX_RETRY_DELAY_MS = 15 * 60_000
+/** Attempts of a topic creation failing with transient broker errors, and the first backoff (doubled each time). */
+const CREATE_TOPICS_ATTEMPTS = 3
+const CREATE_TOPICS_BACKOFF_MS = 250
 /** Headers carrying transport fields (not exposed as message headers). */
 const TRANSPORT_HEADERS = new Set<string>([
   MessagingHeaders.Id,
@@ -298,22 +301,102 @@ export class KafkaDriver implements MessagingDriver {
           ['Create them, or set kafka({ createTopics: true }) to let Znight create them'],
         )
       }
-      const settings = create === true ? {} : create
-      try {
-        await admin.createTopics({
-          topics: missing,
-          partitions: settings.partitions ?? 1,
-          replicas: settings.replicas ?? 1,
-        })
-      } catch (error) {
-        // created concurrently by another instance
-        const now = new Set(await admin.listTopics())
-        if (missing.some(topic => !now.has(topic))) throw error
-      }
+      await createMissingTopics(admin, missing, create === true ? {} : create, consumer)
     } finally {
       await admin.close().catch(() => undefined)
     }
   }
+}
+
+/**
+ * Creates `topics`. A topic the broker reports as already existing counts as created: subscriptions
+ * sharing a topic (a consumer and the collector of its dead letters) or other instances create it
+ * concurrently, and the topic listing lags behind the controller, so it cannot tell on its own. The
+ * client retries transient errors by itself, but not in a response that also reports an existing
+ * topic (not retriable): then the topics still missing are retried here, with a short backoff.
+ */
+async function createMissingTopics(
+  admin: Admin,
+  topics: readonly string[],
+  settings: KafkaTopicOptions,
+  consumer: string,
+): Promise<void> {
+  let pending = topics
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await admin.createTopics({
+        topics: [...pending],
+        partitions: settings.partitions ?? 1,
+        replicas: settings.replicas ?? 1,
+      })
+      return
+    } catch (error) {
+      const all = topicCreationFailures(error)
+      const failures = all.filter(failure => failure.code !== 'TOPIC_ALREADY_EXISTS')
+      if (failures.length === 0) return
+      // a topic without an error was created, unless the request failed as a whole (timeout...)
+      const failed = failures.every(failure => failure.topic !== undefined)
+        ? new Set(failures.map(failure => failure.topic))
+        : undefined
+      // created in the meantime, by this request or concurrently
+      const listed = new Set(await admin.listTopics().catch((): string[] => []))
+      pending = pending.filter(topic => (failed?.has(topic) ?? true) && !listed.has(topic))
+      if (pending.length === 0) return
+      // without an existing topic in the response, the client already spent its own retries
+      const clientRetried = failures.length === all.length
+      if (attempt >= CREATE_TOPICS_ATTEMPTS || clientRetried || failures.some(failure => !failure.retriable)) {
+        const causes = new Set(
+          failures.map(({ topic, code, message }) => `${topic === undefined ? '' : `"${topic}" `}${code}: ${message}`),
+        )
+        throw brokerUnavailableError(
+          `Kafka: cannot create topic(s) ${pending.map(name => `"${name}"`).join(', ')} of ${consumer}` +
+            ` (${attempt} attempt${attempt === 1 ? '' : 's'}): ${[...causes].join('; ')}`,
+          error,
+        )
+      }
+      await sleep(CREATE_TOPICS_BACKOFF_MS * 2 ** (attempt - 1))
+    }
+  }
+}
+
+/** One error of a failed topic creation. */
+interface TopicCreationFailure {
+  /** The topic it concerns, when the broker answered topic by topic. */
+  readonly topic: string | undefined
+  /** Kafka error (`TOPIC_ALREADY_EXISTS`, `REQUEST_TIMED_OUT`...) or client error code. */
+  readonly code: string
+  readonly message: string
+  /** Whether the client flags it as worth retrying. */
+  readonly retriable: boolean
+}
+
+/**
+ * The leaf errors of a failed `createTopics`: a `MultipleErrors` of the attempts of the client (only
+ * the last one counts), each a `ResponseError` carrying the response and one `ProtocolError` per failed
+ * topic (`path: /topics/<index>`), or a network error.
+ */
+function topicCreationFailures(error: unknown, response?: unknown): TopicCreationFailure[] {
+  const fields = (error !== null && typeof error === 'object' ? error : {}) as Record<string, unknown>
+  const nested = fields['errors']
+  if (Array.isArray(nested) && nested.length > 0) {
+    // the errors of a response are its topics; the errors of a retry wrapper are attempts
+    const inners = fields['response'] === undefined ? nested.slice(-1) : nested
+    return inners.flatMap(inner => topicCreationFailures(inner, fields['response'] ?? response))
+  }
+  const index = /^\/topics\/(\d+)$/.exec(String(fields['path']))?.[1]
+  const topics = (response as { topics?: unknown } | null | undefined)?.topics
+  const name =
+    index !== undefined && Array.isArray(topics)
+      ? (topics[Number(index)] as { name?: unknown } | undefined)?.name
+      : undefined
+  return [
+    {
+      topic: typeof name === 'string' ? name : undefined,
+      code: String(fields['apiId'] ?? fields['code'] ?? (error instanceof Error ? error.name : 'UNKNOWN')),
+      message: String(fields['serverErrorMessage'] ?? errorMessage(error)),
+      retriable: fields['canRetry'] !== false,
+    },
+  ]
 }
 
 /**
