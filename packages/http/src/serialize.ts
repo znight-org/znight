@@ -5,6 +5,7 @@ import type { ResolvedFile } from './files.ts'
 import type { HttpResponse } from './response.ts'
 import type { SseSession } from './sse.ts'
 
+import { Buffer } from 'node:buffer'
 import { Readable } from 'node:stream'
 
 import { isFileBody } from './files.ts'
@@ -12,9 +13,15 @@ import { isHttpResponse } from './response.ts'
 import { isSseBody } from './sse.ts'
 import { isBodylessStatus } from './status.ts'
 import { discardStream, isByteStream, toByteStream } from './stream.ts'
-import { emptyRecord } from './utils.ts'
+import { emptyRecord, isBun } from './utils.ts'
 
 const ENCODER = new TextEncoder()
+
+/**
+ * UTF-8 encoding of a text body: a pooled `Buffer` (a `Uint8Array`) is several times cheaper than
+ * `TextEncoder` on Node.js, `TextEncoder` is the fastest on Bun.
+ */
+const utf8: (text: string) => Uint8Array = isBun() ? text => ENCODER.encode(text) : text => Buffer.from(text, 'utf8')
 
 /** Content types set by the serialiser. */
 export const ContentType: {
@@ -48,6 +55,10 @@ export interface SerializedReply {
   readonly status: number
   readonly headers: Record<string, HeaderValue>
   readonly body: ReplyBody
+  /** The text `body` encodes, for a body serialised from a string (JSON, text). */
+  readonly text?: string
+  /** Only the serialiser set the headers (content type and length): they are valid by construction. */
+  readonly ownHeaders?: boolean
   /** Cookies of the `HttpResponse` (`withCookie`), applied by the pipeline over those of the context. */
   readonly cookies?: readonly ResponseCookie[]
   /** The event stream of the body (`@Sse`, `HttpResponse.sse()`). */
@@ -87,10 +98,20 @@ export function serializeResult(result: unknown, options: SerializeOptions): Ser
   const finalStatus = options.status ?? status ?? defaultStatus(options.routeMethod, payload)
   const headers = emptyRecord<HeaderValue>()
   const body = encode(payload, headers)
-  if (options.headers !== undefined) assignHeaders(headers, options.headers)
-  if (options.context !== undefined) assignHeaders(headers, options.context)
-  if (extra !== undefined) assignHeaders(headers, extra)
-  return withCookies(finish(finalStatus, headers, body, options.method), cookies)
+  let own = true
+  if (options.headers !== undefined) {
+    assignHeaders(headers, options.headers)
+    own = false
+  }
+  if (options.context !== undefined) {
+    assignHeaders(headers, options.context)
+    own = false
+  }
+  if (extra !== undefined) {
+    assignHeaders(headers, extra)
+    own = false
+  }
+  return withCookies(finish(finalStatus, headers, body, options.method, own), cookies)
 }
 
 /**
@@ -184,11 +205,16 @@ export function addMissingHeaders(
   }
 }
 
+/**
+ * The reply of a body: a string (see {@link encode}) is sent as its UTF-8 bytes, with its text.
+ * `own`: only {@link encode} set `headers`, which are then valid for a text body.
+ */
 function finish(
   status: number,
   headers: Record<string, HeaderValue>,
-  body: ReplyBody,
+  body: ReplyBody | string,
   method: string,
+  own = false,
 ): SerializedReply {
   if (isBodylessStatus(status)) {
     discard(body)
@@ -200,16 +226,23 @@ function finish(
     discard(body)
     return { status, headers, body: null }
   }
-  return { status, headers, body }
+  if (typeof body !== 'string') return { status, headers, body }
+  return own
+    ? { status, headers, body: utf8(body), text: body, ownHeaders: true }
+    : { status, headers, body: utf8(body), text: body }
 }
 
-function discard(body: ReplyBody): void {
+function discard(body: ReplyBody | string): void {
   if (body instanceof ReadableStream) discardStream(body)
 }
 
-function encode(payload: unknown, headers: Record<string, HeaderValue>): ReplyBody {
+/**
+ * The body of a payload, its `content-type` and, for bytes and text, its `content-length` set in
+ * `headers`. Text (a string, JSON) is returned as a string, encoded as UTF-8 by {@link finish}.
+ */
+function encode(payload: unknown, headers: Record<string, HeaderValue>): ReplyBody | string {
   if (payload === undefined) return null
-  if (typeof payload === 'string') return bytes(ENCODER.encode(payload), headers, ContentType.text)
+  if (typeof payload === 'string') return text(payload, headers, ContentType.text)
   if (payload instanceof Uint8Array) return bytes(payload, headers, ContentType.bytes)
   if (payload instanceof ArrayBuffer) return bytes(new Uint8Array(payload), headers, ContentType.bytes)
   if (ArrayBuffer.isView(payload)) {
@@ -233,12 +266,19 @@ function encode(payload: unknown, headers: Record<string, HeaderValue>): ReplyBo
   if (isSseBody(payload)) throw new TypeError('An event stream (HttpResponse.sse()) cannot be serialised here')
   const json = JSON.stringify(payload)
   if (json === undefined) throw new TypeError(`Cannot serialise a ${typeof payload} as a response body`)
-  return bytes(ENCODER.encode(json), headers, ContentType.json)
+  return text(json, headers, ContentType.json)
 }
 
 function bytes(data: Uint8Array, headers: Record<string, HeaderValue>, type: string): Uint8Array {
   headers['content-type'] = type
   headers['content-length'] = String(data.byteLength)
+  return data
+}
+
+function text(data: string, headers: Record<string, HeaderValue>, type: string): string {
+  headers['content-type'] = type
+  // the length of its UTF-8 encoding (a lone surrogate counts as U+FFFD, like the encoders)
+  headers['content-length'] = String(Buffer.byteLength(data, 'utf8'))
   return data
 }
 

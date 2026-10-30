@@ -183,23 +183,52 @@ export function nodeAdapterRequest(
   response: ServerResponse,
   options: NodeRequestOptions = {},
 ): AdapterRequest {
-  let body: Promise<Uint8Array> | undefined
-  return {
-    method: request.method ?? 'GET',
-    url: options.url ?? request.url ?? '/',
-    headers: normalizeNodeHeaders(request.headers),
-    ip: options.ip ?? request.socket?.remoteAddress,
-    remoteAddress: request.socket?.remoteAddress,
-    encrypted: isEncrypted(request),
-    raw: options.raw ?? request,
-    rawResponse: options.rawResponse ?? response,
-    readBody: (limit: number): Promise<Uint8Array> => {
-      body ??= readNodeBody(request, limit)
-      return body
-    },
-    streamBody: (limit: number): ReadableStream<Uint8Array> => nodeBodyStream(request, limit),
-    rawStatus: (): number => response.statusCode,
-    onAbort: (listener: () => void): void => onResponseAbort(response, listener),
+  return new NodeAdapterRequest(request, response, options)
+}
+
+/** A Node.js request/response pair as an {@link AdapterRequest} (a class: no closure per request). */
+class NodeAdapterRequest implements AdapterRequest {
+  readonly method: string
+  readonly url: string
+  readonly headers: Readonly<Record<string, string | undefined>>
+  readonly ip: string | undefined
+  readonly remoteAddress: string | undefined
+  readonly encrypted: boolean
+  readonly raw: unknown
+  readonly rawResponse: unknown
+  readonly #request: IncomingMessage
+  readonly #response: ServerResponse
+  #body: Promise<Uint8Array> | undefined
+
+  constructor(request: IncomingMessage, response: ServerResponse, options: NodeRequestOptions) {
+    const remoteAddress = request.socket?.remoteAddress
+    this.method = request.method ?? 'GET'
+    this.url = options.url ?? request.url ?? '/'
+    this.headers = normalizeNodeHeaders(request.headers)
+    this.ip = options.ip ?? remoteAddress
+    this.remoteAddress = remoteAddress
+    this.encrypted = isEncrypted(request)
+    this.raw = options.raw ?? request
+    this.rawResponse = options.rawResponse ?? response
+    this.#request = request
+    this.#response = response
+  }
+
+  readBody(limit: number): Promise<Uint8Array> {
+    this.#body ??= readNodeBody(this.#request, limit)
+    return this.#body
+  }
+
+  streamBody(limit: number): ReadableStream<Uint8Array> {
+    return nodeBodyStream(this.#request, limit)
+  }
+
+  rawStatus(): number {
+    return this.#response.statusCode
+  }
+
+  onAbort(listener: () => void): void {
+    onResponseAbort(this.#response, listener)
   }
 }
 
@@ -224,10 +253,10 @@ export function isEncrypted(request: IncomingMessage): boolean {
 }
 
 /**
- * Writes a reply to a `ServerResponse`. Resolves when the response is complete (streams included);
- * never rejects (a failing stream destroys the response).
+ * Writes a reply to a `ServerResponse`, piping a stream body (a failing stream destroys the
+ * response). Never throws.
  */
-export async function writeNodeReply(response: ServerResponse, reply: AdapterReply): Promise<void> {
+export function writeNodeReply(response: ServerResponse, reply: AdapterReply): void {
   if (reply.raw === true) {
     discardStream(reply.body instanceof ReadableStream ? reply.body : null)
     return
@@ -263,14 +292,18 @@ export async function writeNodeReply(response: ServerResponse, reply: AdapterRep
     response.setTimeout(0)
   }
   if (body instanceof Uint8Array) {
-    response.end(body)
+    // a string is written with the headers at once (bytes take a second write)
+    response.end(reply.text ?? body)
     return
   }
-  const stream = body instanceof Blob ? body.stream() : body
-  try {
-    await pipeline(Readable.fromWeb(stream as import('node:stream/web').ReadableStream), response)
-  } catch {
+  const fail = (): void => {
     if (!response.destroyed) response.destroy()
+  }
+  try {
+    const stream = body instanceof Blob ? body.stream() : body
+    pipeline(Readable.fromWeb(stream as import('node:stream/web').ReadableStream), response).catch(fail)
+  } catch {
+    fail()
   }
 }
 

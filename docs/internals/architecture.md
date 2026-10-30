@@ -1842,6 +1842,7 @@ interface AdapterReply {
   status
   headers // lower-case names, validated: every name and value can be sent
   body: ReplyBody // bytes, a stream (files too) or null
+  text?: string // the text `body` encodes (JSON, text): adapters writing strings MAY send it instead
   blob?: Blob // the file `body` streams, for adapters able to send it natively
   raw?: boolean
   eventStream?: boolean // a streamed text/event-stream body: headers at once, no idle timeout, no buffering, no compression
@@ -1878,7 +1879,10 @@ Adapters only route and translate I/O; everything else is done by the plugin so 
 behaves the same. A reply is an event stream (`eventStream`) when its body is a stream with a
 `text/event-stream` content type, whatever produced it (`@Sse`, `HttpResponse.sse()`, a proxied
 `fetch()` response, `HttpResponse.stream()`): the adapter sends its headers without waiting for the
-first chunk (a quiet stream may send nothing for a while). An adapter without `streamBody` gets
+first chunk (a quiet stream may send nothing for a while). A body serialised from a string (JSON,
+text) comes with that string in `text`: `body` holds its UTF-8 encoding, and an adapter that writes
+strings MAY send `text` instead, which writes the same bytes (Node.js then writes the headers and
+the body at once, where bytes take a second write). An adapter without `streamBody` gets
 multipart uploads buffered before parsing. A
 stream body MUST be read to its end or cancelled (client gone, HEAD...), since the request scope and
 the in-flight count stay open until then. Files (and every `Blob` result) are such streams, reading
@@ -1897,7 +1901,12 @@ the body; `honoAdapter({ app?, serveOptions? })` passes `serveOptions` to `Bun.s
 opens it at once, and the scope closes then. On `@hono/node-server`, a reply whose client already
 left (an async step before the handler returned) has its body discarded, and a stream body nobody
 locked is cancelled when the response closes unfinished: the server would neither read nor cancel
-it, and the event source, the request scope and the in-flight count would stay open.
+it, and the event source, the request scope and the in-flight count would stay open. There, an
+HTTP/1.1 request is read from the Node.js request (its body, and its headers when none is repeated,
+the case where they equal its Fetch `Headers`), and without other routes or middleware in the Hono
+application a reply whose headers are single strings is handed over as a record, written as is.
+Fastify gets `text` only for a content type it sends unchanged (it adds a charset to a JSON type
+without one).
 
 `inject` is in-memory (fastify `inject`, hono `request`, node and express via `light-my-request`, an
 optional peer): strings and bytes are sent as is (`text/plain` / `application/octet-stream` without

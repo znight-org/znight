@@ -17,6 +17,7 @@ import type {
   InjectStreamRequest,
   InjectStreamResponse,
 } from '../adapter.ts'
+import type { HeaderValue } from '../exceptions.ts'
 
 import { Readable } from 'node:stream'
 import Fastify, {
@@ -189,14 +190,18 @@ class FastifyHttpAdapter implements FastifyAdapter {
       const native = lowerCaseHeaders(reply.getHeaders())
       const headers = { ...native, ...withNativeCookies(native['set-cookie'], result.headers) }
       reply.hijack()
-      void writeNodeReply(reply.raw, { ...result, headers })
+      writeNodeReply(reply.raw, { ...result, headers })
       return reply
     }
     reply.code(result.status)
     for (const name of Object.keys(result.headers)) reply.header(name, result.headers[name])
     const body = result.body
     if (body === null) return reply.send()
-    if (body instanceof Uint8Array) return reply.send(Buffer.from(body.buffer, body.byteOffset, body.byteLength))
+    if (body instanceof Uint8Array) {
+      // a string is written with the headers at once (bytes take a second write)
+      if (result.text !== undefined && sendsTextAsIs(result.headers['content-type'])) return reply.send(result.text)
+      return reply.send(Buffer.isBuffer(body) ? body : Buffer.from(body.buffer, body.byteOffset, body.byteLength))
+    }
     const stream = body instanceof Blob ? body.stream() : body
     return reply.send(Readable.fromWeb(stream as import('node:stream/web').ReadableStream))
   }
@@ -236,6 +241,20 @@ class FastifyHttpAdapter implements FastifyAdapter {
   }
 }
 
+/** The JSON content type of the plugin (with a charset). */
+const JSON_TYPE = 'application/json; charset=utf-8'
+
+/**
+ * Whether Fastify sends a string with this content type unchanged: it adds a charset to a JSON
+ * type without one, and a content type to a string without one.
+ */
+function sendsTextAsIs(type: HeaderValue | undefined): boolean {
+  if (typeof type !== 'string') return false
+  if (type === JSON_TYPE) return true
+  const semicolon = type.indexOf(';')
+  return !(semicolon === -1 ? type : type.slice(0, semicolon)).toLowerCase().includes('json')
+}
+
 function lowerCaseHeaders(
   headers: Readonly<Record<string, string | number | readonly string[] | undefined>>,
 ): Record<string, string | string[]> {
@@ -257,24 +276,50 @@ function adapterRequest(
     HIDDEN_CONTENT_TYPES.delete(request.raw)
     request.raw.headers['content-type'] = hidden
   }
-  let body: Promise<Uint8Array> | undefined
-  return {
-    method: request.raw.method ?? request.method,
-    url: request.raw.url ?? request.url,
-    headers: normalizeNodeHeaders(request.headers),
-    ip: request.ip,
-    remoteAddress: request.raw.socket?.remoteAddress,
-    encrypted: isEncrypted(request.raw),
-    raw: request,
-    rawResponse: reply,
-    readBody: (limit: number): Promise<Uint8Array> => {
-      body ??= readNodeBody(request.raw, limit)
-      return body
-    },
-    streamBody: (limit: number): ReadableStream<Uint8Array> => nodeBodyStream(request.raw, limit),
-    rawStatus: (): number | undefined => reply?.statusCode,
-    onAbort: (listener: () => void): void => {
-      if (response !== undefined) onResponseAbort(response.raw, listener)
-    },
+  return new FastifyAdapterRequest(request, reply, response)
+}
+
+/** A Fastify request as an {@link AdapterRequest} (a class: no closure per request). */
+class FastifyAdapterRequest implements AdapterRequest {
+  readonly method: string
+  readonly url: string
+  readonly headers: Readonly<Record<string, string | undefined>>
+  readonly ip: string | undefined
+  readonly remoteAddress: string | undefined
+  readonly encrypted: boolean
+  readonly raw: FastifyRequest
+  /** `@Res()`: the reply of a route, `undefined` for the fallback handler. */
+  readonly rawResponse: FastifyReply | undefined
+  /** The reply whose disconnection aborts the request. */
+  readonly #response: FastifyReply | undefined
+  #body: Promise<Uint8Array> | undefined
+
+  constructor(request: FastifyRequest, reply: FastifyReply | undefined, response: FastifyReply | undefined) {
+    this.method = request.raw.method ?? request.method
+    this.url = request.raw.url ?? request.url
+    this.headers = normalizeNodeHeaders(request.headers)
+    this.ip = request.ip
+    this.remoteAddress = request.raw.socket?.remoteAddress
+    this.encrypted = isEncrypted(request.raw)
+    this.raw = request
+    this.rawResponse = reply
+    this.#response = response
+  }
+
+  readBody(limit: number): Promise<Uint8Array> {
+    this.#body ??= readNodeBody(this.raw.raw, limit)
+    return this.#body
+  }
+
+  streamBody(limit: number): ReadableStream<Uint8Array> {
+    return nodeBodyStream(this.raw.raw, limit)
+  }
+
+  rawStatus(): number | undefined {
+    return this.rawResponse?.statusCode
+  }
+
+  onAbort(listener: () => void): void {
+    if (this.#response !== undefined) onResponseAbort(this.#response.raw, listener)
   }
 }

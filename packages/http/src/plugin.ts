@@ -49,7 +49,14 @@ import { openInjectSse } from './inject-sse.ts'
 import { isMediaTypePattern } from './mime.ts'
 import { invalidOption } from './option-error.ts'
 import { compareRoutePaths, compareStrings, joinPaths, parseRoutePath, type RoutePath, RoutePathError } from './path.ts'
-import { DEFAULT_SSE_SETTINGS, Pipeline, type Resolvable, type RoutePlan, type SseSettings } from './pipeline.ts'
+import {
+  DEFAULT_SSE_SETTINGS,
+  Pipeline,
+  type Resolvable,
+  type RoutePlan,
+  randomRequestId,
+  type SseSettings,
+} from './pipeline.ts'
 import { collectPluginRoutes } from './plugin-routes.ts'
 import { resolveTrustProxy } from './proxy.ts'
 import { RouteTable } from './router.ts'
@@ -649,7 +656,7 @@ function resolve(options: HttpPluginOptions): Resolved {
   if (requestIdHeader !== false && (typeof requestIdHeader !== 'string' || !isHeaderName(requestIdHeader))) {
     throw invalidOption('requestIdHeader', 'a header name or false', requestIdHeader)
   }
-  const generateRequestId = options.generateRequestId ?? ((): string => crypto.randomUUID())
+  const generateRequestId = options.generateRequestId ?? randomRequestId
   if (typeof generateRequestId !== 'function') throw invalidOption('generateRequestId', 'a function', generateRequestId)
   const adapter = options.adapter ?? nodeAdapter()
   if (

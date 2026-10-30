@@ -1012,8 +1012,8 @@
   },
   "http": {
     "environment": {
-      "date": "2026-10-30T16:39:05.972Z",
-      "commit": "1c78914",
+      "date": "2026-10-30T18:28:16.104Z",
+      "commit": "67d1ade",
       "machine": "Apple M5",
       "cpus": 10,
       "memoryGiB": 16,
@@ -1059,25 +1059,25 @@
         "endpoint": "get",
         "rounds": [
           {
-            "requestsPerSecond": 131651,
+            "requestsPerSecond": 144143,
             "latencyP99Ms": 1
           },
           {
-            "requestsPerSecond": 126236,
+            "requestsPerSecond": 150057,
             "latencyP99Ms": 1
           },
           {
-            "requestsPerSecond": 136663,
+            "requestsPerSecond": 149999,
             "latencyP99Ms": 1
           }
         ],
         "requestsPerSecond": {
           "n": 3,
-          "median": 131651,
-          "p25": 128944,
-          "p75": 134157,
-          "min": 126236,
-          "max": 136663
+          "median": 149999,
+          "p25": 147071,
+          "p75": 150028,
+          "min": 144143,
+          "max": 150057
         },
         "latencyP99Ms": {
           "n": 3,
@@ -1096,33 +1096,33 @@
         "endpoint": "post",
         "rounds": [
           {
-            "requestsPerSecond": 93553,
-            "latencyP99Ms": 3
-          },
-          {
-            "requestsPerSecond": 110153,
+            "requestsPerSecond": 122836,
             "latencyP99Ms": 1
           },
           {
-            "requestsPerSecond": 100593,
-            "latencyP99Ms": 2
+            "requestsPerSecond": 123633,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 123889,
+            "latencyP99Ms": 1
           }
         ],
         "requestsPerSecond": {
           "n": 3,
-          "median": 100593,
-          "p25": 97073,
-          "p75": 105373,
-          "min": 93553,
-          "max": 110153
+          "median": 123633,
+          "p25": 123235,
+          "p75": 123761,
+          "min": 122836,
+          "max": 123889
         },
         "latencyP99Ms": {
           "n": 3,
-          "median": 2,
-          "p25": 1.5,
-          "p75": 2.5,
+          "median": 1,
+          "p25": 1,
+          "p75": 1,
           "min": 1,
-          "max": 3
+          "max": 1
         }
       },
       {
@@ -1133,33 +1133,33 @@
         "endpoint": "get",
         "rounds": [
           {
-            "requestsPerSecond": 64285,
-            "latencyP99Ms": 4
+            "requestsPerSecond": 113990,
+            "latencyP99Ms": 1
           },
           {
-            "requestsPerSecond": 67539,
-            "latencyP99Ms": 4
+            "requestsPerSecond": 114237,
+            "latencyP99Ms": 1
           },
           {
-            "requestsPerSecond": 69674,
-            "latencyP99Ms": 4
+            "requestsPerSecond": 115401,
+            "latencyP99Ms": 1
           }
         ],
         "requestsPerSecond": {
           "n": 3,
-          "median": 67539,
-          "p25": 65912,
-          "p75": 68607,
-          "min": 64285,
-          "max": 69674
+          "median": 114237,
+          "p25": 114114,
+          "p75": 114819,
+          "min": 113990,
+          "max": 115401
         },
         "latencyP99Ms": {
           "n": 3,
-          "median": 4,
-          "p25": 4,
-          "p75": 4,
-          "min": 4,
-          "max": 4
+          "median": 1,
+          "p25": 1,
+          "p75": 1,
+          "min": 1,
+          "max": 1
         }
       },
       {
@@ -1170,33 +1170,33 @@
         "endpoint": "post",
         "rounds": [
           {
-            "requestsPerSecond": 55434,
-            "latencyP99Ms": 4
+            "requestsPerSecond": 85414,
+            "latencyP99Ms": 2
           },
           {
-            "requestsPerSecond": 55536,
-            "latencyP99Ms": 4
+            "requestsPerSecond": 88579,
+            "latencyP99Ms": 2
           },
           {
-            "requestsPerSecond": 48498,
-            "latencyP99Ms": 7
+            "requestsPerSecond": 87747,
+            "latencyP99Ms": 2
           }
         ],
         "requestsPerSecond": {
           "n": 3,
-          "median": 55434,
-          "p25": 51966,
-          "p75": 55485,
-          "min": 48498,
-          "max": 55536
+          "median": 87747,
+          "p25": 86581,
+          "p75": 88163,
+          "min": 85414,
+          "max": 88579
         },
         "latencyP99Ms": {
           "n": 3,
-          "median": 4,
-          "p25": 4,
-          "p75": 5.5,
-          "min": 4,
-          "max": 7
+          "median": 2,
+          "p25": 2,
+          "p75": 2,
+          "min": 2,
+          "max": 2
         }
       },
       {
@@ -1207,33 +1207,33 @@
         "endpoint": "get",
         "rounds": [
           {
-            "requestsPerSecond": 95114,
-            "latencyP99Ms": 3
+            "requestsPerSecond": 127025,
+            "latencyP99Ms": 1
           },
           {
-            "requestsPerSecond": 104096,
-            "latencyP99Ms": 2
+            "requestsPerSecond": 129969,
+            "latencyP99Ms": 1
           },
           {
-            "requestsPerSecond": 118572,
+            "requestsPerSecond": 122836,
             "latencyP99Ms": 1
           }
         ],
         "requestsPerSecond": {
           "n": 3,
-          "median": 104096,
-          "p25": 99605,
-          "p75": 111334,
-          "min": 95114,
-          "max": 118572
+          "median": 127025,
+          "p25": 124931,
+          "p75": 128497,
+          "min": 122836,
+          "max": 129969
         },
         "latencyP99Ms": {
           "n": 3,
-          "median": 2,
-          "p25": 1.5,
-          "p75": 2.5,
+          "median": 1,
+          "p25": 1,
+          "p75": 1,
           "min": 1,
-          "max": 3
+          "max": 1
         }
       },
       {
@@ -1244,33 +1244,33 @@
         "endpoint": "post",
         "rounds": [
           {
-            "requestsPerSecond": 67295,
-            "latencyP99Ms": 4
+            "requestsPerSecond": 100474,
+            "latencyP99Ms": 1
           },
           {
-            "requestsPerSecond": 90522,
-            "latencyP99Ms": 2
+            "requestsPerSecond": 104058,
+            "latencyP99Ms": 1
           },
           {
-            "requestsPerSecond": 93990,
-            "latencyP99Ms": 2
+            "requestsPerSecond": 98458,
+            "latencyP99Ms": 1
           }
         ],
         "requestsPerSecond": {
           "n": 3,
-          "median": 90522,
-          "p25": 78909,
-          "p75": 92256,
-          "min": 67295,
-          "max": 93990
+          "median": 100474,
+          "p25": 99466,
+          "p75": 102266,
+          "min": 98458,
+          "max": 104058
         },
         "latencyP99Ms": {
           "n": 3,
-          "median": 2,
-          "p25": 2,
-          "p75": 3,
-          "min": 2,
-          "max": 4
+          "median": 1,
+          "p25": 1,
+          "p75": 1,
+          "min": 1,
+          "max": 1
         }
       },
       {
@@ -1281,33 +1281,33 @@
         "endpoint": "get",
         "rounds": [
           {
-            "requestsPerSecond": 68911,
-            "latencyP99Ms": 3
-          },
-          {
-            "requestsPerSecond": 71716,
+            "requestsPerSecond": 90010,
             "latencyP99Ms": 2
           },
           {
-            "requestsPerSecond": 73341,
+            "requestsPerSecond": 93158,
+            "latencyP99Ms": 2
+          },
+          {
+            "requestsPerSecond": 92529,
             "latencyP99Ms": 2
           }
         ],
         "requestsPerSecond": {
           "n": 3,
-          "median": 71716,
-          "p25": 70314,
-          "p75": 72529,
-          "min": 68911,
-          "max": 73341
+          "median": 92529,
+          "p25": 91270,
+          "p75": 92844,
+          "min": 90010,
+          "max": 93158
         },
         "latencyP99Ms": {
           "n": 3,
           "median": 2,
           "p25": 2,
-          "p75": 2.5,
+          "p75": 2,
           "min": 2,
-          "max": 3
+          "max": 2
         }
       },
       {
@@ -1318,33 +1318,33 @@
         "endpoint": "post",
         "rounds": [
           {
-            "requestsPerSecond": 56772,
-            "latencyP99Ms": 4
+            "requestsPerSecond": 76599,
+            "latencyP99Ms": 2
           },
           {
-            "requestsPerSecond": 56068,
-            "latencyP99Ms": 4
+            "requestsPerSecond": 78042,
+            "latencyP99Ms": 2
           },
           {
-            "requestsPerSecond": 62563,
-            "latencyP99Ms": 3
+            "requestsPerSecond": 77344,
+            "latencyP99Ms": 2
           }
         ],
         "requestsPerSecond": {
           "n": 3,
-          "median": 56772,
-          "p25": 56420,
-          "p75": 59668,
-          "min": 56068,
-          "max": 62563
+          "median": 77344,
+          "p25": 76972,
+          "p75": 77693,
+          "min": 76599,
+          "max": 78042
         },
         "latencyP99Ms": {
           "n": 3,
-          "median": 4,
-          "p25": 3.5,
-          "p75": 4,
-          "min": 3,
-          "max": 4
+          "median": 2,
+          "p25": 2,
+          "p75": 2,
+          "min": 2,
+          "max": 2
         }
       },
       {
@@ -1355,33 +1355,33 @@
         "endpoint": "get",
         "rounds": [
           {
-            "requestsPerSecond": 55381,
-            "latencyP99Ms": 6
+            "requestsPerSecond": 95695,
+            "latencyP99Ms": 1
           },
           {
-            "requestsPerSecond": 64580,
-            "latencyP99Ms": 4
+            "requestsPerSecond": 98982,
+            "latencyP99Ms": 1
           },
           {
-            "requestsPerSecond": 65008,
-            "latencyP99Ms": 4
+            "requestsPerSecond": 99552,
+            "latencyP99Ms": 1
           }
         ],
         "requestsPerSecond": {
           "n": 3,
-          "median": 64580,
-          "p25": 59981,
-          "p75": 64794,
-          "min": 55381,
-          "max": 65008
+          "median": 98982,
+          "p25": 97339,
+          "p75": 99267,
+          "min": 95695,
+          "max": 99552
         },
         "latencyP99Ms": {
           "n": 3,
-          "median": 4,
-          "p25": 4,
-          "p75": 5,
-          "min": 4,
-          "max": 6
+          "median": 1,
+          "p25": 1,
+          "p75": 1,
+          "min": 1,
+          "max": 1
         }
       },
       {
@@ -1392,62 +1392,25 @@
         "endpoint": "post",
         "rounds": [
           {
-            "requestsPerSecond": 52691,
-            "latencyP99Ms": 5
-          },
-          {
-            "requestsPerSecond": 53988,
-            "latencyP99Ms": 4
-          },
-          {
-            "requestsPerSecond": 56182,
-            "latencyP99Ms": 4
-          }
-        ],
-        "requestsPerSecond": {
-          "n": 3,
-          "median": 53988,
-          "p25": 53340,
-          "p75": 55085,
-          "min": 52691,
-          "max": 56182
-        },
-        "latencyP99Ms": {
-          "n": 3,
-          "median": 4,
-          "p25": 4,
-          "p75": 4.5,
-          "min": 4,
-          "max": 5
-        }
-      },
-      {
-        "variant": "nestjs-express",
-        "framework": "nestjs",
-        "adapter": "express",
-        "runtime": "node",
-        "endpoint": "get",
-        "rounds": [
-          {
-            "requestsPerSecond": 74573,
+            "requestsPerSecond": 80823,
             "latencyP99Ms": 2
           },
           {
-            "requestsPerSecond": 77955,
+            "requestsPerSecond": 82860,
             "latencyP99Ms": 2
           },
           {
-            "requestsPerSecond": 77693,
+            "requestsPerSecond": 84250,
             "latencyP99Ms": 2
           }
         ],
         "requestsPerSecond": {
           "n": 3,
-          "median": 77693,
-          "p25": 76133,
-          "p75": 77824,
-          "min": 74573,
-          "max": 77955
+          "median": 82860,
+          "p25": 81842,
+          "p75": 83555,
+          "min": 80823,
+          "max": 84250
         },
         "latencyP99Ms": {
           "n": 3,
@@ -1463,36 +1426,73 @@
         "framework": "nestjs",
         "adapter": "express",
         "runtime": "node",
-        "endpoint": "post",
+        "endpoint": "get",
         "rounds": [
           {
-            "requestsPerSecond": 60077,
-            "latencyP99Ms": 3
+            "requestsPerSecond": 82313,
+            "latencyP99Ms": 2
           },
           {
-            "requestsPerSecond": 61177,
-            "latencyP99Ms": 3
+            "requestsPerSecond": 84855,
+            "latencyP99Ms": 1
           },
           {
-            "requestsPerSecond": 63905,
+            "requestsPerSecond": 85356,
             "latencyP99Ms": 2
           }
         ],
         "requestsPerSecond": {
           "n": 3,
-          "median": 61177,
-          "p25": 60627,
-          "p75": 62541,
-          "min": 60077,
-          "max": 63905
+          "median": 84855,
+          "p25": 83584,
+          "p75": 85106,
+          "min": 82313,
+          "max": 85356
         },
         "latencyP99Ms": {
           "n": 3,
-          "median": 3,
-          "p25": 2.5,
-          "p75": 3,
+          "median": 2,
+          "p25": 1.5,
+          "p75": 2,
+          "min": 1,
+          "max": 2
+        }
+      },
+      {
+        "variant": "nestjs-express",
+        "framework": "nestjs",
+        "adapter": "express",
+        "runtime": "node",
+        "endpoint": "post",
+        "rounds": [
+          {
+            "requestsPerSecond": 65500,
+            "latencyP99Ms": 2
+          },
+          {
+            "requestsPerSecond": 69169,
+            "latencyP99Ms": 2
+          },
+          {
+            "requestsPerSecond": 69056,
+            "latencyP99Ms": 2
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 69056,
+          "p25": 67278,
+          "p75": 69113,
+          "min": 65500,
+          "max": 69169
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 2,
+          "p25": 2,
+          "p75": 2,
           "min": 2,
-          "max": 3
+          "max": 2
         }
       },
       {
@@ -1503,33 +1503,33 @@
         "endpoint": "get",
         "rounds": [
           {
-            "requestsPerSecond": 113135,
-            "latencyP99Ms": 3
-          },
-          {
-            "requestsPerSecond": 139852,
+            "requestsPerSecond": 142807,
             "latencyP99Ms": 1
           },
           {
-            "requestsPerSecond": 135671,
+            "requestsPerSecond": 148637,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 150662,
             "latencyP99Ms": 1
           }
         ],
         "requestsPerSecond": {
           "n": 3,
-          "median": 135671,
-          "p25": 124403,
-          "p75": 137762,
-          "min": 113135,
-          "max": 139852
+          "median": 148637,
+          "p25": 145722,
+          "p75": 149650,
+          "min": 142807,
+          "max": 150662
         },
         "latencyP99Ms": {
           "n": 3,
           "median": 1,
           "p25": 1,
-          "p75": 2,
+          "p75": 1,
           "min": 1,
-          "max": 3
+          "max": 1
         }
       },
       {
@@ -1540,33 +1540,33 @@
         "endpoint": "post",
         "rounds": [
           {
-            "requestsPerSecond": 96829,
-            "latencyP99Ms": 3
-          },
-          {
-            "requestsPerSecond": 118182,
+            "requestsPerSecond": 128771,
             "latencyP99Ms": 1
           },
           {
-            "requestsPerSecond": 117385,
+            "requestsPerSecond": 129597,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 130621,
             "latencyP99Ms": 1
           }
         ],
         "requestsPerSecond": {
           "n": 3,
-          "median": 117385,
-          "p25": 107107,
-          "p75": 117784,
-          "min": 96829,
-          "max": 118182
+          "median": 129597,
+          "p25": 129184,
+          "p75": 130109,
+          "min": 128771,
+          "max": 130621
         },
         "latencyP99Ms": {
           "n": 3,
           "median": 1,
           "p25": 1,
-          "p75": 2,
+          "p75": 1,
           "min": 1,
-          "max": 3
+          "max": 1
         }
       },
       {
@@ -1577,33 +1577,33 @@
         "endpoint": "get",
         "rounds": [
           {
-            "requestsPerSecond": 73893,
-            "latencyP99Ms": 3
+            "requestsPerSecond": 121079,
+            "latencyP99Ms": 1
           },
           {
-            "requestsPerSecond": 76141,
-            "latencyP99Ms": 3
+            "requestsPerSecond": 121807,
+            "latencyP99Ms": 1
           },
           {
-            "requestsPerSecond": 62134,
-            "latencyP99Ms": 5
+            "requestsPerSecond": 122063,
+            "latencyP99Ms": 1
           }
         ],
         "requestsPerSecond": {
           "n": 3,
-          "median": 73893,
-          "p25": 68014,
-          "p75": 75017,
-          "min": 62134,
-          "max": 76141
+          "median": 121807,
+          "p25": 121443,
+          "p75": 121935,
+          "min": 121079,
+          "max": 122063
         },
         "latencyP99Ms": {
           "n": 3,
-          "median": 3,
-          "p25": 3,
-          "p75": 4,
-          "min": 3,
-          "max": 5
+          "median": 1,
+          "p25": 1,
+          "p75": 1,
+          "min": 1,
+          "max": 1
         }
       },
       {
@@ -1614,62 +1614,25 @@
         "endpoint": "post",
         "rounds": [
           {
-            "requestsPerSecond": 64167,
-            "latencyP99Ms": 4
-          },
-          {
-            "requestsPerSecond": 63693,
-            "latencyP99Ms": 4
-          },
-          {
-            "requestsPerSecond": 64813,
-            "latencyP99Ms": 4
-          }
-        ],
-        "requestsPerSecond": {
-          "n": 3,
-          "median": 64167,
-          "p25": 63930,
-          "p75": 64490,
-          "min": 63693,
-          "max": 64813
-        },
-        "latencyP99Ms": {
-          "n": 3,
-          "median": 4,
-          "p25": 4,
-          "p75": 4,
-          "min": 4,
-          "max": 4
-        }
-      },
-      {
-        "variant": "baseline-hono",
-        "framework": "baseline",
-        "adapter": "hono",
-        "runtime": "node",
-        "endpoint": "get",
-        "rounds": [
-          {
-            "requestsPerSecond": 124163,
+            "requestsPerSecond": 96637,
             "latencyP99Ms": 1
           },
           {
-            "requestsPerSecond": 121620,
+            "requestsPerSecond": 97030,
             "latencyP99Ms": 1
           },
           {
-            "requestsPerSecond": 130531,
+            "requestsPerSecond": 98447,
             "latencyP99Ms": 1
           }
         ],
         "requestsPerSecond": {
           "n": 3,
-          "median": 124163,
-          "p25": 122892,
-          "p75": 127347,
-          "min": 121620,
-          "max": 130531
+          "median": 97030,
+          "p25": 96834,
+          "p75": 97739,
+          "min": 96637,
+          "max": 98447
         },
         "latencyP99Ms": {
           "n": 3,
@@ -1685,36 +1648,73 @@
         "framework": "baseline",
         "adapter": "hono",
         "runtime": "node",
-        "endpoint": "post",
+        "endpoint": "get",
         "rounds": [
           {
-            "requestsPerSecond": 101734,
+            "requestsPerSecond": 143855,
             "latencyP99Ms": 1
           },
           {
-            "requestsPerSecond": 87098,
-            "latencyP99Ms": 2
+            "requestsPerSecond": 143552,
+            "latencyP99Ms": 1
           },
           {
-            "requestsPerSecond": 98796,
-            "latencyP99Ms": 2
+            "requestsPerSecond": 136047,
+            "latencyP99Ms": 1
           }
         ],
         "requestsPerSecond": {
           "n": 3,
-          "median": 98796,
-          "p25": 92947,
-          "p75": 100265,
-          "min": 87098,
-          "max": 101734
+          "median": 143552,
+          "p25": 139800,
+          "p75": 143704,
+          "min": 136047,
+          "max": 143855
         },
         "latencyP99Ms": {
           "n": 3,
-          "median": 2,
-          "p25": 1.5,
-          "p75": 2,
+          "median": 1,
+          "p25": 1,
+          "p75": 1,
           "min": 1,
-          "max": 2
+          "max": 1
+        }
+      },
+      {
+        "variant": "baseline-hono",
+        "framework": "baseline",
+        "adapter": "hono",
+        "runtime": "node",
+        "endpoint": "post",
+        "rounds": [
+          {
+            "requestsPerSecond": 112416,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 111852,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 108815,
+            "latencyP99Ms": 1
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 111852,
+          "p25": 110334,
+          "p75": 112134,
+          "min": 108815,
+          "max": 112416
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 1,
+          "p25": 1,
+          "p75": 1,
+          "min": 1,
+          "max": 1
         }
       },
       {
@@ -1725,33 +1725,33 @@
         "endpoint": "get",
         "rounds": [
           {
-            "requestsPerSecond": 54224,
-            "latencyP99Ms": 5
+            "requestsPerSecond": 101402,
+            "latencyP99Ms": 1
           },
           {
-            "requestsPerSecond": 52807,
-            "latencyP99Ms": 5
+            "requestsPerSecond": 103596,
+            "latencyP99Ms": 1
           },
           {
-            "requestsPerSecond": 56752,
-            "latencyP99Ms": 5
+            "requestsPerSecond": 101117,
+            "latencyP99Ms": 1
           }
         ],
         "requestsPerSecond": {
           "n": 3,
-          "median": 54224,
-          "p25": 53516,
-          "p75": 55488,
-          "min": 52807,
-          "max": 56752
+          "median": 101402,
+          "p25": 101260,
+          "p75": 102499,
+          "min": 101117,
+          "max": 103596
         },
         "latencyP99Ms": {
           "n": 3,
-          "median": 5,
-          "p25": 5,
-          "p75": 5,
-          "min": 5,
-          "max": 5
+          "median": 1,
+          "p25": 1,
+          "p75": 1,
+          "min": 1,
+          "max": 1
         }
       },
       {
@@ -1762,599 +1762,7 @@
         "endpoint": "post",
         "rounds": [
           {
-            "requestsPerSecond": 31643,
-            "latencyP99Ms": 6
-          },
-          {
-            "requestsPerSecond": 28343,
-            "latencyP99Ms": 8
-          },
-          {
-            "requestsPerSecond": 30993,
-            "latencyP99Ms": 7
-          }
-        ],
-        "requestsPerSecond": {
-          "n": 3,
-          "median": 30993,
-          "p25": 29668,
-          "p75": 31318,
-          "min": 28343,
-          "max": 31643
-        },
-        "latencyP99Ms": {
-          "n": 3,
-          "median": 7,
-          "p25": 6.5,
-          "p75": 7.5,
-          "min": 6,
-          "max": 8
-        }
-      },
-      {
-        "variant": "baseline-fastify",
-        "framework": "baseline",
-        "adapter": "fastify",
-        "runtime": "bun",
-        "endpoint": "get",
-        "rounds": [
-          {
-            "requestsPerSecond": 145878,
-            "latencyP99Ms": 1
-          },
-          {
-            "requestsPerSecond": 154816,
-            "latencyP99Ms": 1
-          },
-          {
-            "requestsPerSecond": 145100,
-            "latencyP99Ms": 1
-          }
-        ],
-        "requestsPerSecond": {
-          "n": 3,
-          "median": 145878,
-          "p25": 145489,
-          "p75": 150347,
-          "min": 145100,
-          "max": 154816
-        },
-        "latencyP99Ms": {
-          "n": 3,
-          "median": 1,
-          "p25": 1,
-          "p75": 1,
-          "min": 1,
-          "max": 1
-        }
-      },
-      {
-        "variant": "baseline-fastify",
-        "framework": "baseline",
-        "adapter": "fastify",
-        "runtime": "bun",
-        "endpoint": "post",
-        "rounds": [
-          {
-            "requestsPerSecond": 122179,
-            "latencyP99Ms": 1
-          },
-          {
-            "requestsPerSecond": 115290,
-            "latencyP99Ms": 1
-          },
-          {
-            "requestsPerSecond": 123279,
-            "latencyP99Ms": 1
-          }
-        ],
-        "requestsPerSecond": {
-          "n": 3,
-          "median": 122179,
-          "p25": 118735,
-          "p75": 122729,
-          "min": 115290,
-          "max": 123279
-        },
-        "latencyP99Ms": {
-          "n": 3,
-          "median": 1,
-          "p25": 1,
-          "p75": 1,
-          "min": 1,
-          "max": 1
-        }
-      },
-      {
-        "variant": "znight-fastify",
-        "framework": "znight",
-        "adapter": "fastify",
-        "runtime": "bun",
-        "endpoint": "get",
-        "rounds": [
-          {
-            "requestsPerSecond": 102711,
-            "latencyP99Ms": 1
-          },
-          {
-            "requestsPerSecond": 84501,
-            "latencyP99Ms": 3
-          },
-          {
-            "requestsPerSecond": 109821,
-            "latencyP99Ms": 1
-          }
-        ],
-        "requestsPerSecond": {
-          "n": 3,
-          "median": 102711,
-          "p25": 93606,
-          "p75": 106266,
-          "min": 84501,
-          "max": 109821
-        },
-        "latencyP99Ms": {
-          "n": 3,
-          "median": 1,
-          "p25": 1,
-          "p75": 2,
-          "min": 1,
-          "max": 3
-        }
-      },
-      {
-        "variant": "znight-fastify",
-        "framework": "znight",
-        "adapter": "fastify",
-        "runtime": "bun",
-        "endpoint": "post",
-        "rounds": [
-          {
-            "requestsPerSecond": 85158,
-            "latencyP99Ms": 2
-          },
-          {
-            "requestsPerSecond": 73759,
-            "latencyP99Ms": 3
-          },
-          {
-            "requestsPerSecond": 86839,
-            "latencyP99Ms": 2
-          }
-        ],
-        "requestsPerSecond": {
-          "n": 3,
-          "median": 85158,
-          "p25": 79459,
-          "p75": 85999,
-          "min": 73759,
-          "max": 86839
-        },
-        "latencyP99Ms": {
-          "n": 3,
-          "median": 2,
-          "p25": 2,
-          "p75": 2.5,
-          "min": 2,
-          "max": 3
-        }
-      },
-      {
-        "variant": "nestjs-fastify",
-        "framework": "nestjs",
-        "adapter": "fastify",
-        "runtime": "bun",
-        "endpoint": "get",
-        "rounds": [
-          {
-            "requestsPerSecond": 127537,
-            "latencyP99Ms": 1
-          },
-          {
-            "requestsPerSecond": 97498,
-            "latencyP99Ms": 3
-          },
-          {
-            "requestsPerSecond": 97722,
-            "latencyP99Ms": 4
-          }
-        ],
-        "requestsPerSecond": {
-          "n": 3,
-          "median": 97722,
-          "p25": 97610,
-          "p75": 112630,
-          "min": 97498,
-          "max": 127537
-        },
-        "latencyP99Ms": {
-          "n": 3,
-          "median": 3,
-          "p25": 2,
-          "p75": 3.5,
-          "min": 1,
-          "max": 4
-        }
-      },
-      {
-        "variant": "nestjs-fastify",
-        "framework": "nestjs",
-        "adapter": "fastify",
-        "runtime": "bun",
-        "endpoint": "post",
-        "rounds": [
-          {
-            "requestsPerSecond": 105708,
-            "latencyP99Ms": 1
-          },
-          {
-            "requestsPerSecond": 97423,
-            "latencyP99Ms": 2
-          },
-          {
-            "requestsPerSecond": 94246,
-            "latencyP99Ms": 2
-          }
-        ],
-        "requestsPerSecond": {
-          "n": 3,
-          "median": 97423,
-          "p25": 95835,
-          "p75": 101566,
-          "min": 94246,
-          "max": 105708
-        },
-        "latencyP99Ms": {
-          "n": 3,
-          "median": 2,
-          "p25": 1.5,
-          "p75": 2,
-          "min": 1,
-          "max": 2
-        }
-      },
-      {
-        "variant": "baseline-express",
-        "framework": "baseline",
-        "adapter": "express",
-        "runtime": "bun",
-        "endpoint": "get",
-        "rounds": [
-          {
-            "requestsPerSecond": 126502,
-            "latencyP99Ms": 1
-          },
-          {
-            "requestsPerSecond": 116064,
-            "latencyP99Ms": 2
-          },
-          {
-            "requestsPerSecond": 127610,
-            "latencyP99Ms": 1
-          }
-        ],
-        "requestsPerSecond": {
-          "n": 3,
-          "median": 126502,
-          "p25": 121283,
-          "p75": 127056,
-          "min": 116064,
-          "max": 127610
-        },
-        "latencyP99Ms": {
-          "n": 3,
-          "median": 1,
-          "p25": 1,
-          "p75": 1.5,
-          "min": 1,
-          "max": 2
-        }
-      },
-      {
-        "variant": "baseline-express",
-        "framework": "baseline",
-        "adapter": "express",
-        "runtime": "bun",
-        "endpoint": "post",
-        "rounds": [
-          {
-            "requestsPerSecond": 96963,
-            "latencyP99Ms": 1
-          },
-          {
-            "requestsPerSecond": 96207,
-            "latencyP99Ms": 1
-          },
-          {
-            "requestsPerSecond": 99087,
-            "latencyP99Ms": 1
-          }
-        ],
-        "requestsPerSecond": {
-          "n": 3,
-          "median": 96963,
-          "p25": 96585,
-          "p75": 98025,
-          "min": 96207,
-          "max": 99087
-        },
-        "latencyP99Ms": {
-          "n": 3,
-          "median": 1,
-          "p25": 1,
-          "p75": 1,
-          "min": 1,
-          "max": 1
-        }
-      },
-      {
-        "variant": "znight-express",
-        "framework": "znight",
-        "adapter": "express",
-        "runtime": "bun",
-        "endpoint": "get",
-        "rounds": [
-          {
-            "requestsPerSecond": 105196,
-            "latencyP99Ms": 1
-          },
-          {
-            "requestsPerSecond": 102909,
-            "latencyP99Ms": 2
-          },
-          {
-            "requestsPerSecond": 111409,
-            "latencyP99Ms": 1
-          }
-        ],
-        "requestsPerSecond": {
-          "n": 3,
-          "median": 105196,
-          "p25": 104053,
-          "p75": 108303,
-          "min": 102909,
-          "max": 111409
-        },
-        "latencyP99Ms": {
-          "n": 3,
-          "median": 1,
-          "p25": 1,
-          "p75": 1.5,
-          "min": 1,
-          "max": 2
-        }
-      },
-      {
-        "variant": "znight-express",
-        "framework": "znight",
-        "adapter": "express",
-        "runtime": "bun",
-        "endpoint": "post",
-        "rounds": [
-          {
-            "requestsPerSecond": 80722,
-            "latencyP99Ms": 3
-          },
-          {
-            "requestsPerSecond": 85011,
-            "latencyP99Ms": 2
-          },
-          {
-            "requestsPerSecond": 66466,
-            "latencyP99Ms": 7
-          }
-        ],
-        "requestsPerSecond": {
-          "n": 3,
-          "median": 80722,
-          "p25": 73594,
-          "p75": 82867,
-          "min": 66466,
-          "max": 85011
-        },
-        "latencyP99Ms": {
-          "n": 3,
-          "median": 3,
-          "p25": 2.5,
-          "p75": 5,
-          "min": 2,
-          "max": 7
-        }
-      },
-      {
-        "variant": "nestjs-express",
-        "framework": "nestjs",
-        "adapter": "express",
-        "runtime": "bun",
-        "endpoint": "get",
-        "rounds": [
-          {
-            "requestsPerSecond": 85662,
-            "latencyP99Ms": 4
-          },
-          {
-            "requestsPerSecond": 108687,
-            "latencyP99Ms": 2
-          },
-          {
-            "requestsPerSecond": 99475,
-            "latencyP99Ms": 3
-          }
-        ],
-        "requestsPerSecond": {
-          "n": 3,
-          "median": 99475,
-          "p25": 92569,
-          "p75": 104081,
-          "min": 85662,
-          "max": 108687
-        },
-        "latencyP99Ms": {
-          "n": 3,
-          "median": 3,
-          "p25": 2.5,
-          "p75": 3.5,
-          "min": 2,
-          "max": 4
-        }
-      },
-      {
-        "variant": "nestjs-express",
-        "framework": "nestjs",
-        "adapter": "express",
-        "runtime": "bun",
-        "endpoint": "post",
-        "rounds": [
-          {
-            "requestsPerSecond": 74944,
-            "latencyP99Ms": 4
-          },
-          {
-            "requestsPerSecond": 82284,
-            "latencyP99Ms": 2
-          },
-          {
-            "requestsPerSecond": 85001,
-            "latencyP99Ms": 2
-          }
-        ],
-        "requestsPerSecond": {
-          "n": 3,
-          "median": 82284,
-          "p25": 78614,
-          "p75": 83643,
-          "min": 74944,
-          "max": 85001
-        },
-        "latencyP99Ms": {
-          "n": 3,
-          "median": 2,
-          "p25": 2,
-          "p75": 3,
-          "min": 2,
-          "max": 4
-        }
-      },
-      {
-        "variant": "baseline-node",
-        "framework": "baseline",
-        "adapter": "node",
-        "runtime": "bun",
-        "endpoint": "get",
-        "rounds": [
-          {
-            "requestsPerSecond": 141597,
-            "latencyP99Ms": 2
-          },
-          {
-            "requestsPerSecond": 157379,
-            "latencyP99Ms": 1
-          },
-          {
-            "requestsPerSecond": 166383,
-            "latencyP99Ms": 1
-          }
-        ],
-        "requestsPerSecond": {
-          "n": 3,
-          "median": 157379,
-          "p25": 149488,
-          "p75": 161881,
-          "min": 141597,
-          "max": 166383
-        },
-        "latencyP99Ms": {
-          "n": 3,
-          "median": 1,
-          "p25": 1,
-          "p75": 1.5,
-          "min": 1,
-          "max": 2
-        }
-      },
-      {
-        "variant": "baseline-node",
-        "framework": "baseline",
-        "adapter": "node",
-        "runtime": "bun",
-        "endpoint": "post",
-        "rounds": [
-          {
-            "requestsPerSecond": 136224,
-            "latencyP99Ms": 1
-          },
-          {
-            "requestsPerSecond": 128701,
-            "latencyP99Ms": 1
-          },
-          {
-            "requestsPerSecond": 129100,
-            "latencyP99Ms": 2
-          }
-        ],
-        "requestsPerSecond": {
-          "n": 3,
-          "median": 129100,
-          "p25": 128901,
-          "p75": 132662,
-          "min": 128701,
-          "max": 136224
-        },
-        "latencyP99Ms": {
-          "n": 3,
-          "median": 1,
-          "p25": 1,
-          "p75": 1.5,
-          "min": 1,
-          "max": 2
-        }
-      },
-      {
-        "variant": "znight-node",
-        "framework": "znight",
-        "adapter": "node",
-        "runtime": "bun",
-        "endpoint": "get",
-        "rounds": [
-          {
-            "requestsPerSecond": 110665,
-            "latencyP99Ms": 1
-          },
-          {
-            "requestsPerSecond": 101513,
-            "latencyP99Ms": 2
-          },
-          {
-            "requestsPerSecond": 107197,
-            "latencyP99Ms": 2
-          }
-        ],
-        "requestsPerSecond": {
-          "n": 3,
-          "median": 107197,
-          "p25": 104355,
-          "p75": 108931,
-          "min": 101513,
-          "max": 110665
-        },
-        "latencyP99Ms": {
-          "n": 3,
-          "median": 2,
-          "p25": 1.5,
-          "p75": 2,
-          "min": 1,
-          "max": 2
-        }
-      },
-      {
-        "variant": "znight-node",
-        "framework": "znight",
-        "adapter": "node",
-        "runtime": "bun",
-        "endpoint": "post",
-        "rounds": [
-          {
-            "requestsPerSecond": 91063,
+            "requestsPerSecond": 85530,
             "latencyP99Ms": 2
           },
           {
@@ -2362,17 +1770,17 @@
             "latencyP99Ms": 2
           },
           {
-            "requestsPerSecond": 93206,
+            "requestsPerSecond": 86758,
             "latencyP99Ms": 2
           }
         ],
         "requestsPerSecond": {
           "n": 3,
-          "median": 91063,
-          "p25": 89664,
-          "p75": 92135,
-          "min": 88265,
-          "max": 93206
+          "median": 86758,
+          "p25": 86144,
+          "p75": 87512,
+          "min": 85530,
+          "max": 88265
         },
         "latencyP99Ms": {
           "n": 3,
@@ -2384,40 +1792,632 @@
         }
       },
       {
-        "variant": "baseline-hono",
+        "variant": "baseline-fastify",
         "framework": "baseline",
-        "adapter": "hono",
+        "adapter": "fastify",
         "runtime": "bun",
         "endpoint": "get",
         "rounds": [
           {
-            "requestsPerSecond": 126912,
-            "latencyP99Ms": 3
-          },
-          {
-            "requestsPerSecond": 163569,
+            "requestsPerSecond": 164823,
             "latencyP99Ms": 1
           },
           {
-            "requestsPerSecond": 166371,
+            "requestsPerSecond": 157213,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 165510,
             "latencyP99Ms": 1
           }
         ],
         "requestsPerSecond": {
           "n": 3,
-          "median": 163569,
-          "p25": 145241,
-          "p75": 164970,
-          "min": 126912,
-          "max": 166371
+          "median": 164823,
+          "p25": 161018,
+          "p75": 165167,
+          "min": 157213,
+          "max": 165510
         },
         "latencyP99Ms": {
           "n": 3,
           "median": 1,
           "p25": 1,
-          "p75": 2,
+          "p75": 1,
           "min": 1,
-          "max": 3
+          "max": 1
+        }
+      },
+      {
+        "variant": "baseline-fastify",
+        "framework": "baseline",
+        "adapter": "fastify",
+        "runtime": "bun",
+        "endpoint": "post",
+        "rounds": [
+          {
+            "requestsPerSecond": 129638,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 135744,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 134313,
+            "latencyP99Ms": 1
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 134313,
+          "p25": 131976,
+          "p75": 135029,
+          "min": 129638,
+          "max": 135744
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 1,
+          "p25": 1,
+          "p75": 1,
+          "min": 1,
+          "max": 1
+        }
+      },
+      {
+        "variant": "znight-fastify",
+        "framework": "znight",
+        "adapter": "fastify",
+        "runtime": "bun",
+        "endpoint": "get",
+        "rounds": [
+          {
+            "requestsPerSecond": 103315,
+            "latencyP99Ms": 2
+          },
+          {
+            "requestsPerSecond": 117711,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 126490,
+            "latencyP99Ms": 1
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 117711,
+          "p25": 110513,
+          "p75": 122101,
+          "min": 103315,
+          "max": 126490
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 1,
+          "p25": 1,
+          "p75": 1.5,
+          "min": 1,
+          "max": 2
+        }
+      },
+      {
+        "variant": "znight-fastify",
+        "framework": "znight",
+        "adapter": "fastify",
+        "runtime": "bun",
+        "endpoint": "post",
+        "rounds": [
+          {
+            "requestsPerSecond": 91087,
+            "latencyP99Ms": 2
+          },
+          {
+            "requestsPerSecond": 93984,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 101553,
+            "latencyP99Ms": 1
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 93984,
+          "p25": 92536,
+          "p75": 97769,
+          "min": 91087,
+          "max": 101553
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 1,
+          "p25": 1,
+          "p75": 1.5,
+          "min": 1,
+          "max": 2
+        }
+      },
+      {
+        "variant": "nestjs-fastify",
+        "framework": "nestjs",
+        "adapter": "fastify",
+        "runtime": "bun",
+        "endpoint": "get",
+        "rounds": [
+          {
+            "requestsPerSecond": 126269,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 129728,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 136873,
+            "latencyP99Ms": 1
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 129728,
+          "p25": 127999,
+          "p75": 133301,
+          "min": 126269,
+          "max": 136873
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 1,
+          "p25": 1,
+          "p75": 1,
+          "min": 1,
+          "max": 1
+        }
+      },
+      {
+        "variant": "nestjs-fastify",
+        "framework": "nestjs",
+        "adapter": "fastify",
+        "runtime": "bun",
+        "endpoint": "post",
+        "rounds": [
+          {
+            "requestsPerSecond": 100559,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 106412,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 113329,
+            "latencyP99Ms": 1
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 106412,
+          "p25": 103486,
+          "p75": 109871,
+          "min": 100559,
+          "max": 113329
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 1,
+          "p25": 1,
+          "p75": 1,
+          "min": 1,
+          "max": 1
+        }
+      },
+      {
+        "variant": "baseline-express",
+        "framework": "baseline",
+        "adapter": "express",
+        "runtime": "bun",
+        "endpoint": "get",
+        "rounds": [
+          {
+            "requestsPerSecond": 113271,
+            "latencyP99Ms": 2
+          },
+          {
+            "requestsPerSecond": 124268,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 135581,
+            "latencyP99Ms": 1
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 124268,
+          "p25": 118770,
+          "p75": 129925,
+          "min": 113271,
+          "max": 135581
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 1,
+          "p25": 1,
+          "p75": 1.5,
+          "min": 1,
+          "max": 2
+        }
+      },
+      {
+        "variant": "baseline-express",
+        "framework": "baseline",
+        "adapter": "express",
+        "runtime": "bun",
+        "endpoint": "post",
+        "rounds": [
+          {
+            "requestsPerSecond": 99180,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 99104,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 104207,
+            "latencyP99Ms": 1
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 99180,
+          "p25": 99142,
+          "p75": 101694,
+          "min": 99104,
+          "max": 104207
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 1,
+          "p25": 1,
+          "p75": 1,
+          "min": 1,
+          "max": 1
+        }
+      },
+      {
+        "variant": "znight-express",
+        "framework": "znight",
+        "adapter": "express",
+        "runtime": "bun",
+        "endpoint": "get",
+        "rounds": [
+          {
+            "requestsPerSecond": 117187,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 116698,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 119537,
+            "latencyP99Ms": 1
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 117187,
+          "p25": 116943,
+          "p75": 118362,
+          "min": 116698,
+          "max": 119537
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 1,
+          "p25": 1,
+          "p75": 1,
+          "min": 1,
+          "max": 1
+        }
+      },
+      {
+        "variant": "znight-express",
+        "framework": "znight",
+        "adapter": "express",
+        "runtime": "bun",
+        "endpoint": "post",
+        "rounds": [
+          {
+            "requestsPerSecond": 99884,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 99348,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 108890,
+            "latencyP99Ms": 1
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 99884,
+          "p25": 99616,
+          "p75": 104387,
+          "min": 99348,
+          "max": 108890
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 1,
+          "p25": 1,
+          "p75": 1,
+          "min": 1,
+          "max": 1
+        }
+      },
+      {
+        "variant": "nestjs-express",
+        "framework": "nestjs",
+        "adapter": "express",
+        "runtime": "bun",
+        "endpoint": "get",
+        "rounds": [
+          {
+            "requestsPerSecond": 113830,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 118112,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 125716,
+            "latencyP99Ms": 1
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 118112,
+          "p25": 115971,
+          "p75": 121914,
+          "min": 113830,
+          "max": 125716
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 1,
+          "p25": 1,
+          "p75": 1,
+          "min": 1,
+          "max": 1
+        }
+      },
+      {
+        "variant": "nestjs-express",
+        "framework": "nestjs",
+        "adapter": "express",
+        "runtime": "bun",
+        "endpoint": "post",
+        "rounds": [
+          {
+            "requestsPerSecond": 86880,
+            "latencyP99Ms": 2
+          },
+          {
+            "requestsPerSecond": 94956,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 95631,
+            "latencyP99Ms": 1
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 94956,
+          "p25": 90918,
+          "p75": 95294,
+          "min": 86880,
+          "max": 95631
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 1,
+          "p25": 1,
+          "p75": 1.5,
+          "min": 1,
+          "max": 2
+        }
+      },
+      {
+        "variant": "baseline-node",
+        "framework": "baseline",
+        "adapter": "node",
+        "runtime": "bun",
+        "endpoint": "get",
+        "rounds": [
+          {
+            "requestsPerSecond": 157492,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 174714,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 167475,
+            "latencyP99Ms": 1
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 167475,
+          "p25": 162484,
+          "p75": 171095,
+          "min": 157492,
+          "max": 174714
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 1,
+          "p25": 1,
+          "p75": 1,
+          "min": 1,
+          "max": 1
+        }
+      },
+      {
+        "variant": "baseline-node",
+        "framework": "baseline",
+        "adapter": "node",
+        "runtime": "bun",
+        "endpoint": "post",
+        "rounds": [
+          {
+            "requestsPerSecond": 138572,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 150243,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 149370,
+            "latencyP99Ms": 1
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 149370,
+          "p25": 143971,
+          "p75": 149807,
+          "min": 138572,
+          "max": 150243
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 1,
+          "p25": 1,
+          "p75": 1,
+          "min": 1,
+          "max": 1
+        }
+      },
+      {
+        "variant": "znight-node",
+        "framework": "znight",
+        "adapter": "node",
+        "runtime": "bun",
+        "endpoint": "get",
+        "rounds": [
+          {
+            "requestsPerSecond": 121824,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 136666,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 136108,
+            "latencyP99Ms": 1
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 136108,
+          "p25": 128966,
+          "p75": 136387,
+          "min": 121824,
+          "max": 136666
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 1,
+          "p25": 1,
+          "p75": 1,
+          "min": 1,
+          "max": 1
+        }
+      },
+      {
+        "variant": "znight-node",
+        "framework": "znight",
+        "adapter": "node",
+        "runtime": "bun",
+        "endpoint": "post",
+        "rounds": [
+          {
+            "requestsPerSecond": 100297,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 115692,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 116698,
+            "latencyP99Ms": 1
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 115692,
+          "p25": 107995,
+          "p75": 116195,
+          "min": 100297,
+          "max": 116698
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 1,
+          "p25": 1,
+          "p75": 1,
+          "min": 1,
+          "max": 1
+        }
+      },
+      {
+        "variant": "baseline-hono",
+        "framework": "baseline",
+        "adapter": "hono",
+        "runtime": "bun",
+        "endpoint": "get",
+        "rounds": [
+          {
+            "requestsPerSecond": 172876,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 175447,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 178298,
+            "latencyP99Ms": 1
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 175447,
+          "p25": 174162,
+          "p75": 176873,
+          "min": 172876,
+          "max": 178298
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 1,
+          "p25": 1,
+          "p75": 1,
+          "min": 1,
+          "max": 1
         }
       },
       {
@@ -2428,33 +2428,33 @@
         "endpoint": "post",
         "rounds": [
           {
-            "requestsPerSecond": 120688,
-            "latencyP99Ms": 2
-          },
-          {
-            "requestsPerSecond": 147834,
+            "requestsPerSecond": 157993,
             "latencyP99Ms": 1
           },
           {
-            "requestsPerSecond": 148023,
-            "latencyP99Ms": 2
+            "requestsPerSecond": 170816,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 170013,
+            "latencyP99Ms": 1
           }
         ],
         "requestsPerSecond": {
           "n": 3,
-          "median": 147834,
-          "p25": 134261,
-          "p75": 147929,
-          "min": 120688,
-          "max": 148023
+          "median": 170013,
+          "p25": 164003,
+          "p75": 170415,
+          "min": 157993,
+          "max": 170816
         },
         "latencyP99Ms": {
           "n": 3,
-          "median": 2,
-          "p25": 1.5,
-          "p75": 2,
+          "median": 1,
+          "p25": 1,
+          "p75": 1,
           "min": 1,
-          "max": 2
+          "max": 1
         }
       },
       {
@@ -2465,33 +2465,33 @@
         "endpoint": "get",
         "rounds": [
           {
-            "requestsPerSecond": 101792,
-            "latencyP99Ms": 2
+            "requestsPerSecond": 126170,
+            "latencyP99Ms": 1
           },
           {
-            "requestsPerSecond": 94509,
-            "latencyP99Ms": 3
+            "requestsPerSecond": 135930,
+            "latencyP99Ms": 1
           },
           {
-            "requestsPerSecond": 117204,
+            "requestsPerSecond": 136035,
             "latencyP99Ms": 1
           }
         ],
         "requestsPerSecond": {
           "n": 3,
-          "median": 101792,
-          "p25": 98151,
-          "p75": 109498,
-          "min": 94509,
-          "max": 117204
+          "median": 135930,
+          "p25": 131050,
+          "p75": 135983,
+          "min": 126170,
+          "max": 136035
         },
         "latencyP99Ms": {
           "n": 3,
-          "median": 2,
-          "p25": 1.5,
-          "p75": 2.5,
+          "median": 1,
+          "p25": 1,
+          "p75": 1,
           "min": 1,
-          "max": 3
+          "max": 1
         }
       },
       {
@@ -2502,33 +2502,33 @@
         "endpoint": "post",
         "rounds": [
           {
-            "requestsPerSecond": 49110,
-            "latencyP99Ms": 4
-          },
-          {
-            "requestsPerSecond": 54002,
+            "requestsPerSecond": 59891,
             "latencyP99Ms": 3
           },
           {
-            "requestsPerSecond": 57791,
+            "requestsPerSecond": 57910,
+            "latencyP99Ms": 3
+          },
+          {
+            "requestsPerSecond": 60237,
             "latencyP99Ms": 3
           }
         ],
         "requestsPerSecond": {
           "n": 3,
-          "median": 54002,
-          "p25": 51556,
-          "p75": 55897,
-          "min": 49110,
-          "max": 57791
+          "median": 59891,
+          "p25": 58901,
+          "p75": 60064,
+          "min": 57910,
+          "max": 60237
         },
         "latencyP99Ms": {
           "n": 3,
           "median": 3,
           "p25": 3,
-          "p75": 3.5,
+          "p75": 3,
           "min": 3,
-          "max": 4
+          "max": 3
         }
       }
     ]

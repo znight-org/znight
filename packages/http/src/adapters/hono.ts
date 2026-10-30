@@ -3,7 +3,7 @@
  * dependency `hono`). On Bun the server is `Bun.serve()`; on Node.js it is `@hono/node-server`
  * (optional peer dependency, loaded on `listen()`). `inject()` uses `app.request()`.
  */
-import type { Server, ServerResponse } from 'node:http'
+import type { IncomingMessage, Server, ServerResponse } from 'node:http'
 import type {
   AdapterCloseOptions,
   AdapterHandler,
@@ -18,13 +18,14 @@ import type {
   InjectStreamRequest,
   InjectStreamResponse,
 } from '../adapter.ts'
+import type { HeaderValue } from '../exceptions.ts'
 
 import { type Context, Hono, type Next } from 'hono'
 
 import { toHonoPath } from '../path.ts'
 import { discardStream } from '../stream.ts'
 import { isBun } from '../utils.ts'
-import { ConnectionTracker, closeServer, onResponseAbort } from './node-io.ts'
+import { ConnectionTracker, closeServer, nodeBodyStream, onResponseAbort, readNodeBody } from './node-io.ts'
 import { bufferInjectStream, injectFetchStream, readWebStream, serverAddress, webBodyStream } from './shared.ts'
 
 /** Options of {@link honoAdapter}. */
@@ -130,6 +131,8 @@ class HonoHttpAdapter implements HonoAdapter {
   readonly name = 'hono' as const
   readonly app: Hono
   readonly #serveOptions: HonoServeOptions
+  /** Number of routes of `app` registered by the adapter (see {@link #middleware}). */
+  #routes = 0
   #fallback: FallbackHandler | undefined
   #prepared = false
   #bun: BunServer | undefined
@@ -150,6 +153,7 @@ class HonoHttpAdapter implements HonoAdapter {
   registerRoute(route: AdapterRoute): void {
     const handler = route.handler
     const path = toHonoPath(route.path)
+    this.#routes++
     if (route.method === 'HEAD') {
       // Hono routes HEAD requests to GET handlers: serve them from a GET handler that only answers HEAD
       this.app.get(path, (c: Context, next: Next) =>
@@ -187,7 +191,16 @@ class HonoHttpAdapter implements HonoAdapter {
     return this.#toResponse(c, await this.#fallback(adapterRequest(c), error))
   }
 
+  /**
+   * Whether `app` has routes the adapter did not register (middleware, other routes): only they can
+   * set headers on the context or read the response.
+   */
+  #middleware(): boolean {
+    return this.app.routes.length !== this.#routes
+  }
+
   #toResponse(c: Context, reply: AdapterReply): Response {
+    const middleware = this.#middleware()
     const outgoing = nodeOutgoing(c)
     if (outgoing !== undefined) {
       const body = reply.body instanceof ReadableStream ? reply.body : null
@@ -195,7 +208,7 @@ class HonoHttpAdapter implements HonoAdapter {
         // @hono/node-server: the client left before the reply was ready (an async pre-flight). The
         // server would neither read nor cancel the body: release it (event source, request scope)
         discardStream(body)
-        return toResponse(c, { ...reply, body: null })
+        return toResponse(c, { ...reply, body: null }, middleware)
       }
       if (body !== null) {
         // the client may leave before @hono/node-server reads the body (its own listener then comes
@@ -207,7 +220,7 @@ class HonoHttpAdapter implements HonoAdapter {
       // a quiet event stream must outlive a socket timeout
       if (reply.eventStream === true && typeof outgoing.setTimeout === 'function') outgoing.setTimeout(0)
     }
-    if (this.#bun === undefined || !(reply.body instanceof ReadableStream)) return toResponse(c, reply)
+    if (this.#bun === undefined || !(reply.body instanceof ReadableStream)) return toResponse(c, reply, middleware)
     // served by Bun.serve(): observe the end of the body (idle timeout, native blob: see #bunFetch)
     const reader = reply.body.getReader()
     let ended = false
@@ -247,7 +260,7 @@ class HonoHttpAdapter implements HonoAdapter {
         onEnd = callback
       },
     })
-    return toResponse(c, { ...reply, body })
+    return toResponse(c, { ...reply, body }, middleware)
   }
 
   /** The fetch handler given to `Bun.serve()`. */
@@ -355,47 +368,105 @@ class HonoHttpAdapter implements HonoAdapter {
 }
 
 function adapterRequest(c: Context): AdapterRequest {
-  const request = c.req.raw
-  const headers: Record<string, string> = {}
-  for (const [name, value] of request.headers) headers[name] = value
-  const incoming = nodeIncoming(c)
-  const address = remoteAddress(c)
-  let body: Promise<Uint8Array> | undefined
-  return {
-    method: request.method,
+  return new HonoAdapterRequest(c)
+}
+
+/** A Hono request as an {@link AdapterRequest} (a class: no closure per request). */
+class HonoAdapterRequest implements AdapterRequest {
+  readonly method: string
+  readonly url: string
+  readonly headers: Readonly<Record<string, string | undefined>>
+  readonly ip: string | undefined
+  readonly remoteAddress: string | undefined
+  readonly encrypted: boolean
+  readonly raw: Request
+  readonly rawResponse: Context
+  /** The Node.js request of `@hono/node-server`, absent on Bun and for `inject()`. */
+  readonly #incoming: NodeIncoming | undefined
+  /**
+   * The same request over HTTP/1.1, read directly (Node.js streams): no Fetch `Request` and body
+   * stream are built for it.
+   */
+  readonly #http1: IncomingMessage | undefined
+  #body: Promise<Uint8Array> | undefined
+
+  constructor(c: Context) {
+    const request = c.req.raw
+    const incoming = nodeIncoming(c)
+    const http1 = incoming !== undefined && incoming.httpVersionMajor < 2 ? (incoming as IncomingMessage) : undefined
+    const address = remoteAddress(c)
+    this.method = request.method
     // the raw target on Node.js; on Bun only the normalised URL is known
-    url: pathAndQuery(typeof incoming?.url === 'string' && incoming.url !== '' ? incoming.url : request.url),
-    headers,
-    ip: address,
-    remoteAddress: address,
-    encrypted: incoming === undefined ? request.url.startsWith('https:') : incoming.socket?.encrypted === true,
-    raw: request,
-    rawResponse: c,
-    readBody: (limit: number): Promise<Uint8Array> => {
-      body ??= readWebStream(() => request.body, limit, headers['content-length'])
-      return body
-    },
-    streamBody: (limit: number): ReadableStream<Uint8Array> =>
-      webBodyStream(() => request.body, limit, headers['content-length']),
-    // asked only without content-length / transfer-encoding: a request read from an HTTP/1.1
-    // connection then has no body (`@hono/node-server` still gives every POST a body stream), an
-    // HTTP/2 one unless its HEADERS frame ended the stream; a Web `Request` (Bun, inject) says it
-    hasBody: (): boolean =>
-      incoming === undefined
-        ? request.body !== null
-        : incoming.httpVersionMajor >= 2 && incoming.stream?.endAfterHeaders === false,
-    onAbort: (listener: () => void): void => {
-      const outgoing = nodeOutgoing(c)
-      if (outgoing !== undefined) {
-        onResponseAbort(outgoing as unknown as ServerResponse, listener)
-        return
-      }
-      // Bun.serve() and inject(): the request signal aborts when the client leaves
-      const signal = request.signal
-      if (signal.aborted) queueMicrotask(listener)
-      else signal.addEventListener('abort', listener, { once: true })
-    },
+    this.url = pathAndQuery(typeof incoming?.url === 'string' && incoming.url !== '' ? incoming.url : request.url)
+    this.headers = (http1 === undefined ? undefined : distinctHeaders(http1)) ?? fetchHeaders(request.headers)
+    this.ip = address
+    this.remoteAddress = address
+    this.encrypted = incoming === undefined ? request.url.startsWith('https:') : incoming.socket?.encrypted === true
+    this.raw = request
+    this.rawResponse = c
+    this.#incoming = incoming
+    this.#http1 = http1
   }
+
+  readBody(limit: number): Promise<Uint8Array> {
+    if (this.#body === undefined) {
+      const http1 = this.#http1
+      this.#body =
+        http1 === undefined
+          ? readWebStream(() => this.raw.body, limit, this.headers['content-length'])
+          : readNodeBody(http1, limit)
+    }
+    return this.#body
+  }
+
+  streamBody(limit: number): ReadableStream<Uint8Array> {
+    const http1 = this.#http1
+    if (http1 !== undefined) return nodeBodyStream(http1, limit)
+    return webBodyStream(() => this.raw.body, limit, this.headers['content-length'])
+  }
+
+  // asked only without content-length / transfer-encoding: a request read from an HTTP/1.1
+  // connection then has no body (`@hono/node-server` still gives every POST a body stream), an
+  // HTTP/2 one unless its HEADERS frame ended the stream; a Web `Request` (Bun, inject) says it
+  hasBody(): boolean {
+    const incoming = this.#incoming
+    return incoming === undefined
+      ? this.raw.body !== null
+      : incoming.httpVersionMajor >= 2 && incoming.stream?.endAfterHeaders === false
+  }
+
+  onAbort(listener: () => void): void {
+    const outgoing = nodeOutgoing(this.rawResponse)
+    if (outgoing !== undefined) {
+      onResponseAbort(outgoing as unknown as ServerResponse, listener)
+      return
+    }
+    // Bun.serve() and inject(): the request signal aborts when the client leaves
+    const signal = this.raw.signal
+    if (signal.aborted) queueMicrotask(listener)
+    else signal.addEventListener('abort', listener, { once: true })
+  }
+}
+
+/** The headers of a Fetch request: lower-case names, repeated headers joined (`Headers` semantics). */
+function fetchHeaders(source: Headers): Record<string, string> {
+  const headers: Record<string, string> = {}
+  for (const [name, value] of source) headers[name] = value
+  return headers
+}
+
+/**
+ * The headers of a Node.js request when none is repeated: then they hold the values of its Fetch
+ * `Headers` (Node.js keeps the first of some repeated headers where `Headers` join them all).
+ */
+function distinctHeaders(request: IncomingMessage): Record<string, string | undefined> | undefined {
+  const headers = request.headers
+  let count = 0
+  for (const name in headers) {
+    if (typeof headers[name] !== 'string') return undefined
+    count++
+  }
+  return count * 2 === request.rawHeaders.length ? (headers as Record<string, string | undefined>) : undefined
 }
 
 /** The part of a Node.js `ServerResponse` used here. */
@@ -439,10 +510,21 @@ function remoteAddress(c: Context): string | undefined {
   return env.incoming?.socket?.remoteAddress
 }
 
-function toResponse(c: Context, reply: AdapterReply): Response {
+/**
+ * The `Response` of a reply. Without `middleware` (see `#middleware`), nothing set headers on the
+ * context and nothing reads the response: headers given as a record of strings are sent as is by
+ * `@hono/node-server` (no `Headers` object), and a text body as a string.
+ */
+function toResponse(c: Context, reply: AdapterReply, middleware: boolean): Response {
   if (reply.raw === true) {
     discardStream(reply.body instanceof ReadableStream ? reply.body : null)
     return c.res
+  }
+  if (!middleware && isStringRecord(reply.headers)) {
+    return new Response(reply.text ?? reply.body, {
+      status: reply.status,
+      headers: reply.headers as Readonly<Record<string, string>>,
+    })
   }
   const headers = new Headers()
   try {
@@ -460,8 +542,14 @@ function toResponse(c: Context, reply: AdapterReply): Response {
       headers: { 'content-type': 'application/json; charset=utf-8' },
     })
   }
-  keepContextCookies(c, headers)
-  return new Response(reply.body, { status: reply.status, headers })
+  if (middleware) keepContextCookies(c, headers)
+  return new Response(reply.text ?? reply.body, { status: reply.status, headers })
+}
+
+/** Whether every header has a single value (a record of strings is a valid `HeadersInit`). */
+function isStringRecord(headers: Readonly<Record<string, HeaderValue>>): boolean {
+  for (const name in headers) if (typeof headers[name] !== 'string') return false
+  return true
 }
 
 /**

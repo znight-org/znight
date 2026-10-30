@@ -82,6 +82,12 @@ export interface AdapterReply {
   /** `null` for HEAD requests and bodyless statuses (headers such as `content-length` are kept). */
   readonly body: ReplyBody
   /**
+   * The text `body` holds encoded as UTF-8, for a body serialised from a string (JSON, text).
+   * Adapters writing strings MAY send it instead of `body`, which writes the same bytes: Node.js then
+   * writes the headers and the body at once (bytes take a second write).
+   */
+  readonly text?: string
+  /**
    * The `Blob` (file) that `body` streams, for adapters able to send it natively (`sendfile`, exact
    * length: `new Response(blob)` on `Bun.serve()`). An adapter sending it instead of reading `body`
    * MUST cancel `body` once the server holds the blob (file opened): that releases the request
