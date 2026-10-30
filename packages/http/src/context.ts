@@ -182,6 +182,47 @@ export interface HttpContext {
   bodyStream(): ReadableStream<Uint8Array>
 }
 
+/** What {@link RequestContext.of} needs to create a context. */
+export interface RequestContextInit {
+  readonly requestId: RequestId
+  readonly adapter: string
+  /** `source.url` split (default: split here). */
+  readonly url?: RequestTarget
+  readonly route: HttpRouteInfo | undefined
+  readonly params: Readonly<Record<string, string>>
+  readonly body: BodyPlan
+  /** Client address and protocol (`trustProxy`); default: the adapter's `ip` and `encrypted`. */
+  readonly client?: RequestClient | undefined
+  /** Cookie defaults and signing key (plugin option `cookies`); default: secure defaults, no signing. */
+  readonly cookies?: CookieSettings
+}
+
+/** The client of a request behind trusted proxies (`trustProxy`). */
+export interface RequestClient {
+  readonly ip: string | undefined
+  readonly protocol: 'http' | 'https'
+}
+
+/**
+ * The state of a request context that most requests never need (parsed query, `ctx.state`, body,
+ * request cookies, abort signal), created on first use: a context is created for every request.
+ */
+class ContextState {
+  query: QueryRecord | undefined = undefined
+  state: Map<string | symbol, unknown> | undefined = undefined
+  body: unknown = undefined
+  files: Readonly<Record<string, readonly File[]>> | undefined = undefined
+  raw: Promise<Uint8Array> | undefined = undefined
+  streamed = false
+  /** Stops the body stream opened for the request, unless it was read to its end or cancelled. */
+  stopBody: (() => void) | undefined = undefined
+  parsed: Promise<unknown> | undefined = undefined
+  cookies: Readonly<Record<string, string>> | undefined = undefined
+  signed: Map<string, string | undefined> | undefined = undefined
+  abortReason: RequestAbortedError | undefined = undefined
+  abortController: AbortController | undefined = undefined
+}
+
 /** Implementation of {@link HttpContext} used by the pipeline (internal). */
 export class RequestContext implements HttpContext {
   readonly requestId: RequestId
@@ -199,80 +240,93 @@ export class RequestContext implements HttpContext {
   readonly #source: AdapterRequest
   readonly #plan: BodyPlan
   readonly #rawQuery: string
-  #query: QueryRecord | undefined
-  #state: Map<string | symbol, unknown> | undefined
-  #responseHeaders: Record<string, HeaderValue> | undefined
-  #body: unknown
-  #files: Readonly<Record<string, readonly File[]>> | undefined
-  #raw: Promise<Uint8Array> | undefined
-  #streamed = false
-  /** Stops the body stream opened for the request, unless it was read to its end or cancelled. */
-  #stopBody: (() => void) | undefined
-  #parsed: Promise<unknown> | undefined
   readonly #cookieSettings: CookieSettings
-  #cookies: Readonly<Record<string, string>> | undefined
-  #signed: Map<string, string | undefined> | undefined
+  #responseHeaders: Record<string, HeaderValue> | undefined = undefined
   /** Cookies set on the response, by key (name, domain, path), with their `Set-Cookie` line. */
-  #jar: Map<string, { readonly cookie: ResponseCookie; readonly line: string }> | undefined
+  #jar: Map<string, { readonly cookie: ResponseCookie; readonly line: string }> | undefined = undefined
   /** The response headers were handed to the adapter (cookies can no longer be set). */
   #committed = false
   /** The request is over: later aborts are ignored. */
   #completed = false
-  #abortReason: RequestAbortedError | undefined
-  #abortController: AbortController | undefined
+  #more: ContextState | undefined = undefined
 
+  /** `path` and `query`: `source.url` split; `client`: see {@link RequestContextInit.client}. */
   constructor(
     source: AdapterRequest,
-    init: {
-      readonly requestId: RequestId
-      readonly adapter: string
-      /** `source.url` split (default: split here). */
-      readonly url?: RequestTarget
-      readonly route: HttpRouteInfo | undefined
-      readonly params: Readonly<Record<string, string>>
-      readonly body: BodyPlan
-      /** Client address and protocol (`trustProxy`); default: the adapter's `ip` and `encrypted`. */
-      readonly client?: { readonly ip: string | undefined; readonly protocol: 'http' | 'https' } | undefined
-      /** Cookie defaults and signing key (plugin option `cookies`); default: secure defaults, no signing. */
-      readonly cookies?: CookieSettings
-    },
+    requestId: RequestId,
+    adapter: string,
+    path: string,
+    query: string,
+    route: HttpRouteInfo | undefined,
+    params: Readonly<Record<string, string>>,
+    body: BodyPlan,
+    cookies: CookieSettings,
+    client: RequestClient | undefined,
   ) {
     this.#source = source
-    this.#plan = init.body
-    this.#cookieSettings = init.cookies ?? DEFAULT_COOKIE_SETTINGS
-    const { path, query } = init.url ?? splitUrl(source.url)
+    this.#plan = body
+    this.#cookieSettings = cookies
     this.#rawQuery = query
-    this.requestId = init.requestId
+    this.requestId = requestId
     this.method = source.method
     this.url = source.url
     this.path = path
-    this.params = init.params
+    this.params = params
     this.headers = source.headers
-    this.route = init.route
+    this.route = route
     this.request = source.raw
     this.response = source.rawResponse
-    this.adapter = init.adapter
-    const connection = source.encrypted === true ? 'https' : 'http'
-    this.ip = init.client === undefined ? source.ip : init.client.ip
-    this.protocol = init.client === undefined ? connection : init.client.protocol
+    this.adapter = adapter
+    if (client === undefined) {
+      this.ip = source.ip
+      this.protocol = source.encrypted === true ? 'https' : 'http'
+    } else {
+      this.ip = client.ip
+      this.protocol = client.protocol
+    }
+  }
+
+  /** A context from named settings (defaults: `source.url` split, secure cookie defaults, the adapter's client). */
+  static of(source: AdapterRequest, init: RequestContextInit): RequestContext {
+    const { path, query } = init.url ?? splitUrl(source.url)
+    return new RequestContext(
+      source,
+      init.requestId,
+      init.adapter,
+      path,
+      query,
+      init.route,
+      init.params,
+      init.body,
+      init.cookies ?? DEFAULT_COOKIE_SETTINGS,
+      init.client,
+    )
+  }
+
+  /** The state created on first use. */
+  get #extra(): ContextState {
+    this.#more ??= new ContextState()
+    return this.#more
   }
 
   get query(): Readonly<QueryRecord> {
-    this.#query ??= parseQuery(this.#rawQuery)
-    return this.#query
+    const state = this.#extra
+    state.query ??= parseQuery(this.#rawQuery)
+    return state.query
   }
 
   get state(): Map<string | symbol, unknown> {
-    this.#state ??= new Map()
-    return this.#state
+    const state = this.#extra
+    state.state ??= new Map()
+    return state.state
   }
 
   get body(): unknown {
-    return this.#body
+    return this.#more?.body
   }
 
   get files(): Readonly<Record<string, readonly File[]>> {
-    return this.#files ?? NO_FILES
+    return this.#more?.files ?? NO_FILES
   }
 
   /** Maximum body size of the route, in bytes. */
@@ -307,17 +361,19 @@ export class RequestContext implements HttpContext {
   }
 
   get cookies(): Readonly<Record<string, string>> {
-    this.#cookies ??= parseCookieHeader(this.headers['cookie'])
-    return this.#cookies
+    const state = this.#extra
+    state.cookies ??= parseCookieHeader(this.headers['cookie'])
+    return state.cookies
   }
 
   signedCookie(name: string): string | undefined {
     const signer = this.#cookieSettings.signer
     if (signer === undefined) throw missingSecrets(`Cannot read the signed cookie ${JSON.stringify(String(name))}`)
-    this.#signed ??= new Map()
-    if (this.#signed.has(name)) return this.#signed.get(name)
+    const state = this.#extra
+    state.signed ??= new Map()
+    if (state.signed.has(name)) return state.signed.get(name)
     const value = verifySigned(signer, name, this.cookies[name])
-    this.#signed.set(name, value)
+    state.signed.set(name, value)
     return value
   }
 
@@ -364,18 +420,19 @@ export class RequestContext implements HttpContext {
   }
 
   get signal(): AbortSignal {
-    if (this.#abortController === undefined) {
+    const state = this.#extra
+    if (state.abortController === undefined) {
       const controller = new AbortController()
-      this.#abortController = controller
-      if (this.#abortReason !== undefined) controller.abort(this.#abortReason)
+      state.abortController = controller
+      if (state.abortReason !== undefined) controller.abort(state.abortReason)
       else if (!this.#completed) this.#source.onAbort?.(() => this.abort('client'))
     }
-    return this.#abortController.signal
+    return state.abortController.signal
   }
 
   /** Whether {@link signal} aborted (or will be created aborted). */
   get aborted(): boolean {
-    return this.#abortReason !== undefined
+    return this.#more?.abortReason !== undefined
   }
 
   /**
@@ -383,10 +440,11 @@ export class RequestContext implements HttpContext {
    * never once the request is over ({@link complete}).
    */
   abort(kind: RequestAbortKind): void {
-    if (this.#abortReason !== undefined || this.#completed) return
+    if (this.#more?.abortReason !== undefined || this.#completed) return
     const reason = new RequestAbortedError(kind)
-    this.#abortReason = reason
-    this.#abortController?.abort(reason)
+    const state = this.#extra
+    state.abortReason = reason
+    state.abortController?.abort(reason)
   }
 
   /** The response headers are handed to the adapter: cookies can no longer be set (internal). */
@@ -400,16 +458,18 @@ export class RequestContext implements HttpContext {
   }
 
   rawBody(): Promise<Uint8Array> {
-    if (this.#raw === undefined) {
-      if (this.#streamed) return Promise.reject(alreadyStreamed())
-      this.#raw = this.#source.readBody(this.#plan.limit)
+    const state = this.#extra
+    if (state.raw === undefined) {
+      if (state.streamed) return Promise.reject(alreadyStreamed())
+      state.raw = this.#source.readBody(this.#plan.limit)
     }
-    return this.#raw
+    return state.raw
   }
 
   bodyStream(): ReadableStream<Uint8Array> {
-    if (this.#raw !== undefined || this.#streamed) throw alreadyStreamed()
-    this.#streamed = true
+    const state = this.#extra
+    if (state.raw !== undefined || state.streamed) throw alreadyStreamed()
+    state.streamed = true
     return this.#openBodyStream()
   }
 
@@ -419,19 +479,22 @@ export class RequestContext implements HttpContext {
    * adapter discard the rest of the body, so that the connection can serve the next request.
    */
   releaseBody(): void {
-    const stop = this.#stopBody
-    this.#stopBody = undefined
+    const state = this.#more
+    if (state === undefined) return
+    const stop = state.stopBody
+    state.stopBody = undefined
     stop?.()
   }
 
   /** The body as a stream (see {@link releaseBody}). */
   #openBodyStream(): ReadableStream<Uint8Array> {
     const reader = openBodyStream(this.#source, this.#plan.limit).getReader()
+    const state = this.#extra
     let controller: ReadableStreamDefaultController<Uint8Array> | undefined
     const settle = (): void => {
-      this.#stopBody = undefined
+      state.stopBody = undefined
     }
-    this.#stopBody = (): void => {
+    state.stopBody = (): void => {
       reader.cancel().catch(() => undefined)
       try {
         controller?.error(new Error('The request is over: its body can no longer be read'))
@@ -469,27 +532,29 @@ export class RequestContext implements HttpContext {
   }
 
   parseBody(): Promise<unknown> {
-    this.#parsed ??= this.#parse()
-    return this.#parsed
+    const state = this.#extra
+    state.parsed ??= this.#parse()
+    return state.parsed
   }
 
   async #parse(): Promise<unknown> {
     const headers = this.headers
     const contentType = headers['content-type']
     const media = parseMediaType(contentType)
+    const state = this.#extra
     if (media?.type === 'multipart/form-data') {
       checkContentEncoding(headers['content-encoding'])
       const policy = this.#plan.multipart
       let result: MultipartResult
-      if (this.#raw === undefined) {
-        if (this.#streamed) throw alreadyStreamed()
-        this.#streamed = true
+      if (state.raw === undefined) {
+        if (state.streamed) throw alreadyStreamed()
+        state.streamed = true
         result = await readMultipart(this.#openBodyStream(), contentType as string, policy)
       } else {
-        result = parseMultipart(await this.#raw, contentType as string, policy)
+        result = parseMultipart(await state.raw, contentType as string, policy)
       }
-      this.#files = result.files
-      this.#body = result.fields
+      state.files = result.files
+      state.body = result.fields
       return result.fields
     }
     if (this.#plan.upload) {
@@ -503,7 +568,7 @@ export class RequestContext implements HttpContext {
     }
     const bytes = await this.rawBody()
     const body = await parseBody(bytes, contentType, headers['content-encoding'])
-    this.#body = body
+    state.body = body
     return body
   }
 }

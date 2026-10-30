@@ -194,6 +194,9 @@ const ROUTES = [
     return { cookie: true }
   }),
   route('status', '/status', () => ({ accepted: true }), { status: 202 }),
+  route('nothing', '/nothing', () => undefined, { method: 'POST' }),
+  route('emptyOk', '/empty-ok', () => undefined, { status: 200 }),
+  route('emptyNoContent', '/empty-no-content', () => undefined, { status: 204 }),
   route('noContent', '/no-content', () => ({ dropped: true }), { status: 204 }),
   route('withHeader', '/with-header', () => ({ fixed: true }), { headers: { 'x-fixed': 'yes' } }),
   route('create', '/create', (_c, ctx) => ({ created: ctx.body }), {
@@ -322,7 +325,10 @@ describe('fast lane', () => {
     ['toJSON returning undefined (500)', { url: '/to-json-undefined' }, '/to-json-undefined', false],
     ['a BigInt (500)', { url: '/bigint' }, '/bigint', false],
     ['a string', { url: '/string' }, '/string', false],
-    ['undefined (204)', { url: '/undefined' }, '/undefined', false],
+    ['undefined (204)', { url: '/undefined' }, '/undefined', true],
+    ['undefined from a POST route (201)', { method: 'POST', url: '/nothing' }, '/nothing', true],
+    ['undefined with @HttpCode(200)', { url: '/empty-ok' }, '/empty-ok', true],
+    ['undefined with @HttpCode(204)', { url: '/empty-no-content' }, '/empty-no-content', true],
     ['null', { url: '/null' }, '/null', false],
     ['a number', { url: '/number' }, '/number', false],
     ['a class instance', { url: '/instance' }, '/instance', false],

@@ -26,7 +26,7 @@ function request(overrides: Partial<AdapterRequest> = {}, body = ''): AdapterReq
 }
 
 function context(source: AdapterRequest, signer?: CookieSigner): RequestContext {
-  return new RequestContext(source, {
+  return RequestContext.of(source, {
     requestId: 'id-1' as RequestId,
     adapter: 'test',
     route: undefined,

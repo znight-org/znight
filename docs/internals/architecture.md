@@ -1542,8 +1542,8 @@ read in the async context of the handler (request-scoped providers and tracing k
 `@Header` (and a status that has a body) gets a specialised handler (`Pipeline.handler`). A request
 of the route's method takes it when no `http:request` wrapper or listener is registered and the
 server is not draining: the request scope is opened with `openScope`, the handler runs in it
-synchronously and a plain object or array result is serialised as JSON with the headers built in
-their final order from a template computed at boot, with no promise until something is
+synchronously and a plain object or array result is serialised as JSON (`undefined`: no body) with
+the headers built in their final order from a template computed at boot, with no promise until something is
 asynchronous (a body to read, a thenable result). Anything else (a malformed or unmatched path
 before the request starts; a thrown error, a thenable, any other result, headers or cookies set on
 the context after) continues in the general pipeline in the same scope; replies are identical

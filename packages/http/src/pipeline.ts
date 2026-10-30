@@ -183,8 +183,17 @@ function pooledUuid(): string {
   putHex(30, pool[at + 13] as number)
   putHex(32, pool[at + 14] as number)
   putHex(34, pool[at + 15] as number)
-  return uuidText.toString('latin1', 0, 36)
+  return readUuidText()
 }
+
+/**
+ * The text of {@link uuidText}: Node.js `Buffer#latin1Slice` (what `toString('latin1')` calls after
+ * checking its arguments) when present.
+ */
+const readUuidText: () => string =
+  typeof (uuidText as { latin1Slice?: unknown }).latin1Slice === 'function'
+    ? () => (uuidText as unknown as { latin1Slice(start: number, end: number): string }).latin1Slice(0, 36)
+    : () => uuidText.toString('latin1', 0, 36)
 
 /** UUID generator: Bun's native `crypto.randomUUID()` is the fastest there. */
 const uuid: () => string = isBun() ? () => crypto.randomUUID() : pooledUuid
@@ -212,6 +221,12 @@ export class Pipeline {
   readonly #jsonHeaders: Readonly<Record<string, HeaderValue>>
   /** The request id header of {@link #jsonHeaders}, `undefined` when the reply has none. */
   readonly #jsonIdHeader: string | undefined
+  /** The headers of a reply without body of the fast lane (the framework headers, see {@link #jsonHeaders}). */
+  readonly #emptyHeaders: Readonly<Record<string, HeaderValue>>
+  /** The request id header of {@link #emptyHeaders}, `undefined` when the reply has none. */
+  readonly #emptyIdHeader: string | undefined
+  /** The `cookies` option (secure defaults, no signing, when not set). */
+  readonly #cookies: CookieSettings
   #inflight = 0
   #idle: (() => void)[] = []
   /** Open event streams. */
@@ -232,16 +247,22 @@ export class Pipeline {
     this.#options = options
     this.#table = table
     this.#validIds = options.generateRequestId === randomRequestId
+    this.#cookies = options.cookies ?? DEFAULT_COOKIE_SETTINGS
     this.#securityHeaders = Object.entries(options.securityHeaders ?? {}).map(
       ([name, value]) => [name.toLowerCase(), value] as const,
     )
-    // what #complete adds to the headers of serializeResult for a JSON value (no CORS, not draining)
-    const json: Record<string, HeaderValue> = { 'content-type': ContentType.json, 'content-length': '0' }
+    // what #complete adds to the headers of serializeResult for a JSON value or no value (no CORS,
+    // not draining), with a placeholder where the request id goes
     const placeholder = '-' as RequestId
+    const idHeader = options.requestIdHeader
+    const json: Record<string, HeaderValue> = { 'content-type': ContentType.json, 'content-length': '0' }
     this.#frameworkHeaders(json, placeholder, undefined, false)
     this.#jsonHeaders = json
-    const idHeader = options.requestIdHeader
     this.#jsonIdHeader = idHeader !== undefined && json[idHeader] === placeholder ? idHeader : undefined
+    const empty: Record<string, HeaderValue> = {}
+    this.#frameworkHeaders(empty, placeholder, undefined, false)
+    this.#emptyHeaders = empty
+    this.#emptyIdHeader = idHeader !== undefined && empty[idHeader] === placeholder ? idHeader : undefined
   }
 
   /** Number of requests being processed. */
@@ -294,10 +315,16 @@ export class Pipeline {
     ) {
       return undefined
     }
-    // the status of a JSON reply (`@HttpCode` > 201 for POST routes > 200)
-    const status = definition.status ?? (definition.method === 'POST' ? 201 : 200)
-    if (isBodylessStatus(status)) return undefined
-    return { plan, target: { kind: 'route', plan }, method: definition.method, status }
+    // the statuses of serializeResult: `@HttpCode` > 201 for POST routes > 200 (JSON) or 204 (none)
+    const post = definition.method === 'POST'
+    const json = definition.status ?? (post ? 201 : 200)
+    return {
+      plan,
+      target: { kind: 'route', plan },
+      method: definition.method,
+      jsonStatus: isBodylessStatus(json) ? undefined : json,
+      emptyStatus: definition.status ?? (post ? 201 : 204),
+    }
   }
 
   /**
@@ -305,7 +332,8 @@ export class Pipeline {
    * of per request, without promises while the route stays synchronous. A request takes it when no
    * `http:request` wrapper nor listener is registered, the server is not draining and its method
    * is the route's (not a `HEAD` served by a `GET` route); a plain object or array returned by the
-   * handler is serialised as JSON with the headers in their final order (a precomputed template).
+   * handler is serialised as JSON, and `undefined` answered without body, with the headers in their
+   * final order (a template precomputed at boot).
    * Anything else — a malformed path (before the request starts), a thrown error, a thenable, an
    * `HttpResponse`, a `Response` or any other result, headers or cookies set through the context —
    * continues in the general pipeline, in the same request scope, with the same outcome.
@@ -374,7 +402,7 @@ export class Pipeline {
 
   /**
    * The fast lane in the request scope: the reply when the handler answered synchronously with a
-   * plain JSON value, otherwise the exchange finishing the request (see {@link #fast}).
+   * plain JSON value or `undefined`, otherwise the exchange finishing the request (see {@link #fast}).
    */
   readonly #fastRun = (route: FastRoute, request: AdapterRequest, ctx: RequestContext): AdapterReply | Exchange => {
     const plan = route.plan
@@ -441,22 +469,31 @@ export class Pipeline {
   }
 
   /**
-   * The reply of a plain JSON value (see {@link isPlainJson}): what `serializeResult` and
-   * {@link #complete} produce for it, the headers in their final order. `undefined` when the result
-   * or the context needs the general pipeline. Throws like `JSON.stringify`.
+   * The reply of a plain JSON value (see {@link isPlainJson}) or of `undefined`: what
+   * `serializeResult` and {@link #complete} produce for it, the headers in their final order.
+   * `undefined` when the result or the context needs the general pipeline. Throws like
+   * `JSON.stringify`.
    */
   #fastReply(route: FastRoute, ctx: RequestContext, result: unknown): AdapterReply | undefined {
-    if (!isPlainJson(result) || ctx.hasResponseHeaders || ctx.hasCookies) return undefined
+    const status = result === undefined ? route.emptyStatus : route.jsonStatus
+    if (status === undefined || ctx.hasResponseHeaders || ctx.hasCookies) return undefined
     const requestId = ctx.requestId
     // a custom generator's id that cannot be sent is left out (see #frameworkHeaders)
     if (!this.#validIds && !isHeaderValue(requestId)) return undefined
+    if (result === undefined) {
+      const headers: Record<string, HeaderValue> = { ...this.#emptyHeaders }
+      const idHeader = this.#emptyIdHeader
+      if (idHeader !== undefined) headers[idHeader] = requestId
+      return { status, headers, body: null }
+    }
+    if (!isPlainJson(result)) return undefined
     const json = JSON.stringify(result)
     if (json === undefined) throw new TypeError(`Cannot serialise a ${typeof result} as a response body`)
     const headers: Record<string, HeaderValue> = { ...this.#jsonHeaders }
     headers['content-length'] = String(Buffer.byteLength(json, 'utf8'))
     const idHeader = this.#jsonIdHeader
     if (idHeader !== undefined) headers[idHeader] = requestId
-    return { status: route.status, headers, body: utf8(json), text: json }
+    return { status, headers, body: utf8(json), text: json }
   }
 
   /** Ends a fast-lane request once its asynchronous part settled: its scope is closed, then it is over. */
@@ -643,19 +680,20 @@ export class Pipeline {
     body: BodyPlan,
   ): RequestContext {
     const proxy = this.#options.trustProxy
-    return new RequestContext(request, {
+    return new RequestContext(
+      request,
       requestId,
-      adapter: this.#options.adapter,
-      url: { path, query },
+      this.#options.adapter,
+      path,
+      query,
       route,
       params,
       body,
-      cookies: this.#options.cookies ?? DEFAULT_COOKIE_SETTINGS,
-      client:
-        proxy === undefined
-          ? undefined
-          : proxy.resolve(request.remoteAddress ?? request.ip, request.headers, request.encrypted === true),
-    })
+      this.#cookies,
+      proxy === undefined
+        ? undefined
+        : proxy.resolve(request.remoteAddress ?? request.ip, request.headers, request.encrypted === true),
+    )
   }
 
   /**
@@ -810,7 +848,7 @@ export class Pipeline {
   #checkCookies(reply: SerializedReply, ctx: RequestContext, event: HttpRequestEvent): CheckedReply {
     const cookies = reply.cookies
     if (cookies === undefined || cookies.length === 0) return reply
-    const settings = this.#options.cookies ?? DEFAULT_COOKIE_SETTINGS
+    const settings = this.#cookies
     const lines: SerializedCookie[] = []
     try {
       for (const cookie of cookies) lines.push(serializeWith(cookie, settings))
@@ -1215,8 +1253,10 @@ interface FastRoute {
   readonly target: Target
   /** The method of the route definition (requests of another method take the general pipeline). */
   readonly method: string
-  /** The status of a JSON reply. */
-  readonly status: number
+  /** The status of a JSON reply, `undefined` when it has no body (such replies take the general pipeline). */
+  readonly jsonStatus: number | undefined
+  /** The status of a reply without value (`undefined` returned). */
+  readonly emptyStatus: number
 }
 
 /** `#fastAsync` reads the body and runs the handler. */
