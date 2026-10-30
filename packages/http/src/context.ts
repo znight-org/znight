@@ -333,6 +333,11 @@ export class RequestContext implements HttpContext {
     return this.#jar === undefined ? NO_COOKIES : [...this.#jar.values()].map(entry => entry.cookie)
   }
 
+  /** Whether {@link setCookie} / {@link clearCookie} were called (internal). */
+  get hasCookies(): boolean {
+    return this.#jar !== undefined
+  }
+
   /** The `Set-Cookie` lines of {@link setCookie} / {@link clearCookie}, with their keys, in order (internal). */
   get cookieLines(): readonly SerializedCookie[] {
     return this.#jar === undefined ? NO_LINES : [...this.#jar].map(([key, entry]) => ({ key, line: entry.line }))

@@ -340,3 +340,113 @@ describe('currentScope', () => {
     expect(scope?.closed).toBe(true)
   })
 })
+
+describe('openScope', () => {
+  it('runs synchronous code in the scope and returns its result', async () => {
+    const container = create()
+    await container.init()
+    const scope = container.openScope([[HTTP_CONTEXT, { id: 'a' }]])
+    const state = scope.run((label: string) => [label, container.get(RequestState)] as const, 'run')
+    expect(state[0]).toBe('run')
+    expect(state[1].ctx.id).toBe('a')
+    // a second run is in the same scope
+    expect(scope.run(() => container.get(RequestState))).toBe(state[1])
+    expect(scope.context.get(HTTP_CONTEXT)).toEqual({ id: 'a' })
+    expect(container.currentScope()).toBeUndefined()
+    await scope.close()
+  })
+
+  it('keeps the scope in the continuations created by run', async () => {
+    const container = create()
+    await container.init()
+    const scope = container.openScope([[HTTP_CONTEXT, { id: 'later' }]])
+    const seen = await scope.run(async () => {
+      await sleep(1)
+      return container.get(RequestState).ctx.id
+    })
+    expect(seen).toBe('later')
+    await scope.close()
+  })
+
+  it('accepts seed values keyed by class, alias or token', async () => {
+    const container = Container.create(
+      meta(
+        { [t('Impl')]: factoryDef(() => 'impl', [], { scope: 'request' }) },
+        { aliases: { 'src/x.ts#Port': t('Impl') } },
+      ),
+    )
+    await container.init()
+    const scope = container.openScope([['src/x.ts#Port', 'seeded']])
+    expect(scope.run(() => container.get(t('Impl')))).toBe('seeded')
+    expect(scope.context.has(t('Impl'))).toBe(true)
+    expect(scope.close()).toBeUndefined()
+  })
+
+  it('closes synchronously when no instance was created', async () => {
+    const container = create()
+    await container.init()
+    const scope = container.openScope([[HTTP_CONTEXT, { id: 'a' }]])
+    expect(scope.run(() => container.get<Ctx>(HTTP_CONTEXT).id)).toBe('a')
+    expect(scope.close()).toBeUndefined()
+    expect(scope.context.closed).toBe(true)
+    expect(scope.close()).toBeUndefined()
+  })
+
+  it('disposes the instances created in the scope in reverse creation order', async () => {
+    const disposed: string[] = []
+    const container = create(disposed)
+    await container.init()
+    const scope = container.openScope([[HTTP_CONTEXT, { id: 'r' }]])
+    scope.run(() => {
+      container.get(t('Disposable'))
+      container.get(t('Handler'))
+    })
+    const closing = scope.close()
+    expect(closing).toBeInstanceOf(Promise)
+    expect(scope.close()).toBe(closing as Promise<void>)
+    await closing
+    expect(disposed).toEqual(['Handler r', 'Disposable r'])
+    expect(scope.context.closed).toBe(true)
+    const error = caughtSync(() => scope.run(() => container.get(RequestState))) as ZnightError
+    expect(error.code).toBe(ErrorCode.NoActiveScope)
+  })
+
+  it('rejects with ZNIGHT021 when a disposal fails', async () => {
+    const container = Container.create(
+      meta({
+        [t('Bad')]: factoryDef(
+          () => ({
+            [Symbol.asyncDispose]: () => Promise.reject(new Error('flush failed')),
+          }),
+          [],
+          { scope: 'request' },
+        ),
+      }),
+    )
+    await container.init()
+    const scope = container.openScope()
+    scope.run(() => container.get(t('Bad')))
+    const error = (await caught(() => scope.close())) as ZnightAggregateError
+    expect(error).toBeInstanceOf(ZnightAggregateError)
+    expect(error.code).toBe(ErrorCode.LifecycleFailed)
+    expect(error.message).toContain('flush failed')
+  })
+
+  it('isolates concurrent scopes', async () => {
+    const container = create()
+    await container.init()
+    const ids = Array.from({ length: 50 }, (_, index) => `req-${index}`)
+    const results = await Promise.all(
+      ids.map(async id => {
+        const scope = container.openScope([[HTTP_CONTEXT, { id }]])
+        const seen = await scope.run(async () => {
+          await sleep(Math.random() * 5)
+          return container.get(RequestState).ctx.id
+        })
+        await scope.close()
+        return seen
+      }),
+    )
+    expect(results).toEqual(ids)
+  })
+})

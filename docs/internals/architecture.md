@@ -1180,6 +1180,7 @@ class Container {
   tokenOf(key: ProviderKey): Token | undefined
   instances(): ManagedInstance[] // created singletons in resolution order, idempotent dispose()
   runInScope<R>(fn: () => R | Promise<R>, values?: Iterable<[ProviderKey, unknown]>): Promise<R>
+  openScope(values?: Iterable<[ProviderKey, unknown]>): OpenedScope // { context, run(fn, ...args), close() }
   currentScope(): ScopeContext | undefined // get / has / set / closed
   dispose(): Promise<void>
 }
@@ -1213,7 +1214,12 @@ type ProviderKey<T> = TypedToken<T> | ProviderClass<T> | ClassKey<T> // ClassKey
   request-scoped providers and request-scoped externals are resolved from it (ZNIGHT013 when
   absent); a seed value for a token bound as singleton/transient is ignored (the binding wins);
   instances created in the scope are disposed in reverse creation order when `fn` settles (only a
-  disposal failure rejects, with ZNIGHT021).
+  disposal failure rejects, with ZNIGHT021). `openScope` is the callback-free form for hot paths:
+  the same scope, whose owner calls `run(fn, ...args)` (synchronous; the code and the continuations
+  it creates see the scope) as many times as needed, then `close()`, which disposes the instances
+  created in it and returns `undefined` when there were none (nothing to wait for), otherwise a
+  promise rejecting with ZNIGHT021 when a disposal fails. Seed values are copied into the scope's
+  map when it is first read.
 - **Lifecycle** is duck-typed on instantiated singletons (compiled providers and `@Provides`
   values): `onStart`, `onReady`, `onStop`, then disposal (`dispose` method name,
   `Symbol.asyncDispose`, `Symbol.dispose`). Transient instances belong to their consumer.
@@ -1532,6 +1538,16 @@ none of them. The
 request scope (request-scoped instances) and the in-flight count last until a streamed response
 body (a file or `Blob` included) has been fully read or cancelled by the adapter; stream sources are
 read in the async context of the handler (request-scoped providers and tracing keep working).
+**Impl.** fast lane: when CORS is off, a route without guards, interceptors, `@Sse`, `@Res()` or
+`@Header` (and a status that has a body) gets a specialised handler (`Pipeline.handler`). A request
+of the route's method takes it when no `http:request` wrapper or listener is registered and the
+server is not draining: the request scope is opened with `openScope`, the handler runs in it
+synchronously and a plain object or array result is serialised as JSON with the headers built in
+their final order from a template computed at boot, with no promise until something is
+asynchronous (a body to read, a thenable result). Anything else (a malformed or unmatched path
+before the request starts; a thrown error, a thenable, any other result, headers or cookies set on
+the context after) continues in the general pipeline in the same scope; replies are identical
+byte for byte, header order included.
 
 - Path grammar: static segments, `:name` params, trailing `*` wildcard (`ctx.params['*']`); anything
   else ZNIGHT007 (at build time, and at boot for hand-written metadata). Routing happens on the

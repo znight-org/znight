@@ -93,6 +93,30 @@ export interface ManagedInstance {
 /** Seed values of a request scope: token-keyed pairs (aliases and known classes are accepted). */
 export type ScopeValues = Iterable<readonly [ProviderKey, unknown]>
 
+/**
+ * A request scope opened with {@link Container.openScope}: its owner runs code in it with
+ * {@link OpenedScope.run} and ends it with {@link OpenedScope.close}. The callback-free form of
+ * {@link Container.runInScope}, for hot paths that stay synchronous as long as their work is (the
+ * HTTP pipeline): no promise is created unless something is asynchronous.
+ */
+export interface OpenedScope {
+  /** The values of the scope (what `currentScope()` returns in {@link run}). */
+  readonly context: ScopeContext
+  /**
+   * Calls `fn(...args)` in the scope and returns its result. The code it runs and the asynchronous
+   * continuations it creates (awaits, promise callbacks, timers) see the scope, like the callback
+   * of `runInScope`. May be called several times until the scope is closed.
+   */
+  run<A extends readonly unknown[], R>(fn: (...args: A) => R, ...args: A): R
+  /**
+   * Closes the scope (a later resolution of a request-scoped provider in it throws ZNIGHT013) and
+   * disposes the instances created in it, in reverse creation order. Returns `undefined` when no
+   * instance was created (nothing to wait for), otherwise a promise rejecting with ZNIGHT021 when a
+   * disposal fails. Idempotent: later calls return the first result.
+   */
+  close(): Promise<void> | undefined
+}
+
 type Status = 'open' | 'initializing' | 'ready' | 'failed' | 'disposed'
 
 interface InitRun {
@@ -706,10 +730,26 @@ export class Container {
     return result
   }
 
+  /**
+   * Opens a request scope seeded with `values`, like {@link runInScope}, but without running
+   * anything: the caller runs code in it (`run`) and closes it (`close`) when the work it started
+   * is over. Request-scoped providers resolved in it are disposed by `close`, which must be called.
+   */
+  openScope(values?: ScopeValues): OpenedScope {
+    let seeds: unknown[] | undefined
+    if (values !== undefined) {
+      seeds = []
+      for (const [key, value] of values) seeds.push(this.#canonical(key), value)
+    }
+    return new ScopeHandle(this.#storage, new RequestScope(this.#canonical, seeds), this.#closeScopeFn)
+  }
+
   /** The active request scope, if any. */
   currentScope(): ScopeContext | undefined {
     return this.#storage.getStore()
   }
+
+  readonly #closeScopeFn = (scope: RequestScope): Promise<unknown[]> => this.#closeScope(scope)
 
   async #closeScope(scope: RequestScope): Promise<unknown[]> {
     scope.closed = true
@@ -1009,5 +1049,52 @@ function disposeQuietly(instance: unknown, method: string | undefined): void {
     if (isThenable(result)) result.then(undefined, () => undefined)
   } catch {
     // best effort
+  }
+}
+
+/** Implementation of {@link OpenedScope}. */
+class ScopeHandle implements OpenedScope {
+  readonly #storage: AsyncLocalStorage<RequestScope>
+  readonly #scope: RequestScope
+  readonly #dispose: (scope: RequestScope) => Promise<unknown[]>
+  #closed = false
+  #closing: Promise<void> | undefined
+
+  constructor(
+    storage: AsyncLocalStorage<RequestScope>,
+    scope: RequestScope,
+    dispose: (scope: RequestScope) => Promise<unknown[]>,
+  ) {
+    this.#storage = storage
+    this.#scope = scope
+    this.#dispose = dispose
+  }
+
+  get context(): ScopeContext {
+    return this.#scope
+  }
+
+  run<A extends readonly unknown[], R>(fn: (...args: A) => R, ...args: A): R {
+    return this.#storage.run(this.#scope, fn, ...args)
+  }
+
+  close(): Promise<void> | undefined {
+    if (this.#closed) return this.#closing
+    this.#closed = true
+    const scope = this.#scope
+    if (scope.created.length === 0) {
+      scope.closed = true
+      return undefined
+    }
+    this.#closing = this.#dispose(scope).then(errors => {
+      if (errors.length > 0) {
+        throw new ZnightAggregateError(
+          ErrorCode.LifecycleFailed,
+          `Failed to dispose ${errors.length} request-scoped instance(s)`,
+          errors,
+        )
+      }
+    })
+    return this.#closing
   }
 }

@@ -17,7 +17,7 @@ export {
   type ProviderValues,
   type ShutdownOptions,
 } from './application.ts'
-export { Container, type InitOptions, type ManagedInstance, type ScopeValues } from './container.ts'
+export { Container, type InitOptions, type ManagedInstance, type OpenedScope, type ScopeValues } from './container.ts'
 export {
   type ClassMarker,
   Factory,
