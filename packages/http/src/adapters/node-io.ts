@@ -308,7 +308,10 @@ export function writeNodeReply(response: ServerResponse, reply: AdapterReply): v
   try {
     // one call (merged over headers set earlier with setHeader(), e.g. by Express middleware); the
     // cookies set earlier are kept before the reply's own (writeHead would replace them)
-    const headers = withNativeCookies(response.getHeader('set-cookie'), reply.headers)
+    const headers =
+      reply.headers['set-cookie'] === undefined
+        ? reply.headers
+        : withNativeCookies(response.getHeader('set-cookie'), reply.headers)
     response.writeHead(reply.status, headers as OutgoingHttpHeaders)
   } catch {
     // invalid header name or value set by user code
