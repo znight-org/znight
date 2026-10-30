@@ -1,0 +1,84 @@
+# The documentation site (VitePress, docs/) on GitHub Pages. The release workflow deploys it after
+# each stable release, so that the site documents the version on npm. A manual run (Actions > Docs >
+# Run workflow, on main) redeploys it: by default the latest release, or the tag or branch given in
+# `ref` (a fix of the docs between two releases). See RELEASING.md.
+name: Docs
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Tag, branch or commit to deploy (default the latest release)
+        type: string
+        default: ""
+  workflow_call:
+    inputs:
+      ref:
+        description: Commit to deploy
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build the site
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pages: read # configure-pages reads the site settings (base path, URL)
+    steps:
+      - name: Version to document
+        id: ref
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ inputs.ref }}
+        run: |
+          if [ -z "$REF" ]; then
+            REF=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName 2>/dev/null || true)
+          fi
+          if [ -z "$REF" ]; then
+            echo "::error::No release yet: give a tag, branch or commit in the ref input."
+            exit 1
+          fi
+          echo "Deploying the documentation of $REF"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          ref: ${{ steps.ref.outputs.ref }}
+      - uses: ./.github/actions/setup
+      - name: GitHub Pages settings
+        id: pages
+        uses: actions/configure-pages@v6
+      - name: Build
+        env:
+          # e.g. /znight/ and https://znight-org.github.io for a project site (none with a custom domain)
+          ZNIGHT_DOCS_BASE: ${{ steps.pages.outputs.base_path }}
+          ZNIGHT_DOCS_URL: ${{ steps.pages.outputs.origin }}
+        run: bun run docs:build
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: docs/.vitepress/dist
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      pages: write # deploy
+      id-token: write # authenticate the deployment
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v5

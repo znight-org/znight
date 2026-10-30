@@ -12,6 +12,3 @@
 - [ ] Docs updated (`docs/`, package READMEs) when the public API or behaviour changes
 - [ ] **Changeset added** (`bun run changeset`) when a published `@znight/*` package changes for its users
   (features, fixes, dependency changes). Not needed for docs, tests, examples or CI only.
-
-<!-- Slow suites (e2e, Docker integration, packed-tarball smoke test) run on main; add the `ci:full`
-label to run them on this pull request. -->

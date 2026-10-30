@@ -410,8 +410,9 @@ ORM owns the data layer, Znight owns the wiring.
 
 ## Documentation
 
-The documentation site is built with VitePress from [`docs/`](./docs). It is not deployed yet: read
-the pages on GitHub, or browse them locally with `bun run docs:dev`.
+The documentation site, [znight-org.github.io/znight](https://znight-org.github.io/znight/), is
+built with VitePress from [`docs/`](./docs) and published with each release. Browse it locally
+with `bun run docs:dev`.
 
 - **Start**: [Introduction](./docs/guide/introduction.md) ·
   [Getting started](./docs/guide/getting-started.md) ·

@@ -67,8 +67,10 @@ Every change must keep these. A change that bends one starts with an RFC (see [R
 | `@znight/testing`       | `TestBed` (auto-mocked dependencies), `TestApp` (in-memory end-to-end tests), mocks and spies                                                                                    |
 | `@znight/cli`           | The `znight` binary: `new`, `generate`, `g`, `dev`, `build`, `start`, `openapi`                                                                                                  |
 
-Release tooling (CI, Changesets, a `RELEASING.md` procedure) is being set up in pull request #1 and
-is not merged yet.
+Releases: [`RELEASING.md`](RELEASING.md). `main` is protected, so every change goes through a pull
+request whose CI (`ci.yml`) and CI (full) (`ci-full.yml`) pass. Changesets feed a "chore: version
+packages" pull request; merging it publishes to npm after an approval in the `npm` environment, then
+deploys the docs site to GitHub Pages (`docs.yml`).
 
 ### Product decisions
 
@@ -251,6 +253,10 @@ Affects, Decision) and a row in `rfcs/README.md`. Implement it only once it is a
 - Biome: 2 spaces, 120 columns, single quotes, no semicolons, trailing commas; imports grouped as
   type imports, then `node:` and packages, then relative paths. `bun run check` must report no error.
 - Conventional Commits: `feat(http): ...`, `fix(compiler): ...`, `docs: ...`.
+- Never push to `main`: work on a branch and open a pull request. A change that users of a
+  published package see comes with a changeset (`bun run changeset`, or a `.changeset/<name>.md`
+  file: `'@znight/http': patch` front matter and a one-line summary; `minor` for a breaking change
+  before 1.0). Docs-, tests-, examples- or CI-only changes need none.
 
 ### Error codes
 

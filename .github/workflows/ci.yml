@@ -1,18 +1,22 @@
-# Fast checks, on every pull request and every push to main.
-# The slow suites (e2e, Docker integration, packed-tarball smoke test) are in ci-full.yml.
+# Fast checks: every pull request, every push to main, and before every release (the release
+# workflow calls it on the commit it publishes). The slow suites are in ci-full.yml. See RELEASING.md.
 name: CI
 
 on:
   pull_request:
   push:
     branches: [ main ]
+  # manual runs, and the release workflow running it on the version pull request (see release.yml)
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # a new push to a pull request cancels its previous run; every other run (main, manual, called by
+  # the release workflow) has a group of its own and is never cancelled
+  group: ci-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -24,11 +28,22 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+          # the changeset reminder of pull requests compares with the base branch
+          fetch-depth: ${{ github.event_name == 'pull_request' && 0 || 1 }}
       - uses: ./.github/actions/setup
       - name: Biome
         run: bun run check
       - name: Workflows (actionlint)
         run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color
+      - name: Changeset
+        # a reminder, never a failure: a change users do not see needs no changeset
+        if: github.event_name == 'pull_request' && github.head_ref != 'changeset-release/main'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if ! bun run changeset status --since="origin/$BASE_REF" > /dev/null 2>&1; then
+            echo "::warning title=No changeset::This pull request changes packages without a changeset. If users see the change, add one with \`bun run changeset\` (see .changeset/README.md)."
+          fi
 
   typecheck:
     name: Typecheck

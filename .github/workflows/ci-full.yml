@@ -1,37 +1,32 @@
 # Slow suites: end-to-end tests, Docker integration tests and the packed-tarball smoke test.
 #
-# They run on every push to main, on demand (Actions > CI (full) > Run workflow) and on pull
-# requests labelled `ci:full`. Set the repository variable CI_FULL_ON_PR=true to run them on every
-# pull request (recommended once the repository is public: Actions minutes are free). See RELEASING.md.
+# Every pull request, every push to main, before every release (the release workflow calls it on
+# the commit it publishes) and once a week, to catch what changes without a commit (base images,
+# brokers, the npm registry). See RELEASING.md.
 name: CI (full)
 
 on:
+  pull_request:
   push:
     branches: [ main ]
-  pull_request:
-    types: [ opened, synchronize, reopened, labeled ]
+  schedule:
+    - cron: "0 4 * * 1" # Mondays, 04:00 UTC
+  # manual runs, and the release workflow running it on the version pull request (see release.yml)
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
 
 concurrency:
-  # adding an unrelated label must not cancel a running suite: it gets a group of its own (and skips)
-  group: >-
-    ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}${{
-    github.event.action == 'labeled' && github.event.label.name != 'ci:full'
-    && format('-label-{0}', github.event.label.name) || '' }}
+  # a new push to a pull request cancels its previous run; every other run has a group of its own
+  group: ci-full-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   e2e:
     # every e2e suite starts the production builds on Node.js 24 AND on Bun: one job covers both
     name: E2E (Node 24 + Bun)
-    if: >-
-      github.event_name != 'pull_request' || (
-        (github.event.action != 'labeled' || github.event.label.name == 'ci:full') &&
-        (contains(github.event.pull_request.labels.*.name, 'ci:full') || vars.CI_FULL_ON_PR == 'true')
-      )
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -46,11 +41,6 @@ jobs:
 
   integration:
     name: Integration (Docker)
-    if: >-
-      github.event_name != 'pull_request' || (
-        (github.event.action != 'labeled' || github.event.label.name == 'ci:full') &&
-        (contains(github.event.pull_request.labels.*.name, 'ci:full') || vars.CI_FULL_ON_PR == 'true')
-      )
     runs-on: ubuntu-latest
     timeout-minutes: 45
     services:
@@ -89,11 +79,6 @@ jobs:
 
   smoke:
     name: Packed tarballs (${{ matrix.pm }})
-    if: >-
-      github.event_name != 'pull_request' || (
-        (github.event.action != 'labeled' || github.event.label.name == 'ci:full') &&
-        (contains(github.event.pull_request.labels.*.name, 'ci:full') || vars.CI_FULL_ON_PR == 'true')
-      )
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:

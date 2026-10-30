@@ -28,7 +28,7 @@ main(async () => {
   }
   if (pending.length > 0) {
     log.info(`Pending changesets (${pending.length}): ${pending.join(', ')}`)
-    log.info('→ the "Version Packages" pull request must be merged before publishing.')
+    log.info('→ the "chore: version packages" pull request must be merged before publishing.')
   }
   log.info(publishable ? `→ ready to publish ${unpublished.length} package(s).` : '→ nothing to publish.')
 

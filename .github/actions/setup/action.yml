@@ -5,7 +5,7 @@ description: >-
 
 inputs:
   build:
-    description: Build the packages (`bun run build`) and re-link the workspace binaries.
+    description: Build the packages (`bun run build`).
     default: "false"
 
 runs:
@@ -31,10 +31,8 @@ runs:
       run: bun install --frozen-lockfile
 
     - name: Build packages
+      # the examples' `znight` binary (packages/cli/bin/znight.mjs, linked by the install) loads
+      # packages/cli/dist/cli.mjs, and their Vite configs load the built packages
       if: inputs.build == 'true'
       shell: bash
-      run: |
-        bun run build
-        # the `znight` binary (packages/cli/dist/cli.mjs) only exists after the build:
-        # a second install links it into the examples' node_modules/.bin
-        bun install --frozen-lockfile
+      run: bun run build

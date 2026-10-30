@@ -2594,7 +2594,16 @@ injectable services and never throws.
 
 ## 12. Release
 
-Being set up in pull request #1 (continuous integration, Changesets and a `RELEASING.md` maintainer
-procedure), not merged into `main` yet: this section will describe the process once it lands. The
-principles do not change: every `@znight/*` package is versioned in lockstep (§2) and packed with
-`bun pm pack`, which rewrites the `workspace:` and `catalog:` ranges.
+Every `@znight/*` package is versioned in lockstep (§2, a `fixed` Changesets group) and packed with
+`bun pm pack`, which rewrites the `workspace:` and `catalog:` ranges. The process, detailed in
+[`RELEASING.md`](https://github.com/znight-org/znight/blob/main/RELEASING.md):
+
+- every change reaches `main` through a pull request whose CI passes (fast checks, then end-to-end,
+  Docker integration and packed-tarball smoke tests on Node.js 24 and Bun); user-facing changes
+  carry a changeset;
+- changesets on `main` feed a "chore: version packages" pull request (versions and changelogs);
+- merging it runs every check again on that commit, then publishes the versions missing from npm
+  after an approval in the `npm` environment (npm trusted publishing with provenance), tags
+  `vX.Y.Z`, creates the GitHub release and deploys the documentation site to GitHub Pages;
+- the release script refuses tarballs that are incomplete (README, LICENSE, `dist`, `exports`
+  targets, `bin` shebangs), that keep a `workspace:` or `catalog:` range, or whose versions differ.

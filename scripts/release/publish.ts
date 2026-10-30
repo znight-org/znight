@@ -141,7 +141,7 @@ main(async () => {
   const tag = values.tag ?? distTagFor(version)
   const pending = pendingChangesets()
   if (pending.length > 0) {
-    const message = `Pending changesets (${pending.join(', ')}): merge the "Version Packages" pull request (or run \`bun run version\`) before publishing`
+    const message = `Pending changesets (${pending.join(', ')}): merge the "chore: version packages" pull request (or run \`bun run version\`) before publishing`
     if (!dryRun) throw new Error(message)
     log.warn(message)
   }

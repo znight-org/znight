@@ -137,6 +137,13 @@ bun run docs:build   # production build, fails on dead links
 
 ## Releases
 
-All `@znight/*` packages are versioned in lockstep. Continuous integration, Changesets and the
-release procedure are being set up in pull request #1, not merged into `main` yet; this section
-will link to the maintainer documentation once it lands.
+Every change to `main` goes through a pull request whose checks pass: CI (lint, typecheck, build
+and pack, unit and example tests, docs build) and CI (full) (end-to-end tests on Node.js and Bun,
+Docker integration tests, the packed packages installed in a fresh application).
+
+All `@znight/*` packages are versioned in lockstep with [Changesets](https://changesets.dev): a pull
+request that changes a published package for its users adds a changeset (`bun run changeset`;
+before 1.0, a breaking change is a minor bump, everything else a patch). Changesets merged into
+`main` feed a "chore: version packages" pull request; merging it releases a new version to npm
+after a maintainer's approval, and deploys this site to GitHub Pages. The maintainer guide is
+[`RELEASING.md`](https://github.com/znight-org/znight/blob/main/RELEASING.md).
