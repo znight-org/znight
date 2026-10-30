@@ -38,9 +38,8 @@ factories, in an order computed at build time. It is the approach of [Micronaut]
 and [Dagger](https://dagger.dev), brought to TypeScript.
 
 > [!NOTE]
-> Znight is approaching its first public release, `0.1.0`. Every package is implemented, documented
-> and tested on Node.js 24 and Bun, with runnable [example applications](#examples). The packages are
-> not on npm yet: until they are, try Znight from this repository (see [Contributing](#contributing)).
+> Znight `0.1.0` is its first public release, on npm under the `@znight` scope. Every package is
+> documented and tested on Node.js 24 and Bun, with runnable [example applications](#examples).
 > Before 1.0, minor versions may still change APIs.
 
 ## Why compile-time DI?

@@ -17,7 +17,7 @@ ahead of time. It is the approach of Micronaut and Dagger, brought to TypeScript
 `reflect-metadata`, no `emitDecoratorMetadata`, wiring errors at build time.
 
 - Repository: <https://github.com/znight-org/znight> (MIT), npm scope `@znight`.
-- Version `0.1.0`, every `@znight/*` package versioned in lockstep, **not published yet**.
+- Version `0.1.0`, published on npm, every `@znight/*` package versioned in lockstep.
 - Runtime packages run on Node.js >= 24 and Bun >= 1.3, ESM only.
 
 ## Principles
