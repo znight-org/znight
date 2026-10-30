@@ -179,7 +179,7 @@ jobs:
   # in `needs`. It runs whatever happened (a skipped required check would count as passed) and fails
   # unless every job succeeded.
   all-checks-complete:
-    name: all-checks-complete
+    name: All Checks Complete
     if: always()
     needs: [ lint, typecheck, build, test, docs, e2e, integration, smoke ]
     runs-on: ubuntu-latest
