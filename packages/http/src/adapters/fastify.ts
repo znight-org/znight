@@ -3,6 +3,8 @@
  * peer dependency `fastify`). Routing uses Fastify's router; body parsing, validation and
  * serialisation stay Znight's, so responses are identical to the other adapters.
  */
+
+import type { OutgoingHttpHeaders } from 'node:http'
 import type {
   AdapterCloseOptions,
   AdapterHandler,
@@ -19,12 +21,15 @@ import type {
 } from '../adapter.ts'
 import type { HeaderValue } from '../exceptions.ts'
 
+import { tracingChannel } from 'node:diagnostics_channel'
 import { Readable } from 'node:stream'
 import Fastify, {
   type FastifyInstance,
   type FastifyReply,
   type FastifyRequest,
   type FastifyServerOptions,
+  type HookHandlerDoneFunction,
+  type RouteOptions,
 } from 'fastify'
 
 import { toFastifyPath } from '../path.ts'
@@ -87,11 +92,68 @@ const MAX_PARAM_LENGTH = 8192
 /** `content-type` headers hidden from Fastify (see `#register`), by request. */
 const HIDDEN_CONTENT_TYPES = new WeakMap<object, string>()
 
+/**
+ * Fastify's tracing channel of route handlers: while it has subscribers (an APM), every request runs
+ * Fastify's whole lifecycle, so that the handler is traced.
+ */
+const HANDLER_CHANNEL = tracingChannel('fastify.request.handler')
+
+/** The `config` key marking a Znight route that may be served from the `onRequest` hook (see `#onRoute`). */
+const DIRECT = Symbol('znight.direct')
+
+/** The hooks that run between `onRequest` and the route handler. */
+const HANDLER_HOOKS = ['onRequest', 'preParsing', 'preValidation', 'preHandler'] as const
+
+/** What `#onRoute` records about a Znight route (in its `config`). */
+interface DirectRoute {
+  readonly handler: AdapterHandler
+  /** No route-level `onSend` or `onResponse` hook. */
+  readonly bare: boolean
+}
+
+/**
+ * How the requests of a Fastify route context are served, decided on its first request (see
+ * `#lane`): `handler` from the `onRequest` hook, and `raw` when a text reply may be written on the
+ * raw response.
+ */
+interface Lane {
+  readonly handler: AdapterHandler
+  readonly raw: boolean
+}
+
+/**
+ * The fields of Fastify's route context (`request[Symbol('fastify.context')]`) read by the adapter.
+ * They are internal: the adapter only skips Fastify's lifecycle when they have the expected shape.
+ */
+interface RouteContext {
+  readonly config?: Readonly<Record<PropertyKey, unknown>>
+  readonly preParsing?: unknown
+  readonly preValidation?: unknown
+  readonly preHandler?: unknown
+  readonly onSend?: unknown
+  readonly onResponse?: unknown
+}
+
+/** The keys of Fastify's internal request and reply state read by the adapter (`null`: not found). */
+interface InternalKeys {
+  /** The route context of a request. */
+  readonly context: symbol | null
+  /** The headers set with `reply.header()`. */
+  readonly headers: symbol | null
+  /** The trailers set with `reply.trailer()`. */
+  readonly trailers: symbol | null
+}
+
 class FastifyHttpAdapter implements FastifyAdapter {
   readonly name = 'fastify' as const
   readonly instance: FastifyInstance
   readonly #routes: AdapterRoute[] = []
   readonly #tracker: ConnectionTracker
+  /** The Fastify handler of each Znight route (before Fastify binds it). */
+  readonly #handlers = new Map<unknown, AdapterHandler>()
+  /** By Fastify route context: how its requests are served (`null`: through Fastify's lifecycle). */
+  readonly #lanes = new WeakMap<object, Lane | null>()
+  #keys: InternalKeys | undefined
   #fallback: FallbackHandler | undefined
   #ready: Promise<void> | undefined
   #closing: Promise<void> | undefined
@@ -133,23 +195,19 @@ class FastifyHttpAdapter implements FastifyAdapter {
       // Znight reads and parses bodies itself: accept every content type without consuming it
       child.removeAllContentTypeParsers()
       child.addContentTypeParser('*', (_request, _payload, done) => done(null, undefined))
-      // Fastify answers 415 to a content type it cannot parse (`foo`, an empty one) before the route
-      // runs: hide such a header from Fastify (Znight reads it, and parses the body as bytes)
-      child.addHook('onRequest', (request, _reply, done) => {
-        const contentType = request.headers['content-type']
-        if (contentType !== undefined && request.mediaType === undefined) {
-          HIDDEN_CONTENT_TYPES.set(request.raw, contentType)
-          delete request.raw.headers['content-type']
-        }
-        done()
-      })
+      child.addHook('onRequest', this.#onRequest)
+      // added last: sees the route options once every other `onRoute` hook changed them
+      child.addHook('onRoute', this.#onRoute)
       for (const route of routes) {
         const handler = route.handler
+        const fastifyHandler = (request: FastifyRequest, reply: FastifyReply): Promise<FastifyReply> =>
+          this.#reply(reply, handler(adapterRequest(request, reply)))
+        this.#handlers.set(fastifyHandler, handler)
         child.route({
           method: route.method,
           url: toFastifyPath(route.path),
           exposeHeadRoute: false,
-          handler: (request, reply) => this.#reply(reply, handler(adapterRequest(request, reply))),
+          handler: fastifyHandler,
         })
       }
       child.setNotFoundHandler((request, reply) =>
@@ -163,6 +221,121 @@ class FastifyHttpAdapter implements FastifyAdapter {
     await this.instance.ready()
   }
 
+  /**
+   * Records in the `config` of a Znight route whether it may be served from the `onRequest` hook:
+   * its handler is still the adapter's (no `onRoute` hook wrapped it) and no route-level hook or
+   * schema runs between `onRequest` and the handler. The hooks of the instance are checked on the
+   * first request (see `#lane`).
+   */
+  readonly #onRoute = (options: RouteOptions): void => {
+    const handler = this.#handlers.get(options.handler)
+    if (handler === undefined || options.schema !== undefined) return
+    if (HANDLER_HOOKS.some(hook => hasHooks(options[hook]))) return
+    const route: DirectRoute = { handler, bare: !hasHooks(options.onSend) && !hasHooks(options.onResponse) }
+    options.config = { ...options.config, [DIRECT]: route }
+  }
+
+  /**
+   * The `onRequest` hook of the Znight context. A route request that no later hook, schema or
+   * tracing subscriber needs (see `#lane`) is served from here: Fastify skips its content type
+   * parsing and the steps between this hook and the handler, which do nothing for Znight routes.
+   * Otherwise the request goes on through Fastify's lifecycle.
+   */
+  readonly #onRequest = (request: FastifyRequest, reply: FastifyReply, done: HookHandlerDoneFunction): void => {
+    const lane = this.#lane(request, reply)
+    if (lane !== null && !HANDLER_CHANNEL.hasSubscribers) {
+      this.#serve(lane, request, reply)
+      return
+    }
+    // Fastify answers 415 to a content type it cannot parse (`foo`, an empty one) before the route
+    // runs: hide such a header from Fastify (Znight reads it, and parses the body as bytes)
+    const contentType = request.headers['content-type']
+    if (contentType !== undefined && request.mediaType === undefined) {
+      HIDDEN_CONTENT_TYPES.set(request.raw, contentType)
+      delete request.raw.headers['content-type']
+    }
+    done()
+  }
+
+  /**
+   * How the requests of the route of `request` are served, decided once per route context: from the
+   * `onRequest` hook when `#onRoute` marked the route and the instance has no `preParsing`,
+   * `preValidation` or `preHandler` hook (the `onRequest` hook of the Znight context is then the
+   * last one); with a text reply written on the raw response when no `onSend` or `onResponse` hook
+   * runs either (see `#writeRaw`). `null`: through Fastify's lifecycle (404s, hooks, a Fastify
+   * version whose route context differs).
+   */
+  #lane(request: FastifyRequest, reply: FastifyReply): Lane | null {
+    this.#keys ??= {
+      context: ownSymbol(request, 'fastify.context'),
+      headers: ownSymbol(reply, 'fastify.reply.headers'),
+      trailers: ownSymbol(reply, 'fastify.reply.trailers'),
+    }
+    const key = this.#keys.context
+    const context = key === null ? undefined : (request as unknown as Record<symbol, unknown>)[key]
+    if (typeof context !== 'object' || context === null) return null
+    let lane = this.#lanes.get(context)
+    if (lane === undefined) {
+      lane = laneOf(context as RouteContext, this.#keys)
+      this.#lanes.set(context, lane)
+    }
+    return lane
+  }
+
+  /** Serves a route request from the `onRequest` hook (see `#lane`). */
+  #serve(lane: Lane, request: FastifyRequest, reply: FastifyReply): void {
+    let pending: Promise<AdapterReply>
+    try {
+      pending = lane.handler(new FastifyAdapterRequest(request, reply, reply))
+    } catch (error) {
+      // what Fastify does when a route handler throws
+      reply.send(asError(error))
+      return
+    }
+    pending.then(
+      result => this.#settle(lane, reply, result),
+      () => this.#settle(lane, reply, internalError()),
+    )
+  }
+
+  /** Writes the reply of a request served from the `onRequest` hook; a failure is handled like Fastify does. */
+  #settle(lane: Lane, reply: FastifyReply, result: AdapterReply): void {
+    try {
+      if (!lane.raw || !this.#writeRaw(reply, result)) this.#write(reply, result)
+    } catch (error) {
+      // what Fastify does when the promise of a route handler rejects
+      if (reply.sent) reply.log.error({ err: error }, 'Promise errored, but reply.sent = true was set')
+      else reply.send(asError(error))
+    }
+  }
+
+  /**
+   * Writes a text reply on the raw response, as `reply.send(text)` would without `onSend` hook: one
+   * `writeHead()` with the same headers in the same order, then the text. Only when nothing set
+   * reply headers or trailers before (an `onRequest` hook) and Fastify would send the headers and
+   * text unchanged (content type, exact `content-length`). Returns whether it wrote the reply.
+   */
+  #writeRaw(reply: FastifyReply, result: AdapterReply): boolean {
+    const text = result.text
+    const body = result.body
+    if (text === undefined || !(body instanceof Uint8Array) || result.raw === true) return false
+    const headers = result.headers
+    const length = headers['content-length']
+    if (typeof length !== 'string' || Number(length) !== body.byteLength) return false
+    if (!sendsTextAsIs(headers['content-type'])) return false
+    const response = reply.raw
+    if (reply.sent || response.destroyed || response.headersSent || reply.request.raw.httpVersionMajor !== 1) {
+      return false
+    }
+    const keys = this.#keys as InternalKeys
+    const state = reply as unknown as Record<symbol, unknown>
+    if (keys.headers === null || keys.trailers === null || state[keys.trailers] !== null) return false
+    if (!isEmptyRecord(state[keys.headers])) return false
+    response.writeHead(result.status, headers as OutgoingHttpHeaders)
+    response.end(text)
+    return true
+  }
+
   #dispatchFallback(request: FastifyRequest, reply: FastifyReply, error: unknown): Promise<AdapterReply> {
     if (this.#fallback === undefined) return Promise.reject(error ?? new Error('No fallback handler'))
     return this.#fallback(adapterRequest(request, undefined, reply), error)
@@ -173,15 +346,17 @@ class FastifyHttpAdapter implements FastifyAdapter {
     try {
       result = await pending
     } catch {
-      result = {
-        status: 500,
-        headers: { 'content-type': 'application/json; charset=utf-8' },
-        body: new TextEncoder().encode('{"statusCode":500,"error":"Internal Server Error"}'),
-      }
+      result = internalError()
     }
+    this.#write(reply, result)
+    return reply
+  }
+
+  /** Writes a reply through Fastify (`reply.send()`: `onSend` hooks...). */
+  #write(reply: FastifyReply, result: AdapterReply): void {
     if (result.raw === true || reply.sent || reply.raw.destroyed) {
       discardStream(result.body instanceof ReadableStream ? result.body : null)
-      return reply
+      return
     }
     if (result.eventStream === true) {
       // no onSend hook (compression, ETag...) may rewrite an event stream: write it on the raw
@@ -191,19 +366,24 @@ class FastifyHttpAdapter implements FastifyAdapter {
       const headers = { ...native, ...withNativeCookies(native['set-cookie'], result.headers) }
       reply.hijack()
       writeNodeReply(reply.raw, { ...result, headers })
-      return reply
+      return
     }
     reply.code(result.status)
-    for (const name of Object.keys(result.headers)) reply.header(name, result.headers[name])
+    const headers = result.headers
+    for (const name of Object.keys(headers)) reply.header(name, headers[name])
     const body = result.body
-    if (body === null) return reply.send()
+    if (body === null) {
+      reply.send()
+      return
+    }
     if (body instanceof Uint8Array) {
       // a string is written with the headers at once (bytes take a second write)
-      if (result.text !== undefined && sendsTextAsIs(result.headers['content-type'])) return reply.send(result.text)
-      return reply.send(Buffer.isBuffer(body) ? body : Buffer.from(body.buffer, body.byteOffset, body.byteLength))
+      if (result.text !== undefined && sendsTextAsIs(headers['content-type'])) reply.send(result.text)
+      else reply.send(Buffer.isBuffer(body) ? body : Buffer.from(body.buffer, body.byteOffset, body.byteLength))
+      return
     }
     const stream = body instanceof Blob ? body.stream() : body
-    return reply.send(Readable.fromWeb(stream as import('node:stream/web').ReadableStream))
+    reply.send(Readable.fromWeb(stream as import('node:stream/web').ReadableStream))
   }
 
   async listen(port: number, host: string): Promise<HttpServerAddress> {
@@ -238,6 +418,48 @@ class FastifyHttpAdapter implements FastifyAdapter {
     const inject = this.instance.inject as unknown as (options: LightInjectOptions) => Promise<unknown>
     const response = await inject.call(this.instance, options)
     return lightStreamResponse(response as Parameters<typeof lightStreamResponse>[0], request.signal)
+  }
+}
+
+/**
+ * The lane of a route context (see `FastifyHttpAdapter.#lane`). Once the instance is ready, every
+ * lifecycle hook list of a context is `null` or a non-empty array.
+ */
+function laneOf(context: RouteContext, keys: InternalKeys): Lane | null {
+  const route = context.config?.[DIRECT] as DirectRoute | undefined
+  if (route === undefined) return null
+  if (context.preParsing !== null || context.preValidation !== null || context.preHandler !== null) return null
+  const raw = route.bare && context.onSend === null && context.onResponse === null
+  return { handler: route.handler, raw: raw && keys.headers !== null && keys.trailers !== null }
+}
+
+/** Whether a route option holds hooks (a function or a non-empty array). */
+function hasHooks(value: unknown): boolean {
+  return value !== undefined && value !== null && !(Array.isArray(value) && value.length === 0)
+}
+
+/** An own symbol-keyed property of a Fastify object, by the symbol's description (internal state). */
+function ownSymbol(target: object, description: string): symbol | null {
+  for (const symbol of Object.getOwnPropertySymbols(target)) if (symbol.description === description) return symbol
+  return null
+}
+
+function isEmptyRecord(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null) return false
+  for (const _key in value) return false
+  return true
+}
+
+function asError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error), { cause: error })
+}
+
+/** The last-resort 500 of a handler promise that rejected (the pipeline maps errors: should not happen). */
+function internalError(): AdapterReply {
+  return {
+    status: 500,
+    headers: { 'content-type': 'application/json; charset=utf-8' },
+    body: new TextEncoder().encode('{"statusCode":500,"error":"Internal Server Error"}'),
   }
 }
 

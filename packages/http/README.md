@@ -1638,8 +1638,16 @@ HttpPlugin.configure({ adapter: fastifyAdapter({ instance }) })
 
 Znight routes are registered in an encapsulated context with their own body handling and 404
 handler, so your other routes keep Fastify's parsers. A `content-type` Fastify cannot parse (`foo`,
-an empty one) is hidden from Fastify for Znight routes, which then answer like on the other adapters
-instead of Fastify's `415`. Created instances use
+an empty one) never reaches Fastify's parsers for Znight routes, which then answer like on the other
+adapters instead of Fastify's `415`.
+
+Znight parses bodies itself, so a Znight route that no other hook needs is served straight from the
+`onRequest` hook of its context: Fastify skips its content type parsing and the steps before the
+handler, and a text reply is written on the raw response exactly as `reply.send()` writes it. Your
+hooks always run: with a `preParsing`, `preValidation` or `preHandler` hook (or an `onRoute` hook
+wrapping the handler, a schema, a subscriber of the `fastify.request.handler` tracing channel), the
+request goes through Fastify's whole lifecycle; with an `onSend` or `onResponse` hook, or headers
+and trailers set by an `onRequest` hook, the reply goes through `reply.send()`. Created instances use
 `exposeHeadRoutes: false` (Znight serves HEAD), a `maxParamLength` of 8 KiB and a
 `frameworkErrors` handler rendering Znight errors (with your own instance, malformed URLs are
 answered by Fastify). `inject()` uses `fastify.inject()`. Event streams are sent through
