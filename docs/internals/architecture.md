@@ -2598,12 +2598,11 @@ Every `@znight/*` package is versioned in lockstep (§2, a `fixed` Changesets gr
 `bun pm pack`, which rewrites the `workspace:` and `catalog:` ranges. The process, detailed in
 [`RELEASING.md`](https://github.com/znight-org/znight/blob/main/RELEASING.md):
 
-- every change reaches `main` through a pull request whose fast checks pass (lint, typecheck,
-  build and pack, unit and example tests, docs build); the slow suites (end-to-end, Docker
-  integration and packed-tarball smoke tests on Node.js 24 and Bun) run on it too; user-facing
-  changes carry a changeset;
+- every change reaches `main` through a pull request whose CI passes (lint, typecheck, build and
+  pack, unit and example tests, docs build, end-to-end, Docker integration and packed-tarball smoke
+  tests on Node.js 24 and Bun); user-facing changes carry a changeset;
 - changesets on `main` feed a "chore: version packages" pull request (versions and changelogs);
-- merging it runs every check again on that commit, then publishes the versions missing from npm
+- merging it runs CI on that commit, like every push to `main`, then publishes the versions missing from npm
   after an approval in the `npm` environment (npm trusted publishing with provenance), tags
   `vX.Y.Z`, creates the GitHub release and deploys the documentation site to GitHub Pages;
 - the release script refuses tarballs that are incomplete (README, LICENSE, `dist`, `exports`

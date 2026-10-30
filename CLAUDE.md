@@ -68,10 +68,10 @@ Every change must keep these. A change that bends one starts with an RFC (see [R
 | `@znight/cli`           | The `znight` binary: `new`, `generate`, `g`, `dev`, `build`, `start`, `openapi`                                                                                                  |
 
 Releases: [`RELEASING.md`](RELEASING.md). `main` is protected, so every change goes through a pull
-request whose CI (`ci.yml`) passes; CI (full) (`ci-full.yml`) runs too, and every release runs it
-again before publishing. Changesets feed a "chore: version packages" pull request; merging it
-publishes to npm after an approval in the `npm` environment, then deploys the docs site to GitHub
-Pages (`docs.yml`).
+request whose CI (`ci.yml`, every check; the ruleset requires its `all-checks-complete` job)
+passes. A push to `main` only starts `release.yml`, which runs CI on the pushed commit. Changesets
+feed a "chore: version packages" pull request; merging it publishes to npm after an approval in the
+`npm` environment, then deploys the docs site to GitHub Pages (`docs.yml`).
 
 ### Product decisions
 

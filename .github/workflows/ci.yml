@@ -1,21 +1,25 @@
-# Fast checks: every pull request, every push to main, and before every release (the release
-# workflow calls it on the commit it publishes). The slow suites are in ci-full.yml. See RELEASING.md.
+# Every check: lint, typecheck, build and pack, unit and example tests, docs build, end-to-end
+# tests, Docker integration tests and the packed-tarball smoke test. See RELEASING.md.
+#
+# On every pull request; on main, the release workflow runs it on every push (main starts no CI run
+# of its own); every Monday, to catch what changes without a commit (base images, brokers, the npm
+# registry); and on demand. The ruleset of main requires one check: all-checks-complete.
 name: CI
 
 on:
   pull_request:
-  push:
-    branches: [ main ]
-  workflow_dispatch:
-  # the release workflow, on the commit it is about to publish
+  # the release workflow, on every push to main
   workflow_call:
+  schedule:
+    - cron: "0 4 * * 1" # Mondays, 04:00 UTC
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  # a new push to a pull request cancels its previous run; every other run (main, manual, called by
-  # the release workflow) has a group of its own and is never cancelled
+  # a new push to a pull request cancels its previous run; every other run (called by the release
+  # workflow, scheduled, manual) has a group of its own and is never cancelled
   group: ci-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
@@ -102,3 +106,95 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup
       - run: bun run docs:build
+
+  e2e:
+    # every e2e suite starts the production builds on Node.js 24 AND on Bun: one job covers both
+    name: E2E (Node 24 + Bun)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          build: "true"
+      - name: Examples, golden and CLI e2e
+        run: bun run test:e2e
+
+  integration:
+    name: Integration (Docker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      # the worker example's e2e publishes jobs to a real broker (ZNIGHT_E2E_RABBITMQ_URL)
+      rabbitmq:
+        image: rabbitmq:4.1-alpine
+        ports:
+          - 5672:5672
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 5s
+          --health-timeout 10s
+          --health-retries 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          build: "true"
+      - name: Messaging drivers (RabbitMQ, LocalStack SQS, Kafka via testcontainers)
+        run: bun run test:integration
+      # only the RabbitMQ scenarios (the in-memory ones run in the e2e job), one example at a time
+      - name: Worker example e2e against RabbitMQ
+        working-directory: examples/worker
+        env:
+          ZNIGHT_E2E: "1"
+          ZNIGHT_E2E_RABBITMQ_URL: amqp://guest:guest@localhost:5672
+        run: bun run test -t RabbitMQ
+      - name: Microservice example e2e against RabbitMQ
+        working-directory: examples/microservice
+        env:
+          ZNIGHT_E2E: "1"
+          ZNIGHT_INTEGRATION: "1"
+        run: bun run test -t RabbitMQ
+
+  smoke:
+    name: Packed tarballs (${{ matrix.pm }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        pm: [ npm, bun ]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          build: "true"
+      - name: Install the tarballs in a clean app, build it, run it on Node.js 24 and Bun
+        run: bun run release:smoke --pm ${{ matrix.pm }}
+
+  # The only check required by the ruleset of main: a job added above is required once it is listed
+  # in `needs`. It runs whatever happened (a skipped required check would count as passed) and fails
+  # unless every job succeeded.
+  all-checks-complete:
+    name: all-checks-complete
+    if: always()
+    needs: [ lint, typecheck, build, test, docs, e2e, integration, smoke ]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every job succeeded
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          failed=$(jq -r 'to_entries | map(select(.value.result != "success") | "\(.key) (\(.value.result))") | join(", ")' <<< "$RESULTS")
+          if [ -n "$failed" ]; then
+            echo "::error title=CI failed::Not successful: $failed"
+            exit 1
+          fi
+          echo "Every job succeeded."

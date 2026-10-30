@@ -1,20 +1,21 @@
-# Releases (see RELEASING.md). Like every change to main, a release goes through pull requests.
+# Releases, and the CI of main (see RELEASING.md). Like every change to main, a release goes through
+# pull requests.
 #
-# 1. Pull requests bring their changesets to main (`bun run changeset`).
-# 2. On every push to main, `version` opens or updates the "chore: version packages" pull request.
-#    Opened with the GITHUB_TOKEN, its CI runs wait for a maintainer's "Approve workflows to run".
-# 3. Merging it bumps the versions and the changelogs. On that push, `plan` finds a version missing
-#    from npm (or without its GitHub release); CI and CI (full) run again on that exact commit; then
-#    `publish` waits for an approval in the `npm` environment (its required reviewers), publishes,
-#    tags vX.Y.Z, creates the GitHub release, and `docs` deploys the documentation of that tag to
-#    GitHub Pages.
+# On every push to main:
+# - `ci` runs every check (ci.yml) on the pushed commit: main starts no CI run of its own;
+# - `version` opens or updates the "chore: version packages" pull request with the changesets of
+#   main. Opened with the GITHUB_TOKEN, its CI run waits for a maintainer's "Approve workflows to run";
+# - `plan` finds a version missing from npm (or without its GitHub release), which happens once the
+#   version pull request is merged. Then, once `ci` passed on that exact commit, `publish` waits for
+#   an approval in the `npm` environment (its required reviewers), publishes, tags vX.Y.Z, creates
+#   the GitHub release, and `docs` deploys the documentation of that tag to GitHub Pages.
 #
 # A failed release is retried with "Re-run failed jobs" on its run (same commit). A manual run
 # (Actions > Release > Run workflow, on main) does the same from the current main, or with
 # "Dry run" (the default) packs, verifies and runs `npm publish --dry-run` without publishing.
 #
-# npm authentication: the NPM_TOKEN secret when set (bootstrap: the first release), otherwise npm
-# trusted publishing (OIDC). Provenance is attested for public repositories.
+# npm authentication: the NPM_TOKEN secret when set (only to publish a new package for the first
+# time), otherwise npm trusted publishing (OIDC). Provenance is attested for public repositories.
 name: Release
 
 on:
@@ -96,18 +97,11 @@ jobs:
             echo "missing=true" >> "$GITHUB_OUTPUT"
           fi
 
-  # the gates, on the exact commit about to be published (a dry run skips them)
+  # every check, on the pushed commit: the CI of main, and the gate of `publish` (a dry run skips it)
   ci:
     name: CI
-    needs: plan
-    if: needs.plan.outputs.release == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.dry_run)
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
     uses: ./.github/workflows/ci.yml
-
-  ci-full:
-    name: CI (full)
-    needs: plan
-    if: needs.plan.outputs.release == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.dry_run)
-    uses: ./.github/workflows/ci-full.yml
 
   dry-run:
     name: Publish (dry run)
@@ -129,7 +123,7 @@ jobs:
 
   publish:
     name: Publish to npm
-    needs: [ plan, ci, ci-full ]
+    needs: [ plan, ci ]
     if: needs.plan.outputs.release == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.dry_run)
     runs-on: ubuntu-latest
     timeout-minutes: 20
