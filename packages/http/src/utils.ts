@@ -25,6 +25,23 @@ export function emptyRecord<V>(): Record<string, V> {
   return Object.create(null) as Record<string, V>
 }
 
+/**
+ * Constructor of {@link fastRecord}: its prototype is an empty, frozen object without prototype, so
+ * nothing is inherited (`__proto__`, `constructor`, `toString`... are plain own keys).
+ */
+const FastRecord = function FastRecord() {} as unknown as new () => object
+FastRecord.prototype = Object.freeze(Object.create(null))
+
+/**
+ * A `Record` that inherits nothing, like {@link emptyRecord}, but that V8 keeps in fast mode: an
+ * `Object.create(null)` object is a dictionary, about twice as slow to fill and enumerate (response
+ * headers: built, completed and enumerated on every request). Its prototype is not `null` (an empty
+ * frozen object): use {@link emptyRecord} for records handed to user code (query, fields...).
+ */
+export function fastRecord<V>(): Record<string, V> {
+  return new FastRecord() as Record<string, V>
+}
+
 /** Whether the code runs on Bun. */
 export function isBun(): boolean {
   return typeof (globalThis as { Bun?: unknown }).Bun !== 'undefined'

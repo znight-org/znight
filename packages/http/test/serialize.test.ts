@@ -127,6 +127,44 @@ describe('serializeResult', () => {
     expect(cancelled).toBe(true)
   })
 
+  it('sends the UTF-8 bytes of the text, their length in content-length', () => {
+    for (const value of ['héllo', 'a\ud800b', '\udc00', '€'.repeat(100), { name: '😀 \ud800' }]) {
+      const reply = serializeResult(value, GET)
+      const bytes = reply.body as Uint8Array
+      expect(reply.text).toBe(typeof value === 'string' ? value : JSON.stringify(value))
+      // a lone surrogate is sent as U+FFFD (3 bytes), whether an adapter sends `text` or `body`
+      expect([...bytes]).toEqual([...Buffer.from(reply.text as string, 'utf8')])
+      expect(reply.headers['content-length']).toBe(String(bytes.byteLength))
+      const head = serializeResult(value, { ...GET, method: 'HEAD' })
+      expect(head.body).toBeNull()
+      expect(head.headers['content-length']).toBe(String(bytes.byteLength))
+    }
+    const error = serializeError(400, { message: 'bad \ud800' }, 'GET')
+    expect(error.headers['content-length']).toBe(String((error.body as Uint8Array).byteLength))
+    expect(serializeError(400, { message: 'bad \ud800' }, 'HEAD').headers['content-length']).toBe(
+      error.headers['content-length'],
+    )
+  })
+
+  it('builds header records that inherit nothing (any header name is an own key)', () => {
+    const context = JSON.parse('{"__proto__":"p","constructor":"c","toString":"t"}') as Record<string, string>
+    const reply = serializeResult({ a: 1 }, { ...GET, context })
+    expect(Object.keys(reply.headers)).toEqual([
+      'content-type',
+      'content-length',
+      '__proto__',
+      'constructor',
+      'tostring',
+    ])
+    expect(Object.getOwnPropertyDescriptor(reply.headers, '__proto__')?.value).toBe('p')
+    for (const plain of [serializeResult({ a: 1 }, GET), serializeError(500, {}, 'GET')]) {
+      for (const name of ['__proto__', 'constructor', 'toString', 'hasOwnProperty', 'valueOf']) {
+        expect(plain.headers[name]).toBeUndefined()
+        expect(name in plain.headers).toBe(false)
+      }
+    }
+  })
+
   it('serialises errors as JSON', async () => {
     const reply = serializeError(404, { statusCode: 404 }, 'GET')
     expect(reply.status).toBe(404)
@@ -183,5 +221,11 @@ describe('HttpResponse', () => {
     Object.defineProperty(HttpResponseLike, 'name', { value: 'HttpResponse' })
     expect(isHttpResponse(new HttpResponseLike())).toBe(true)
     expect(isHttpResponse({ body: 1, headers: {} })).toBe(false)
+    expect(isHttpResponse([1])).toBe(false)
+    expect(isHttpResponse(Object.assign(Object.create(null), { body: 1, headers: {} }))).toBe(false)
+    // an object literal whose own `constructor` looks like the class is still recognised
+    expect(isHttpResponse({ constructor: { name: 'HttpResponse' }, body: 1, headers: {} })).toBe(true)
+    expect(isHttpResponse({ constructor: { name: 'HttpResponse' }, body: 1 })).toBe(false)
+    expect([null, undefined, 'x', 1].some(isHttpResponse)).toBe(false)
   })
 })

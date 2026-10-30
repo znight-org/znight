@@ -45,7 +45,7 @@ import { isSseBody, isSseSource, type SseOptions, SseSession, type SseSource } f
 import { isBodylessStatus } from './status.ts'
 import { type ContextRunner, captureContext, discardStream, trackStream } from './stream.ts'
 import { HttpTokens } from './tokens.ts'
-import { emptyRecord, errorMessage, isBun, isThenable } from './utils.ts'
+import { emptyRecord, errorMessage, fastRecord, isBun, isThenable } from './utils.ts'
 
 /** A dependency of the pipeline: an instance resolved at bootstrap, or a token resolved per request. */
 export type Resolvable<T> = { readonly instance: T } | { readonly token: Token }
@@ -255,11 +255,14 @@ export class Pipeline {
     // not draining), with a placeholder where the request id goes
     const placeholder = '-' as RequestId
     const idHeader = options.requestIdHeader
-    const json: Record<string, HeaderValue> = { 'content-type': ContentType.json, 'content-length': '0' }
+    // records without Object.prototype, like the serialiser's: any header name is an own property
+    const json = fastRecord<HeaderValue>()
+    json['content-type'] = ContentType.json
+    json['content-length'] = '0'
     this.#frameworkHeaders(json, placeholder, undefined, false)
     this.#jsonHeaders = json
     this.#jsonIdHeader = idHeader !== undefined && json[idHeader] === placeholder ? idHeader : undefined
-    const empty: Record<string, HeaderValue> = {}
+    const empty = fastRecord<HeaderValue>()
     this.#frameworkHeaders(empty, placeholder, undefined, false)
     this.#emptyHeaders = empty
     this.#emptyIdHeader = idHeader !== undefined && empty[idHeader] === placeholder ? idHeader : undefined
@@ -491,10 +494,12 @@ export class Pipeline {
     const json = JSON.stringify(result)
     if (json === undefined) throw new TypeError(`Cannot serialise a ${typeof result} as a response body`)
     const headers: Record<string, HeaderValue> = { ...this.#jsonHeaders }
-    headers['content-length'] = String(Buffer.byteLength(json, 'utf8'))
+    // encoded once, its length from the bytes (see serialize.ts encodeText)
+    const body = utf8(json)
+    headers['content-length'] = String(body.byteLength)
     const idHeader = this.#jsonIdHeader
     if (idHeader !== undefined) headers[idHeader] = requestId
-    return { status, headers, body: utf8(json), text: json }
+    return { status, headers, body, text: json }
   }
 
   /** Ends a fast-lane request once its asynchronous part settled: its scope is closed, then it is over. */
