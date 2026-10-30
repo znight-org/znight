@@ -1,0 +1,38 @@
+name: Setup
+description: >-
+  Installs Bun (the version of package.json#packageManager) and Node.js 24, installs the dependencies
+  (Bun cache restored from bun.lock) and optionally builds the packages.
+
+inputs:
+  build:
+    description: Build the packages (`bun run build`).
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - uses: oven-sh/setup-bun@v2
+      with:
+        bun-version-file: package.json
+
+    - uses: actions/setup-node@v7
+      with:
+        node-version: 24
+
+    - name: Restore the Bun install cache
+      uses: actions/cache@v6
+      with:
+        path: ~/.bun/install/cache
+        key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+        restore-keys: bun-${{ runner.os }}-
+
+    - name: Install dependencies
+      shell: bash
+      run: bun install --frozen-lockfile
+
+    - name: Build packages
+      # the examples' `znight` binary (packages/cli/bin/znight.mjs, linked by the install) loads
+      # packages/cli/dist/cli.mjs, and their Vite configs load the built packages
+      if: inputs.build == 'true'
+      shell: bash
+      run: bun run build

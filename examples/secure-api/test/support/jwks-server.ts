@@ -41,8 +41,10 @@ export async function startJwksServer(jwks: JSONWebKeySet): Promise<JwksServer> 
     hits: path => hits.get(path) ?? 0,
     close: () =>
       new Promise<void>((resolve, reject) => {
-        server.closeAllConnections()
+        // stop listening first: on Bun 1.4.2, closeAllConnections() also stops the server, and a
+        // close() after it fails with ERR_SERVER_NOT_RUNNING
         server.close(error => (error ? reject(error) : resolve()))
+        server.closeAllConnections()
       }),
   }
 }

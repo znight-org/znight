@@ -1,0 +1,104 @@
+# Fast checks: every pull request, every push to main, and before every release (the release
+# workflow calls it on the commit it publishes). The slow suites are in ci-full.yml. See RELEASING.md.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+  # the release workflow, on the commit it is about to publish
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  # a new push to a pull request cancels its previous run; every other run (main, manual, called by
+  # the release workflow) has a group of its own and is never cancelled
+  group: ci-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  lint:
+    name: Lint & format
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          # the changeset reminder of pull requests compares with the base branch
+          fetch-depth: 0
+      - uses: ./.github/actions/setup
+      - name: Biome
+        run: bun run check
+      - name: Workflows (actionlint)
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color
+      - name: Changeset
+        # a reminder, never a failure: a change users do not see needs no changeset
+        if: github.event_name == 'pull_request' && github.head_ref != 'changeset-release/main'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if ! git rev-parse --verify --quiet "origin/$BASE_REF" > /dev/null; then
+            echo "::warning title=Changeset reminder skipped::origin/$BASE_REF is not in the checkout"
+          elif ! bun run changeset status --since="origin/$BASE_REF" > /dev/null; then
+            echo "::warning title=No changeset::This pull request changes packages without a changeset. If users see the change, add one with \`bun run changeset\` (see .changeset/README.md)."
+          fi
+
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          build: "true"
+      - run: bun run typecheck
+
+  build:
+    name: Build & pack
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          build: "true"
+      - name: Pack and verify the tarballs
+        run: bun run release:pack
+      - name: Release status
+        run: bun run release:status
+
+  test:
+    name: Unit & example tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          build: "true"
+      - name: Unit tests
+        run: bun run test
+      - name: Example tests
+        run: bun run test:examples
+
+  docs:
+    name: Docs build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: bun run docs:build

@@ -452,6 +452,11 @@ skipped (committed offsets never move back); the buffered records of the partiti
 dropped, their new owner handles them. On shutdown, unsettled records are not committed and are
 consumed again later.
 
+With `createTopics`, a topic created concurrently (by another consumer, such as the collector of a
+dead-letter topic, or another instance) counts as created. Transient broker errors are retried by the
+client (`connection.retries`), and by the driver for the topics still missing when an existing topic
+stopped those retries; startup then fails with the error code and message of each topic.
+
 ## Hooks
 
 ```ts

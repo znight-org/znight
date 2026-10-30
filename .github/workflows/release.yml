@@ -1,0 +1,202 @@
+# Releases (see RELEASING.md). Like every change to main, a release goes through pull requests.
+#
+# 1. Pull requests bring their changesets to main (`bun run changeset`).
+# 2. On every push to main, `version` opens or updates the "chore: version packages" pull request.
+#    Opened with the GITHUB_TOKEN, its CI runs wait for a maintainer's "Approve workflows to run".
+# 3. Merging it bumps the versions and the changelogs. On that push, `plan` finds a version missing
+#    from npm (or without its GitHub release); CI and CI (full) run again on that exact commit; then
+#    `publish` waits for an approval in the `npm` environment (its required reviewers), publishes,
+#    tags vX.Y.Z, creates the GitHub release, and `docs` deploys the documentation of that tag to
+#    GitHub Pages.
+#
+# A failed release is retried with "Re-run failed jobs" on its run (same commit). A manual run
+# (Actions > Release > Run workflow, on main) does the same from the current main, or with
+# "Dry run" (the default) packs, verifies and runs `npm publish --dry-run` without publishing.
+#
+# npm authentication: the NPM_TOKEN secret when set (bootstrap: the first release), otherwise npm
+# trusted publishing (OIDC). Provenance is attested for public repositories.
+name: Release
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Dry run (pack, verify and `npm publish --dry-run`, nothing is published)
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    name: Version packages pull request
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: release-version-pr
+      cancel-in-progress: false
+    permissions:
+      contents: write # the changeset-release/main branch
+      pull-requests: write # the pull request
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - name: Create or update the pull request
+        id: changesets
+        uses: changesets/action@v2.1.2
+        with:
+          version-script: bun run version
+          commit-message: "chore: version packages"
+          pr-title: "chore: version packages"
+      - name: CI of the pull request
+        if: steps.changesets.outputs.pr-number != ''
+        env:
+          PR: ${{ steps.changesets.outputs.pr-number }}
+        # events of the GITHUB_TOKEN start no run by themselves: GitHub creates the pull request's CI
+        # runs pending, and a maintainer starts them from the pull request
+        run: >-
+          echo "::notice title=Version pull request #${PR}::Up to date. Start its CI with
+          \"Approve workflows to run\" on the pull request, then merge it to release."
+
+  plan:
+    name: Release plan
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.status.outputs.version }}
+      # a version to release: no pending changeset, and the version missing from npm or without its
+      # GitHub release (a release whose tag step failed is finished by the next run)
+      release: >-
+        ${{ steps.status.outputs.pending-changesets == 'false' && (steps.status.outputs.publishable == 'true'
+        || steps.github.outputs.missing == 'true') }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - name: Versions not on npm yet
+        id: status
+        run: bun scripts/release/status.ts
+      - name: GitHub release of that version
+        id: github
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.status.outputs.version }}
+        run: |
+          if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "missing=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "missing=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  # the gates, on the exact commit about to be published (a dry run skips them)
+  ci:
+    name: CI
+    needs: plan
+    if: needs.plan.outputs.release == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.dry_run)
+    uses: ./.github/workflows/ci.yml
+
+  ci-full:
+    name: CI (full)
+    needs: plan
+    if: needs.plan.outputs.release == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.dry_run)
+    uses: ./.github/workflows/ci-full.yml
+
+  dry-run:
+    name: Publish (dry run)
+    needs: plan
+    if: github.event_name == 'workflow_dispatch' && inputs.dry_run
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          build: "true"
+      - name: Pack, verify, npm publish --dry-run
+        env:
+          ZNIGHT_REPOSITORY_VISIBILITY: ${{ github.event.repository.visibility }}
+        run: bun scripts/release/publish.ts --dry-run
+
+  publish:
+    name: Publish to npm
+    needs: [ plan, ci, ci-full ]
+    if: needs.plan.outputs.release == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.dry_run)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # the approval of a required reviewer of this environment is the go of the release
+    environment:
+      name: npm
+      url: https://www.npmjs.com/org/znight
+    concurrency:
+      # one publish at a time, never cancelled halfway
+      group: release-publish
+      cancel-in-progress: false
+    permissions:
+      contents: write # tag + GitHub release
+      id-token: write # npm trusted publishing (OIDC) and provenance
+      actions: read # read the protection rules of the npm environment
+    steps:
+      - name: Require an approval
+        # a push never publishes without a reviewer's approval (a manual run is an explicit go)
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          reviewers=$(gh api "repos/$GITHUB_REPOSITORY/environments/npm" \
+            --jq '[.protection_rules[]? | select(.type == "required_reviewers")] | length')
+          if [ "$reviewers" = "0" ]; then
+            echo "::error::The npm environment has no required reviewers: refusing to publish without an approval. Add reviewers (Settings > Environments > npm), then re-run this job or run the Release workflow manually."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          build: "true"
+
+      - name: Publish
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          ZNIGHT_REPOSITORY_VISIBILITY: ${{ github.event.repository.visibility }}
+        run: bun scripts/release/publish.ts
+
+      - name: Tag and GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "Release v$VERSION already exists"
+            exit 0
+          fi
+          bun scripts/release/notes.ts "$VERSION" > "$RUNNER_TEMP/notes.md"
+          prerelease=()
+          if [[ "$VERSION" == *-* ]]; then prerelease=(--prerelease); fi
+          gh release create "v$VERSION" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "v$VERSION" --notes-file "$RUNNER_TEMP/notes.md" "${prerelease[@]}"
+
+  docs:
+    name: Documentation
+    needs: [ plan, publish ]
+    # the site documents the latest stable version: a prerelease (1.0.0-beta.1) does not replace it
+    if: ${{ !contains(needs.plan.outputs.version, '-') }}
+    uses: ./.github/workflows/docs.yml
+    with:
+      # the tag the publish job made sure of: the released commit, even on a later run
+      ref: v${{ needs.plan.outputs.version }}
+    permissions:
+      contents: read
+      pages: write
+      id-token: write

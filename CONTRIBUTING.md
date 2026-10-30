@@ -119,6 +119,12 @@ The [full contributing guide](./docs/contributing/index.md#repository-layout) de
 
 ## Pull requests
 
+Every change to `main` goes through a pull request, the maintainers' included, and is merged once
+CI passes (lint, typecheck, build and pack, unit and example tests, docs build). CI (full) also
+runs on every pull request (end-to-end tests on Node.js and Bun, Docker integration tests, the
+packed packages installed in a fresh application); it is not required to merge, but every release
+runs it again before publishing.
+
 - Keep each pull request focused on one change, and link the issue or the RFC it addresses.
 - Before pushing, run `bun run check`, `bun run typecheck` and `bun run test`; add
   `bun run test:examples` when an example changes and `bun run docs:build` when the docs change.
@@ -126,11 +132,13 @@ The [full contributing guide](./docs/contributing/index.md#repository-layout) de
 
 ## Add a changeset
 
-All `@znight/*` packages are versioned in lockstep. The release tooling (Changesets and continuous
-integration) lands with the CI pull request. Once it is merged, every change to a published package
-needs a changeset: run `bun run changeset`, select the packages and the bump (before 1.0, a breaking
-change is a minor bump), write the changelog entry, and commit the generated `.changeset/*.md` file
-with your change. Until then, describe the user-facing changes in the pull request.
+All `@znight/*` packages are versioned in lockstep with [Changesets](https://changesets.dev). A pull
+request that changes a published package for its users (a feature, a fix, a behaviour or dependency
+change) adds a changeset: run `bun run changeset`, pick the bump (before 1.0, a breaking change is a
+minor bump, everything else a patch), write the changelog entry, and commit the generated
+`.changeset/*.md` file with your change. Docs-, tests-, examples- or CI-only changes need none; CI
+reminds you (a warning, never a failure) when packages change without one. Maintainers release from
+there: [RELEASING.md](RELEASING.md).
 
 ## Propose an RFC
 
