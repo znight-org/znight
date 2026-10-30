@@ -48,6 +48,33 @@ describe('coerce', () => {
     }
   })
 
+  it('number and integer: the plain digits fast path parses like Number() and falls back otherwise', () => {
+    const digits = ['0', '7', '42', '007', '000', '1000000', '123456789012345', '999999999999999']
+    for (const value of digits) {
+      expect(coerce.number(value, 'x')).toBe(Number(value))
+      expect(coerce.integer(value, 'x')).toBe(Number(value))
+    }
+    expect(Object.is(coerce.number('0', 'x'), 0)).toBe(true)
+    // longer runs, signs, spaces, fractions and exponents take the general path
+    expect(coerce.number('1234567890123456', 'x')).toBe(1234567890123456)
+    expect(coerce.integer('9007199254740991', 'x')).toBe(9007199254740991)
+    expect(Object.is(coerce.number('-0', 'x'), -0)).toBe(true)
+    expect(coerce.number('+5', 'x')).toBe(5)
+    expect(coerce.integer(' 12', 'x')).toBe(12)
+    expect(coerce.number('4.', 'x')).toBe(4)
+    expect(coerce.number('4e2', 'x')).toBe(400)
+    for (const value of ['4/', '4:', '٤', '12 3', '1a']) {
+      expect(failure(() => coerce.number(value, 'param "id"')).message).toBe(
+        `Invalid param "id": expected a number, received ${JSON.stringify(value)}`,
+      )
+      expect(failure(() => coerce.integer(value, 'param "id"')).message).toContain('expected an integer')
+    }
+    expect(failure(() => coerce.number(undefined, 'param "id"')).message).toBe('Missing param "id"')
+    expect(failure(() => coerce.integer(['1', '2'], 'query "n"')).message).toBe(
+      'Invalid query "n": expected a single value, received 2',
+    )
+  })
+
   it('integer', () => {
     expect(coerce.integer('42', 'x')).toBe(42)
     expect(coerce.integer('-7', 'x')).toBe(-7)
@@ -62,6 +89,12 @@ describe('coerce', () => {
       'Invalid query "flag": expected a boolean (true, false, 1 or 0), received "yes"',
     )
     expect(failure(() => coerce.boolean('', 'x')).message).toContain('expected a boolean')
+    // the canonical spellings are matched exactly; anything else goes through the general path
+    expect(failure(() => coerce.boolean(['true'], 'query "flag"')).message).toBe(
+      'Invalid query "flag": expected a single value, received 1',
+    )
+    expect(failure(() => coerce.boolean(undefined, 'query "flag"')).message).toBe('Missing query "flag"')
+    expect(coerce.boolean(' 0 ', 'x')).toBe(false)
   })
 
   it('bigint', () => {

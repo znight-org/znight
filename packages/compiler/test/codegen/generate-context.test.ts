@@ -142,6 +142,39 @@ describe('GenerateContext', () => {
     expect(result.code).toContain("['operand']: (1 + 2).toString,")
   })
 
+  it('prints blocks one statement per line and keeps their locals free of imports and constants', async () => {
+    const result = await run(
+      extension('blocks', ctx => {
+        const helper = ctx.importFrom('@acme/mark', 'helper')
+        const marked = ctx.importValue(ctx.stored[0]?.identity as string)
+        return ctx.obj({
+          run: ctx.arrow(['x'], x =>
+            ctx.block(['helper', 'Marked'], (local, other) => [
+              ctx.code`const ${local} = ${ctx.call(helper, [x])}`,
+              ctx.code`const ${other} = ${marked}`,
+              ctx.code`return ${ctx.arr([local, other])}`,
+            ]),
+          ),
+          empty: ctx.arrow([], () => ctx.block([], () => [])),
+        })
+      }),
+    )
+    expect(result.text).toBe('')
+    expect(result.code).toContain("import { helper as helper$1 } from '@acme/mark'")
+    expect(result.code).toContain("import { Marked as Marked$1, Square } from '../marked.js'")
+    expect(result.code).toContain('factory: d => new Marked$1(d[0]),')
+    expect(result.code).toContain(
+      [
+        "      ['run']: x => {",
+        '        const helper = helper$1(x)',
+        '        const Marked = Marked$1',
+        '        return [helper, Marked]',
+        '      },',
+        "      ['empty']: () => {},",
+      ].join('\n'),
+    )
+  })
+
   it('emits only the constants (and their imports) reachable from the metadata', async () => {
     const result = await run(
       extension('constants', ctx => {

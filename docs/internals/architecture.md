@@ -297,8 +297,8 @@ Rules for generated code:
   bare specifiers, then relative paths; for one specifier `import type` comes before the value
   import, and a type and a value import of the same binding are merged. Only imports and constants
   reachable from the emitted metadata are printed. Identifiers are validated and de-duplicated by
-  identity order (`UserService`, `UserService$1`); they never shadow a global (`Date$1`) nor an arrow
-  parameter.
+  identity order (`UserService`, `UserService$1`); they never shadow a global (`Date$1`), an arrow
+  parameter nor a local declared by a block (`GenerateContext.block`, §6.5).
 - **Constants**: `GenerateContext.constant(name, value, { type })` (§6.5) declares a module-level
   `const <name>: <type> = <value>` printed before `__ZNIGHT_METADATA__`, in declaration order,
   de-duplicated like imports (`AppConfig$fields`, `AppConfig$fields$1`). `@znight/config` uses it
@@ -1114,7 +1114,9 @@ interface DecoratorSpec {
     by identity); the files read are part of `watchFiles`. The extension decides the severity of
     issues.
 - `GenerateContext`: pure builders `lit`, `obj`, `arr`, `ref`, `member`, `call`, `construct`,
-  `arrow` (typed parameters), `code` (tagged template escaping every interpolation) — also available
+  `arrow` (typed parameters), `block(locals, statements)` (an arrow body printed one statement per
+  line; its `locals`, the `const`s its statements declare, are reserved like arrow parameters),
+  `code` (tagged template escaping every interpolation) — also available
   as `createGenBuilders()` — plus `importValue` / `importType(ValueRef | ArgInfo | ClassInfo |
   ClassRef | identity)`, `importFrom(bareSpecifier, name, { type? })`, `tokenOf(target)`,
   `binding(handle)`, `provider(token)`, `constant(name, value, { type? })` (§3.3), `report`, and
@@ -1512,17 +1514,38 @@ interface HttpRouteDefinition {
 matched in linear time; `date` accepts an ISO 8601 date (UTC midnight), an ISO 8601 date-time
 **with** an offset (`Z`, `+02:00`, `+0200`) or an integer millisecond timestamp, checks the calendar
 (`2024-02-30` → 400) and rejects a date-time without offset, which would depend on the server time
-zone; `validate(schema, value, location)` with any Standard Schema, `await`ed, so the arrow is
-`async` only when a schema is used). `@Validate(S)` without `@Body()` generates `await validate(S,
-await ctx.parseBody(), 'body')`. Upload parameters read `ctx.files` through the `uploads` helper,
+zone; `validate(schema, value, location)` with any Standard Schema, which returns the output, or a
+promise of it when the schema validates asynchronously). `@Validate(S)` without `@Body()` generates
+an `async` arrow, `await validate(S, await ctx.parseBody(), 'body')`, whose other validations are
+`await`ed too. Upload parameters read `ctx.files` through the `uploads` helper,
 imported by the generated module only when a route uses it: `@UploadedFile('avatar') avatar: File` →
 `uploads.file(ctx, 'avatar')` (400 `Missing file "avatar"` when absent; `optionalFile` for an
 optional parameter, `files` / `optionalFiles` for `@UploadedFiles`; `undefined` field = every
 field). `@Body()` on an upload route receives the text fields. Cookie parameters read
 `ctx.cookies['name']` (`@Cookie`) or `ctx.signedCookie('name')` (`@SignedCookie`) with the label
-`cookie "name"` (`coerce.X`, `coerce.optional` or `await validate(S, ..., 'cookie "name"')`), the
+`cookie "name"` (`coerce.X`, `coerce.optional` or `validate(S, ..., 'cookie "name"')`), the
 whole record `ctx.cookies` (`validate(S, ctx.cookies, 'cookies')` with a schema). Unused `ctx` is
 omitted.
+
+An `invoke` without validation is an expression arrow (`(c, ctx) => c.m(coerce.number(...))`). An
+`invoke` validating arguments MUST stay synchronous while every `validate()` returns a value, and
+MUST otherwise behave exactly like an `async` arrow `await`ing every `validate()` in parameter order:
+the arguments up to the last validated one are evaluated in order into `const a<index>` (`@Ctx()` is
+passed as `ctx`), each validated one is followed by `if (isThenable(a<i>)) return (async () =>
+c.m(...))()`, which `await`s it, then evaluates the remaining arguments (`await`ing their
+validations) and calls the handler; the arguments after the last validated one are inlined in the
+calls. A thenable output is therefore awaited, a failure stops the evaluation of the later
+arguments, and the first failing argument is the one reported. The plugin `await`s the result of
+`invoke` only when it is a thenable.
+
+```ts
+['invoke']: (c: UserController, ctx: HttpContext) => {
+  const a0 = coerce.number(ctx.params['id'], 'param "id"')
+  const a1 = validate(UpdateUser, ctx.body, 'body')
+  if (isThenable(a1)) return (async () => c.update(a0, await a1, ctx))()
+  return c.update(a0, a1, ctx)
+},
+```
 
 Pipeline (normative), per request — matched or not:
 `container.runInScope({ HttpContext, RequestId }) → hooks.run('http:request', event, () =>

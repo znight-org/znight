@@ -306,6 +306,16 @@ export class ModuleBuilder {
               ]
         return [prefix, params, arrowBody(this.print(node.body, owner), bodyKind(node.body))]
       }
+      case 'gen:block': {
+        for (const local of node.locals) {
+          this.names.reserve(local)
+        }
+        if (node.statements.length === 0) {
+          return '{}'
+        }
+        const statements = node.statements.map(statement => this.print(statement, owner))
+        return ['{', indent([hardline, join(hardline, statements)]), hardline, '}']
+      }
       case 'gen:code': {
         const parts: Doc[] = []
         node.parts.forEach((part, index) => {
@@ -374,10 +384,13 @@ export function arrowBody(body: Doc, kind: 'object' | 'block' | 'expression'): D
   }
 }
 
-/** How an arrow body is printed: object literals are parenthesized, `code` blocks stay on the line. */
+/** How an arrow body is printed: object literals are parenthesized, blocks stay on the line. */
 export function bodyKind(node: GenNode): 'object' | 'block' | 'expression' {
   if (isObjectBody(node)) {
     return 'object'
+  }
+  if (node.kind === 'gen:block') {
+    return 'block'
   }
   return node.kind === 'gen:code' && (node.parts[0] ?? '').trimStart().startsWith('{') ? 'block' : 'expression'
 }

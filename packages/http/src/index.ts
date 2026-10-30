@@ -182,4 +182,4 @@ export {
   type Uploads,
   uploads,
 } from './uploads.ts'
-export { validate } from './validate.ts'
+export { isThenable, validate } from './validate.ts'

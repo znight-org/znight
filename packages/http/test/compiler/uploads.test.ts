@@ -68,6 +68,7 @@ describe('valid uploads', () => {
     expect(httpDiagnostics(result)).toEqual([])
     expect(section.diagnostics).toEqual([])
     expect(section.imports).toEqual([
+      'isThenable from @znight/http',
       'type HttpContext from @znight/http',
       'type src/app.ts#FilesController',
       'uploads from @znight/http',
@@ -101,7 +102,14 @@ describe('valid uploads', () => {
 
   it('generates invoke calls with the uploads helpers', () => {
     expect(invoke('avatar')).toBe(
-      "async (c: FilesController, ctx: HttpContext) => c.avatar(uploads.file(ctx, 'avatar'), await validate(Meta, ctx.body, 'body'))",
+      [
+        '(c: FilesController, ctx: HttpContext) => {',
+        "  const a0 = uploads.file(ctx, 'avatar')",
+        "  const a1 = validate(Meta, ctx.body, 'body')",
+        '  if (isThenable(a1)) return (async () => c.avatar(a0, await a1))()',
+        '  return c.avatar(a0, a1)',
+        '}',
+      ].join('\n'),
     )
     expect(invoke('optional')).toBe(
       "(c: FilesController, ctx: HttpContext) => c.optional(uploads.optionalFile(ctx, 'file'))",
