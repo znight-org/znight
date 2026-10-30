@@ -1,16 +1,44 @@
 import type { Token } from '@znight/core'
 import type { AdapterRequest } from './adapter.ts'
+import type { CookieSettings } from './cookie-settings.ts'
+import type { ClearCookieOptions, CookieOptions, ResponseCookie, SerializedCookie } from './cookies.ts'
 import type { HeaderValue } from './exceptions.ts'
 import type { MultipartResult } from './multipart.ts'
 import type { BodyPlan } from './uploads.ts'
 
 import { checkContentEncoding, hasBody, parseBody, parseMediaType } from './body.ts'
+import { DEFAULT_COOKIE_SETTINGS, missingSecrets, serializeWith, verifySigned } from './cookie-settings.ts'
+import { parseCookieHeader } from './cookies.ts'
 import { UnsupportedMediaTypeException } from './exceptions.ts'
 import { parseMultipart, readMultipart } from './multipart.ts'
 import { parseQuery, type QueryRecord, splitUrl } from './query.ts'
 import { emptyRecord } from './utils.ts'
 
 declare const requestIdBrand: unique symbol
+
+/** Why `ctx.signal` aborted: the client left, the server shuts down, or an SSE stream reached its `maxDuration`. */
+export type RequestAbortKind = 'client' | 'shutdown' | 'expired'
+
+/**
+ * The reason of an aborted `ctx.signal`. Named `AbortError`, what `fetch`, `node:timers/promises`
+ * and most libraries check.
+ */
+export class RequestAbortedError extends Error {
+  override readonly name = 'AbortError'
+  /** `client`: disconnected; `shutdown`: the server stops; `expired`: an SSE stream reached its `maxDuration`. */
+  readonly kind: RequestAbortKind
+
+  constructor(kind: RequestAbortKind) {
+    super(ABORT_MESSAGES[kind])
+    this.kind = kind
+  }
+}
+
+const ABORT_MESSAGES: Readonly<Record<RequestAbortKind, string>> = {
+  client: 'The client disconnected',
+  shutdown: 'The server is shutting down',
+  expired: 'The event stream reached its maxDuration',
+}
 
 /**
  * Identifier of the current request: the incoming `x-request-id` header (see the plugin option
@@ -94,6 +122,46 @@ export interface HttpContext {
   /** Appends a response header value (`set-cookie`...). */
   appendHeader(name: string, value: string): void
   /**
+   * Request cookies (`cookie` header), parsed on first access: decoded values, the first occurrence
+   * of a name wins. A prototype-less, frozen record.
+   */
+  readonly cookies: Readonly<Record<string, string>>
+  /**
+   * The verified value of a signed cookie (`@SignedCookie`), `undefined` when it is absent, tampered
+   * or signed with a key that is no longer in `cookies.secrets`. Verified once per name.
+   *
+   * @throws Error when the plugin option `cookies.secrets` is not set.
+   */
+  signedCookie(name: string): string | undefined
+  /**
+   * Sets a cookie on the response, whatever its outcome (errors, redirects included), with the
+   * secure defaults (`Path=/; Secure; HttpOnly; SameSite=Lax`, see the plugin option
+   * `cookies.defaults`). A later cookie with the same name, domain and path replaces this one; a
+   * cookie of the same key in an `HttpResponse` (`withCookie`) wins over it. Everything is validated
+   * now (name, value, attributes, prefixes, size), so the stack trace points to the faulty call.
+   *
+   * @throws TypeError / RangeError for an invalid cookie; Error once the response headers were sent
+   *   (a running event stream).
+   */
+  setCookie(name: string, value: string, options?: CookieOptions): void
+  /**
+   * Clears a cookie (`Max-Age=0`, with the same domain and path, and the defaults: a `__Host-`
+   * cookie is cleared with valid attributes).
+   *
+   * @throws like {@link setCookie}.
+   */
+  clearCookie(name: string, options?: ClearCookieOptions): void
+  /** Cookies set on this response so far (`setCookie` / `clearCookie`), in order. */
+  readonly responseCookies: readonly ResponseCookie[]
+  /**
+   * Aborted when the client disconnects before the response was written, when the response body is
+   * cancelled, or when the server closes an event stream (shutdown, `maxDuration`); never after a
+   * normal completion. The reason is a {@link RequestAbortedError}. Pass it to the work the request
+   * starts (`fetch(url, { signal: ctx.signal })`, `setTimeout(ms, v, { signal })`). Created on first
+   * access.
+   */
+  readonly signal: AbortSignal
+  /**
    * Reads and parses the body (once): JSON (`application/json`, `+json`), text (`text/*`), forms
    * (`application/x-www-form-urlencoded` and `multipart/form-data` → record of the text fields,
    * repeated names as arrays; files in {@link files}), raw bytes otherwise; `undefined` when empty.
@@ -141,6 +209,17 @@ export class RequestContext implements HttpContext {
   /** Stops the body stream opened for the request, unless it was read to its end or cancelled. */
   #stopBody: (() => void) | undefined
   #parsed: Promise<unknown> | undefined
+  readonly #cookieSettings: CookieSettings
+  #cookies: Readonly<Record<string, string>> | undefined
+  #signed: Map<string, string | undefined> | undefined
+  /** Cookies set on the response, by key (name, domain, path), with their `Set-Cookie` line. */
+  #jar: Map<string, { readonly cookie: ResponseCookie; readonly line: string }> | undefined
+  /** The response headers were handed to the adapter (cookies can no longer be set). */
+  #committed = false
+  /** The request is over: later aborts are ignored. */
+  #completed = false
+  #abortReason: RequestAbortedError | undefined
+  #abortController: AbortController | undefined
 
   constructor(
     source: AdapterRequest,
@@ -152,10 +231,13 @@ export class RequestContext implements HttpContext {
       readonly body: BodyPlan
       /** Client address and protocol (`trustProxy`); default: the adapter's `ip` and `encrypted`. */
       readonly client?: { readonly ip: string | undefined; readonly protocol: 'http' | 'https' }
+      /** Cookie defaults and signing key (plugin option `cookies`); default: secure defaults, no signing. */
+      readonly cookies?: CookieSettings
     },
   ) {
     this.#source = source
     this.#plan = init.body
+    this.#cookieSettings = init.cookies ?? DEFAULT_COOKIE_SETTINGS
     const { path, query } = splitUrl(source.url)
     this.#rawQuery = query
     this.requestId = init.requestId
@@ -220,6 +302,94 @@ export class RequestContext implements HttpContext {
     const existing = this.#responseHeaders[key]
     if (existing === undefined) this.#responseHeaders[key] = value
     else this.#responseHeaders[key] = typeof existing === 'string' ? [existing, value] : [...existing, value]
+  }
+
+  get cookies(): Readonly<Record<string, string>> {
+    this.#cookies ??= parseCookieHeader(this.headers['cookie'])
+    return this.#cookies
+  }
+
+  signedCookie(name: string): string | undefined {
+    const signer = this.#cookieSettings.signer
+    if (signer === undefined) throw missingSecrets(`Cannot read the signed cookie ${JSON.stringify(String(name))}`)
+    this.#signed ??= new Map()
+    if (this.#signed.has(name)) return this.#signed.get(name)
+    const value = verifySigned(signer, name, this.cookies[name])
+    this.#signed.set(name, value)
+    return value
+  }
+
+  setCookie(name: string, value: string, options: CookieOptions = {}): void {
+    this.#addCookie({ name, value, options })
+  }
+
+  clearCookie(name: string, options: ClearCookieOptions = {}): void {
+    this.#addCookie({ name, value: undefined, options })
+  }
+
+  get responseCookies(): readonly ResponseCookie[] {
+    return this.#jar === undefined ? NO_COOKIES : [...this.#jar.values()].map(entry => entry.cookie)
+  }
+
+  /** The `Set-Cookie` lines of {@link setCookie} / {@link clearCookie}, with their keys, in order (internal). */
+  get cookieLines(): readonly SerializedCookie[] {
+    return this.#jar === undefined ? [] : [...this.#jar].map(([key, entry]) => ({ key, line: entry.line }))
+  }
+
+  #addCookie(cookie: ResponseCookie): void {
+    if (this.#committed) {
+      throw new Error(
+        `Cannot set cookie ${JSON.stringify(String(cookie.name))}: the response headers were already sent`,
+      )
+    }
+    if (cookie.options === null || typeof cookie.options !== 'object') {
+      throw new TypeError(`Invalid cookie ${JSON.stringify(String(cookie.name))}: options must be an object`)
+    }
+    const options = cookie.value === undefined ? withoutLifetime(cookie.options) : cookie.options
+    const frozen: ResponseCookie = Object.freeze({
+      name: cookie.name,
+      value: cookie.value,
+      options: Object.freeze({ ...options }),
+    })
+    const { key, line } = serializeWith(frozen, this.#cookieSettings)
+    this.#jar ??= new Map()
+    this.#jar.set(key, { cookie: frozen, line })
+  }
+
+  get signal(): AbortSignal {
+    if (this.#abortController === undefined) {
+      const controller = new AbortController()
+      this.#abortController = controller
+      if (this.#abortReason !== undefined) controller.abort(this.#abortReason)
+      else if (!this.#completed) this.#source.onAbort?.(() => this.abort('client'))
+    }
+    return this.#abortController.signal
+  }
+
+  /** Whether {@link signal} aborted (or will be created aborted). */
+  get aborted(): boolean {
+    return this.#abortReason !== undefined
+  }
+
+  /**
+   * Aborts {@link signal} with a {@link RequestAbortedError} of `kind` (internal): at most once, and
+   * never once the request is over ({@link complete}).
+   */
+  abort(kind: RequestAbortKind): void {
+    if (this.#abortReason !== undefined || this.#completed) return
+    const reason = new RequestAbortedError(kind)
+    this.#abortReason = reason
+    this.#abortController?.abort(reason)
+  }
+
+  /** The response headers are handed to the adapter: cookies can no longer be set (internal). */
+  commit(): void {
+    this.#committed = true
+  }
+
+  /** The request is over (response sent or abandoned): later aborts are ignored (internal). */
+  complete(): void {
+    this.#completed = true
   }
 
   rawBody(): Promise<Uint8Array> {
@@ -352,5 +522,12 @@ function alreadyStreamed(): Error {
   )
 }
 
+/** Clearing cookies have no lifetime of their own (`Max-Age=0`) and are never signed. */
+function withoutLifetime(options: ClearCookieOptions): ClearCookieOptions {
+  const { maxAge: _maxAge, expires: _expires, signed: _signed, ...rest } = options as CookieOptions
+  return rest
+}
+
 const EMPTY_HEADERS: Readonly<Record<string, HeaderValue>> = Object.freeze({})
+const NO_COOKIES: readonly ResponseCookie[] = Object.freeze([])
 const NO_FILES: Readonly<Record<string, readonly File[]>> = Object.freeze(emptyRecord<readonly File[]>())

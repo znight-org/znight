@@ -192,17 +192,25 @@ describe('schedule:run', () => {
       context: { job: 'digest.daily' },
       startTime: performance.now(),
     }
-    let executed = false
     try {
       await hooks.run('schedule:run', event, async () => {
-        executed = true
-        await job()
+        try {
+          await job()
+        } catch (error) {
+          event.outcome = 'failed'
+          event.error = error
+          throw error
+        }
+        event.outcome = 'completed'
       })
-      event.outcome = executed ? 'completed' : 'skipped'
     } catch (error) {
-      event.outcome = 'failed'
-      event.error = error
+      // a wrapper failed before the job
+      if (event.outcome === undefined) {
+        event.outcome = 'failed'
+        event.error = error
+      }
     }
+    event.outcome ??= 'skipped' // a wrapper did not call next()
     hooks.emit('schedule:run', event)
     return event
   }
@@ -233,6 +241,44 @@ describe('schedule:run', () => {
     })
     expect(ran).toBe(false)
     expect(event.outcome).toBe('skipped')
+  })
+
+  it('wrappers see no outcome when the job did not start (veto, a wrapper that threw first)', async () => {
+    /** An outer wrapper reporting the outcome as the JSDoc of `ScheduledRunEvent.outcome` says. */
+    const observe = (hooks: Hooks, seen: string[]): void => {
+      hooks.wrap('schedule:run', async (event, next) => {
+        let rejected = false
+        try {
+          await next()
+        } catch (error) {
+          rejected = true
+          throw error // swallowing it would turn the failure into a veto
+        } finally {
+          seen.push(`${String(event.outcome)} → ${event.outcome ?? (rejected ? 'failed' : 'skipped')}`)
+        }
+      })
+    }
+    const job = () => Promise.resolve()
+    const seen: string[] = []
+    const vetoing = new Hooks()
+    observe(vetoing, seen)
+    vetoing.wrap('schedule:run', () => Promise.resolve(undefined)) // maintenance window
+    const throwing = new Hooks()
+    observe(throwing, seen)
+    throwing.wrap('schedule:run', () => Promise.reject(new Error('tracer down')))
+    const failing = new Hooks()
+    observe(failing, seen)
+    const plain = new Hooks()
+    observe(plain, seen)
+    expect((await run(vetoing, job)).outcome).toBe('skipped')
+    const thrown = await run(throwing, job)
+    const failed = await run(failing, () => Promise.reject(new Error('smtp down')))
+    expect((await run(plain, job)).outcome).toBe('completed')
+    expect(seen).toEqual(['undefined → skipped', 'undefined → failed', 'failed → failed', 'completed → completed'])
+    // the producer settles what the wrappers could not see: listeners get the final outcome
+    expect(thrown.outcome).toBe('failed')
+    expect((thrown.error as Error).message).toBe('tracer down')
+    expect((failed.error as Error).message).toBe('smtp down')
   })
 
   it('types the abort reasons, triggers and outcomes', () => {

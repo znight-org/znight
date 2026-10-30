@@ -18,7 +18,7 @@ import type { PluginInitRoots } from '../src/index.ts'
 
 import { ErrorCode, silentLogger } from '@znight/core'
 
-import { HttpPlugin, HttpResponse, uploads } from '../../http/src/index.ts'
+import { coerce, EventChannel, HttpPlugin, HttpResponse, type SseEvent, uploads } from '../../http/src/index.ts'
 import { createMetadata, TestApp } from '../src/index.ts'
 import { afterEach, beforeEach, describe, expect, test as it } from 'bun:test'
 
@@ -162,6 +162,141 @@ describe('TestApp.inject with HttpPlugin', () => {
     expect(partial.status).toBe(206)
     expect(partial.headers['content-range']).toBe('bytes 0-15/256')
     expect(partial.bytes).toEqual(BINARY.slice(0, 16))
+  })
+})
+
+/** Cookies and an event stream (RFC 0006). */
+class SessionController {
+  readonly channels: EventChannel<SseEvent>[] = []
+
+  /** `@Post('/login') login()` */
+  login(): HttpResponse {
+    return HttpResponse.ok({ id: 'u-1' }).withCookie('__Host-uid', 'u-1', { signed: true })
+  }
+
+  /** `@Get('/me') me(@SignedCookie('__Host-uid') uid: string)` */
+  me(uid: string): { uid: string } {
+    return { uid }
+  }
+
+  /** `@Sse('/events') events(@Headers('last-event-id') last: string | undefined, @Ctx() ctx: HttpContext)` */
+  events(last: string | undefined, ctx: HttpContext): EventChannel<SseEvent> {
+    const channel = new EventChannel<SseEvent>({ signal: ctx.signal })
+    this.channels.push(channel)
+    const from = last === undefined ? 1 : Number(last) + 1
+    for (let id = from; id <= 2; id++) channel.push({ id, data: `event ${id}` })
+    return channel
+  }
+}
+
+const SESSION = 'src/session.controller.ts#SessionController'
+const sessionController: HttpControllerDefinition = {
+  token: SESSION,
+  basePath: '/session',
+  guards: [],
+  interceptors: [],
+  meta: {},
+  routes: [
+    route({
+      method: 'POST',
+      path: '/login',
+      fullPath: '/session/login',
+      handler: 'login',
+      params: [],
+      invoke: (c: SessionController) => c.login(),
+    }),
+    route({
+      method: 'GET',
+      path: '/me',
+      fullPath: '/session/me',
+      handler: 'me',
+      params: [{ index: 0, source: 'signedCookie', name: '__Host-uid', type: 'string' }],
+      invoke: (c: SessionController, ctx) => c.me(coerce.string(ctx.signedCookie('__Host-uid'), 'cookie "__Host-uid"')),
+    }),
+    route({
+      method: 'GET',
+      path: '/events',
+      fullPath: '/session/events',
+      handler: 'events',
+      params: [
+        { index: 0, source: 'headers', name: 'last-event-id', type: 'string', optional: true },
+        { index: 1, source: 'context' },
+      ],
+      sse: { retry: 2_000 },
+      invoke: (c: SessionController, ctx) =>
+        c.events(coerce.optional(ctx.headers['last-event-id'], 'header "last-event-id"', coerce.string), ctx),
+    }),
+  ],
+}
+
+const sessions = createMetadata(
+  { [SESSION]: { scope: 'singleton', class: SessionController, deps: [], factory: () => new SessionController() } },
+  { extensions: { http: { controllers: [sessionController] } } },
+)
+
+async function until(condition: () => boolean): Promise<void> {
+  for (let index = 0; index < 100 && !condition(); index++) await new Promise(resolve => setTimeout(resolve, 10))
+  expect(condition()).toBe(true)
+}
+
+describe('TestApp with cookies and event streams', () => {
+  let app: TestApp
+
+  beforeEach(async () => {
+    app = await TestApp.create({
+      metadata: sessions,
+      plugins: [HttpPlugin.configure({ port: 0, cookies: { secrets: 's'.repeat(32) } })],
+      logger: silentLogger,
+    })
+  })
+
+  afterEach(() => app.close())
+
+  it('sends cookies and signed cookies, and reads the cookies of the response', async () => {
+    const login = await app.inject({ method: 'POST', url: '/session/login' })
+    const uid = login.cookies['__Host-uid']
+    expect(uid).toMatchObject({ httpOnly: true, secure: true, sameSite: 'lax', path: '/', partitioned: false })
+    const me = await app.inject({ url: '/session/me', cookies: { '__Host-uid': uid?.value as string } })
+    expect(me.json()).toEqual({ uid: 'u-1' })
+    const forged = await app.inject({ url: '/session/me', signedCookies: { '__Host-uid': 'u-2' } })
+    expect(forged.json()).toEqual({ uid: 'u-2' })
+    const tampered = await app.inject({ url: '/session/me', cookies: { '__Host-uid': 'u-2.AAAA' } })
+    expect(tampered.status).toBe(400)
+  })
+
+  it('reads an event stream, reconnects with Last-Event-ID and disconnects with await using', async () => {
+    const controller = app.get<SessionController>(SESSION)
+    {
+      await using stream = await app.injectSse({ url: '/session/events' })
+      expect(stream.status).toBe(200)
+      expect(stream.retry).toBe(2_000)
+      expect((await stream.take(2)).map(event => [event.id, event.data])).toEqual([
+        ['1', 'event 1'],
+        ['2', 'event 2'],
+      ])
+      controller.channels[0]?.push({ id: 3, event: 'update', data: { n: 3 } })
+      const third = await stream.next()
+      expect([third.event, third.json()]).toEqual(['update', { n: 3 }])
+      await using resumed = await stream.reconnect()
+      await until(() => controller.channels[0]?.closed === true) // the first connection was closed
+      // the server resumes after Last-Event-ID 3: nothing to replay
+      await expect(resumed.next({ timeoutMs: 50 })).rejects.toThrow('no event received within 50 ms')
+    }
+    // leaving the block disconnected the client: the channel closed with ctx.signal
+    await until(() => controller.channels[1]?.closed === true)
+  })
+
+  it('streams a response body', async () => {
+    const response = await app.injectStream({ url: '/session/events' })
+    expect(response.status).toBe(200)
+    expect(response.headers['content-type']).toBe('text/event-stream; charset=utf-8')
+    const reader = response.body.getReader()
+    expect(new TextDecoder().decode((await reader.read()).value)).toBe('retry: 2000\n\n')
+    await reader.cancel()
+  })
+
+  it('refuses inject() on an event stream', async () => {
+    await expect(app.inject({ url: '/session/events' })).rejects.toThrow('use injectSse() or injectStream()')
   })
 })
 

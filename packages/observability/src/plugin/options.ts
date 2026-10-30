@@ -3,6 +3,7 @@ import type { HttpRequestLogOptions, MessageLogOptions } from '../logging/reques
 import type { HttpMetricsOptions, MessagingMetricsOptions } from '../metrics/hooks.ts'
 import type { MetricsRegistryOptions } from '../metrics/registry.ts'
 import type { MetricsServerOptions } from '../metrics/server.ts'
+import type { JobLogOptions, ScheduleMetricsOptions, ScheduleTracingOptions } from '../schedule/jobs.ts'
 import type { HttpTracingOptions, MessagePublishTracingOptions, MessagingTracingOptions } from '../tracing/hooks.ts'
 import type { TracerOptions } from '../tracing/tracer.ts'
 
@@ -12,6 +13,8 @@ export interface LoggingOptions extends Omit<LoggerOptions, 'scope'> {
   readonly requests?: boolean | HttpRequestLogOptions
   /** One entry per message delivery (`messaging:message` hook). Default: `true`. */
   readonly messages?: boolean | MessageLogOptions
+  /** One entry per scheduled run (`schedule:run` hook of `@znight/schedule`). Default: `true`. */
+  readonly jobs?: boolean | JobLogOptions
   /**
    * Route the framework's own logs (core, plugins) through the logger, with `component: 'znight'`
    * (`app.setLogger()`). Default: `true`.
@@ -27,6 +30,8 @@ export interface MetricsOptions extends MetricsRegistryOptions {
   readonly http?: boolean | HttpMetricsOptions
   /** Consumer metrics (`messaging:message` hook). Default: `true`. */
   readonly messaging?: boolean | MessagingMetricsOptions
+  /** Scheduled job metrics (`schedule:run` hook of `@znight/schedule`). Default: `true`. */
+  readonly schedule?: boolean | ScheduleMetricsOptions
 }
 
 /** `tracing` options of `ObservabilityPlugin.configure()`. */
@@ -40,6 +45,11 @@ export interface TracingOptions extends TracerOptions {
    * headers (`messaging:publish` hook of `@znight/messaging`). Default: `true`.
    */
   readonly publish?: boolean | MessagePublishTracingOptions
+  /**
+   * An `INTERNAL` span per scheduled run (`schedule:run` hook of `@znight/schedule`), the root of a
+   * new trace except for manual runs. Default: `true`.
+   */
+  readonly schedule?: boolean | ScheduleTracingOptions
 }
 
 /** Options of `ObservabilityPlugin.configure()`. */

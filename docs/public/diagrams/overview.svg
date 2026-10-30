@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 688 460" width="688" height="460" role="img" aria-labelledby="title desc">
+<title id="title">How Znight fits together</title>
+<desc id="desc">At build time, @znight/compiler (Vite plugin, CLI or Bun preload) reads your decorated classes in src, scans, analyses, binds and validates them, and generates src/.znight/container.generated.ts exporting __ZNIGHT_METADATA__; ZNIGHT errors fail the build. At run time, main.ts imports that module and passes it to Application.create with the plugins: the @znight/core container calls the generated factories in order, and plugins such as HttpPlugin, MessagingPlugin and ConfigPlugin add the runtime features.</desc>
+<defs>
+<linearGradient id="zn-card" x1="0" y1="0" x2="0" y2="1">
+<stop offset="0" stop-color="#1A2350"/>
+<stop offset="1" stop-color="#0B1020"/>
+</linearGradient>
+<linearGradient id="zn-accent" x1="0" y1="0" x2="1" y2="1">
+<stop offset="0" stop-color="#2F6AE8"/>
+<stop offset="1" stop-color="#7C4DEF"/>
+</linearGradient>
+<linearGradient id="zn-accent-line" x1="0" y1="0" x2="1" y2="0">
+<stop offset="0" stop-color="#3E7BFA"/>
+<stop offset="1" stop-color="#8B5CF6"/>
+</linearGradient>
+<style>.s{font-family:ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif}.m{font-family:ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace}</style>
+</defs>
+<rect x="0.5" y="0.5" width="687" height="459" rx="16" fill="url(#zn-card)" stroke="#2C3660"/>
+<text x="24" y="34" class="s" font-size="12" font-weight="700" fill="#8E9AC4" letter-spacing="1.2">BUILD TIME</text>
+<rect x="24" y="52" width="150" height="124" rx="10" fill="#1E2858" stroke="#4A5AA6" stroke-width="1.25"/>
+<text x="38" y="78" class="s" font-size="14" font-weight="600" fill="#F4F6FC">Your code</text>
+<text x="38" y="97" class="m" font-size="12.5" fill="#A9B4D6">src/**/*.ts</text>
+<text x="38" y="124" class="m" font-size="12.5" fill="#D6DCEE">@Injectable()</text>
+<text x="38" y="142" class="m" font-size="12.5" fill="#D6DCEE">@Controller()</text>
+<text x="38" y="160" class="m" font-size="12.5" fill="#D6DCEE">@Consumer() ...</text>
+<rect x="210" y="52" width="214" height="124" rx="10" fill="#1B2457" stroke="url(#zn-accent-line)" stroke-width="1.5"/>
+<text x="224" y="78" class="m" font-size="14" font-weight="600" fill="#F4F6FC">@znight/compiler</text>
+<text x="224" y="97" class="s" font-size="12.5" fill="#A9B4D6">Vite plugin · CLI · Bun preload</text>
+<text x="224" y="128" class="s" font-size="12.5" fill="#D6DCEE">scans and analyses your code,</text>
+<text x="224" y="147" class="s" font-size="12.5" fill="#D6DCEE">binds and validates the graph</text>
+<rect x="460" y="52" width="204" height="124" rx="10" fill="#141C44" stroke="#4A5AA6" stroke-width="1.25"/>
+<text x="474" y="78" class="m" font-size="12.5" fill="#A9B4D6">src/.znight/</text>
+<text x="474" y="97" class="m" font-size="12.5" font-weight="600" fill="#F4F6FC">container.generated.ts</text>
+<rect x="474" y="113" width="156.3" height="22" rx="11" fill="#251E5C" stroke="#A78BFA" stroke-width="1"/>
+<text x="552.1" y="128.2" text-anchor="middle" class="m" font-size="12" fill="#EDE9FE">__ZNIGHT_METADATA__</text>
+<text x="474" y="160" class="s" font-size="12.5" fill="#A9B4D6">providers, deps, order</text>
+<path d="M178,114 L198.5,114" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M206,114 L197.5,118.6 L197.5,109.4 Z" fill="#A9B4D6"/>
+<path d="M428,114 L448.5,114" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M456,114 L447.5,118.6 L447.5,109.4 Z" fill="#A9B4D6"/>
+<path d="M317,178 L317,190.5" fill="none" stroke="#FB7185" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M317,198 L312.4,189.5 L321.6,189.5 Z" fill="#FB7185"/>
+<rect x="214.1" y="198.3" width="205.8" height="23.5" rx="11.75" fill="#3A1A2E" stroke="#FB7185" stroke-width="1"/>
+<text x="317" y="214.4" text-anchor="middle" class="s" font-size="12.5" fill="#FFE4E6"><tspan class="m">ZNIGHTxxx</tspan> errors fail the build</text>
+<line x1="24" y1="240" x2="664" y2="240" stroke="#7381B3" stroke-width="1" stroke-dasharray="3 5"/>
+<text x="24" y="266" class="s" font-size="12" font-weight="700" fill="#8E9AC4" letter-spacing="1.2">RUN TIME</text>
+<path d="M562,178 L562,274.5" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M562,282 L557.4,273.5 L566.6,273.5 Z" fill="#A9B4D6"/>
+<text x="552" y="232.4" text-anchor="end" class="s" font-size="12.5" fill="#A9B4D6">imported by <tspan class="m">main.ts</tspan></text>
+<rect x="24" y="284" width="640" height="152" rx="12" fill="#F4F6FC" fill-opacity="0.035" stroke="#4A5AA6" stroke-width="1.25"/>
+<text x="38" y="310" class="m" font-size="13" font-weight="600" fill="#F4F6FC">Application.create({ metadata, plugins })</text>
+<rect x="38" y="326" width="270" height="96" rx="10" fill="#1E2858" stroke="#4A5AA6" stroke-width="1.25"/>
+<text x="52" y="350" class="m" font-size="14" font-weight="600" fill="#F4F6FC">@znight/core</text>
+<text x="52" y="375" class="s" font-size="12.5" fill="#D6DCEE">container · scopes · lifecycle</text>
+<text x="52" y="394" class="s" font-size="12.5" fill="#D6DCEE">hooks · AOP</text>
+<text x="52" y="413" class="s" font-size="12.5" fill="#A9B4D6">runs the generated factories in order</text>
+<rect x="322" y="326" width="328" height="96" rx="10" fill="#1E2858" stroke="#4A5AA6" stroke-width="1.25"/>
+<text x="336" y="350" class="s" font-size="14" font-weight="600" fill="#F4F6FC">Runtime plugins</text>
+<rect x="336" y="364" width="88.9" height="22" rx="11" fill="#1E2858" stroke="#4A5AA6" stroke-width="1"/>
+<text x="380.4" y="379.2" text-anchor="middle" class="m" font-size="12" fill="#F4F6FC">HttpPlugin</text>
+<rect x="430.9" y="364" width="103.9" height="22" rx="11" fill="#1E2858" stroke="#4A5AA6" stroke-width="1"/>
+<text x="482.8" y="379.2" text-anchor="middle" class="m" font-size="12" fill="#F4F6FC">ConfigPlugin</text>
+<rect x="336" y="392" width="126.3" height="22" rx="11" fill="#1E2858" stroke="#4A5AA6" stroke-width="1"/>
+<text x="399.2" y="407.2" text-anchor="middle" class="m" font-size="12" fill="#F4F6FC">MessagingPlugin</text>
+<rect x="468.3" y="392" width="156.3" height="22" rx="11" fill="#1E2858" stroke="#4A5AA6" stroke-width="1"/>
+<text x="546.5" y="407.2" text-anchor="middle" class="m" font-size="12" fill="#F4F6FC">ObservabilityPlugin</text>
+</svg>

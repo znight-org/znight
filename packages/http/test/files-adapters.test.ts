@@ -85,7 +85,7 @@ for (const adapter of ADAPTERS) {
               statusCode: 400,
               error: 'Bad Request',
               message: 'Missing file "avatar"',
-              details: { field: 'avatar' },
+              details: [{ path: 'avatar', message: 'Missing file' }],
             })
             const text = await send({ method: 'POST', url: '/upload/avatar', body: form({ title: 'Me', avatar: 'x' }) })
             expect(text.status).toBe(400)
@@ -140,7 +140,7 @@ for (const adapter of ADAPTERS) {
               statusCode: 400,
               error: 'Bad Request',
               message: 'Unexpected file field "other"',
-              details: { field: 'other', expected: ['avatar'] },
+              details: [{ path: 'other', message: 'Unexpected file field (expected avatar)' }],
             })
           })
 

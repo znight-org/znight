@@ -3,7 +3,14 @@ import type { Principal, RequestUser } from './request-user.js'
 
 import { Controller, Get } from '@znight/http'
 
+import { Authenticated } from './auth.decorators.js'
+
+/**
+ * `@Authenticated()`: any valid API key, whatever its roles. Without an access decision, the build
+ * would fail with ZNIGHT023 (the `access` group is required): there is no implicit default.
+ */
 @Controller('/me')
+@Authenticated()
 export class MeController {
   constructor(private readonly user: Lazy<RequestUser>) {}
 

@@ -164,11 +164,7 @@ class DatadogSender {
       this.#bufferBytes -= removed.bytes
       this.#drop(new Error('Datadog log transport: buffer full, dropping the oldest entry'), 1)
     }
-    if (this.#buffer.length >= this.#settings.batchSize || this.#bufferBytes >= this.#settings.maxBatchBytes) {
-      this.#sendSoon()
-    } else {
-      this.#arm()
-    }
+    this.#schedule()
   }
 
   async flush(): Promise<void> {
@@ -178,6 +174,15 @@ class DatadogSender {
 
   close(): Promise<void> {
     return this.flush()
+  }
+
+  /** Sends right away when a batch is full, after the flush interval otherwise. */
+  #schedule(): void {
+    if (this.#buffer.length >= this.#settings.batchSize || this.#bufferBytes >= this.#settings.maxBatchBytes) {
+      this.#sendSoon()
+    } else {
+      this.#arm()
+    }
   }
 
   #arm(): void {
@@ -204,7 +209,11 @@ class DatadogSender {
   #startDrain(): Promise<void> {
     if (this.#sending === undefined) {
       const sending: Promise<void> = this.#drain().finally(() => {
-        if (this.#sending === sending) this.#sending = undefined
+        if (this.#sending !== sending) return
+        this.#sending = undefined
+        // entries written once the drain found the buffer empty, while it was ending: neither the
+        // drain nor the timer (not armed during a drain) would send them
+        if (this.#buffer.length > 0) this.#schedule()
       })
       this.#sending = sending
     }

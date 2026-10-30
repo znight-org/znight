@@ -40,6 +40,8 @@ export interface FakeViteOptions {
   readonly configAlias?: unknown
   /** A `znight()` plugin in the config of the builds, exposing this API (`configResolved`). */
   readonly znight?: FakeZnightApi
+  /** Other plugins of the config file, as the `configResolved` hooks of a build see them (before the inline ones). */
+  readonly buildConfigPlugins?: readonly object[]
 }
 
 /** A fake `vite` module recording builds. */
@@ -98,6 +100,7 @@ export class FakeVite implements ViteApi {
     const plugins = (config.plugins ?? []) as Plugin[]
     const resolved = [
       ...(this.options.znight === undefined ? [] : [{ name: 'znight', api: this.options.znight }]),
+      ...(this.options.buildConfigPlugins ?? []),
       ...plugins,
     ]
     const root = this.resolvedRoot(config)

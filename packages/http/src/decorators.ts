@@ -9,6 +9,7 @@ import type { ClassMarker, MethodMarker, ParameterMarker, Scope } from '@znight/
 import type { HttpContext } from './context.ts'
 import type { GuardClass, HttpInterceptorClass } from './interfaces.ts'
 import type { ByteSize } from './size.ts'
+import type { SseOptions } from './sse.ts'
 import type { StandardSchemaV1 } from './standard-schema.ts'
 import type { UploadedFileOptions, UploadedFilesOptions } from './uploads.ts'
 
@@ -91,6 +92,33 @@ export function All(_path?: string): MethodMarker {
 }
 
 /**
+ * A `GET` route serving an event stream (Server-Sent Events). The handler returns an
+ * `AsyncIterable`, an `Iterable` or a `ReadableStream` of `SseEvent` (`{ data, event, id, retry,
+ * comment }`), or an `HttpResponse` / exception for other outcomes (204 stops `EventSource`). The
+ * plugin frames the events, sends heartbeats, stops the source when the client leaves (`ctx.signal`)
+ * and closes the stream gracefully on shutdown.
+ *
+ * ```ts
+ * @Sse('/:id/events', { retry: 5_000 })
+ * async events(@Param('id') id: string, @Ctx() ctx: HttpContext): Promise<AsyncIterable<SseEvent<OrderEvent>>> {
+ *   if ((await this.orders.find(id)) === undefined) throw new NotFoundException() // pre-flight checks first
+ *   return this.hub.subscribe(id, { signal: ctx.signal })
+ * }
+ * ```
+ *
+ * Prefer an `async` method returning the source over an `async *` generator: the body of a
+ * generator only runs once the 200 and the headers are sent.
+ *
+ * @param path static: route path (relative to the controller path).
+ * @param options static: `{ heartbeat?, retry?, maxDuration? }` (see `SseOptions`).
+ */
+export function Sse(path?: string, options?: SseOptions): MethodMarker
+export function Sse(options: SseOptions): MethodMarker
+export function Sse(_pathOrOptions?: string | SseOptions, _options?: SseOptions): MethodMarker {
+  return methodMarker
+}
+
+/**
  * Injects a route parameter, coerced to the parameter type (`string`, `number`, `boolean`,
  * `bigint`, `Date`, literal unions) or validated with `schema`. Without arguments: every parameter
  * (`Record<string, string>`).
@@ -127,6 +155,42 @@ export function Query(): ParameterMarker
 export function Query(name: string, schema?: StandardSchemaV1): ParameterMarker
 export function Query(schema: StandardSchemaV1): ParameterMarker
 export function Query(_nameOrSchema?: string | StandardSchemaV1, _schema?: StandardSchemaV1): ParameterMarker {
+  return parameterMarker
+}
+
+/**
+ * Injects a request cookie (decoded, coerced to the parameter type like `@Headers`: `string`,
+ * `number`, `boolean`, `bigint`, `Date`, literal unions, enums, branded primitives) or validated
+ * with `schema`; without name, every cookie (`Record<string, string>`). An absent cookie answers 400
+ * `Missing cookie "name"` unless the parameter is optional. Error messages never echo the value.
+ *
+ * ```ts
+ * // a stale or forged value falls back instead of answering 400 until the cookie expires
+ * export const Theme = z.enum(['light', 'dark']).catch('light')
+ *
+ * read(@Cookie('theme', Theme) theme: 'light' | 'dark', @Cookie('visits') visits = 0) {}
+ * ```
+ *
+ * @param name static: cookie name (an RFC 9110 token).
+ * @param schema value: a Standard Schema (its output is injected).
+ */
+export function Cookie(): ParameterMarker
+export function Cookie(name: string, schema?: StandardSchemaV1): ParameterMarker
+export function Cookie(schema: StandardSchemaV1): ParameterMarker
+export function Cookie(_nameOrSchema?: string | StandardSchemaV1, _schema?: StandardSchemaV1): ParameterMarker {
+  return parameterMarker
+}
+
+/**
+ * Injects the **verified** value of a signed cookie (set with `{ signed: true }`, plugin option
+ * `cookies.secrets`): absent, tampered or signed with a retired key, the cookie does not exist
+ * (400 `Missing cookie "name"` unless the parameter is optional). Same coercion and schema rules as
+ * {@link Cookie}. A route reading a signed cookie fails the boot when `cookies.secrets` is not set.
+ *
+ * @param name static: cookie name.
+ * @param schema value: a Standard Schema (its output is injected).
+ */
+export function SignedCookie(_name: string, _schema?: StandardSchemaV1): ParameterMarker {
   return parameterMarker
 }
 
@@ -350,8 +414,16 @@ export interface RouteDecorator<T> extends RouteDecoratorInfo {
   meta(...args: RouteDecoratorArgs<T>): RouteMetaEntry<T>
 }
 
-/** Grammar of a decision group name (internal; the compiler extension has the same rule). */
+/**
+ * Grammar of an explicit decision group name (internal; the compiler extension has the same rule).
+ * A decorator without `group` is its own group, named after its key: any non-empty key is valid.
+ */
 export const GROUP_NAME: RegExp = /^[A-Za-z][\w.-]*$/
+
+/** `true` when `group` is a valid group of `key`: the key itself (the default) or a valid name. */
+export function isGroupOf(group: unknown, key: string): group is string {
+  return typeof group === 'string' && (group === key || GROUP_NAME.test(group))
+}
 
 /**
  * Creates a metadata decorator for controllers and routes. The compiler stores its argument
@@ -391,8 +463,9 @@ export function createRouteDecorator<T = true>(key: string, options?: RouteDecor
   if (options !== undefined && (options === null || typeof options !== 'object')) {
     throw new TypeError(`createRouteDecorator('${key}'): options must be an object { group?, required? }`)
   }
+  // the grammar applies to an explicit group only: without one, any key is its own group (as before groups)
   const group = options?.group ?? key
-  if (typeof group !== 'string' || !GROUP_NAME.test(group)) {
+  if (!isGroupOf(group, key)) {
     throw new TypeError(
       `createRouteDecorator('${key}'): "group" must be a name made of letters, digits, _ . - starting with a letter (received ${String(group)})`,
     )

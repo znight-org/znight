@@ -11,6 +11,7 @@ import type {
   HttpRouteData,
   MetaEntry,
   ParamCoercion,
+  SseRouteData,
   UploadData,
 } from './model.ts'
 
@@ -159,7 +160,25 @@ function routeNode(ctx: Context, helpers: Helpers, controller: HttpControllerDat
   if (route.rawResponse) {
     entries.push(['rawResponse', true])
   }
+  if (route.sse !== undefined) {
+    entries.push(['sse', sseNode(ctx, route.sse)])
+  }
   entries.push(['invoke', invokeNode(ctx, helpers, controller, route)])
+  return ctx.obj(entries)
+}
+
+/** `{ heartbeat?, retry?, maxDuration? }` (`{}` without options). */
+function sseNode(ctx: Context, sse: SseRouteData): GenNode {
+  const entries: [string, GenInput][] = []
+  if (sse.heartbeat !== undefined) {
+    entries.push(['heartbeat', sse.heartbeat])
+  }
+  if (sse.retry !== undefined) {
+    entries.push(['retry', sse.retry])
+  }
+  if (sse.maxDuration !== undefined) {
+    entries.push(['maxDuration', sse.maxDuration])
+  }
   return ctx.obj(entries)
 }
 
@@ -287,6 +306,25 @@ function argumentNode(ctx: Context, helpers: Helpers, http: GenNode, param: Http
       }
       const value = ctx.code`${record}[${param.key}]`
       const label = `${param.source === 'headers' ? 'header' : param.source} "${param.key}"`
+      if (param.schema !== undefined) {
+        return validation(ctx, helpers, param.schema, value, label)
+      }
+      return coercion(ctx, helpers, param.coercion ?? { plan: { kind: 'raw' }, cast: false }, value, label)
+    }
+    case 'cookie':
+    case 'signedCookie': {
+      if (param.key === undefined) {
+        // @Cookie() / @Cookie(S): every cookie
+        const cookies = ctx.member(http, 'cookies')
+        return param.schema === undefined
+          ? ctx.code`${cookies} as never`
+          : validation(ctx, helpers, param.schema, cookies, 'cookies')
+      }
+      const value =
+        param.source === 'cookie'
+          ? ctx.code`${ctx.member(http, 'cookies')}[${param.key}]`
+          : ctx.call(ctx.member(http, 'signedCookie'), [param.key])
+      const label = `cookie "${param.key}"`
       if (param.schema !== undefined) {
         return validation(ctx, helpers, param.schema, value, label)
       }

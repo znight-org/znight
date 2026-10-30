@@ -128,13 +128,53 @@ const clock = container.get(ClockToken) // Clock
 Helpers: `displayName(token)` (`'UserService'`), `describeToken(token)`, `formatPath(tokens)`
 (`'A -> B -> C'`).
 
+## Plugins
+
+A `Plugin` is an object with a unique `name` and optional hooks, each receiving a `PluginContext`
+(`app`, `container`, `metadata`, `hooks`, `logger`, `getPlugin(name)`):
+
+| Member                    | When                                                                                     |
+| ------------------------- | ---------------------------------------------------------------------------------------- |
+| `register(ctx)`           | Before `container.init()`: supply externals (`registerValue`, `register`)                |
+| `onBootstrap(ctx)`        | After `container.init()`: read the metadata, resolve options, register routes, consumers |
+| `onStart`, `onReady`      | `app.start()`: start ingress, then announce readiness                                    |
+| `onStop`, `onDispose`     | `app.stop()`, in reverse plugin order: drain, then release connections                   |
+| `initRoots({ metadata })` | Not a lifecycle hook: the providers the plugin needs at boot (see below)                 |
+
+`initRoots(context: PluginRootsContext)` returns the classes or tokens the plugin resolves at boot
+although the metadata does not make them entry points: the classes of its options (the global
+`guards` of `HttpPlugin`), or providers it derives from its own section of `context.metadata`. The
+application never calls it; tools that restrict the boot with `init: { only }`, such as
+[`TestApp`](/packages/testing), create these providers at boot with their dependencies. It is called
+before the application exists, possibly several times: keep it cheap, side-effect free and
+non-throwing, and return `[]` for options given as a function of the container.
+
+`PluginOptions<O>` (options or a function of the container) and `resolveOptions(options, container)`
+implement the `XxxPlugin.configure(container => options)` convention. See
+[Plugins & hooks](/guide/plugins).
+
 ## Hooks
 
 `Hooks` is a typed event bus: `on(name, listener)`, `emit(name, event)`, `wrap(name, wrapper)`,
-`run(name, event, fn)`, `hasListeners(name)`, `hasWrappers(name)`. The `http:request`
-(`HttpRequestEvent`) and `messaging:message` (`MessageDeliveryEvent`) events are defined in core so
-producers and observers share one type. Augment `ZnightHooks` to declare your own. See
-[Plugins & hooks](/guide/plugins#hooks).
+`run(name, event, fn)`, `hasListeners(name)`, `hasWrappers(name)`. The events of the feature
+packages are defined in core so producers and observers share one type:
+
+| Hook                | Event                  | Produced by                                                           |
+| ------------------- | ---------------------- | --------------------------------------------------------------------- |
+| `http:request`      | `HttpRequestEvent`     | `@znight/http` (one request)                                          |
+| `messaging:message` | `MessageDeliveryEvent` | `@znight/messaging` (one delivery)                                    |
+| `messaging:publish` | `MessagePublishEvent`  | `@znight/messaging` (one publish)                                     |
+| `schedule:run`      | `ScheduledRunEvent`    | `@znight/schedule` (one occurrence of a job: trigger, outcome, error) |
+
+Augment `ZnightHooks` to declare your own. See [Plugins & hooks](/guide/plugins#hooks).
+
+## Error code ranges
+
+`ZNIGHT001` to `ZNIGHT029` belong to the core, the compiler and the features of 0.1 (http, messaging,
+config, observability). From `ZNIGHT030`, each first-party package owns a block of ten:
+`ZNIGHT030`–`039` [`@znight/openapi`](/packages/openapi), `ZNIGHT040`–`049`
+[`@znight/schedule`](/packages/schedule) (`050`–`069` are reserved). Third-party packages get no
+`ZNIGHT` code. Every code is in the [error reference](/reference/error-codes).
 
 ## AOP
 

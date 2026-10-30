@@ -10,6 +10,7 @@ import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
 import { AuthGuard } from './auth/auth.guard.js'
 import { ServerConfig } from './config/server.config.js'
 import { DomainErrorMapper } from './shared/domain-error.mapper.js'
+import { httpSecurityOptions } from './shared/http-security.js'
 
 const app = await Application.create({
   metadata: __ZNIGHT_METADATA__,
@@ -33,11 +34,15 @@ const app = await Application.create({
         adapter: fastifyAdapter(),
         port: server.port,
         host: server.host,
-        // global guards run before the guards of controllers and routes
+        // Global guards run before the guards of controllers and routes. AuthGuard enforces the
+        // "access" decision of every route (`static enforces`): without it, the boot fails with
+        // ZNIGHT023 listing the unprotected routes.
         guards: [AuthGuard],
         exceptionMappers: [DomainErrorMapper],
         exposeErrors: server.exposeErrors,
         bodyLimit: '64kb', // JSON bodies are small; the cover upload route computes its own limit
+        // CORS, security headers and trusted proxies, shared with the tests
+        ...httpSecurityOptions(server),
       }
     }),
   ],

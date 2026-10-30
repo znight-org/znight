@@ -40,6 +40,8 @@ const ISO_DATE =
   /^(\d{4})-(\d{2})-(\d{2})(?:[Tt ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?(?:([Zz])|([+-])(\d{2}):?(\d{2}))?)?$/
 
 function invalid(label: string, expected: string, value: unknown): BadRequestException {
+  // cookies often carry tokens: their values are never echoed
+  if (label.startsWith('cookie ')) return new BadRequestException(`Invalid ${label}: expected ${expected}`)
   return new BadRequestException(`Invalid ${label}: expected ${expected}, received ${describe(value)}`)
 }
 

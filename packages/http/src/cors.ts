@@ -26,14 +26,22 @@ export interface CorsOptions {
   readonly origin: CorsOrigin
   /** `access-control-allow-credentials: true` (cookies, `Authorization`). Not with `'*'`. Default `false`. */
   readonly credentials?: boolean
-  /** `access-control-allow-methods` of preflights. Default: the methods routed on the requested path. */
+  /**
+   * `access-control-allow-methods` of preflights. Default: the methods routed on the requested path.
+   * `'*'` (any method) is refused with `credentials`, where browsers read it as a method named `*`.
+   */
   readonly methods?: readonly string[]
   /**
    * `access-control-allow-headers` of preflights. Default: the headers the browser asks for
-   * (`access-control-request-headers`). `'*'` is refused with `credentials`.
+   * (`access-control-request-headers`). `'*'` is refused with `credentials`; it covers
+   * `Authorization` too (sent as `*, authorization` when the browser asks for it: browsers never let
+   * `*` alone cover it).
    */
   readonly allowHeaders?: readonly string[] | '*'
-  /** `access-control-expose-headers` of replies. Default: the request id header (none when it is `false`). */
+  /**
+   * `access-control-expose-headers` of replies. Default: the request id header (none when it is
+   * `false`). `'*'` (every header) is refused with `credentials`, where browsers read it literally.
+   */
   readonly exposeHeaders?: readonly string[]
   /** `access-control-max-age` of preflights, in seconds (0 to 86400). Default `600`. */
   readonly maxAge?: number
@@ -43,7 +51,10 @@ export interface CorsOptions {
 export interface CorsPolicy {
   /** Any origin is allowed: `access-control-allow-origin: *`. */
   readonly wildcard: boolean
-  /** Replies get `vary: origin` (every policy but `origin: '*'`). */
+  /**
+   * Replies get `vary: origin` (every policy but a wildcard one, whose replies all carry
+   * `access-control-allow-origin: *`).
+   */
   readonly varyOrigin: boolean
   readonly credentials: boolean
   /** Joined `methods`, `undefined` for the default (the methods of the path). */
@@ -95,6 +106,11 @@ export function resolveCors(
     )
   }
   const methods = tokenList('cors.methods', options.methods, TOKEN, 'HTTP method names')
+  if (credentials) {
+    refuseWildcard('cors.methods', options.methods, 'HTTP method names', 'a method named "*"')
+    refuseWildcard('cors.allowHeaders', options.allowHeaders, 'header names', 'a header named "*"')
+    refuseWildcard('cors.exposeHeaders', options.exposeHeaders, 'header names', 'a header named "*"')
+  }
   let allowHeaders: string | undefined
   if (options.allowHeaders === '*') {
     if (credentials) {
@@ -118,7 +134,7 @@ export function resolveCors(
   }
   return Object.freeze({
     wildcard: origin.wildcard,
-    varyOrigin: options.origin !== '*',
+    varyOrigin: !origin.wildcard,
     credentials,
     methods,
     allowHeaders,
@@ -237,6 +253,14 @@ function hasTopLevelAlternation(source: string): boolean {
   return false
 }
 
+/** `'*'` in a list of a credentialed policy: browsers read it literally there (Fetch, CORS protocol). */
+function refuseWildcard(name: string, value: unknown, what: string, literal: string): void {
+  if (!Array.isArray(value) || !value.includes('*')) return
+  throw invalidOption(name, `a list of ${what} when credentials is true (not '*')`, value, undefined, [
+    `On credentialed requests browsers read '*' as ${literal}, not as a wildcard: list the names`,
+  ])
+}
+
 function tokenList(name: string, value: unknown, grammar: RegExp, what: string): string | undefined {
   if (value === undefined) return undefined
   if (!Array.isArray(value) || !value.every(item => typeof item === 'string' && grammar.test(item))) {
@@ -276,7 +300,13 @@ export function preflightHeaders(
   if (policy.credentials) headers['access-control-allow-credentials'] = 'true'
   const methods = policy.methods ?? allow
   if (methods !== '') headers['access-control-allow-methods'] = methods
-  const allowHeaders = policy.allowHeaders ?? requestedHeaders(requestHeaders['access-control-request-headers'])
+  const requested = requestedHeaders(requestHeaders['access-control-request-headers'])
+  let allowHeaders = policy.allowHeaders ?? requested
+  // `*` never covers Authorization (Fetch): name it when the browser asks for it
+  if (allowHeaders !== undefined && requested?.split(', ').includes('authorization') === true) {
+    const allowed = allowHeaders.split(', ')
+    if (allowed.includes('*') && !allowed.includes('authorization')) allowHeaders = `${allowHeaders}, authorization`
+  }
   if (allowHeaders !== undefined && allowHeaders !== '') headers['access-control-allow-headers'] = allowHeaders
   headers['access-control-max-age'] = policy.maxAge
   headers['allow'] = allow

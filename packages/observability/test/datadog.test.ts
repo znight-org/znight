@@ -212,6 +212,34 @@ describe('datadogTransport', () => {
     await timed.close()
   })
 
+  it('sends an entry written while the drain is ending, without waiting for another entry', async () => {
+    // the drain loops while entries are buffered: one written once it found the buffer empty, but
+    // before it ended, must still be sent (the timer is not armed while a drain is running)
+    for (const batchSize of [1, 100]) {
+      for (let depth = 0; depth < 12; depth++) {
+        const messages: string[] = []
+        const dd = transport({
+          batchSize,
+          compress: false,
+          flushIntervalMs: batchSize === 1 ? 60_000 : 0,
+          fetch: ((_url: string, init: RequestInit) => {
+            for (const entry of JSON.parse(String(init.body))) messages.push(entry.message)
+            return Promise.resolve(new Response(null, { status: 202 }))
+          }) as typeof fetch,
+        })
+        const logger = new Logger({ transport: dd })
+        logger.info('first')
+        if (batchSize !== 1) await sleep(1) // the interval elapsed: the drain runs
+        let tick = Promise.resolve()
+        for (let i = 0; i < depth; i++) tick = tick.then(() => undefined)
+        void tick.then(() => logger.info('second'))
+        await sleep(20)
+        expect({ batchSize, depth, messages }).toEqual({ batchSize, depth, messages: ['first', 'second'] })
+        await dd.close()
+      }
+    }
+  })
+
   it('retries 5xx and 429 (honouring Retry-After) then succeeds', async () => {
     intake.statuses = [503, 429, 500]
     intake.retryAfter = '0'

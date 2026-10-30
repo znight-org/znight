@@ -11,7 +11,8 @@ export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | 
 
 /**
  * Where a handler parameter comes from (`file` / `files`: `@UploadedFile` / `@UploadedFiles`, the
- * `name` being the multipart field).
+ * `name` being the multipart field; `cookie` / `signedCookie`: `@Cookie` / `@SignedCookie`, the
+ * `name` being the cookie name).
  */
 export type HttpParamSource =
   | 'param'
@@ -23,6 +24,8 @@ export type HttpParamSource =
   | 'context'
   | 'file'
   | 'files'
+  | 'cookie'
+  | 'signedCookie'
 
 /** A handler parameter (informational: extraction, coercion and validation happen in `invoke`). */
 export interface HttpParamDefinition {
@@ -56,6 +59,16 @@ export interface HttpUploadDefinition {
   readonly maxFiles?: number
   /** Accepted media types (`image/png`, `image/*`), compared with the type declared by the client. */
   readonly mimeTypes?: readonly string[]
+}
+
+/** Options of an `@Sse` route (`HttpRouteDefinition.sse`). */
+export interface HttpSseDefinition {
+  /** Heartbeat interval in ms (≥ 1 000); `0` disables it. Absent: the plugin option `sse.heartbeat`. */
+  readonly heartbeat?: number
+  /** `retry` sent first (ms). Absent: the plugin option `sse.retry`. */
+  readonly retry?: number
+  /** The stream ends gracefully after this many ms (≥ 1 000). */
+  readonly maxDuration?: number
 }
 
 /** A route: one decorated method of a controller. */
@@ -94,6 +107,12 @@ export interface HttpRouteDefinition {
   readonly uploads?: readonly HttpUploadDefinition[]
   /** `true` when the handler takes `@Res()` and writes the response itself. */
   readonly rawResponse?: boolean
+  /**
+   * `@Sse` route (GET only): the handler result (an `AsyncIterable`, an `Iterable` or a
+   * `ReadableStream` of `SseEvent`) is served as an event stream; an `HttpResponse` or a Web
+   * `Response` is sent as usual. `{}` without options.
+   */
+  readonly sse?: HttpSseDefinition
   /**
    * Calls the handler: extracts, coerces and validates every argument from the context, then calls
    * the method on the controller instance. May return a promise.

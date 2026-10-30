@@ -23,13 +23,25 @@
       "types": "./dist/index.d.mts",
       "default": "./dist/index.mjs"
     },
+    "./testing": {
+      "@znight/source": "./src/testing/index.ts",
+      "types": "./dist/testing.d.mts",
+      "default": "./dist/testing.mjs"
+    },
+    "./compiler": {
+      "@znight/source": "./src/compiler/index.ts",
+      "types": "./dist/compiler.d.mts",
+      "default": "./dist/compiler.mjs"
+    },
     "./package.json": "./package.json"
   },
   "types": "./dist/index.d.mts",
   "files": ["dist", "src"],
   "scripts": {
     "build": "tsdown",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p test"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p test",
+    "test": "bun test --conditions=@znight/source test",
+    "test:integration": "ZNIGHT_INTEGRATION=1 bun test --conditions=@znight/source --timeout 180000 test/integration"
   },
   "publishConfig": {
     "access": "public"
@@ -52,5 +64,21 @@
     "fast-check": "4.10.2",
     "testcontainers": "12.2.1",
     "@testcontainers/redis": "12.2.1"
+  },
+  "znight": {
+    "apiVersion": 1,
+    "compiler": "@znight/schedule/compiler",
+    "provides": [
+      {
+        "export": "SchedulerRegistry",
+        "plugin": "SchedulePlugin",
+        "scope": "singleton"
+      },
+      {
+        "export": "JobContext",
+        "plugin": "SchedulePlugin",
+        "scope": "request"
+      }
+    ]
   }
 }

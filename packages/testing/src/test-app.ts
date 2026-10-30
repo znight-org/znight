@@ -104,6 +104,71 @@ export interface HttpInjector {
   inject(request: InjectRequest & { readonly method: string }): Promise<HttpInjectResult>
 }
 
+/** A request for {@link TestApp.injectStream} / {@link TestApp.injectSse}: an {@link InjectRequest} that can be aborted. */
+export interface InjectStreamRequest extends InjectRequest {
+  /** Aborting it disconnects the client (like cancelling the response body). */
+  readonly signal?: AbortSignal
+}
+
+/**
+ * The response of {@link TestApp.injectStream}: available at the headers, the body read as it is
+ * produced. Cancelling `body` disconnects the client. The shape of `InjectStreamResponse` from
+ * `@znight/http`.
+ */
+export interface InjectStreamResponse {
+  readonly status: number
+  readonly headers: Readonly<Record<string, string | readonly string[] | undefined>>
+  readonly cookies: Readonly<Record<string, SetCookieInfo>>
+  readonly body: ReadableStream<Uint8Array>
+}
+
+/** An event of an event stream (`SseMessage` of `@znight/http`). */
+export interface SseMessage {
+  /** Event type: `message` by default. */
+  readonly event: string
+  readonly data: string
+  /** The last event id at dispatch time. */
+  readonly id: string
+  json<T = unknown>(): T
+}
+
+/**
+ * The response of {@link TestApp.injectSse}: an event stream read in memory like `EventSource`
+ * would (`InjectSseResponse` of `@znight/http`).
+ */
+export interface InjectSseResponse extends AsyncIterable<SseMessage>, AsyncDisposable {
+  readonly status: number
+  readonly headers: Readonly<Record<string, string | readonly string[] | undefined>>
+  readonly cookies: Readonly<Record<string, SetCookieInfo>>
+  /** `''` for an event stream; otherwise the whole body (an error, a 204...). */
+  readonly body: string
+  json<T = unknown>(): T
+  /** The next event (comments skipped). Rejects on timeout (default 2 000 ms) or when the stream ended. */
+  next(options?: { readonly timeoutMs?: number }): Promise<SseMessage>
+  take(count: number, options?: { readonly timeoutMs?: number }): Promise<SseMessage[]>
+  /** Comments received so far (heartbeats are `''`). */
+  readonly comments: readonly string[]
+  /** What a browser would send as `Last-Event-ID`. */
+  readonly lastEventId: string
+  /** The last `retry` received. */
+  readonly retry: number | undefined
+  /** Resolves when the server ends the stream. */
+  readonly done: Promise<void>
+  /** Disconnects (the server sees a client disconnect). Idempotent. */
+  close(): Promise<void>
+  /** Reconnects like `EventSource`: the same request plus `last-event-id`. */
+  reconnect(): Promise<InjectSseResponse>
+}
+
+/**
+ * What `TestApp.injectStream()` / `injectSse()` expect from the plugin named `'http'`
+ * (`HttpPlugin` of `@znight/http` ≥ 0.1.0, the release that ships streaming).
+ */
+export interface HttpStreamInjector {
+  injectStream(request: InjectStreamRequest & { readonly method: string }): Promise<InjectStreamResponse>
+  injectSse(request: InjectStreamRequest & { readonly method: string }): Promise<InjectSseResponse>
+}
+
 /**
  * A plugin implementing the optional `initRoots(context)` member of `Plugin` (`@znight/core`), read
  * by `TestApp.create()`: the providers the plugin needs at boot although the metadata does not make
@@ -252,6 +317,71 @@ export class TestApp implements AsyncDisposable {
       return Promise.resolve(plugin.inject({ ...request, method })).then(complete)
     } catch (error) {
       return Promise.reject(error)
+    }
+  }
+
+  /**
+   * Dispatches a request in memory and resolves at the response headers; the body is read as it is
+   * produced (`response.body`). Cancelling the body (or aborting `signal`) disconnects the client.
+   *
+   * @throws ZnightError ZNIGHT001 when the HTTP plugin does not support streaming, ZNIGHT021 once closed.
+   */
+  injectStream(request: InjectStreamRequest): Promise<InjectStreamResponse> {
+    return this.#stream('injectStream', request)
+  }
+
+  /**
+   * Opens an event stream (Server-Sent Events) in memory and reads it like `EventSource`:
+   *
+   * ```ts
+   * await using stream = await app.injectSse({ url: '/orders/o-1/events' })
+   * const event = await stream.next() // rejects after 2 000 ms
+   * expect(event.json()).toMatchObject({ status: 'paid' })
+   * const resumed = await stream.reconnect() // last-event-id, like EventSource
+   * ```
+   *
+   * Leaving the `await using` block (or `close()`) disconnects: the server sees `ctx.signal` abort.
+   *
+   * @throws ZnightError ZNIGHT001 when the HTTP plugin does not support event streams, ZNIGHT021 once closed.
+   */
+  injectSse(request: InjectStreamRequest): Promise<InjectSseResponse> {
+    return this.#stream('injectSse', request)
+  }
+
+  #stream<K extends keyof HttpStreamInjector>(
+    method: K,
+    request: InjectStreamRequest,
+  ): ReturnType<HttpStreamInjector[K]> {
+    try {
+      if (this.#closed) {
+        throw new ZnightError(ErrorCode.LifecycleFailed, `TestApp.${method}(): the application is closed`)
+      }
+      if (request === null || typeof request !== 'object' || typeof request.url !== 'string') {
+        throw new TypeError(
+          `[znight] TestApp.${method}() expects { method?, url, headers?, body?, query?, cookies?, signedCookies?, signal? }`,
+        )
+      }
+      const plugin = this.app.getPlugin<Plugin & Partial<HttpStreamInjector>>(HTTP_PLUGIN_NAME)
+      const dispatch = plugin?.[method] as
+        | ((this: unknown, request: InjectStreamRequest & { readonly method: string }) => unknown)
+        | undefined
+      if (typeof dispatch !== 'function') {
+        throw new ZnightError(
+          ErrorCode.MissingProvider,
+          `TestApp.${method}() requires the HTTP plugin with streaming support`,
+          {
+            hints: [
+              plugin === undefined
+                ? 'Add HttpPlugin.configure({ adapter }) from @znight/http to TestApp.create({ plugins })'
+                : `The plugin named 'http' does not implement ${method}(): register HttpPlugin.configure({ adapter }) from @znight/http ≥ 0.1.0 (the same release as @znight/testing)`,
+            ],
+          },
+        )
+      }
+      const sent = { ...request, method: (request.method ?? 'GET').toUpperCase() }
+      return Promise.resolve(dispatch.call(plugin, sent)) as ReturnType<HttpStreamInjector[K]>
+    } catch (error) {
+      return Promise.reject(error) as ReturnType<HttpStreamInjector[K]>
     }
   }
 

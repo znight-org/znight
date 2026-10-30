@@ -45,6 +45,40 @@ describe('schematic contents', () => {
     expect(plan.hint).toContain('@Intercept(TimingInterceptor)')
   })
 
+  it('job: a class of scheduled jobs named <Name>Jobs', () => {
+    const plan = planSchematic({ schematic: schematic('job'), name: 'reports/digest', root: '/app', context: plain })
+    expect(plan.file).toBe('/app/src/reports/digest.jobs.ts')
+    expect(plan.names.className).toBe('DigestJobs')
+    expect(plan.content).toContain("@Cron('0 3 * * *', { name: 'reports.digest.daily' })")
+    expect(plan.content).toContain("import { Cron, type JobContext } from '@znight/schedule'")
+    expect(plan.hint).toContain('SchedulePlugin.configure()')
+    expect(findSchematic('j')?.name).toBe('job')
+    expect(parseSchematicName('digest-jobs', schematic('job')).names.kebab).toBe('digest')
+  })
+
+  // job names are unique in the application (ZNIGHT041): the directories qualify the default name
+  it.each([
+    [{ name: 'digest' }, '/app/src/digest/digest.jobs.ts', 'digest.daily'],
+    [{ name: 'digest', flat: true }, '/app/src/digest.jobs.ts', 'digest.daily'],
+    [{ name: 'digest/digest' }, '/app/src/digest/digest.jobs.ts', 'digest.daily'],
+    [{ name: 'reports/digest' }, '/app/src/reports/digest.jobs.ts', 'reports.digest.daily'],
+    [{ name: 'emails/Digest_Jobs' }, '/app/src/emails/digest.jobs.ts', 'emails.digest.daily'],
+    [{ name: 'Admin/Mail/digest' }, '/app/src/admin/mail/digest.jobs.ts', 'admin.mail.digest.daily'],
+    [{ name: 'digest', path: '/app/src/emails' }, '/app/src/emails/digest.jobs.ts', 'emails.digest.daily'],
+    [{ name: 'reports/digest', path: '/app/src' }, '/app/src/reports/digest.jobs.ts', 'reports.digest.daily'],
+    [{ name: 'digest', path: '/app/lib/jobs' }, '/app/lib/jobs/digest.jobs.ts', 'lib.jobs.digest.daily'],
+    [{ name: 'digest', path: '/elsewhere' }, '/elsewhere/digest.jobs.ts', 'digest.daily'],
+  ])('job: %o at %s is named %s', (input, file, name) => {
+    const plan = planSchematic({ schematic: schematic('job'), root: '/app', context: plain, ...input })
+    expect(plan.file).toBe(file)
+    expect(plan.content).toContain(`{ name: '${name}' }`)
+  })
+
+  it('guard: a commented static enforces line (route decisions)', () => {
+    const plan = planSchematic({ schematic: schematic('guard'), name: 'auth', root: '/app', context: plain })
+    expect(plan.content).toContain('// static readonly enforces = [Public, Roles]')
+  })
+
   it('config: prefix and environment names from the name', () => {
     const plan = planSchematic({
       schematic: schematic('config'),
@@ -135,6 +169,7 @@ describe('znight g', () => {
       'thing/thing.factory.ts',
       'thing/thing.guard.ts',
       'thing/thing.interceptor.ts',
+      'thing/thing.jobs.ts',
       'thing/thing.service.ts',
     ])
     // the project depends on zod: the consumer validates its messages

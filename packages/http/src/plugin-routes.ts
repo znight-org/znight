@@ -11,7 +11,7 @@ import type { GuardRef } from './plugin.ts'
 
 import { ErrorCode, ZnightError } from '@znight/core'
 
-import { GROUP_NAME } from './decorators.ts'
+import { isGroupOf } from './decorators.ts'
 import { joinPaths, normalizePath, parseRoutePath, type RoutePath, RoutePathError } from './path.ts'
 
 /**
@@ -167,7 +167,7 @@ function metaEntry(plugin: string, where: string, value: unknown): NormalizedMet
   }
   const group = entry.group ?? entry.key
   const required = entry.required ?? false
-  if (typeof group !== 'string' || !GROUP_NAME.test(group) || typeof required !== 'boolean') {
+  if (!isGroupOf(group, entry.key) || typeof required !== 'boolean') {
     throw invalid(plugin, `invalid group of the meta entry "${entry.key}" of the route ${where}`)
   }
   return { key: entry.key, value: entry.value, group, required }

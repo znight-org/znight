@@ -1,15 +1,19 @@
 import type { Container, CoreLogger, Hooks, HttpRequestEvent, Token } from '@znight/core'
-import type { AdapterReply, AdapterRequest } from './adapter.ts'
+import type { AdapterReply, AdapterRequest, ReplyBody } from './adapter.ts'
+import type { CookieSettings } from './cookie-settings.ts'
+import type { SerializedCookie } from './cookies.ts'
 import type { CorsPolicy } from './cors.ts'
 import type { CanActivate, ExceptionMapper, HttpInterceptor } from './interfaces.ts'
-import type { HttpRouteDefinition } from './metadata.ts'
+import type { HttpRouteDefinition, HttpSseDefinition } from './metadata.ts'
 import type { TrustPolicy } from './proxy.ts'
 import type { RouteTable } from './router.ts'
 import type { BodyPlan } from './uploads.ts'
 
 import { displayName } from '@znight/core'
 
+import { isEventStreamType } from './adapters/shared.ts'
 import { type HttpRouteInfo, RequestContext, type RequestId } from './context.ts'
+import { DEFAULT_COOKIE_SETTINGS, serializeWith } from './cookie-settings.ts'
 import { corsReplyHeaders, isPreflight, mergeVary, preflightHeaders } from './cors.ts'
 import {
   BadRequestException,
@@ -33,7 +37,9 @@ import {
   serializeError,
   serializeFileReply,
   serializeResult,
+  serializeSseReply,
 } from './serialize.ts'
+import { isSseBody, isSseSource, type SseOptions, SseSession, type SseSource } from './sse.ts'
 import { type ContextRunner, captureContext, discardStream, trackStream } from './stream.ts'
 import { HttpTokens } from './tokens.ts'
 import { emptyRecord, errorMessage } from './utils.ts'
@@ -73,7 +79,28 @@ export interface PipelineOptions {
   readonly securityHeaders?: Readonly<Record<string, string>>
   /** `trustProxy` policy, `undefined` when proxies are not trusted. */
   readonly trustProxy?: TrustPolicy | undefined
+  /** Cookie defaults and signing key (`cookies` option). Default: secure defaults, no signing. */
+  readonly cookies?: CookieSettings
+  /** Event stream defaults (`sse` option). */
+  readonly sse?: SseSettings
 }
+
+/** Resolved plugin option `sse`. */
+export interface SseSettings {
+  /** Heartbeat interval in ms; `0`: none. */
+  readonly heartbeat: number
+  /** `retry` sent first, if any. */
+  readonly retry: number | undefined
+  /** Time a source gets to finish after a graceful close started (ms). */
+  readonly shutdownGraceMs: number
+}
+
+/** Default event stream settings. */
+export const DEFAULT_SSE_SETTINGS: SseSettings = Object.freeze({
+  heartbeat: 8_000,
+  retry: undefined,
+  shutdownGraceMs: 1_000,
+})
 
 type Target =
   | { readonly kind: 'route'; readonly plan: RoutePlan }
@@ -92,6 +119,9 @@ interface CorsDecision {
 
 const RAW = Symbol('raw response')
 type Outcome = SerializedReply | typeof RAW
+
+/** A reply whose `HttpResponse` cookies were serialised (see `#checkCookies`). */
+type CheckedReply = SerializedReply & { readonly cookieLines?: readonly SerializedCookie[] }
 
 /** A reply, and a promise settled once the request is over (response body sent or abandoned, scope closed). */
 interface Served {
@@ -115,6 +145,8 @@ export class Pipeline {
   readonly #table: RouteTable<RoutePlan>
   #inflight = 0
   #idle: (() => void)[] = []
+  /** Open event streams. */
+  readonly #streams = new Set<SseSession>()
   /** Set while the server drains: responses ask clients to close their connection. */
   draining = false
 
@@ -135,6 +167,19 @@ export class Pipeline {
   /** Number of requests being processed. */
   get inflight(): number {
     return this.#inflight
+  }
+
+  /** Number of open event streams. */
+  get streams(): number {
+    return this.#streams.size
+  }
+
+  /**
+   * Starts the graceful close of every open event stream (`ctx.signal` aborts with `kind`, the source
+   * gets `shutdownGraceMs` to finish, then the client receives a jittered `retry`).
+   */
+  closeStreams(kind: 'shutdown' | 'expired'): void {
+    for (const session of [...this.#streams]) session.close(kind)
   }
 
   /** Resolves once no request is being processed. */
@@ -262,10 +307,14 @@ export class Pipeline {
       route,
       params,
       body,
+      cookies: this.#options.cookies ?? DEFAULT_COOKIE_SETTINGS,
       ...(proxy === undefined
         ? {}
         : { client: proxy.resolve(request.remoteAddress ?? request.ip, request.headers, request.encrypted === true) }),
     })
+    // an event stream requested while draining is served (guards run) with its signal already
+    // aborted: a well-behaved source ends at once and the client gets a jittered retry
+    if (this.draining && target.kind === 'route' && target.plan.definition.sse !== undefined) ctx.abort('shutdown')
     const event: HttpRequestEvent = {
       method: request.method,
       path: ctx.path,
@@ -294,7 +343,7 @@ export class Pipeline {
         try {
           await this.#hooks.run('http:request', event, async () => {
             outcome = await this.#process(ctx, target, event, cors)
-            if (outcome !== RAW) outcome = this.#checkHeaders(outcome, ctx, event)
+            if (outcome !== RAW) outcome = this.#checkCookies(this.#checkHeaders(outcome, ctx, event), ctx, event)
             run = captureContext() // stream producers run in the context of the handler (scope, hooks)
             return outcome
           })
@@ -306,7 +355,9 @@ export class Pipeline {
           // a wrapper failed before the request was handled, or did not call next(): answer anyway
           const error = failed ? hookError : new Error('An "http:request" hook wrapper did not call next()')
           event.error ??= error
-          outcome = await this.#errorReply(error, ctx)
+          // the same checks as a handled reply: an exception mapper's HttpResponse may carry cookies
+          const fallback = await this.#errorReply(error, ctx)
+          outcome = this.#checkCookies(this.#checkHeaders(fallback, ctx, event), ctx, event)
           event.status = outcome.status
         } else if (failed) {
           this.#logger.error('An "http:request" hook wrapper failed after the request was handled', {
@@ -315,25 +366,31 @@ export class Pipeline {
           })
         }
         if (outcome === RAW) {
+          ctx.commit()
           replied()
           return
         }
         const serialized = this.#complete(outcome, ctx, event, requestId, cors, preflight)
         const body = serialized.body
         if (!(body instanceof ReadableStream || body instanceof Blob)) {
-          reply = serialized
+          reply = adapterReply(serialized, body)
+          ctx.commit()
           replied()
           ctx.releaseBody()
           return
         }
         // files too: a file-backed Blob is read lazily, after the handler returned
-        const tracked = trackStream(body, run ?? captureContext())
-        reply =
-          body instanceof Blob
-            ? { ...serialized, body: tracked.stream, blob: body }
-            : { ...serialized, body: tracked.stream }
+        const tracked = trackStream(body, run ?? captureContext(), () => ctx.abort('client'))
+        const session = serialized.sse
+        reply = adapterReply(serialized, tracked.stream, body instanceof Blob ? body : undefined)
+        if (session !== undefined) {
+          this.#streams.add(session)
+          if (this.draining) session.close('shutdown')
+        }
+        ctx.commit()
         replied()
         const failure = await tracked.done
+        if (session !== undefined) this.#streams.delete(session)
         if (failure !== undefined) {
           this.#logger.error('The response stream failed', { err: failure, requestId, path: ctx.path })
         }
@@ -343,8 +400,11 @@ export class Pipeline {
         [HttpTokens.RequestId, requestId],
       ])
       .then(
-        () => undefined,
+        () => {
+          ctx.complete()
+        },
         (error: unknown) => {
+          ctx.complete()
           // the callback above never throws: only the disposal of request-scoped instances can fail
           this.#logger.error('Failed to dispose request-scoped providers', { err: error, requestId })
         },
@@ -377,7 +437,7 @@ export class Pipeline {
    * {@link #frameworkHeaders}), then checks the final headers (see {@link #checkHeaders}).
    */
   #complete(
-    reply: SerializedReply,
+    reply: CheckedReply,
     ctx: RequestContext,
     event: HttpRequestEvent,
     requestId: RequestId,
@@ -385,16 +445,45 @@ export class Pipeline {
     preflight: boolean,
   ): SerializedReply {
     addMissingHeaders(reply.headers, event.responseHeaders)
+    applyCookies(reply, ctx)
     this.#frameworkHeaders(reply.headers, requestId, cors, preflight)
     const checked = this.#checkHeaders(reply, ctx, event)
-    if (checked !== reply) this.#frameworkHeaders(checked.headers, requestId, cors, preflight)
+    if (checked !== reply) {
+      applyCookies(checked, ctx)
+      this.#frameworkHeaders(checked.headers, requestId, cors, preflight)
+    }
     return checked
   }
 
   /**
+   * Serialises the cookies of an `HttpResponse` (`withCookie`) with the plugin settings (defaults,
+   * signing). A cookie breaking a rule that depends on them (a prefix with the `secure` default,
+   * `SameSite=None` without `secure`, signing without secrets, the size after signing) turns the
+   * reply into a plain 500, logged as `Invalid cookie "x": …` (like an invalid header).
+   */
+  #checkCookies(reply: SerializedReply, ctx: RequestContext, event: HttpRequestEvent): CheckedReply {
+    const cookies = reply.cookies
+    if (cookies === undefined || cookies.length === 0) return reply
+    const settings = this.#options.cookies ?? DEFAULT_COOKIE_SETTINGS
+    const lines: SerializedCookie[] = []
+    try {
+      for (const cookie of cookies) lines.push(serializeWith(cookie, settings))
+    } catch (error) {
+      if (reply.body instanceof ReadableStream) discardStream(reply.body)
+      event.error = error
+      event.status = 500
+      this.#log(error, ctx)
+      return serializeError(500, this.#internalBody(error), ctx.method)
+    }
+    return { ...reply, cookieLines: lines }
+  }
+
+  /**
    * Headers the plugin adds to every reply when nothing set them: the request id, the CORS headers
-   * of an allowed origin (`vary: origin` whatever the origin), the security headers; and
-   * `connection: close` while draining.
+   * of an allowed origin (`vary: origin` whatever the origin) or, with a wildcard policy, of every
+   * reply (`access-control-allow-origin: *` does not depend on the request, so a cached reply serves
+   * CORS and non-CORS requests alike), the security headers; and `connection: close` while
+   * draining.
    */
   #frameworkHeaders(
     headers: Record<string, HeaderValue>,
@@ -406,8 +495,12 @@ export class Pipeline {
     if (header !== undefined && headers[header] === undefined && isHeaderValue(requestId)) headers[header] = requestId
     const policy = this.#options.cors
     if (policy !== undefined) {
-      // a preflight answer carries its own CORS headers; other replies get them for allowed origins
-      if (cors?.allowed === true && !preflight) addMissingHeaders(headers, corsReplyHeaders(policy, cors.origin))
+      // a preflight answer carries its own CORS headers; other replies get them for allowed origins,
+      // or always with a wildcard policy (with or without an origin header: no vary needed)
+      if (!preflight) {
+        if (policy.wildcard) addMissingHeaders(headers, corsReplyHeaders(policy, '*'))
+        else if (cors?.allowed === true) addMissingHeaders(headers, corsReplyHeaders(policy, cors.origin))
+      }
       if (policy.varyOrigin) mergeVary(headers, 'origin')
     }
     const security = this.#options.securityHeaders
@@ -516,14 +609,68 @@ export class Pipeline {
       result = await chain(0)
     }
     if (definition.rawResponse === true && !(result instanceof Response)) return RAW
-    const reply = await serialize(result, ctx, {
+    const options: SerializeOptions = {
       method: ctx.method,
       routeMethod: definition.method,
       status: definition.status,
       headers: definition.headers,
       context: ctx.hasResponseHeaders ? ctx.responseHeaders : undefined,
-    })
+    }
+    const sse = definition.sse
+    let reply: SerializedReply
+    if (sse !== undefined && !(result instanceof Response) && !isHttpResponse(result)) {
+      // an @Sse route: the (awaited) result is the event source
+      if (!isSseSource(result)) {
+        throw new TypeError(
+          `@Sse handler ${displayName(plan.info.controller)}.${definition.handler} must return an AsyncIterable, an Iterable or a ReadableStream of SseEvent (received ${describeResult(result)})`,
+        )
+      }
+      reply = serializeSseReply(this.#openStream(result, sseOptions(sse), ctx), undefined, options)
+    } else {
+      reply = await this.#serialize(result, ctx, options, sse)
+    }
     return this.#finish(event, reply)
+  }
+
+  /** Serialises a handler (or exception mapper) result; file bodies are resolved, event streams opened. */
+  async #serialize(
+    result: unknown,
+    ctx: RequestContext,
+    options: SerializeOptions,
+    route?: HttpSseDefinition,
+  ): Promise<SerializedReply> {
+    if (isHttpResponse(result)) {
+      if (isFileBody(result.body)) return serializeFileReply(await resolveFile(result.body, ctx), result, options)
+      if (isSseBody(result.body)) {
+        const body = result.body
+        // HttpResponse.sse() options win over the @Sse options of the route
+        const merged = { ...(route === undefined ? {} : sseOptions(route)), ...definedOptions(body.options) }
+        return serializeSseReply(this.#openStream(body.source, merged, ctx), result, options)
+      }
+    }
+    return serializeResult(result, options)
+  }
+
+  /** An event stream reading `source` in the request (route options over the plugin `sse` option). */
+  #openStream(source: SseSource, options: SseOptions, ctx: RequestContext): SseSession {
+    const settings = this.#options.sse ?? DEFAULT_SSE_SETTINGS
+    const heartbeat = options.heartbeat === undefined ? settings.heartbeat : options.heartbeat || 0
+    const retry = options.retry ?? settings.retry
+    const logger = this.#logger
+    return new SseSession(
+      source,
+      {
+        heartbeat,
+        retry,
+        maxDuration: options.maxDuration,
+        graceMs: settings.shutdownGraceMs,
+      },
+      {
+        abort: kind => ctx.abort(kind),
+        error: (message, error) => logger.error(message, { err: error, requestId: ctx.requestId, path: ctx.path }),
+        warn: message => logger.warn(message, { requestId: ctx.requestId, path: ctx.path }),
+      },
+    )
   }
 
   #finish(event: HttpRequestEvent, reply: SerializedReply): SerializedReply {
@@ -548,10 +695,11 @@ export class Pipeline {
           mapped = new HttpResponse(mapped.body, {
             status: isHttpException(error) ? error.status : 500,
             headers: mapped.headers,
+            cookies: (mapped as { cookies?: HttpResponse['cookies'] }).cookies ?? [],
           })
         }
         if (mapped instanceof Response || isHttpResponse(mapped)) {
-          return await serialize(mapped, ctx, {
+          return await this.#serialize(mapped, ctx, {
             method: ctx.method,
             routeMethod: ctx.method,
             status: undefined,
@@ -666,12 +814,64 @@ export class Pipeline {
   }
 }
 
-/** Serialises a handler (or exception mapper) result; file bodies are resolved for the request. */
-async function serialize(result: unknown, ctx: RequestContext, options: SerializeOptions): Promise<SerializedReply> {
-  if (isHttpResponse(result) && isFileBody(result.body)) {
-    return serializeFileReply(await resolveFile(result.body, ctx), result, options)
+/**
+ * The reply handed to the adapter (internal fields of the serialised reply left out). A streamed
+ * `text/event-stream` body is an event stream whatever produced it (`@Sse`, `HttpResponse.sse()`, a
+ * proxied `fetch()` response, `HttpResponse.stream()`): the adapter sends its headers at once, even
+ * before a quiet stream's first byte, and lifts idle timeouts.
+ */
+function adapterReply(serialized: SerializedReply, body: ReplyBody, blob?: Blob): AdapterReply {
+  const reply: AdapterReply = { status: serialized.status, headers: serialized.headers, body }
+  if (blob !== undefined) return { ...reply, blob }
+  const eventStream =
+    serialized.sse !== undefined ||
+    (body instanceof ReadableStream && isEventStreamType(serialized.headers['content-type']))
+  return eventStream ? { ...reply, eventStream: true } : reply
+}
+
+/**
+ * Appends the cookies to `set-cookie`, after the raw values (`@Header`, `ctx.setHeader()`, the
+ * `HttpResponse` headers, a Web `Response`): the cookies of the context (`ctx.setCookie()`), then
+ * those of the `HttpResponse`, a cookie of the same key (name, domain, path) replacing the earlier
+ * one in place. One line per cookie.
+ */
+function applyCookies(reply: CheckedReply, ctx: RequestContext): void {
+  const own = reply.cookieLines ?? []
+  const context = ctx.cookieLines
+  if (own.length === 0 && context.length === 0) return
+  const merged = new Map<string, string>()
+  for (const { key, line } of context) merged.set(key, line)
+  for (const { key, line } of own) merged.set(key, line)
+  const existing = reply.headers['set-cookie']
+  let raw: string[] = []
+  if (typeof existing === 'string') raw = [existing]
+  else if (existing !== undefined) raw = [...existing]
+  reply.headers['set-cookie'] = [...raw, ...merged.values()]
+}
+
+/** `SseOptions` of the `sse` metadata of a route (`heartbeat: 0` disables the heartbeat). */
+function sseOptions(definition: HttpSseDefinition): SseOptions {
+  return {
+    ...(definition.heartbeat === undefined
+      ? {}
+      : { heartbeat: definition.heartbeat === 0 ? false : definition.heartbeat }),
+    ...(definition.retry === undefined ? {} : { retry: definition.retry }),
+    ...(definition.maxDuration === undefined ? {} : { maxDuration: definition.maxDuration }),
   }
-  return serializeResult(result, options)
+}
+
+function definedOptions(options: SseOptions): SseOptions {
+  const result: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(options)) if (value !== undefined) result[key] = value
+  return result as SseOptions
+}
+
+function describeResult(value: unknown): string {
+  if (value === null) return 'null'
+  if (value === undefined) return 'undefined'
+  if (typeof value === 'string') return 'a string'
+  if (typeof value === 'object') return `an instance of ${(value as object).constructor?.name ?? 'Object'}`
+  return typeof value
 }
 
 function withContextHeaders(headers: Record<string, HeaderValue>, ctx: RequestContext): Record<string, HeaderValue> {

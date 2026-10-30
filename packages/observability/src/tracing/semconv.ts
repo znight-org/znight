@@ -30,4 +30,12 @@ export const SemanticAttributes = {
   ZNIGHT_MESSAGE_TYPE: 'znight.messaging.message.type',
   ZNIGHT_ATTEMPT: 'znight.messaging.message.attempt',
   ZNIGHT_OUTCOME: 'znight.messaging.outcome',
+  /** Znight specific: scheduled job runs (`@znight/schedule`). */
+  ZNIGHT_SCHEDULE_JOB: 'znight.schedule.job',
+  ZNIGHT_SCHEDULE_KIND: 'znight.schedule.kind',
+  ZNIGHT_SCHEDULE_TRIGGER: 'znight.schedule.trigger',
+  ZNIGHT_SCHEDULE_RUN_ID: 'znight.schedule.run_id',
+  ZNIGHT_SCHEDULE_SCHEDULED_AT: 'znight.schedule.scheduled_at',
+  ZNIGHT_SCHEDULE_OUTCOME: 'znight.schedule.outcome',
+  ZNIGHT_SCHEDULE_ABORTED: 'znight.schedule.aborted',
 } as const

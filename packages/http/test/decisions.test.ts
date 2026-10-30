@@ -79,7 +79,6 @@ function appMetadata(
       [t('StatusController')]: provider(StatusController),
       [t('BookController')]: provider(BookController),
       [t('AuthGuard')]: provider(AuthGuard),
-      [t('RateLimitGuard')]: provider(RateLimitGuard),
       [t('PlainGuard')]: provider(PlainGuard),
       ...options.extraProviders,
     },
@@ -154,6 +153,18 @@ describe('createRouteDecorator options', () => {
     expect(create).toThrow(message)
   })
 
+  it('accepts any non-empty key without explicit group, as before groups (its own group)', () => {
+    for (const key of ['auth:public', 'app/roles', '_internal', '1st']) {
+      expect(() => createRouteDecorator(key)).not.toThrow()
+      const required = createRouteDecorator(key, { required: true })
+      expect({ group: required.group, required: required.required }).toEqual({ group: key, required: true })
+      expect(createRouteDecorator(key, { group: key }).group).toBe(key)
+      expect(createRouteDecorator(key).meta()).toEqual({ key, value: true, group: key, required: false })
+    }
+    // the grammar applies to an explicit group
+    expect(() => createRouteDecorator('auth:public', { group: 'auth:access' })).toThrow('"group" must be a name')
+  })
+
   it('is assignable to `static enforces` of a guard class', () => {
     const guard: GuardClass = AuthGuard
     expect(guard.enforces?.map(info => info.key)).toEqual(['public', 'authenticated', 'roles'])
@@ -208,6 +219,35 @@ describe('metadata groups', () => {
     const error = await bootError(appMetadata({ groups }), { guards: [AuthGuard], enforcement: 'warn' })
     expect(error.code).toBe(ErrorCode.InvalidRoute)
     expect(error.message).toContain(message)
+  })
+
+  it('accepts a group named after its single key, whatever the key (decorator without group)', async () => {
+    const Legacy = createRouteDecorator('auth:public', { required: true })
+    class LegacyGuard implements CanActivate {
+      static readonly enforces = [Legacy]
+      canActivate(): boolean {
+        return true
+      }
+    }
+    const meta = metadata({ [t('BookController')]: provider(BookController) }, [
+      controller(t('BookController'), '/books', [route('list', '/', (c: BookController) => c.list())], {
+        meta: { 'auth:public': true },
+      }),
+    ])
+    const groups = { 'auth:public': { keys: ['auth:public'], required: true } }
+    const withGroups = { ...meta, extensions: { http: { ...meta.extensions?.http, groups } } } as ZnightMetadata
+    const app = await createApp(withGroups, { guards: [new LegacyGuard()] })
+    try {
+      expect((await app.http.inject({ method: 'GET', url: '/books' })).status).toBe(200)
+    } finally {
+      await app.stop()
+    }
+    const shared = {
+      ...meta,
+      extensions: { http: { ...meta.extensions?.http, groups: { 'a:b': { keys: ['a:b', 'c'], required: false } } } },
+    }
+    const error = await bootError(shared as ZnightMetadata, { guards: [new LegacyGuard()] })
+    expect(error.message).toContain('invalid group name "a:b"')
   })
 
   it('rejects two decisions of one group on a hand-written target (ZNIGHT007)', async () => {
@@ -327,6 +367,24 @@ describe('boot check (ZNIGHT023)', () => {
     )
   })
 
+  it('names a guard after the group when no guard of the application enforces it', async () => {
+    const meta = appMetadata()
+    const { [t('AuthGuard')]: _, ...providers } = meta.providers
+    const error = await bootError({ ...meta, providers })
+    expect(error.code).toBe(ErrorCode.MissingRouteDecision)
+    expect(error.hints).toContain(
+      'Register a guard declaring `static enforces` with the decorators of the "access" group (authenticated, public, roles), e.g. HttpPlugin.configure({ guards: [AccessGuard] })',
+    )
+  })
+
+  it('names a guard after a group that is not an identifier', async () => {
+    const groups = { ...ACCESS_GROUPS, 'rate-limit': { keys: ['rateLimit'], required: true } }
+    const error = await bootError(appMetadata({ groups }), { guards: [AuthGuard] })
+    expect(error.hints).toContain(
+      'Register a guard declaring `static enforces` with the decorators of the "rate-limit" group (rateLimit), e.g. HttpPlugin.configure({ guards: [RateLimitGuard] })',
+    )
+  })
+
   it('fails when only some chains enforce the group', async () => {
     const error = await bootError(appMetadata({ routeGuards: [t('AuthGuard')] }))
     expect(error.code).toBe(ErrorCode.MissingRouteDecision)
@@ -358,14 +416,56 @@ describe('boot check (ZNIGHT023)', () => {
   })
 
   it('checks decisions of groups some guard enforces (not required)', async () => {
-    // no guard enforces rateLimit: the decorator is inert, as before
+    // no guard of the application enforces rateLimit: the decorator is inert, as before
     const app = await createApp(appMetadata(), { guards: [AuthGuard] }, { start: false })
     await app.stop()
-    const routeLimited = appMetadata({ routeGuards: [t('RateLimitGuard')] })
+    const routeLimited = appMetadata({
+      routeGuards: [t('RateLimitGuard')],
+      extraProviders: { [t('RateLimitGuard')]: provider(RateLimitGuard) },
+    })
     const failure = await bootError(routeLimited, { guards: [AuthGuard] })
     expect(failure.message).toBe(
       'ZNIGHT023: HttpPlugin: No guard enforces the "rateLimit" group on 1 route: GET /books (BookController.list)',
     )
+  })
+
+  it('checks decisions of a group whose guard class sits in no chain (forgotten guard)', async () => {
+    // the security guide's rate-limit recipe booted from a second entrypoint without the guard
+    const meta = appMetadata({ extraProviders: { [t('RateLimitGuard')]: provider(RateLimitGuard) } })
+    const failure = await bootError(meta, { guards: [AuthGuard] })
+    expect(failure.code).toBe(ErrorCode.MissingRouteDecision)
+    expect(failure.message).toBe(
+      'ZNIGHT023: HttpPlugin: No guard enforces the "rateLimit" group on 1 route: GET /books (BookController.list)',
+    )
+    expect(failure.hints).toContain('Guards of the application enforcing the "rateLimit" group: RateLimitGuard')
+    // the example names the guard of this group, not the access guard
+    expect(failure.hints).toContain(
+      'Register a guard declaring `static enforces` with the decorators of the "rateLimit" group (rateLimit), e.g. HttpPlugin.configure({ guards: [RateLimitGuard] })',
+    )
+    const app = await createApp(meta, { guards: [AuthGuard, RateLimitGuard] }, { start: false })
+    await app.stop()
+    // only its groups become known: an unused guard class does not make its required groups required
+    const warned = await createApp(meta, { guards: [AuthGuard], enforcement: 'warn' }, { start: false })
+    try {
+      expect(warned.logger.entries.filter(entry => entry.level === 'warn').map(entry => entry.context)).toEqual([
+        { code: 'ZNIGHT023', group: 'rateLimit' },
+      ])
+    } finally {
+      await warned.stop()
+    }
+  })
+
+  it('does not require the groups of a guard class that sits in no chain', async () => {
+    const Tenant = createRouteDecorator('tenant', { required: true })
+    class TenantGuard implements CanActivate {
+      static readonly enforces = [Tenant]
+      canActivate(): boolean {
+        return true
+      }
+    }
+    const meta = appMetadata({ extraProviders: { [t('TenantGuard')]: provider(TenantGuard) } })
+    const app = await createApp(meta, { guards: [AuthGuard] }, { start: false })
+    await app.stop()
   })
 
   it("logs one warning per group with enforcement: 'warn'", async () => {

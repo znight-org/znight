@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 688 366" width="688" height="366" role="img" aria-labelledby="title desc">
+<title id="title">Message delivery</title>
+<desc id="desc">Each delivery is received from the broker, runs in a request scope seeded with the InboundMessage, is decoded, routed to a handler by type and invoked (payload validation, then the handler). Success acknowledges it. A failure with attempts left is retried: it waits in process or is delayed by the broker, then is redelivered. A terminal failure (last attempt, NonRetryableError, invalid payload, undecodable body or no matching handler) calls the @OnError hook if declared: returning ack drops the message, otherwise it is dead-lettered: the copy is published and confirmed, then the original is acknowledged; if the publish fails the message is released and redelivered.</desc>
+<defs>
+<linearGradient id="zn-card" x1="0" y1="0" x2="0" y2="1">
+<stop offset="0" stop-color="#1A2350"/>
+<stop offset="1" stop-color="#0B1020"/>
+</linearGradient>
+<linearGradient id="zn-accent" x1="0" y1="0" x2="1" y2="1">
+<stop offset="0" stop-color="#2F6AE8"/>
+<stop offset="1" stop-color="#7C4DEF"/>
+</linearGradient>
+<linearGradient id="zn-accent-line" x1="0" y1="0" x2="1" y2="0">
+<stop offset="0" stop-color="#3E7BFA"/>
+<stop offset="1" stop-color="#8B5CF6"/>
+</linearGradient>
+<style>.s{font-family:ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif}.m{font-family:ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace}</style>
+</defs>
+<rect x="0.5" y="0.5" width="687" height="365" rx="16" fill="url(#zn-card)" stroke="#2C3660"/>
+<rect x="24" y="28" width="116" height="54" rx="10" fill="#1E2858" stroke="#4A5AA6" stroke-width="1.25"/>
+<text x="82" y="51.2" text-anchor="middle" class="s" font-size="13.5" font-weight="600" fill="#F4F6FC">receive</text>
+<text x="82" y="68.5" text-anchor="middle" class="s" font-size="12" fill="#A9B4D6">from the broker</text>
+<path d="M143,55 L144.5,55" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M152,55 L143.5,59.6 L143.5,50.4 Z" fill="#A9B4D6"/>
+<rect x="155" y="28" width="116" height="54" rx="10" fill="#1E2858" stroke="#4A5AA6" stroke-width="1.25"/>
+<text x="213" y="51.2" text-anchor="middle" class="s" font-size="13.5" font-weight="600" fill="#F4F6FC">request scope</text>
+<text x="213" y="68.5" text-anchor="middle" class="s" font-size="12" fill="#A9B4D6"><tspan class="m">InboundMessage</tspan></text>
+<path d="M274,55 L275.5,55" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M283,55 L274.5,59.6 L274.5,50.4 Z" fill="#A9B4D6"/>
+<rect x="286" y="28" width="116" height="54" rx="10" fill="#1E2858" stroke="#4A5AA6" stroke-width="1.25"/>
+<text x="344" y="51.2" text-anchor="middle" class="s" font-size="13.5" font-weight="600" fill="#F4F6FC">decode</text>
+<text x="344" y="68.5" text-anchor="middle" class="s" font-size="12" fill="#A9B4D6">body → payload</text>
+<path d="M405,55 L406.5,55" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M414,55 L405.5,59.6 L405.5,50.4 Z" fill="#A9B4D6"/>
+<rect x="417" y="28" width="116" height="54" rx="10" fill="#1E2858" stroke="#4A5AA6" stroke-width="1.25"/>
+<text x="475" y="51.2" text-anchor="middle" class="s" font-size="13.5" font-weight="600" fill="#F4F6FC">select handler</text>
+<text x="475" y="68.5" text-anchor="middle" class="s" font-size="12" fill="#A9B4D6">by <tspan class="m">type</tspan></text>
+<path d="M536,55 L537.5,55" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M545,55 L536.5,59.6 L536.5,50.4 Z" fill="#A9B4D6"/>
+<rect x="548" y="28" width="116" height="54" rx="10" fill="#1E2858" stroke="#4A5AA6" stroke-width="1.25"/>
+<text x="606" y="51.2" text-anchor="middle" class="s" font-size="13.5" font-weight="600" fill="#F4F6FC">invoke</text>
+<text x="606" y="68.5" text-anchor="middle" class="s" font-size="12" fill="#A9B4D6">validate → handler</text>
+<path d="M606,84 L606,138.5" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M606,146 L601.4,137.5 L610.6,137.5 Z" fill="#A9B4D6"/>
+<text x="615" y="129.4" class="s" font-size="12.5" fill="#A7F3D0">success</text>
+<path d="M606,116 L218,116 Q208,116 208,126 L208,138.5" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M208,146 L203.4,137.5 L212.6,137.5 Z" fill="#A9B4D6"/>
+<text x="217" y="136.4" class="s" font-size="12.5" fill="#FDE68A">attempts left</text>
+<path d="M346,116 L346,138.5" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M346,146 L341.4,137.5 L350.6,137.5 Z" fill="#A9B4D6"/>
+<text x="355" y="136.4" class="s" font-size="12.5" fill="#C4B5FD">terminal failure *</text>
+<rect x="548" y="148" width="116" height="50" rx="10" fill="#0F3036" stroke="#34D399" stroke-width="1.25"/>
+<text x="606" y="169.4" text-anchor="middle" class="s" font-size="14" font-weight="600" fill="#D1FAE5">ack</text>
+<text x="606" y="186.7" text-anchor="middle" class="s" font-size="12" fill="#A7F3D0">handled</text>
+<rect x="24" y="148" width="214" height="50" rx="10" fill="#33290F" stroke="#FBBF24" stroke-width="1.25"/>
+<text x="131" y="169.4" text-anchor="middle" class="s" font-size="14" font-weight="600" fill="#FEF3C7">retry</text>
+<text x="131" y="186.7" text-anchor="middle" class="s" font-size="12" fill="#FDE68A">wait in process, or broker delay</text>
+<rect x="272" y="148" width="148" height="50" rx="10" fill="#251E5C" stroke="#A78BFA" stroke-width="1.25"/>
+<text x="346" y="169.4" text-anchor="middle" class="m" font-size="14" font-weight="500" fill="#EDE9FE">@OnError()</text>
+<text x="346" y="186.7" text-anchor="middle" class="s" font-size="12" fill="#C4B5FD">if declared</text>
+<path d="M52,146 L52,91.5" fill="none" stroke="#FBBF24" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="5 4"/>
+<path d="M52,84 L56.6,92.5 L47.4,92.5 Z" fill="#FBBF24"/>
+<text x="61" y="108.4" class="s" font-size="12.5" fill="#FDE68A">redelivered, <tspan class="m">attempt + 1</tspan></text>
+<path d="M346,200 L346,214 Q346,224 336,224 L292,224 Q282,224 282,234 L282,244.5" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M282,252 L277.4,243.5 L286.6,243.5 Z" fill="#A9B4D6"/>
+<text x="273" y="244.4" text-anchor="end" class="s" font-size="12.5" fill="#A7F3D0">returns 'ack'</text>
+<path d="M346,224 L442,224 Q452,224 452,234 L452,244.5" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M452,252 L447.4,243.5 L456.6,243.5 Z" fill="#A9B4D6"/>
+<text x="461" y="244.4" class="s" font-size="12.5" fill="#FECDD3">otherwise, or no hook</text>
+<rect x="236" y="254" width="92" height="62" rx="10" fill="#0F3036" stroke="#34D399" stroke-width="1.25"/>
+<text x="282" y="281.4" text-anchor="middle" class="s" font-size="14" font-weight="600" fill="#D1FAE5">ack</text>
+<text x="282" y="298.7" text-anchor="middle" class="s" font-size="12" fill="#A7F3D0">dropped</text>
+<rect x="392" y="254" width="272" height="62" rx="10" fill="#3A1A2E" stroke="#FB7185" stroke-width="1.25"/>
+<text x="528" y="273.4" text-anchor="middle" class="s" font-size="14" font-weight="600" fill="#FFE4E6">dead-letter</text>
+<text x="528" y="290.7" text-anchor="middle" class="s" font-size="12" fill="#FECDD3">copy published (confirmed), then ack</text>
+<text x="528" y="306.7" text-anchor="middle" class="s" font-size="12" fill="#FECDD3">publish failed: released, redelivered</text>
+<text x="24" y="346" class="s" font-size="12" fill="#A9B4D6">* last attempt, <tspan class="m">NonRetryableError</tspan>, invalid payload, undecodable body or no matching handler</text>
+</svg>

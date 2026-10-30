@@ -19,6 +19,8 @@ interface Flags {
   readonly config: boolean
   readonly observability: boolean
   readonly messaging: boolean
+  readonly schedule: boolean
+  readonly openapi: boolean
   readonly adapter: HttpAdapterName
   readonly pm: PackageManager
   readonly bun: boolean
@@ -30,6 +32,8 @@ function flagsOf(options: ProjectOptions): Flags {
     config: has('config'),
     observability: has('observability'),
     messaging: has('messaging'),
+    schedule: has('schedule'),
+    openapi: has('openapi'),
     adapter: options.adapter,
     pm: options.packageManager,
     bun: options.packageManager === 'bun',
@@ -56,6 +60,11 @@ export function renderProject(options: ProjectOptions): ProjectFile[] {
   ]
   if (flags.config) files.push({ path: 'src/app/app.config.ts', content: appConfig() })
   if (flags.messaging) files.push({ path: 'src/app/greeting.consumer.ts', content: greetingConsumer(flags) })
+  if (flags.schedule) {
+    files.push({ path: 'src/app/heartbeat.jobs.ts', content: heartbeatJobs() })
+    files.push({ path: 'test/heartbeat.jobs.test.ts', content: heartbeatJobsTest(flags) })
+  }
+  if (flags.openapi) files.push({ path: 'src/api.ts', content: apiDocument(options) })
   if (flags.bun) files.push({ path: 'bunfig.toml', content: bunfig(flags) })
   if (flags.pm === 'yarn') files.push({ path: '.yarnrc.yml', content: 'nodeLinker: node-modules\n' })
   return files.sort((a, b) => (a.path < b.path ? -1 : 1))
@@ -78,6 +87,8 @@ function packageJson(options: ProjectOptions, flags: Flags): string {
   if (flags.config) dependencies['@znight/config'] = znight
   if (flags.observability) dependencies['@znight/observability'] = znight
   if (flags.messaging) dependencies['@znight/messaging'] = znight
+  if (flags.schedule) dependencies['@znight/schedule'] = znight
+  if (flags.openapi) dependencies['@znight/openapi'] = znight
   if (flags.adapter === 'fastify') dependencies['fastify'] = versionOf('fastify')
   if (flags.adapter === 'express') dependencies['express'] = versionOf('express')
   if (flags.adapter === 'hono') {
@@ -113,6 +124,7 @@ function packageJson(options: ProjectOptions, flags: Flags): string {
       generate: 'znight generate',
       typecheck: 'znight generate && tsc --noEmit',
       test: flags.bun ? 'bun test' : 'vitest run',
+      ...(flags.openapi ? { openapi: 'znight openapi', 'openapi:check': 'znight openapi --check' } : {}),
     },
     dependencies: sortRecord(dependencies),
     devDependencies: sortRecord(devDependencies),
@@ -236,6 +248,8 @@ function mainTs(flags: Flags): string {
     flags.messaging ? "import { MessagingPlugin } from '@znight/messaging'" : undefined,
     flags.messaging ? "import { memory } from '@znight/messaging/memory'" : undefined,
     flags.observability ? "import { ObservabilityPlugin } from '@znight/observability'" : undefined,
+    flags.openapi ? "import { OpenApiPlugin } from '@znight/openapi'" : undefined,
+    flags.schedule ? "import { SchedulePlugin } from '@znight/schedule'" : undefined,
   ].filter(line => line !== undefined)
   const localImports = [
     "import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'",
@@ -261,6 +275,12 @@ function mainTs(flags: Flags): string {
       '    MessagingPlugin.configure({ driver: memory() }),',
     )
   }
+  if (flags.schedule) {
+    plugins.push(
+      '    // before HttpPlugin: plugins stop in reverse order, so HTTP stops first, then running jobs drain',
+      '    SchedulePlugin.configure(),',
+    )
+  }
   const adapter = adapterCall(flags.adapter)
   if (flags.config) {
     plugins.push(
@@ -275,6 +295,12 @@ function mainTs(flags: Flags): string {
       adapter === undefined
         ? `    HttpPlugin.configure({ ${port} }),`
         : `    HttpPlugin.configure({ adapter: ${adapter}, ${port} }),`,
+    )
+  }
+  if (flags.openapi) {
+    plugins.push(
+      '    // GET /openapi.json and the API reference at /docs (document options: src/api.ts)',
+      '    OpenApiPlugin.configure(),',
     )
   }
 
@@ -453,8 +479,81 @@ ${output}
 `
 }
 
+function heartbeatJobs(): string {
+  return `import { Cron, type JobContext } from '@znight/schedule'
+
+/**
+ * Scheduled jobs. A class with @Cron, @Interval or @Timeout methods becomes a singleton provider
+ * (no decorator needed): its dependencies are constructor parameters. Running several instances?
+ * Give SchedulePlugin a lock store so that each occurrence runs on one of them.
+ */
+export class HeartbeatJobs {
+  /** Number of runs. */
+  beats = 0
+  /** The occurrence of the last run. */
+  last: Date | undefined
+
+  /** Every minute (cron expressions run in UTC unless they set a timeZone). */
+  @Cron('* * * * *', { name: 'heartbeat' })
+  beat(ctx: JobContext): void {
+    this.beats++
+    this.last = ctx.scheduledAt
+  }
+}
+`
+}
+
+function apiDocument(options: ProjectOptions): string {
+  return `import { OpenApiDocument } from '@znight/openapi'
+
+/**
+ * ${options.name}
+ *
+ * The HTTP API of ${options.name}. Title and description of the OpenAPI document come from this
+ * comment, the version from package.json.
+ */
+@OpenApiDocument({
+  tags: [{ name: 'Greeting', description: 'Greetings' }],
+})
+export class Api {}
+`
+}
+
 // ---------------------------------------------------------------------------------------------------
 // tests
+
+function heartbeatJobsTest(flags: Flags): string {
+  return `${testImports(flags, 'describe, expect, test')}
+import { SchedulePlugin, SchedulerRegistry } from '@znight/schedule'
+import { createTestClock } from '@znight/schedule/testing'
+import { TestApp } from '@znight/testing'
+
+import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { HeartbeatJobs } from '../src/app/heartbeat.jobs.js'
+
+// virtual time: the clock only moves when the test advances it, and waits for the runs it starts
+describe('HeartbeatJobs', () => {
+  test('beats every minute', async () => {
+    const clock = createTestClock('2026-01-01T00:00:30Z')
+    const app = await TestApp.create({
+      metadata,
+      plugins: [SchedulePlugin.configure({ clock })],
+      only: [HeartbeatJobs],
+    })
+    try {
+      await clock.advance('3m')
+
+      expect(app.get(HeartbeatJobs).beats).toBe(3)
+      expect(app.get(HeartbeatJobs).last?.toISOString()).toBe('2026-01-01T00:03:00.000Z')
+      const heartbeat = app.get(SchedulerRegistry).get('heartbeat')
+      expect(heartbeat?.nextRun?.toISOString()).toBe('2026-01-01T00:04:00.000Z')
+    } finally {
+      await app.close()
+    }
+  })
+})
+`
+}
 
 function testImports(flags: Flags, names: string): string {
   return flags.bun ? `import { ${names} } from 'bun:test'` : `import { ${names} } from 'vitest'`
@@ -570,10 +669,17 @@ function readme(options: ProjectOptions, flags: Flags): string {
       ? '- **Observability** with `@znight/observability` (structured logs, metrics, traces)'
       : undefined,
     flags.messaging ? '- **Messaging** with `@znight/messaging` (in-memory broker in `src/main.ts`)' : undefined,
+    flags.schedule ? '- **Scheduled jobs** with `@znight/schedule` (`src/app/heartbeat.jobs.ts`)' : undefined,
+    flags.openapi
+      ? '- **OpenAPI** with `@znight/openapi` (`/openapi.json`, API reference at `/docs`, options in `src/api.ts`)'
+      : undefined,
   ].filter(line => line !== undefined)
   const tree = [
     'src/',
     '├─ main.ts                    # Application.create() + plugins + start()',
+    flags.openapi
+      ? '├─ api.ts                     # @OpenApiDocument: title, tags, security of openapi.json'
+      : undefined,
     '├─ .znight/                   # generated DI container (git-ignored)',
     '└─ app/',
     flags.config ? '   ├─ app.config.ts            # @Config: settings read from the environment' : undefined,
@@ -581,7 +687,8 @@ function readme(options: ProjectOptions, flags: Flags): string {
     '   ├─ greeting.controller.ts   # @Controller: /greetings routes',
     '   ├─ greeting.schemas.ts      # Zod schemas',
     '   ├─ greeting.service.ts      # @Injectable',
-    '   └─ health.controller.ts     # GET /health',
+    flags.schedule ? '   ├─ health.controller.ts     # GET /health' : '   └─ health.controller.ts     # GET /health',
+    flags.schedule ? '   └─ heartbeat.jobs.ts        # @Cron: a job every minute' : undefined,
     'test/                          # TestBed (unit) and TestApp (HTTP) tests',
     'vite.config.ts                 # znight() plugin: generates the container, server build',
     'znight.config.ts               # compiler options',
@@ -625,12 +732,17 @@ ${features.join('\n')}
 | \`${run('test')}\` | Run the tests |
 | \`${run('typecheck')}\` | Generate the container, then type-check with \`tsc\` |
 | \`${run('generate')}\` | Generate \`src/.znight/container.generated.ts\` (\`znight generate --check\` in CI) |
-
+${
+  flags.openapi
+    ? `| \`${run('openapi')}\` | Write \`openapi.json\` (commit it; \`${run('openapi:check')}\` in CI) |
+`
+    : ''
+}
 \`\`\`sh
 ${run('dev')}
 curl localhost:3000/health
 curl localhost:3000/greetings/Ada?excited=true
-curl -X POST localhost:3000/greetings -H 'content-type: application/json' -d '{"name":"Grace"}'
+curl -X POST localhost:3000/greetings -H 'content-type: application/json' -d '{"name":"Grace"}'${flags.openapi ? '\ncurl localhost:3000/openapi.json        # the API reference is at http://localhost:3000/docs' : ''}
 \`\`\`
 
 ## Project structure
@@ -645,7 +757,7 @@ Add code with the generators:
 
 \`\`\`sh
 ${znight} g service users/user        # src/users/user.service.ts
-${znight} g controller users/user     # src/users/user.controller.ts
+${znight} g controller users/user     # src/users/user.controller.ts${flags.schedule ? `\n${znight} g job reports/digest        # src/reports/digest.jobs.ts` : ''}
 \`\`\`
 ${configNote}
 ## Tests

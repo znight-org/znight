@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 688 244" width="688" height="244" role="img" aria-labelledby="title desc">
+<title id="title">Application states</title>
+<desc id="desc">State machine of app.state. Application.create() returns an application in the created state. start() moves it to starting, then to ready once every start hook ran. stop(), or a SIGINT or SIGTERM signal, moves it to stopping, then to stopped. A stop() called from a start hook goes straight from starting to stopping. A failing start hook moves it from starting to failed. stopped and failed are final.</desc>
+<defs>
+<linearGradient id="zn-card" x1="0" y1="0" x2="0" y2="1">
+<stop offset="0" stop-color="#1A2350"/>
+<stop offset="1" stop-color="#0B1020"/>
+</linearGradient>
+<linearGradient id="zn-accent" x1="0" y1="0" x2="1" y2="1">
+<stop offset="0" stop-color="#2F6AE8"/>
+<stop offset="1" stop-color="#7C4DEF"/>
+</linearGradient>
+<linearGradient id="zn-accent-line" x1="0" y1="0" x2="1" y2="0">
+<stop offset="0" stop-color="#3E7BFA"/>
+<stop offset="1" stop-color="#8B5CF6"/>
+</linearGradient>
+<style>.s{font-family:ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif}.m{font-family:ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace}</style>
+</defs>
+<rect x="0.5" y="0.5" width="687" height="243" rx="16" fill="url(#zn-card)" stroke="#2C3660"/>
+<text x="24" y="36" class="s" font-size="12.5" fill="#A9B4D6"><tspan class="m">Application.create()</tspan></text>
+<circle cx="65.35" cy="54" r="5" fill="#A9B4D6"/>
+<path d="M65.4,60 L65.4,88.5" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M65.4,96 L60.7,87.5 L69.9,87.5 Z" fill="#A9B4D6"/>
+<path d="M216.1,96 L216.1,74 Q216.1,62 228.1,62 L479.9,62 Q491.9,62 491.9,74 L491.9,88.5" fill="none" stroke="#7381B3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="5 4"/>
+<path d="M491.9,96 L487.3,87.5 L496.5,87.5 Z" fill="#7381B3"/>
+<text x="354" y="54" text-anchor="middle" class="s" font-size="12.5" fill="#A9B4D6"><tspan class="m">stop()</tspan> called from a start hook</text>
+<rect x="24" y="96" width="82.7" height="40" rx="10" fill="#1E2858" stroke="#4A5AA6" stroke-width="1.25"/>
+<text x="65.4" y="120.7" text-anchor="middle" class="m" font-size="13.5" font-weight="500" fill="#F4F6FC">created</text>
+<rect x="170.7" y="96" width="90.8" height="40" rx="10" fill="#1E2858" stroke="#4A5AA6" stroke-width="1.25"/>
+<text x="216.1" y="120.7" text-anchor="middle" class="m" font-size="13.5" font-weight="500" fill="#F4F6FC">starting</text>
+<rect x="305.5" y="96" width="66.5" height="40" rx="10" fill="url(#zn-accent)"/>
+<text x="338.8" y="120.7" text-anchor="middle" class="m" font-size="13.5" font-weight="500" fill="#FFFFFF">ready</text>
+<rect x="446.5" y="96" width="90.8" height="40" rx="10" fill="#1E2858" stroke="#4A5AA6" stroke-width="1.25"/>
+<text x="491.9" y="120.7" text-anchor="middle" class="m" font-size="13.5" font-weight="500" fill="#F4F6FC">stopping</text>
+<rect x="581.3" y="96" width="82.7" height="40" rx="10" fill="#1E2858" stroke="#4A5AA6" stroke-width="1.25"/>
+<text x="622.7" y="120.7" text-anchor="middle" class="m" font-size="13.5" font-weight="500" fill="#F4F6FC">stopped</text>
+<rect x="584.3" y="99" width="76.7" height="34" rx="7" fill="none" stroke="#4A5AA6" stroke-width="1"/>
+<path d="M108.7,116 L161.2,116" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M168.7,116 L160.2,120.6 L160.2,111.4 Z" fill="#A9B4D6"/>
+<text x="138.7" y="107" text-anchor="middle" class="m" font-size="12.5" fill="#D6DCEE">start()</text>
+<path d="M263.5,116 L296,116" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M303.5,116 L295,120.6 L295,111.4 Z" fill="#A9B4D6"/>
+<path d="M374,116 L437,116" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M444.5,116 L436,120.6 L436,111.4 Z" fill="#A9B4D6"/>
+<text x="409.3" y="107" text-anchor="middle" class="m" font-size="12.5" fill="#D6DCEE">stop()</text>
+<text x="409.3" y="135" text-anchor="middle" class="s" font-size="12" fill="#A9B4D6">or a signal</text>
+<path d="M539.3,116 L571.8,116" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M579.3,116 L570.8,120.6 L570.8,111.4 Z" fill="#A9B4D6"/>
+<path d="M216.1,138 L216.1,170.5" fill="none" stroke="#FB7185" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M216.1,178 L211.5,169.5 L220.7,169.5 Z" fill="#FB7185"/>
+<text x="226.1" y="162.4" class="s" font-size="12.5" fill="#FECDD3">a start hook fails</text>
+<rect x="174.8" y="180" width="82.7" height="40" rx="10" fill="#3A1A2E" stroke="#FB7185" stroke-width="1.25"/>
+<text x="216.1" y="204.7" text-anchor="middle" class="m" font-size="13.5" font-weight="500" fill="#FFE4E6">failed</text>
+<rect x="177.8" y="183" width="76.7" height="34" rx="7" fill="none" stroke="#FB7185" stroke-width="1"/>
+<text x="664" y="190" text-anchor="end" class="s" font-size="12.5" fill="#A9B4D6"><tspan class="m">stopped</tspan> and <tspan class="m">failed</tspan> are final:</text>
+<text x="664" y="208" text-anchor="end" class="s" font-size="12.5" fill="#A9B4D6"><tspan class="m">start()</tspan> rejects, <tspan class="m">stop()</tspan> resolves at once</text>
+</svg>

@@ -1,0 +1,8 @@
+# Bun loads the .env files into process.env by itself, with its own rules: it expands `$name`, even
+# in single-quoted values, which corrupts the `$scrypt$...` password hashes of LOCAL_ACCOUNTS. Leave
+# the files to ConfigPlugin (dotenv()), so that Node.js and Bun read exactly the same values.
+env = false
+
+[test]
+# Regenerates the DI container (src/.znight/container.generated.ts) before the tests run
+preload = ["@znight/compiler/bun"]

@@ -6,6 +6,9 @@ import { fileURLToPath } from 'node:url'
 export const ADMIN_KEY = 'test-admin-key'
 export const READER_KEY = 'test-reader-key'
 
+/** The browser front-end allowed by CORS in the tests (`CORS_ORIGINS`). */
+export const BROWSER_ORIGIN = 'https://shelf.test'
+
 /** The SQL migrations of the application (absolute: tests may run from any directory). */
 export const MIGRATIONS_FOLDER = fileURLToPath(new URL('../../drizzle', import.meta.url))
 

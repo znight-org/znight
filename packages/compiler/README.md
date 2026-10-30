@@ -1,21 +1,40 @@
 # @znight/compiler
 
-The compile-time half of [Znight](../../README.md). The compiler reads your TypeScript sources with
-[oxc](https://oxc.rs), recognises the Znight decorators, resolves every injection point to a
-concrete provider, validates the whole graph and **generates the dependency-injection container**
-(`src/.znight/container.generated.ts`) that `@znight/core` executes at runtime. No
-`reflect-metadata`, no `emitDecoratorMetadata`, no runtime type lookup: a misconfiguration is a
-build error with a precise location and a fix-it.
+The compile-time half of [Znight](../../README.md): it validates your dependency graph and
+generates the dependency injection container at build time.
+
+The compiler reads your TypeScript sources with [oxc](https://oxc.rs), recognises the Znight
+decorators, resolves every injection point to a concrete provider, validates the whole graph and
+**generates the dependency injection container** (`src/.znight/container.generated.ts`) that
+`@znight/core` executes at runtime. No `reflect-metadata`, no `emitDecoratorMetadata`, no runtime
+type lookup: a misconfiguration is a build error with a precise location and a fix-it.
 
 ```sh
-bun add -d @znight/compiler
+# bun
+bun add -d @znight/compiler vite
+
+# npm
+npm install -D @znight/compiler vite
 ```
+
+`vite` is an optional peer dependency: install it for the Vite plugin (and `znight dev` /
+`znight build`); the Bun preload, the programmatic API and `znight generate` without a Vite config
+work without it.
 
 Runs on Node.js >= 24 and Bun >= 1.3. In an application you use it through the
 [Vite plugin](#vite-plugin) (`vite build`, the dev server, Vitest), the [Bun preload](#bun-preload)
 (`bun test`, `bun --watch`) or the `znight` CLI (`znight generate`, `znight dev`, `znight build`);
 this README documents them and what they all share: the compiler, its options, its diagnostics and
 its programmatic API.
+
+**Documentation:** [`@znight/compiler`](https://github.com/znight-org/znight/blob/main/docs/packages/compiler.md),
+the [compiler guide](https://github.com/znight-org/znight/blob/main/docs/guide/compiler.md) and the
+[error codes](https://github.com/znight-org/znight/blob/main/docs/reference/error-codes.md).
+**Examples:** every [example application](https://github.com/znight-org/znight/tree/main/examples)
+is compiled by it; [`rest-api`](https://github.com/znight-org/znight/tree/main/examples/rest-api)
+shares its options between Vite and the Bun preload (`znight.config.ts`), and
+[`monorepo`](https://github.com/znight-org/znight/tree/main/examples/monorepo) uses a source
+provider library.
 
 - [What the compiler does](#what-the-compiler-does)
 - [The generated module](#the-generated-module)
@@ -58,7 +77,7 @@ scan (include/exclude + provider libraries) → parse (oxc, cached by content ha
 ```ts
 // src/main.ts
 import { Application } from '@znight/core'
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated.ts'
+import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
 
 const app = await Application.create({ metadata: __ZNIGHT_METADATA__ })
 await app.start()
@@ -734,13 +753,13 @@ type looks like once serialised as JSON, for schema generators (`@znight/openapi
 declarations, from sources and from `.d.ts` files alike (the same library gives identical shapes),
 so it keeps what `TypeInfo` loses: object literal types, and the names of aliases.
 
-| Target                                       | Annotation                                                               |
-| -------------------------------------------- | ------------------------------------------------------------------------ |
-| `{ returnOf: MethodInfo }`                   | the return type, a top-level `Promise<T>` unwrapped                      |
-| `{ parameter: ParameterInfo }`               | a method or constructor parameter (inherited constructors substituted)   |
-| `{ property: PropertyInfo }`                 | a class field                                                            |
-| `{ decorator: DecoratorInfo, typeArgument }` | a type argument of a decorator call                                      |
-| `{ type: TypeInfo }`                         | an already resolved type (aliases expanded, object literal types opaque) |
+| Target                                       | Annotation                                                                                                        |
+| -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `{ returnOf: MethodInfo }`                   | the return type, a top-level `Promise<T>` unwrapped                                                               |
+| `{ parameter: ParameterInfo }`               | a method or constructor parameter (inherited constructors substituted)                                            |
+| `{ property: PropertyInfo }`                 | a class field                                                                                                     |
+| `{ decorator: DecoratorInfo, typeArgument }` | a type argument of a decorator call                                                                               |
+| `{ type: TypeInfo }`                         | an already resolved type (aliases expanded, enum members such as `Kind.Cat` literal, object literal types opaque) |
 
 `ShapeResult` is `{ root, named, issues }`. A `Shape` is one of:
 
@@ -765,7 +784,10 @@ so it keeps what `TypeInfo` loses: object literal types, and the names of aliase
   (`src/page.ts#Page<src/book.ts#Book>`). `result.named` holds every named shape the root
   references, transitively (structures and type arguments), sorted by key; a declaration only used
   structurally (`Partial<Book>`, `extends`) is not listed, its properties are copied. Enums are the
-  union of their member values, in declaration order. An alias
+  union of their member values, in declaration order, and an enum member type (`Kind.Cat`) is the
+  literal of its value. Key types (`Record<K, V>`, mapped types, `Pick`/`Omit` keys, `T[K]`) and
+  `Exclude`/`Extract`/`NonNullable` go through the members of enums and of aliases of unions:
+  `Record<Genre, number>` has a required property per member. An alias
   whose structure is a schema or a kept reference is transparent (`type CreateBook = z.output<typeof
   CreateBook>` is the schema itself).
 - **Issues.** `{ reason, path, named, text, location }` for every `opaque` part and every `bigint`

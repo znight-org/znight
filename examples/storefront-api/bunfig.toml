@@ -1,0 +1,4 @@
+[test]
+# Regenerates the DI container (src/.znight/container.generated.ts) before the tests run, with the
+# options of znight.config.ts, and serves it from memory
+preload = ["@znight/compiler/bun"]

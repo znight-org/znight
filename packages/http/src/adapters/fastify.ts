@@ -14,6 +14,8 @@ import type {
   HttpServerAddress,
   InjectRequest,
   InjectResponse,
+  InjectStreamRequest,
+  InjectStreamResponse,
 } from '../adapter.ts'
 
 import { Readable } from 'node:stream'
@@ -26,8 +28,23 @@ import Fastify, {
 
 import { toFastifyPath } from '../path.ts'
 import { discardStream } from '../stream.ts'
-import { ConnectionTracker, isEncrypted, nodeBodyStream, normalizeNodeHeaders, readNodeBody } from './node-io.ts'
-import { injectResponse, normalizeInject, serverAddress, toBuffer } from './shared.ts'
+import {
+  ConnectionTracker,
+  isEncrypted,
+  nodeBodyStream,
+  normalizeNodeHeaders,
+  onResponseAbort,
+  readNodeBody,
+  withNativeCookies,
+  writeNodeReply,
+} from './node-io.ts'
+import {
+  bufferInjectStream,
+  type LightInjectOptions,
+  lightInjectOptions,
+  lightStreamResponse,
+  serverAddress,
+} from './shared.ts'
 
 /** Options of {@link fastifyAdapter}. */
 export interface FastifyAdapterOptions {
@@ -84,7 +101,7 @@ class FastifyHttpAdapter implements FastifyAdapter {
       this.instance = Fastify({
         exposeHeadRoutes: false,
         frameworkErrors: (error, request, reply) => {
-          this.#reply(reply, this.#dispatchFallback(request, error)).catch(() => undefined)
+          this.#reply(reply, this.#dispatchFallback(request, reply, error)).catch(() => undefined)
         },
         ...serverOptions,
         routerOptions: { maxParamLength: MAX_PARAM_LENGTH, ...serverOptions.routerOptions },
@@ -134,16 +151,20 @@ class FastifyHttpAdapter implements FastifyAdapter {
           handler: (request, reply) => this.#reply(reply, handler(adapterRequest(request, reply))),
         })
       }
-      child.setNotFoundHandler((request, reply) => this.#reply(reply, this.#dispatchFallback(request, undefined)))
-      child.setErrorHandler((error, request, reply) => this.#reply(reply, this.#dispatchFallback(request, error)))
+      child.setNotFoundHandler((request, reply) =>
+        this.#reply(reply, this.#dispatchFallback(request, reply, undefined)),
+      )
+      child.setErrorHandler((error, request, reply) =>
+        this.#reply(reply, this.#dispatchFallback(request, reply, error)),
+      )
       done()
     })
     await this.instance.ready()
   }
 
-  #dispatchFallback(request: FastifyRequest, error: unknown): Promise<AdapterReply> {
+  #dispatchFallback(request: FastifyRequest, reply: FastifyReply, error: unknown): Promise<AdapterReply> {
     if (this.#fallback === undefined) return Promise.reject(error ?? new Error('No fallback handler'))
-    return this.#fallback(adapterRequest(request, undefined), error)
+    return this.#fallback(adapterRequest(request, undefined, reply), error)
   }
 
   async #reply(reply: FastifyReply, pending: ReturnType<AdapterHandler>): Promise<FastifyReply> {
@@ -159,6 +180,16 @@ class FastifyHttpAdapter implements FastifyAdapter {
     }
     if (result.raw === true || reply.sent || reply.raw.destroyed) {
       discardStream(result.body instanceof ReadableStream ? result.body : null)
+      return reply
+    }
+    if (result.eventStream === true) {
+      // no onSend hook (compression, ETag...) may rewrite an event stream: write it on the raw
+      // response, with the headers Fastify hooks already set (`onRequest`...) under the plugin's,
+      // and their cookies before the plugin's (as reply.header('set-cookie') does on the other path)
+      const native = lowerCaseHeaders(reply.getHeaders())
+      const headers = { ...native, ...withNativeCookies(native['set-cookie'], result.headers) }
+      reply.hijack()
+      void writeNodeReply(reply.raw, { ...result, headers })
       return reply
     }
     reply.code(result.status)
@@ -191,21 +222,35 @@ class FastifyHttpAdapter implements FastifyAdapter {
     return this.#closing
   }
 
-  async inject(request: InjectRequest): Promise<InjectResponse> {
+  inject(request: InjectRequest): Promise<InjectResponse> {
+    return bufferInjectStream(stream => this.injectStream(stream), request)
+  }
+
+  async injectStream(request: InjectStreamRequest): Promise<InjectStreamResponse> {
     await this.#prepare()
-    const normalized = await normalizeInject(request)
-    const response = await this.instance.inject({
-      method: normalized.method as 'GET',
-      url: normalized.url,
-      headers: normalized.headers,
-      remoteAddress: '127.0.0.1',
-      ...(normalized.payload === undefined ? {} : { payload: toBuffer(normalized.payload) }),
-    })
-    return injectResponse(response.statusCode, response.headers, response.rawPayload)
+    const options: LightInjectOptions = await lightInjectOptions(request)
+    // Fastify forwards the options to light-my-request (`payloadAsStream`)
+    const inject = this.instance.inject as unknown as (options: LightInjectOptions) => Promise<unknown>
+    const response = await inject.call(this.instance, options)
+    return lightStreamResponse(response as Parameters<typeof lightStreamResponse>[0], request.signal)
   }
 }
 
-function adapterRequest(request: FastifyRequest, reply: FastifyReply | undefined): AdapterRequest {
+function lowerCaseHeaders(
+  headers: Readonly<Record<string, string | number | readonly string[] | undefined>>,
+): Record<string, string | string[]> {
+  const result: Record<string, string | string[]> = {}
+  for (const [name, value] of Object.entries(headers)) {
+    if (value !== undefined) result[name.toLowerCase()] = typeof value === 'object' ? [...value] : String(value)
+  }
+  return result
+}
+
+function adapterRequest(
+  request: FastifyRequest,
+  reply: FastifyReply | undefined,
+  response: FastifyReply | undefined = reply,
+): AdapterRequest {
   const hidden = HIDDEN_CONTENT_TYPES.get(request.raw)
   if (hidden !== undefined) {
     // Fastify is done with the content type: restore it (for Znight and `@Req()`)
@@ -228,5 +273,8 @@ function adapterRequest(request: FastifyRequest, reply: FastifyReply | undefined
     },
     streamBody: (limit: number): ReadableStream<Uint8Array> => nodeBodyStream(request.raw, limit),
     rawStatus: (): number | undefined => reply?.statusCode,
+    onAbort: (listener: () => void): void => {
+      if (response !== undefined) onResponseAbort(response.raw, listener)
+    },
   }
 }

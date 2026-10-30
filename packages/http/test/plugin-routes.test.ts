@@ -120,6 +120,18 @@ describe('plugin routes', () => {
     )
   })
 
+  it('accepts meta entries of decorators whose key is not a group name (their own group)', async () => {
+    const Legacy = createRouteDecorator('auth:public')
+    const plugin = routesPlugin('openapi', [{ ...docs, meta: [Public.meta(), Legacy.meta()] }])
+    const app = await createApp(homeMetadata(), { guards: [AccessGuard] }, { start: false, plugins: [plugin] })
+    try {
+      const summary = app.http.routes.find(entry => entry.path === '/openapi.json' && entry.method === 'GET')
+      expect(summary?.meta).toEqual({ public: true, 'auth:public': true })
+    } finally {
+      await app.stop()
+    }
+  })
+
   it('reports contradicting group declarations (ZNIGHT005)', async () => {
     const Other = createRouteDecorator('public', { group: 'visibility' })
     const error = await bootError([routesPlugin('openapi', [{ ...docs, meta: [Other.meta()] }])], {

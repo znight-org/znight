@@ -18,7 +18,7 @@ import type { QueryRecord } from './query.ts'
 
 import { Buffer } from 'node:buffer'
 
-import { BadRequestException, PayloadTooLargeException, UnsupportedMediaTypeException } from './exceptions.ts'
+import { BadRequestException, issue, PayloadTooLargeException, UnsupportedMediaTypeException } from './exceptions.ts'
 import { matchesMediaType, mediaTypeEssence, OCTET_STREAM } from './mime.ts'
 import { formatByteSize } from './size.ts'
 import { emptyRecord } from './utils.ts'
@@ -508,7 +508,7 @@ class Collector implements PartHandler {
       const expected = [...this.#named.keys()]
       throw new BadRequestException(
         `Unexpected file field ${JSON.stringify(truncate(field))}`,
-        { field, expected },
+        issue(field, `Unexpected file field (expected ${expected.join(', ')})`),
         CLOSE,
       )
     }
@@ -517,7 +517,9 @@ class Collector implements PartHandler {
       this.#counts.set(rule, count)
       if (count > rule.maxFiles) {
         const where = rule.field === undefined ? '' : ` in field ${JSON.stringify(truncate(rule.field))}`
-        if (!rule.multiple) throw new BadRequestException(`Expected a single file${where}`, { field }, CLOSE)
+        if (!rule.multiple) {
+          throw new BadRequestException(`Expected a single file${where}`, issue(field, 'Expected a single file'), CLOSE)
+        }
         throw new PayloadTooLargeException(
           `Too many files${where} (at most ${rule.maxFiles})`,
           { field, maxFiles: rule.maxFiles },

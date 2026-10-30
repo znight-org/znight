@@ -4,6 +4,7 @@
  * translate I/O; everything else (parameters, query and body parsing, guards, serialisation, errors)
  * is done by the plugin so that every adapter behaves the same.
  */
+import type { SetCookieInfo } from './cookies.ts'
 import type { HeaderValue } from './exceptions.ts'
 import type { HttpMethod } from './metadata.ts'
 import type { RoutePath } from './path.ts'
@@ -56,6 +57,13 @@ export interface AdapterRequest {
   hasBody?(): boolean
   /** Status written by a handler that took over the response with `@Res()`, when known. */
   rawStatus?(): number | undefined
+  /**
+   * Registers a listener called once when the client disconnects before the response was fully
+   * written. When it already happened, the listener is called on the next microtask. Never called
+   * after a complete response. Optional: without it, `ctx.signal` only aborts when the response
+   * body is cancelled or an event stream is closed by the server.
+   */
+  onAbort?(listener: () => void): void
 }
 
 /**
@@ -82,6 +90,14 @@ export interface AdapterReply {
   readonly blob?: Blob
   /** The handler wrote the response itself through `@Res()`: write nothing. */
   readonly raw?: boolean
+  /**
+   * The body is a long-lived event stream (a streamed `text/event-stream` body: `@Sse`,
+   * `HttpResponse.sse()`, a proxied `fetch()` response...). Adapters MUST send the headers without
+   * waiting for the first chunk (a quiet stream may send nothing for a while), MUST NOT apply idle or
+   * inactivity timeouts to the response while it is sent, and MUST write each chunk as soon as it is
+   * read (no buffering, no compression).
+   */
+  readonly eventStream?: boolean
 }
 
 /** Handles one request. Never rejects: errors are already mapped to a reply. */
@@ -127,7 +143,31 @@ export interface InjectRequest {
   readonly body?: unknown
   /** Query parameters appended to `url`. */
   readonly query?: Readonly<Record<string, string | readonly string[]>>
+  /**
+   * Request cookies (name → value), sent in a `cookie` header after any `cookie` header of
+   * `headers`. Values are encoded like the values of `serializeCookie`, so a value read from
+   * `response.cookies` can be sent back as is (signed values included).
+   */
+  readonly cookies?: Readonly<Record<string, string>>
+  /**
+   * Cookies signed by `HttpPlugin` with its first secret (`cookies.secrets`) and merged into
+   * `cookies` before dispatch: the way to send a valid `@SignedCookie`. Adapters never receive this
+   * field.
+   */
+  readonly signedCookies?: Readonly<Record<string, string>>
 }
+
+/** A request for {@link HttpAdapter.injectStream}: an {@link InjectRequest} that can be aborted. */
+export interface InjectStreamRequest extends InjectRequest {
+  /** Aborting it disconnects the client (like cancelling the response body). */
+  readonly signal?: AbortSignal
+}
+
+/**
+ * A request for `HttpPlugin.injectStream()` / `injectSse()`: an {@link InjectStreamRequest} whose
+ * method defaults to `GET`.
+ */
+export type InjectStreamOptions = Omit<InjectStreamRequest, 'method'> & { readonly method?: string }
 
 /** The response of {@link HttpAdapter.inject}. */
 export interface InjectResponse {
@@ -143,6 +183,21 @@ export interface InjectResponse {
   readonly bytes: Uint8Array
   /** `JSON.parse(body)`. */
   json<T = unknown>(): T
+  /** `set-cookie` parsed, by cookie name (the last one wins). */
+  readonly cookies: Readonly<Record<string, SetCookieInfo>>
+}
+
+/**
+ * The response of {@link HttpAdapter.injectStream}: available as soon as the headers are sent, its
+ * body read as it is produced.
+ */
+export interface InjectStreamResponse {
+  readonly status: number
+  /** Like {@link InjectResponse.headers} (`set-cookie` as an array). */
+  readonly headers: Record<string, string | string[]>
+  readonly cookies: Readonly<Record<string, SetCookieInfo>>
+  /** The body as it is produced. Cancelling it disconnects the client (the server sees `onAbort` and a cancelled reply body). */
+  readonly body: ReadableStream<Uint8Array>
 }
 
 /** Options of {@link HttpAdapter.close}. */
@@ -170,6 +225,16 @@ export interface HttpAdapter {
    * created when it never listened.
    */
   close(options?: AdapterCloseOptions): Promise<void>
-  /** Sends a request in memory (no socket), through the same routing and pipeline. */
+  /**
+   * Sends a request in memory (no socket), through the same routing and pipeline, and reads the
+   * whole response. The built-in adapters reject an event stream (`text/event-stream`, which would
+   * never end) with a hint to `injectSse()` / `injectStream()`.
+   */
   inject(request: InjectRequest): Promise<InjectResponse>
+  /**
+   * In-memory request whose response body is returned as it is produced (resolves at the headers).
+   * Cancelling `body` (or aborting `signal`) disconnects the client. Optional for third-party
+   * adapters; the four built-in adapters implement it.
+   */
+  injectStream?(request: InjectStreamRequest): Promise<InjectStreamResponse>
 }

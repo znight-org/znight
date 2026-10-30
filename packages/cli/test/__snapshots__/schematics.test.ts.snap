@@ -73,6 +73,11 @@ import { Injectable } from '@znight/core'
 
 @Injectable()
 export class UserProfileGuard implements CanActivate {
+  // The route decisions this guard enforces (createRouteDecorator groups, see "Route decisions" in
+  // the @znight/http README): the boot fails when a route of a required group has no guard
+  // enforcing its decision.
+  // static readonly enforces = [Public, Roles]
+
   canActivate(ctx: HttpContext): boolean | Promise<boolean> {
     // Return false (403 Forbidden) or throw an HttpException (UnauthorizedException...) to reject
     // the request, e.g. return ctx.header('authorization') !== undefined
@@ -119,6 +124,24 @@ export class UserProfileFactory {
   @Provides({ dispose: 'close' })
   createUserProfileClient(): UserProfileClient {
     return new UserProfileClient()
+  }
+}
+"
+`;
+
+exports[`schematic contents job 1`] = `
+"import { Cron, type JobContext } from '@znight/schedule'
+
+/**
+ * Scheduled jobs. A class with @Cron, @Interval or @Timeout methods becomes a singleton provider
+ * (no decorator needed): declare its dependencies as constructor parameters.
+ */
+export class UserProfileJobs {
+  /** Every day at 03:00 UTC (set timeZone to follow a local clock). A run still running is skipped. */
+  @Cron('0 3 * * *', { name: 'users.user-profile.daily' })
+  daily(ctx: JobContext): void {
+    // checkpoint: throws when the run is aborted (shutdown, maxDuration or a lost lock)
+    ctx.signal.throwIfAborted()
   }
 }
 "

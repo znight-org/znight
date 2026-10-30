@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 688 490" width="688" height="490" role="img" aria-labelledby="title desc">
+<title id="title">How a dependency is bound</title>
+<desc id="desc">For an injection point of type T with an optional qualifier, the compiler collects the candidates: providers of T and of its subtypes, only those named q with a qualifier. A T[] injection receives all of them, ordered by token. With no candidate: a runtime-provided type of a package binds to the external, an optional dependency to undefined, otherwise ZNIGHT001. With one or more: the unique exact candidate, else the unique @Primary(), else the single candidate is bound; otherwise ZNIGHT004 when they all provide the same type, ZNIGHT008 when ambiguous. Primitives need a qualifier (ZNIGHT010) and Lazy&lt;T&gt; binds T with the same rules.</desc>
+<defs>
+<linearGradient id="zn-card" x1="0" y1="0" x2="0" y2="1">
+<stop offset="0" stop-color="#1A2350"/>
+<stop offset="1" stop-color="#0B1020"/>
+</linearGradient>
+<linearGradient id="zn-accent" x1="0" y1="0" x2="1" y2="1">
+<stop offset="0" stop-color="#2F6AE8"/>
+<stop offset="1" stop-color="#7C4DEF"/>
+</linearGradient>
+<linearGradient id="zn-accent-line" x1="0" y1="0" x2="1" y2="0">
+<stop offset="0" stop-color="#3E7BFA"/>
+<stop offset="1" stop-color="#8B5CF6"/>
+</linearGradient>
+<style>.s{font-family:ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif}.m{font-family:ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace}</style>
+</defs>
+<rect x="0.5" y="0.5" width="687" height="489" rx="16" fill="url(#zn-card)" stroke="#2C3660"/>
+<rect x="184" y="20" width="320" height="46" rx="10" fill="#1E2858" stroke="#4A5AA6" stroke-width="1.25"/>
+<text x="344" y="39.4" text-anchor="middle" class="s" font-size="14" font-weight="600" fill="#F4F6FC">injection point</text>
+<text x="344" y="56.7" text-anchor="middle" class="s" font-size="12" fill="#A9B4D6">type <tspan class="m">T</tspan>, optional qualifier <tspan class="m">@Inject(q)</tspan></text>
+<path d="M344,68 L344,78.5" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M344,86 L339.4,77.5 L348.6,77.5 Z" fill="#A9B4D6"/>
+<rect x="184" y="88" width="320" height="62" rx="10" fill="#1E2858" stroke="#4A5AA6" stroke-width="1.25"/>
+<text x="344" y="107.4" text-anchor="middle" class="s" font-size="14" font-weight="600" fill="#F4F6FC">candidates</text>
+<text x="344" y="124.7" text-anchor="middle" class="s" font-size="12" fill="#A9B4D6">providers of <tspan class="m">T</tspan> and of its subtypes</text>
+<text x="344" y="140.7" text-anchor="middle" class="s" font-size="12" fill="#A9B4D6">with a qualifier: only those named <tspan class="m">q</tspan></text>
+<path d="M344,152 L344,162.5" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M344,170 L339.4,161.5 L348.6,161.5 Z" fill="#A9B4D6"/>
+<rect x="246" y="172" width="196" height="34" rx="17" fill="#251E5C" stroke="#A78BFA" stroke-width="1.25"/>
+<text x="344" y="193.6" text-anchor="middle" class="s" font-size="13" font-weight="500" fill="#EDE9FE"><tspan class="m">T[]</tspan> (multi)?</text>
+<path d="M444,189 L471.5,189" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M479,189 L470.5,193.6 L470.5,184.4 Z" fill="#A9B4D6"/>
+<text x="462" y="182" text-anchor="middle" class="s" font-size="12" fill="#A9B4D6">yes</text>
+<rect x="482" y="176" width="139.3" height="26" rx="13" fill="#0F3036" stroke="#34D399" stroke-width="1"/>
+<text x="551.7" y="193.4" text-anchor="middle" class="s" font-size="12.5" fill="#D1FAE5">all, ordered by token</text>
+<path d="M344,208 L344,218 Q344,228 334,228 L132,228 Q122,228 122,238 L122,252.5" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M122,260 L117.4,251.5 L126.6,251.5 Z" fill="#A9B4D6"/>
+<path d="M344,228 L448,228 Q458,228 458,238 L458,252.5" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M458,260 L453.4,251.5 L462.6,251.5 Z" fill="#A9B4D6"/>
+<text x="131" y="249.2" class="s" font-size="12" fill="#A9B4D6">none</text>
+<text x="467" y="249.2" class="s" font-size="12" fill="#A9B4D6">one or more</text>
+<text x="353" y="221.2" class="s" font-size="12" fill="#A9B4D6">no</text>
+<rect x="24" y="262" width="196" height="34" rx="17" fill="#251E5C" stroke="#A78BFA" stroke-width="1.25"/>
+<text x="122" y="283.6" text-anchor="middle" class="s" font-size="13" font-weight="500" fill="#EDE9FE">runtime-provided type?</text>
+<path d="M222,279 L245.5,279" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M253,279 L244.5,283.6 L244.5,274.4 Z" fill="#A9B4D6"/>
+<text x="238" y="272" text-anchor="middle" class="s" font-size="12" fill="#A9B4D6">yes</text>
+<rect x="256" y="266" width="67.6" height="26" rx="13" fill="#0F3036" stroke="#34D399" stroke-width="1"/>
+<text x="289.8" y="283.4" text-anchor="middle" class="s" font-size="12.5" fill="#D1FAE5">external</text>
+<path d="M122,298 L122,304.5" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M122,312 L117.4,303.5 L126.6,303.5 Z" fill="#A9B4D6"/>
+<text x="114" y="309.2" text-anchor="end" class="s" font-size="12" fill="#A9B4D6">no</text>
+<rect x="24" y="314" width="196" height="34" rx="17" fill="#251E5C" stroke="#A78BFA" stroke-width="1.25"/>
+<text x="122" y="335.6" text-anchor="middle" class="s" font-size="13" font-weight="500" fill="#EDE9FE">optional?</text>
+<path d="M222,331 L245.5,331" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M253,331 L244.5,335.6 L244.5,326.4 Z" fill="#A9B4D6"/>
+<text x="238" y="324" text-anchor="middle" class="s" font-size="12" fill="#A9B4D6">yes</text>
+<rect x="256" y="318" width="90.2" height="26" rx="13" fill="#0F3036" stroke="#34D399" stroke-width="1"/>
+<text x="301.1" y="335.4" text-anchor="middle" class="s" font-size="12.5" fill="#D1FAE5"><tspan class="m">undefined</tspan></text>
+<path d="M122,350 L122,356.5" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M122,364 L117.4,355.5 L126.6,355.5 Z" fill="#A9B4D6"/>
+<text x="114" y="361.2" text-anchor="end" class="s" font-size="12" fill="#A9B4D6">no</text>
+<rect x="24" y="366" width="196" height="48" rx="10" fill="#3A1A2E" stroke="#FB7185" stroke-width="1.25"/>
+<text x="122" y="386.1" text-anchor="middle" class="s" font-size="13" font-weight="500" fill="#FFE4E6"><tspan class="m">ZNIGHT001</tspan></text>
+<text x="122" y="403.2" text-anchor="middle" class="s" font-size="12" fill="#FECDD3">missing provider</text>
+<rect x="360" y="262" width="196" height="34" rx="17" fill="#251E5C" stroke="#A78BFA" stroke-width="1.25"/>
+<text x="458" y="283.6" text-anchor="middle" class="s" font-size="13" font-weight="500" fill="#EDE9FE">one exact candidate?</text>
+<path d="M558,279 L581.5,279" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M589,279 L580.5,283.6 L580.5,274.4 Z" fill="#A9B4D6"/>
+<text x="574" y="272" text-anchor="middle" class="s" font-size="12" fill="#A9B4D6">yes</text>
+<rect x="592" y="266" width="54.5" height="26" rx="13" fill="#0F3036" stroke="#34D399" stroke-width="1"/>
+<text x="619.2" y="283.4" text-anchor="middle" class="s" font-size="12.5" fill="#D1FAE5">bound</text>
+<path d="M458,298 L458,304.5" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M458,312 L453.4,303.5 L462.6,303.5 Z" fill="#A9B4D6"/>
+<text x="450" y="309.2" text-anchor="end" class="s" font-size="12" fill="#A9B4D6">no</text>
+<rect x="360" y="314" width="196" height="34" rx="17" fill="#251E5C" stroke="#A78BFA" stroke-width="1.25"/>
+<text x="458" y="335.6" text-anchor="middle" class="s" font-size="13" font-weight="500" fill="#EDE9FE">one <tspan class="m">@Primary()</tspan>?</text>
+<path d="M558,331 L581.5,331" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M589,331 L580.5,335.6 L580.5,326.4 Z" fill="#A9B4D6"/>
+<text x="574" y="324" text-anchor="middle" class="s" font-size="12" fill="#A9B4D6">yes</text>
+<rect x="592" y="318" width="54.5" height="26" rx="13" fill="#0F3036" stroke="#34D399" stroke-width="1"/>
+<text x="619.2" y="335.4" text-anchor="middle" class="s" font-size="12.5" fill="#D1FAE5">bound</text>
+<path d="M458,350 L458,356.5" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M458,364 L453.4,355.5 L462.6,355.5 Z" fill="#A9B4D6"/>
+<text x="450" y="361.2" text-anchor="end" class="s" font-size="12" fill="#A9B4D6">no</text>
+<rect x="360" y="366" width="196" height="34" rx="17" fill="#251E5C" stroke="#A78BFA" stroke-width="1.25"/>
+<text x="458" y="387.6" text-anchor="middle" class="s" font-size="13" font-weight="500" fill="#EDE9FE">a single candidate?</text>
+<path d="M558,383 L581.5,383" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M589,383 L580.5,387.6 L580.5,378.4 Z" fill="#A9B4D6"/>
+<text x="574" y="376" text-anchor="middle" class="s" font-size="12" fill="#A9B4D6">yes</text>
+<rect x="592" y="370" width="54.5" height="26" rx="13" fill="#0F3036" stroke="#34D399" stroke-width="1"/>
+<text x="619.2" y="387.4" text-anchor="middle" class="s" font-size="12.5" fill="#D1FAE5">bound</text>
+<path d="M458,402 L458,408.5" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M458,416 L453.4,407.5 L462.6,407.5 Z" fill="#A9B4D6"/>
+<text x="450" y="413.2" text-anchor="end" class="s" font-size="12" fill="#A9B4D6">no</text>
+<rect x="360" y="418" width="196" height="48" rx="10" fill="#3A1A2E" stroke="#FB7185" stroke-width="1.25"/>
+<text x="458" y="438.1" text-anchor="middle" class="s" font-size="13" font-weight="500" fill="#FFE4E6"><tspan class="m">ZNIGHT004</tspan> / <tspan class="m">ZNIGHT008</tspan></text>
+<text x="458" y="455.2" text-anchor="middle" class="s" font-size="12" fill="#FECDD3">duplicate / ambiguous</text>
+<text x="24" y="442" class="s" font-size="12" fill="#A9B4D6">Primitives need a qualifier (<tspan class="m">ZNIGHT010</tspan>).</text>
+<text x="24" y="460" class="s" font-size="12" fill="#A9B4D6"><tspan class="m">Lazy&lt;T&gt;</tspan> binds <tspan class="m">T</tspan> with the same rules.</text>
+</svg>

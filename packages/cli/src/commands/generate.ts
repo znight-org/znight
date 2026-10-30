@@ -82,7 +82,7 @@ export const generateCommand: Command = defineCommand({
  * Vite config is given with `--config`), else those of `znight()` in the Vite config (when exposed),
  * else the defaults.
  */
-async function compilerOptions(
+export async function compilerOptions(
   cli: CliContext,
   compiler: CompilerApi,
   root: string,

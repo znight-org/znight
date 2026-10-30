@@ -7,8 +7,9 @@
  *   options (key: identity + serialized type arguments); recursion goes through them.
  * - Aliases keep their provenance: a reference to a schema alias (`z.output<typeof S>`) is matched
  *   before expansion, and an alias whose structure is a schema (or a kept reference) is transparent.
- * - Utility types, `keyof`, indexed access and mapped types over literal keys are applied
- *   structurally; anything else is `opaque`, and reported as a {@link ShapeIssue}.
+ * - Utility types, `keyof`, indexed access and mapped types over literal keys (enums and aliases of
+ *   literal unions included) are applied structurally, and an enum member type (`Kind.Cat`) is its
+ *   literal; anything else is `opaque`, and reported as a {@link ShapeIssue}.
  * - Files are read through the project, so they are part of `watchFiles`.
  */
 import type {
@@ -597,7 +598,26 @@ export class ShapeResolver {
       return this.#opaqueAt(node, context, 'this')
     }
     const symbol = this.#project.symbols.resolveEntity(context.scope, name, 'type')
+    if (symbol.kind === 'unresolved' && name.type === 'TSQualifiedName') {
+      const member = this.#enumMember(name, context)
+      if (member) {
+        return member
+      }
+    }
     return this.#fromSymbol(symbol, node.typeArguments?.params ?? [], node, context)
+  }
+
+  /**
+   * `Kind.Cat` (an enum member type, `ns.Kind.Cat` included): the literal value of the member,
+   * `undefined` when the left side is not an enum declaring it.
+   */
+  #enumMember(name: Extract<TSTypeName, { type: 'TSQualifiedName' }>, context: Context): Shape | undefined {
+    const owner = this.#project.symbols.resolveEntity(context.scope, name.left, 'any')
+    const declaration =
+      owner.kind === 'declaration' ? owner.declarations.find(candidate => candidate.kind === 'enum') : undefined
+    const members = declaration ? this.#enumValues(declaration) : undefined
+    const value = members && Object.hasOwn(members, name.right.name) ? members[name.right.name] : undefined
+    return typeof value === 'string' || typeof value === 'number' ? literal(value) : undefined
   }
 
   #fromSymbol(symbol: SymbolResolution, argNodes: readonly TSType[], node: Span, context: Context): Shape {
@@ -700,7 +720,7 @@ export class ShapeResolver {
         return this.#mapObject(first(), node, context, current => ({ ...current, readonly: true }))
       case 'Pick':
       case 'Omit': {
-        const keys = literalKeys(second())
+        const keys = literalKeys(this.#unionMembers(second()))
         if (keys === undefined) {
           return this.#opaqueAt(node, context, 'unsupported')
         }
@@ -710,10 +730,13 @@ export class ShapeResolver {
       case 'Record':
         return this.#record(first(), second(), node, context)
       case 'NonNullable':
-        return nonNullable(first())
+        return this.#filterMembers(first(), member => member.kind !== 'null' && member.kind !== 'undefined')
       case 'Exclude':
-      case 'Extract':
-        return filterUnion(first(), second(), name === 'Extract')
+      case 'Extract': {
+        const matches = unionMatcher(this.#unionMembers(second()))
+        const extract = name === 'Extract'
+        return this.#filterMembers(first(), member => matches(member) === extract)
+      }
       case 'Awaited': {
         const inner = argNodes[0] ? this.#promiseArgument(argNodes[0], context) : undefined
         return inner ? this.#convert(inner, context) : first()
@@ -1193,21 +1216,33 @@ export class ShapeResolver {
   }
 
   #enum(declaration: Declaration, context: Context): Shape {
-    const node = declaration.node as TSEnumDeclaration
+    const members = this.#enumValues(declaration)
+    if (members === undefined) {
+      return this.#opaqueAt((declaration.node as TSEnumDeclaration).id, context, 'unsupported')
+    }
+    return orderedUnion(
+      Object.values(members).flatMap(value =>
+        typeof value === 'string' || typeof value === 'number' ? [literal(value)] : [],
+      ),
+    )
+  }
+
+  /** The members of an enum declaration, evaluated in its scope (`undefined` when not evaluable). */
+  #enumValues(declaration: Declaration): Readonly<Record<string, unknown>> | undefined {
+    const file = this.#project.getFile(declaration.file)
+    if (!file) {
+      return undefined
+    }
     const reference = {
       type: 'Identifier',
       name: declaration.localName,
       start: declaration.span.start,
       end: declaration.span.end,
     } as unknown as Expression
-    const evaluation = this.#project.evaluate(context.scope, reference, { refs: 'none' })
-    if (evaluation.kind !== 'value' || typeof evaluation.value !== 'object' || evaluation.value === null) {
-      return this.#opaqueAt(node.id, context, 'unsupported')
-    }
-    const values = Object.values(evaluation.value as Record<string, unknown>)
-    return orderedUnion(
-      values.flatMap(value => (typeof value === 'string' || typeof value === 'number' ? [literal(value)] : [])),
-    )
+    const evaluation = this.#project.evaluate({ file, namespace: declaration.namespace }, reference, { refs: 'none' })
+    return evaluation.kind === 'value' && typeof evaluation.value === 'object' && evaluation.value !== null
+      ? (evaluation.value as Readonly<Record<string, unknown>>)
+      : undefined
   }
 
   // ------------------------------------------------------ structural ops
@@ -1250,11 +1285,54 @@ export class ShapeResolver {
     return object(structure.properties.filter(keep), structure.additional)
   }
 
+  /**
+   * The members of a union, with named enums and aliases of unions, literals or primitives
+   * dereferenced (`Genre`, `type Keys = 'a' | 'b'`), flattened and de-duplicated: what key types
+   * (`Record<Genre, T>`, `{ [K in Keys]: T }`, `Pick`, `T[K]`) and distributive utility types
+   * (`Exclude`, `Extract`, `NonNullable`) iterate over.
+   */
+  #unionMembers(shape: Shape): Shape[] {
+    const found = new Map<string, Shape>()
+    const visit = (current: Shape, hops: number): void => {
+      if (current.kind === 'union') {
+        for (const member of current.members) {
+          visit(member, hops)
+        }
+        return
+      }
+      const entry = current.kind === 'named' && hops < MAX_ALIAS_HOPS ? this.#options.named.get(current.key) : undefined
+      if (entry && (entry.named.declaration === 'enum' || entry.named.declaration === 'alias')) {
+        if (entry.state === 'pending') {
+          this.#compute(entry)
+        }
+        if (entry.state === 'done' && isDistributable(entry.named.shape)) {
+          visit(entry.named.shape, hops + 1)
+          return
+        }
+      }
+      const key = serializeShape(current)
+      if (!found.has(key)) {
+        found.set(key, current)
+      }
+    }
+    visit(shape, 0)
+    return [...found.values()]
+  }
+
+  /** The members of a union kept by `keep` (see `#unionMembers`); the shape itself when every member is kept. */
+  #filterMembers(shape: Shape, keep: (member: Shape) => boolean): Shape {
+    const members = this.#unionMembers(shape)
+    const kept = members.filter(keep)
+    return kept.length === members.length ? shape : union(kept)
+  }
+
   #record(keys: Shape, value: Shape, node: Span, context: Context): Shape {
     const properties: ShapeProperty[] = []
     let additional: Shape | undefined
-    const members = keys.kind === 'union' ? keys.members : [keys]
-    for (const member of members) {
+    for (const member of this.#unionMembers(keys)) {
+      if (member.kind === 'never') {
+        continue
+      }
       if (member.kind === 'literal' && typeof member.value !== 'boolean') {
         properties.push({
           name: String(member.value),
@@ -1283,8 +1361,11 @@ export class ShapeResolver {
   }
 
   #indexed(objectShape: Shape, index: Shape, node: Span, context: Context): Shape {
-    if (index.kind === 'union') {
-      return union(index.members.map(member => this.#indexed(objectShape, member, node, context)))
+    if (index.kind === 'union' || index.kind === 'named') {
+      const members = this.#unionMembers(index)
+      if (members.length !== 1 || members[0] !== index) {
+        return union(members.map(member => this.#indexed(objectShape, member, node, context)))
+      }
     }
     if (objectShape.kind === 'array' && index.kind === 'number') {
       return objectShape.items
@@ -1328,8 +1409,7 @@ export class ShapeResolver {
     if (constraintNode.type === 'TSTypeOperator' && constraintNode.operator === 'keyof') {
       source = this.#toObject(this.#convert(constraintNode.typeAnnotation, context))
     }
-    const keys = this.#convert(constraintNode, context)
-    let members = keys.kind === 'union' ? keys.members : [keys]
+    let members = this.#unionMembers(this.#convert(constraintNode, context))
     if (source) {
       const order = new Map(source.properties.map((property, index) => [property.name, index]))
       const rank = (member: Shape): number =>
@@ -1709,9 +1789,8 @@ function propertyName(key: PropertyKey, computed: boolean): string | undefined {
   return undefined
 }
 
-/** Names of a union of string/number literals (`Pick`/`Omit` keys), `undefined` otherwise. */
-function literalKeys(shape: Shape): Set<string> | undefined {
-  const members = shape.kind === 'union' ? shape.members : [shape]
+/** Names of union members that are string/number literals (`Pick`/`Omit` keys), `undefined` otherwise. */
+function literalKeys(members: readonly Shape[]): Set<string> | undefined {
   const keys = new Set<string>()
   for (const member of members) {
     if (member.kind === 'literal' && typeof member.value !== 'boolean') {
@@ -1723,26 +1802,38 @@ function literalKeys(shape: Shape): Set<string> | undefined {
   return keys
 }
 
-function nonNullable(shape: Shape): Shape {
-  if (shape.kind === 'null' || shape.kind === 'undefined') {
-    return keyword('never')
+/**
+ * A named shape whose structure `#unionMembers` distributes over: a union, a literal or a
+ * primitive (not an object, which keeps its name).
+ */
+function isDistributable(shape: Shape): boolean {
+  switch (shape.kind) {
+    case 'union':
+    case 'literal':
+    case 'string':
+    case 'number':
+    case 'boolean':
+    case 'null':
+    case 'undefined':
+    case 'never':
+    case 'named':
+      return true
+    default:
+      return false
   }
-  return shape.kind === 'union'
-    ? union(shape.members.filter(member => member.kind !== 'null' && member.kind !== 'undefined'))
-    : shape
 }
 
-/** `Exclude<T, U>` / `Extract<T, U>` on union members (structural equality, literals of a primitive). */
-function filterUnion(shape: Shape, filter: Shape, extract: boolean): Shape {
-  const members = shape.kind === 'union' ? shape.members : [shape]
-  const filters = filter.kind === 'union' ? filter.members : [filter]
+/**
+ * Whether a member is assignable to `U` of `Exclude<T, U>` / `Extract<T, U>` (structural equality,
+ * literals of a primitive).
+ */
+function unionMatcher(filters: readonly Shape[]): (member: Shape) => boolean {
   const keys = new Set(filters.map(serializeShape))
   const kinds = new Set(filters.map(member => member.kind))
-  const matches = (member: Shape): boolean =>
+  return member =>
     keys.has(serializeShape(member)) ||
     kinds.has('unknown') ||
     (member.kind === 'literal' && kinds.has(typeof member.value as Shape['kind']))
-  return union(members.filter(member => matches(member) === extract))
 }
 
 function displayShape(shape: Shape, cache: Cache): string {

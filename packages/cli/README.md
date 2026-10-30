@@ -4,20 +4,31 @@ The `znight` command line of [Znight](../../README.md): create a project, genera
 dependency injection container, run the development loop, build and start the application.
 
 ```sh
-npx @znight/cli new my-service     # or: bunx @znight/cli new, pnpm dlx @znight/cli new
+bunx @znight/cli new my-service    # or: npx @znight/cli new my-service, pnpm dlx @znight/cli new my-service
 cd my-service
-npm run dev
+bun run dev                        # or: npm run dev
 ```
 
 In a project, install it next to its peers (`znight new` does it for you):
 
 ```sh
+# bun
+bun add -d @znight/cli @znight/compiler vite
+
+# npm
 npm install -D @znight/cli @znight/compiler vite
 ```
 
-`vite` and `@znight/compiler` are (optional) peer dependencies: the CLI always uses the versions
-installed in your project, and only loads them for the commands that need them (`generate`, `dev`,
-`build`). Runs on Node.js >= 24 and Bun >= 1.3.
+`vite`, `@znight/compiler` and `@znight/openapi` are (optional) peer dependencies: the CLI always
+uses the versions installed in your project, and only loads them for the commands that need them
+(`generate`, `dev`, `build`, `openapi`). Runs on Node.js >= 24 and Bun >= 1.3.
+
+**Documentation:** [`@znight/cli`](https://github.com/znight-org/znight/blob/main/docs/packages/cli.md)
+and [getting started](https://github.com/znight-org/znight/blob/main/docs/guide/getting-started.md).
+**Examples:** every [example application](https://github.com/znight-org/znight/tree/main/examples)
+runs on the CLI (`generate`, `dev`, `build`, `start` scripts);
+[`storefront-api`](https://github.com/znight-org/znight/tree/main/examples/storefront-api) also
+writes its committed `openapi.json` with `znight openapi` and checks it with `--check`.
 
 - [Commands](#commands)
 - [`znight new`](#znight-new)
@@ -26,22 +37,24 @@ installed in your project, and only loads them for the commands that need them (
 - [`znight dev`](#znight-dev)
 - [`znight build`](#znight-build)
 - [`znight start`](#znight-start)
+- [`znight openapi`](#znight-openapi)
 - [Global options, exit codes, environment](#global-options-exit-codes-environment)
 - [Programmatic API](#programmatic-api)
 - [Compiler contract](#compiler-contract)
 
 ## Commands
 
-| Command                       | Description                                                                     |
-| ----------------------------- | ------------------------------------------------------------------------------- |
-| `znight new [name]`           | Create a project (interactive, or from flags)                                   |
-| `znight generate`             | Write the generated container (`src/.znight/container.generated.ts`)            |
-| `znight generate --check`     | Exit with code 1 when the generated file is missing or out of date (CI)         |
-| `znight generate --watch`     | Keep the generated file up to date (for `tsc --watch` and editors)              |
-| `znight g <schematic> <name>` | Generate a service, controller, consumer, config, guard, interceptor or factory |
-| `znight dev`                  | Vite build in watch mode, full restart of the application after every rebuild   |
-| `znight build`                | Production build (`vite build`)                                                 |
-| `znight start`                | Run the production build                                                        |
+| Command                       | Description                                                                              |
+| ----------------------------- | ---------------------------------------------------------------------------------------- |
+| `znight new [name]`           | Create a project (interactive, or from flags)                                            |
+| `znight generate`             | Write the generated container (`src/.znight/container.generated.ts`)                     |
+| `znight generate --check`     | Exit with code 1 when the generated file is missing or out of date (CI)                  |
+| `znight generate --watch`     | Keep the generated file up to date (for `tsc --watch` and editors)                       |
+| `znight g <schematic> <name>` | Generate a service, controller, consumer, config, guard, interceptor, factory or job     |
+| `znight dev`                  | Vite build in watch mode, full restart of the application after every rebuild            |
+| `znight build`                | Production build (`vite build`); `--openapi` also writes `dist/openapi.json`             |
+| `znight start`                | Run the production build                                                                 |
+| `znight openapi`              | Write the OpenAPI document (`openapi.json`); `--check` exits with code 1 when stale (CI) |
 
 `znight <command> --help` prints the options of a command; `znight help <command>` too.
 
@@ -51,6 +64,7 @@ installed in your project, and only loads them for the commands that need them (
 znight new my-service                       # asks the questions below
 znight new my-service --yes                 # defaults, no question
 znight new my-service --pm pnpm --adapter fastify --features config,observability,messaging
+znight new my-worker --yes --features config,schedule,openapi
 znight new . --yes --no-install             # in the current (empty) directory
 ```
 
@@ -58,17 +72,17 @@ In a terminal, the CLI asks for the name, the package manager, the HTTP adapter,
 and whether to install the dependencies and initialise git. Flags answer the questions up front; with
 `--yes` (or without a terminal, e.g. in CI) the defaults are used.
 
-| Option                                     | Default                                       | Description                                                       |
-| ------------------------------------------ | --------------------------------------------- | ----------------------------------------------------------------- |
-| `[name]`                                   | (asked)                                       | npm package name (`my-service`, `@acme/api`), or `.`              |
-| `-y, --yes`                                | `false`                                       | Do not ask questions                                              |
-| `--pm <bun\|npm\|pnpm\|yarn>`              | the one running the CLI, else bun on Bun, npm | Package manager                                                   |
-| `--adapter <node\|fastify\|express\|hono>` | `node`                                        | HTTP adapter (`node`: the built-in `node:http` server)            |
-| `--features <list>`                        | `config,observability`                        | `config`, `observability`, `messaging`, or `all` / `none`         |
-| `--no-install`                             | install                                       | Do not install the dependencies                                   |
-| `--no-git`                                 | init                                          | Do not run `git init` (skipped anyway inside a git repository)    |
-| `--dir <path>`                             | `./<name>` (unscoped)                         | Target directory                                                  |
-| `--force`                                  | `false`                                       | Write into a non-empty directory (existing files are overwritten) |
+| Option                                     | Default                                       | Description                                                                      |
+| ------------------------------------------ | --------------------------------------------- | -------------------------------------------------------------------------------- |
+| `[name]`                                   | (asked)                                       | npm package name (`my-service`, `@acme/api`), or `.`                             |
+| `-y, --yes`                                | `false`                                       | Do not ask questions                                                             |
+| `--pm <bun\|npm\|pnpm\|yarn>`              | the one running the CLI, else bun on Bun, npm | Package manager                                                                  |
+| `--adapter <node\|fastify\|express\|hono>` | `node`                                        | HTTP adapter (`node`: the built-in `node:http` server)                           |
+| `--features <list>`                        | `config,observability`                        | `config`, `observability`, `messaging`, `schedule`, `openapi`, or `all` / `none` |
+| `--no-install`                             | install                                       | Do not install the dependencies                                                  |
+| `--no-git`                                 | init                                          | Do not run `git init` (skipped anyway inside a git repository)                   |
+| `--dir <path>`                             | `./<name>` (unscoped)                         | Target directory                                                                 |
+| `--force`                                  | `false`                                       | Write into a non-empty directory (existing files are overwritten)                |
 
 The package manager defaults to the one that launched the CLI (`npx`, `pnpm dlx`, `yarn dlx`,
 `bunx`). The target directory must be empty (`.git`, `.DS_Store` and editor folders are fine).
@@ -79,16 +93,19 @@ The package manager defaults to the one that launched the CLI (`npx`, `pnpm dlx`
 my-service/
 ├─ src/
 │  ├─ main.ts                    # Application.create() with the plugins, then start()
+│  ├─ api.ts                     # @OpenApiDocument: title, tags of openapi.json   (openapi)
 │  └─ app/
 │     ├─ app.config.ts           # @Config('app'): PORT, APP_GREETING           (config)
 │     ├─ greeting.schemas.ts     # Zod schema of the request body
 │     ├─ greeting.service.ts     # @Injectable, uses AppConfig and Logger
 │     ├─ greeting.controller.ts  # GET /greetings/:name?excited, POST /greetings (validated body)
 │     ├─ greeting.consumer.ts    # @Consumer('greetings'), POST /greetings/async  (messaging)
-│     └─ health.controller.ts    # GET /health
+│     ├─ health.controller.ts    # GET /health
+│     └─ heartbeat.jobs.ts       # @Cron('* * * * *'): a job every minute          (schedule)
 ├─ test/
 │  ├─ greeting.service.test.ts     # TestBed: real factory, auto-mocked dependencies
-│  └─ greeting.controller.test.ts  # TestApp: in-memory HTTP requests
+│  ├─ greeting.controller.test.ts  # TestApp: in-memory HTTP requests
+│  └─ heartbeat.jobs.test.ts       # TestApp + createTestClock(): virtual time      (schedule)
 ├─ vite.config.ts                # plugins: [znight(options)]
 ├─ znight.config.ts              # compiler options, shared by znight(), the Bun preload and znight generate
 ├─ tsconfig.json                 # strict, experimentalDecorators, moduleResolution bundler, noEmit
@@ -107,6 +124,12 @@ my-service/
   `express` adapters. Yarn projects get a `.yarnrc.yml` with `nodeLinker: node-modules`.
 - Bun projects run the application on Bun: their `dev` and `start` scripts pass `--runtime bun`
   (`bun run` runs the `znight` binary, which has a `node` shebang, on Node.js).
+- `schedule` adds `@znight/schedule`, `SchedulePlugin.configure()` **before** `HttpPlugin` (plugins
+  stop in reverse order: HTTP stops taking requests first, then running jobs drain), a sample job
+  and its test on a virtual clock (`createTestClock()` of `@znight/schedule/testing`).
+- `openapi` adds `@znight/openapi`, `OpenApiPlugin.configure()` after `HttpPlugin` (`/openapi.json`
+  and the API reference at `/docs`), `src/api.ts` (`@OpenApiDocument`) and the `openapi` /
+  `openapi:check` scripts (commit `openapi.json`, check it in CI).
 - The `TestApp` test configures `ObservabilityPlugin` with `metrics: { server: false }`: with
   `prom-client` installed, the metrics server (`:9464`) would collide with `znight dev` or with other
   test files running in parallel.
@@ -196,6 +219,7 @@ znight g consumer orders --path src/messaging
 znight g guard auth --flat             # src/auth.guard.ts                 AuthGuard
 znight g interceptor timing --aop      # a method interceptor (@Intercept)
 znight g config payment-gateway        # @Config('paymentGateway'): PAYMENT_GATEWAY_* variables
+znight g job reports/digest            # src/reports/digest.jobs.ts       DigestJobs
 ```
 
 | Schematic (alias)     | Generates                                                                                                         |
@@ -204,14 +228,21 @@ znight g config payment-gateway        # @Config('paymentGateway'): PAYMENT_GATE
 | `controller` (`co`)   | an `@Controller('/<name>')` with `GET /` and `GET /:id`                                                           |
 | `consumer` (`cs`)     | an `@Consumer('<name>')` with a retried `@OnMessage()` handler (a Zod message schema when the project uses `zod`) |
 | `config` (`cf`)       | a `@Config('<name>')` class                                                                                       |
-| `guard` (`gu`)        | an `@Injectable()` `CanActivate` guard                                                                            |
+| `guard` (`gu`)        | an `@Injectable()` `CanActivate` guard (with a commented `static enforces` line for route decisions)              |
 | `interceptor` (`itc`) | an `@Injectable()` `HttpInterceptor` (`--aop`: a `MethodInterceptor` for `@Intercept`)                            |
 | `factory` (`f`)       | a `@Factory()` with a `@Provides()` method                                                                        |
+| `job` (`j`)           | a class of scheduled jobs (`<Name>Jobs`, `<name>.jobs.ts`) with a `@Cron` method (`@znight/schedule`)             |
 
 Names are converted: files are `kebab-case.<schematic>.ts`, classes `PascalCase<Schematic>`
 (`UserProfile`, `user_profile` and `user-profile.service` all give `user-profile.service.ts` /
 `UserProfileService`). Directories before the last `/` are relative to `src/`; without them the file
 goes to `src/<name>/`. Nothing has to be registered afterwards: the compiler discovers the class.
+
+Job names must be unique in the application (ZNIGHT041), so the `@Cron` of `job` is named after the
+location of the file: its directories relative to `src/` (to the project root for a `--path` outside
+`src/`), then the name, without the directory named after it. `znight g job digest` gives
+`digest.daily`, `znight g job reports/digest` gives `reports.digest.daily` and
+`znight g job digest --path src/emails` gives `emails.digest.daily`.
 
 | Option          | Description                                                |
 | --------------- | ---------------------------------------------------------- |
@@ -291,6 +322,8 @@ that Vite sets in the CLI process for its build is not passed on) and, on Node.j
 ```sh
 znight build                    # ✓ Built dist/main.js 48.20 kB in 1.24s
 znight build --mode staging
+znight build --openapi          # also dist/openapi.json (--openapi=<path> for another file)
+znight build --openapi --openapi-prefix /api   # HttpPlugin.configure({ prefix: '/api' })
 ```
 
 Runs `vite build` with your Vite config. With the defaults of the `znight()` plugin, `src/main.ts`
@@ -306,6 +339,21 @@ same way.
 | `--config-loader <bundle\|runner\|native>` | Vite's            | How Vite loads the config file |
 | `--mode <mode>`                            | `production`      | Vite mode                      |
 | `--log-level <info\|warn\|error\|silent>`  | `info`            | Vite log level                 |
+| `--openapi[=<path>]`                       | off               | Also emit the OpenAPI document |
+| `--openapi-prefix <path>`                  | none              | With `--openapi`: HTTP prefix  |
+
+`--openapi` adds the `openapi()` Vite plugin of `@znight/openapi` to the build when the Vite config
+does not register one: after the bundle is written, the document is emitted to `dist/openapi.json`
+(next to `dist/main.js`, ready for `OpenApiPlugin.configure({ document: { file } })`), or to the
+given path.
+
+When `HttpPlugin` has a `prefix`, pass it with `--openapi-prefix` (like `znight openapi --prefix`):
+it becomes the `servers` of the document (`[{ "url": "/api" }]`) unless `@OpenApiDocument` declares
+servers, so the file is the document the application serves in `'build'` mode. Without it, the
+document has no `servers`, and the API reference ("Test request", "Try it out") and generated
+clients call `/greetings` instead of `/api/greetings`. When the Vite config registers its own
+`openapi()`, that plugin emits the document with its options: `--openapi=<path>` and
+`--openapi-prefix` are then ignored, with a warning (set `output` and `prefix` on that `openapi()`).
 
 ## `znight start`
 
@@ -328,6 +376,35 @@ as a child process: `SIGINT`, `SIGTERM` and `SIGHUP` are forwarded and its exit 
 | `--runtime <auto\|node\|bun>` | `auto`                          | Runtime (`auto`: the one running the CLI\*)     |
 
 \* Node.js under `bun run`, see [`znight dev`](#znight-dev).
+
+## `znight openapi`
+
+```sh
+znight openapi                      # writes openapi.json at the project root
+znight openapi -o docs/openapi.yaml # YAML, chosen by the extension (needs yaml)
+znight openapi --check              # CI: exit 1 when the file is missing or stale; never writes
+znight openapi --prefix /api        # servers default when @OpenApiDocument declares none
+znight openapi --runtime bun        # load the modules with Bun (default: the runtime running the CLI)
+```
+
+Writes the OpenAPI document of the application with `@znight/openapi` (which must be installed in
+the project). The application is compiled like `znight generate` does (compile errors are printed
+and exit with code 1 before any module runs), then its generated module is loaded in a child
+process (Bun: the compiler preload; Node.js: a Vite server in middleware mode), so module side
+effects never reach the CLI. Nothing is instantiated. Outputs are only written when they change;
+the file is byte-identical on Node.js and Bun. Commit it and run `znight openapi --check` in CI: an
+API change shows up in the pull request.
+
+| Option                                     | Default           | Description                                                        |
+| ------------------------------------------ | ----------------- | ------------------------------------------------------------------ |
+| `-o, --output <file>`                      | `openapi.json`    | Output file, repeatable (`.yaml` / `.yml` write YAML)              |
+| `--check`                                  | `false`           | Do not write: exit with code 1 when an output is missing or stale  |
+| `--prefix <path>`                          | none              | HTTP prefix: the `servers` default (`[{ url: prefix }]`)           |
+| `--runtime <auto\|node\|bun>`              | `auto`            | Runtime loading the application modules                            |
+| `--converters <file>`                      | none              | Module whose default export is a `SchemaConverter[]`               |
+| `--root <dir>`                             | current directory | Project root                                                       |
+| `--config <file>`                          | `vite.config.*`   | Vite config file (compiler options and the Node.js module loading) |
+| `--config-loader <bundle\|runner\|native>` | Vite's            | How Vite loads the config file                                     |
 
 ## Global options, exit codes, environment
 

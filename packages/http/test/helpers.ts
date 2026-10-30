@@ -25,6 +25,7 @@ import { fastifyAdapter } from '../src/adapters/fastify.ts'
 import { honoAdapter } from '../src/adapters/hono.ts'
 import { nodeAdapter } from '../src/adapters/node.ts'
 import { normalizeInject } from '../src/adapters/shared.ts'
+import { decodeCookieValue, parseSetCookies } from '../src/cookies.ts'
 import { HttpPlugin } from '../src/index.ts'
 
 /** Token of a test provider declared in `src/app.ts`. */
@@ -187,7 +188,17 @@ export function viaInject(http: HttpPlugin): Send {
 
 /** Network transport (`fetch` against the listening server, redirects not followed). */
 export function viaFetch(http: HttpPlugin): Send {
-  return async request => {
+  return async original => {
+    // like HttpPlugin.inject(): signed cookies are signed with the first secret
+    let request: InjectRequest = original
+    if (original.signedCookies !== undefined) {
+      const { signedCookies, ...rest } = original
+      const cookies: Record<string, string> = { ...rest.cookies }
+      for (const [name, value] of Object.entries(signedCookies)) {
+        cookies[name] = decodeCookieValue(http.signCookie(name, value))
+      }
+      request = { ...rest, cookies }
+    }
     const normalized = await normalizeInject(request)
     const init: RequestInit = { method: normalized.method, headers: normalized.headers, redirect: 'manual' }
     if (normalized.payload !== undefined) init.body = normalized.payload
@@ -198,7 +209,14 @@ export function viaFetch(http: HttpPlugin): Send {
     if (cookies.length > 0) headers['set-cookie'] = cookies
     const bytes = new Uint8Array(await response.arrayBuffer())
     const body = new TextDecoder().decode(bytes)
-    return { status: response.status, headers, body, bytes, json: <T>() => JSON.parse(body) as T }
+    return {
+      status: response.status,
+      headers,
+      body,
+      bytes,
+      cookies: parseSetCookies(cookies),
+      json: <T>() => JSON.parse(body) as T,
+    }
   }
 }
 

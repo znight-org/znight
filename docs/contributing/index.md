@@ -9,11 +9,13 @@ Thanks for your interest in Znight! Issues, discussions and pull requests are we
 
 ## Setup
 
-The repository is a [Bun](https://bun.sh) workspace. You need Bun 1.3+ and Node.js 24+.
+The repository is a [Bun](https://bun.sh) workspace. You need Bun 1.4 (the version pinned in
+`package.json#packageManager`) and Node.js 24+ (`.nvmrc`). Applications built with Znight only need
+Bun 1.3+ or Node.js 24+.
 
 ```sh
 git clone https://github.com/znight-org/znight.git
-cd Znight
+cd znight
 bun install
 ```
 
@@ -31,22 +33,52 @@ bun install
 | `bun run docs:dev`         | Documentation site in development mode                                                                                  |
 | `bun run docs:build`       | Build the documentation site (fails on dead links)                                                                      |
 
+## Run an example
+
+The example applications (`examples/*`) use the `znight` CLI and the production build, which load
+the packages' `dist`. Build the framework once, then run an example in development mode:
+
+```sh
+bun install
+bun run build
+cd examples/rest-api
+bun run dev
+```
+
+`dev` rebuilds and restarts the application on every change. The examples that need development
+settings (credentials, sample data) read them from their `.env.development`. Every example README
+lists its endpoints with `curl` commands; [Examples](/examples) describes each one. If `znight`
+reports that `dist/cli.mjs` is missing, run `bun run build` again from the repository root.
+
 ## Repository layout
 
 ```txt
-packages/
-  core/           runtime: container, application, plugins, hooks, AOP, scopes, decorators, errors
-  compiler/       Vite plugin + programmatic API + Bun preload: analysis, binding, validation, codegen
-  http/           decorators, compiler extension, HttpPlugin, adapters (node, fastify, express, hono)
-  messaging/      decorators, compiler extension, MessagingPlugin, drivers
-  config/         decorators, compiler extension, ConfigPlugin, loaders
-  observability/  logger (pino), metrics (prom-client), tracing (OpenTelemetry)
-  testing/        TestBed, TestApp, mock helpers
-  cli/            the znight binary
-examples/         runnable example applications (rest-api, microservice, worker, monorepo), with their tests
-tests/            repository-wide tests: package boundaries, golden test of the examples
-docs/             this site (VitePress); docs/internals holds the architecture specification
+znight/
+├─ packages/
+│  ├─ core/           # runtime: container, application, plugins, hooks, AOP, scopes, decorators, errors
+│  ├─ compiler/       # Vite plugin, programmatic API, Bun preload: analysis, binding, validation, codegen
+│  ├─ http/           # decorators, compiler extension, HttpPlugin, adapters (node, fastify, express, hono)
+│  ├─ openapi/        # decorators, compiler extension, OpenApiPlugin (Scalar, Swagger UI), build-time emit
+│  ├─ messaging/      # decorators, compiler extension, MessagingPlugin, drivers
+│  ├─ schedule/       # decorators, compiler extension, SchedulePlugin, distributed locks
+│  ├─ config/         # decorators, compiler extension, ConfigPlugin, loaders
+│  ├─ observability/  # logger (pino), metrics (prom-client), tracing (OpenTelemetry)
+│  ├─ testing/        # TestBed, TestApp, mock helpers
+│  └─ cli/            # the znight binary
+├─ examples/          # runnable applications with their tests: rest-api, secure-api, storefront-api,
+│                     # uptime-monitor, microservice, worker, monorepo
+├─ rfcs/              # design documents of significant features, with their status
+├─ tests/             # repository-wide tests: package boundaries, golden test of the examples
+├─ scripts/           # generators of the brand assets and of the documentation diagrams
+└─ docs/              # this site (VitePress); docs/internals holds the architecture specification
 ```
+
+## RFCs
+
+Significant features (a new package, a new cross-package contract) start as an RFC in
+[`rfcs/`](https://github.com/znight-org/znight/tree/main/rfcs), discussed before any implementation.
+Its README lists every RFC with its status and allocates the error code ranges of the packages. The
+[roadmap](/roadmap) summarises where each one stands.
 
 ## The specification comes first
 
@@ -71,9 +103,10 @@ When an implementation needs to deviate, update the specification in the same ch
 - **Tests** live in `packages/<pkg>/test/**/*.test.ts` and use `bun:test`; fixtures in
   `test/fixtures/`. Slow tests are opt-in: `ZNIGHT_INTEGRATION=1` (real brokers),
   `ZNIGHT_CLI_E2E=1` (a scaffolded application, end to end), `ZNIGHT_E2E=1` (the examples end to end
-  and the golden test, after `bun run build`). `tests/boundaries.test.ts` enforces the package
-  boundaries of the specification (§2).
-- **Integrations** (fastify, amqplib, pino...) are optional peer dependencies, loaded from subpath
+  and the golden test, after `bun run build`; the `client:check` of `examples/storefront-api` runs
+  `npm exec`, so the first run needs npm and the registry). `tests/boundaries.test.ts` enforces the
+  package boundaries of the specification (§2).
+- **Integrations** (fastify, amqplib, prom-client...) are optional peer dependencies, loaded from subpath
   exports.
 - **Generated-code contract**: every helper the compiler-generated code calls is exported from the
   package's root entry, documented in a "Compiler contract" section of its README and kept stable.
@@ -104,6 +137,6 @@ bun run docs:build   # production build, fails on dead links
 
 ## Releases
 
-All `@znight/*` packages are versioned in lockstep. The release process is planned, not set up yet:
-Changesets with a fixed group, CI packing every package, installing the tarballs into a clean
-application, running it on Node.js 24 and Bun, then publishing with npm provenance.
+All `@znight/*` packages are versioned in lockstep. Continuous integration, Changesets and the
+release procedure are being set up in pull request #1, not merged into `main` yet; this section
+will link to the maintainer documentation once it lands.

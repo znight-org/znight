@@ -359,8 +359,16 @@ place(@Body(NewOrder) order: v.InferOutput<typeof NewOrder>): Promise<Order> {
 - **One operation per route and concrete method.**
   - The path template comes from `fullPath`: `:id` becomes `{id}`.
   - The trailing wildcard `*` becomes `{wildcard}`, with `x-znight-wildcard: true` and a description
-    saying that it matches the rest of the path, `/` included.
-  - Automatic `HEAD` and `OPTIONS` are not documented. Explicit `@Head` and `@Options` routes are.
+    saying that it matches the rest of the path, `/` included. **As implemented:** `{wildcard_1}`
+    when the path already has a `:wildcard` parameter (`{wildcard_2}` when it also has
+    `:wildcard_1`, and so on).
+  - **As implemented:** routes of one path whose templates differ only by their parameter names
+    (`GET /books/:id`, `DELETE /books/:bookId`) are documented under one template, since OpenAPI
+    forbids two templates of one path: the first in code-point order (`{bookId}`), or the template
+    of a whole-path `@Param(S)` schema, which keeps its own. Path parameters are renamed by
+    position, with a ZNIGHT035 warning.
+  - Automatic `HEAD` and `OPTIONS` are not documented. Explicit `@Head` and `@Options` routes are
+    (**as implemented:** a `HEAD` response never has content).
   - `@All` is documented for each of GET, POST, PUT, PATCH and DELETE that has no explicit route on
     the same path. The operation id then ends with the method (`proxy.forward.get`).
 - **Paths never contain the HttpPlugin `prefix`.** The prefix belongs to `servers`, by precedence:
@@ -374,18 +382,22 @@ place(@Body(NewOrder) order: v.InferOutput<typeof NewOrder>): Promise<Order> {
 
 #### 5.4.2 Parameters
 
-| Handler parameter                                                                   | OpenAPI parameter                                                                                                                           |
-| ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@Param('id') id: number`                                                           | `{ name: 'id', in: 'path', required: true, schema: { type: 'number' } }`                                                                    |
-| `@Query('limit') limit = 20`                                                        | `{ name: 'limit', in: 'query', required: false, schema: { type: 'number', default: 20 } }`                                                  |
-| `@Query('tag') tags: string[] = []`                                                 | `in: 'query'`, `style: 'form'`, `explode: true`, `schema: { type: 'array', items: { type: 'string' }, default: [] }`                        |
-| `@Query('sort') sort: BookSort = 'title'`                                           | `schema: { type: 'string', enum: ['author', 'newest', 'title', 'year'], default: 'title' }` (sorted, as the compiler normalises unions)     |
-| `@Headers('x-tenant') tenant: string`                                               | `{ name: 'x-tenant', in: 'header', required: true, schema: { type: 'string' } }`                                                            |
-| `@Cookie('theme') theme: 'light' \| 'dark'` (RFC 0006)                              | `in: 'cookie'`, coerced like a header                                                                                                       |
-| `@Param('id', IdSchema)`, `@Query('q', S)`                                          | `schema: { $ref: '#/components/schemas/IdSchema' }` (the **input** JSON Schema)                                                             |
-| `@Query(SearchQuery)` (whole object, with a schema)                                 | One parameter per property of the input JSON Schema, `required` from its `required` list. It must be an object schema (ZNIGHT037 otherwise) |
-| `@Query() q: SearchParams` (a TypeScript interface, no schema)                      | One parameter per property of the shape. ZNIGHT017 still applies                                                                            |
-| `@Param()`, `@Query()`, `@Headers()` typed as records, `@Ctx()`, `@Req()`, `@Res()` | Nothing. Document what they read with `@ApiQuery` / `@ApiHeader`                                                                            |
+| Handler parameter                                                                   | OpenAPI parameter                                                                                                                               |
+| ----------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@Param('id') id: number`                                                           | `{ name: 'id', in: 'path', required: true, schema: { type: 'number' } }`                                                                        |
+| `@Query('limit') limit = 20`                                                        | `{ name: 'limit', in: 'query', required: false, schema: { type: 'number', default: 20 } }`                                                      |
+| `@Query('tag') tags: string[] = []`                                                 | `in: 'query'`, `style: 'form'`, `explode: true`, `schema: { type: 'array', items: { type: 'string' }, default: [] }`                            |
+| `@Query('sort') sort: BookSort = 'title'`                                           | `schema: { type: 'string', enum: ['author', 'newest', 'title', 'year'], default: 'title' }` (sorted, as the compiler normalises unions)         |
+| `@Headers('x-tenant') tenant: string`                                               | `{ name: 'x-tenant', in: 'header', required: true, schema: { type: 'string' } }`                                                                |
+| `@Cookie('theme') theme: 'light' \| 'dark'` (RFC 0006)                              | `in: 'cookie'`, coerced like a header                                                                                                           |
+| `@Param('id', IdSchema)`, `@Query('q', S)`                                          | `schema: { $ref: '#/components/schemas/IdSchema' }` (the **input** JSON Schema)                                                                 |
+| `@Query(SearchQuery)` (whole object, with a schema)                                 | One parameter per property of the input JSON Schema, `required` from its `required` list. It must be an object schema (ZNIGHT037 otherwise) (¹) |
+| `@Query() q: SearchParams` (a TypeScript interface, no schema)                      | One parameter per property of the shape. ZNIGHT017 still applies                                                                                |
+| `@Param()`, `@Query()`, `@Headers()` typed as records, `@Ctx()`, `@Req()`, `@Res()` | Nothing. Document what they read with `@ApiQuery` / `@ApiHeader`                                                                                |
+
+(¹) **As implemented:** a property that another parameter of the operation already documents
+(`@Query('page')`, `@ApiQuery('page')`, another whole-object schema) is dropped, with a ZNIGHT035
+assembly warning: OpenAPI forbids two parameters with one name and location.
 
 Coercion plans map to schemas as follows:
 
@@ -435,14 +447,29 @@ The other content types parsed by Znight (urlencoded, multipart for text fields)
 **The success status** is `@HttpCode`, else 201 for POST and 200 otherwise. When the return type
 is `void` or `undefined`, it is `@HttpCode`, else 201 for POST and 204 otherwise. This is the
 runtime rule of architecture §9.1. Its content comes from the annotated return type, after
-unwrapping `Promise<…>`:
+unwrapping `Promise<…>`.
+
+> **As implemented** (v0.1, after the wave 6 review), differences with the table below:
+>
+> - The return type is read member by member. `HttpResponse<A> | HttpResponse<B> | C` is documented
+>   as `A | B | C` (repetitions removed), and the status, chosen at runtime, lets `@ApiResponse`
+>   declare other 2XX statuses.
+> - `T | undefined` documents `T` **and** an empty 204 response (what the runtime sends for
+>   `undefined`), except on POST and with `@HttpCode`; `@ApiResponse(204)` is then accepted.
+> - Media types follow the serialiser: strings, string literals and string enums are `text/plain`;
+>   a mixed union gets both media types, each with its members (`string | null`: `text/plain` and
+>   `application/json` for `null`).
+> - `HttpResponse<SseBody>` (`HttpResponse.sse()` on any route) is `text/event-stream`, status 200
+>   even on POST unless `@HttpCode`; an event stream or another body is ZNIGHT031.
+> - A body with `@HttpCode(204)` or `304` is a ZNIGHT035 error (the serialiser drops it) and is not
+>   documented. `HEAD` operations never have content.
 
 | Return type                                                                                                          | Success response                                                                                                                           |
 | -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | Object types: interfaces, aliases, classes, records, arrays, unions...                                               | `application/json`, with the schema of the shape (§6.2)                                                                                    |
-| `HttpResponse<T>`                                                                                                    | As `T`. In `T \| undefined`, `undefined` is dropped                                                                                        |
+| `HttpResponse<T>`                                                                                                    | As `T`. In `T \| undefined`, `undefined` adds the empty 204 (as implemented, above)                                                        |
 | `z.output<typeof S>`, `v.InferOutput<typeof S>`, or an alias of them                                                 | The **output** JSON Schema of `S`                                                                                                          |
-| `string`                                                                                                             | `text/plain`                                                                                                                               |
+| `string`, string literals, string enums (as implemented)                                                             | `text/plain`                                                                                                                               |
 | `Uint8Array`, `ArrayBuffer`, `Buffer`, views, `ReadableStream`, `Readable`, `Blob`, `File`, `HttpResponse<FileBody>` | `application/octet-stream` without schema. Set the media type with `@ApiResponse(s, { contentType })`                                      |
 | `AsyncIterable<SseEvent<T>>` on an `@Sse` route (RFC 0006)                                                           | `text/event-stream`. The schema of `T` goes into `x-znight-event-schema` and the description. OpenAPI 3.2 `itemSchema` is open question Q1 |
 | `void`, `undefined`, `HttpResponse<undefined>`                                                                       | No content                                                                                                                                 |
@@ -529,7 +556,7 @@ evaluated once, after `container.init()` (architecture §8.2).
 | `ui`              | `'scalar'`        | `'scalar'`, `'swagger'`, `false`, or `{ scalar: ScalarConfig }` / `{ swagger: SwaggerUiConfig }`. The config must be JSON-serialisable                                          |
 | `uiPath`          | `'/docs'`         | HTML page of the UI. Local assets are under `${uiPath}/_assets/`                                                                                                                |
 | `assets`          | `'auto'`          | `'local'` serves the UI package from `node_modules`. `'cdn'` uses the jsDelivr URL pinned by this release, with SRI. `'auto'` is local when the package resolves, CDN otherwise |
-| `document`        | `'build'`         | `'build'` assembles the document from the metadata. `{ file: string \| URL }` serves a prebuilt `openapi.json` (§5.8)                                                           |
+| `document`        | `'build'`         | `'build'` assembles the document from the metadata. `{ file: string \| URL }` serves a prebuilt `openapi.json` (§5.8), with the options below applied to it                     |
 | `build`           | `'boot'`          | `'boot'` builds in `onBootstrap`, so a failure fails `Application.create`. `'first-request'` builds lazily (serverless)                                                         |
 | `info`, `servers` | —                 | Runtime overrides. `info` is merged over the static one, `servers` replaces it                                                                                                  |
 | `filter`          | —                 | `(operation: OpenApiOperationView) => boolean`: hides operations, for example by tag or route meta. Unreferenced components are pruned                                          |
@@ -601,6 +628,11 @@ export class GatewayRegistration implements OnReady {
 
 ### 5.8 Emitting `openapi.json` at build time
 
+> **As implemented** (v0.1, after the wave 6 review): `znight build` takes `--openapi-prefix`, and
+> the `openapi()` Vite plugin a `prefix` option, so that every way of emitting the file can give it
+> the `servers` of the served document. A prebuilt file served with `document: { file }` gets the
+> runtime options of the plugin (§5.6) and is checked against the HTTP prefix.
+
 ```sh
 znight openapi                      # writes openapi.json at the project root
 znight openapi -o docs/openapi.yaml # YAML, chosen by the extension (needs `yaml`)
@@ -608,7 +640,16 @@ znight openapi --check              # CI: exit 1 when the file is missing or sta
 znight openapi --prefix /api        # servers default when @OpenApiDocument declares none
 znight openapi --runtime bun        # load the modules with Bun (default: the runtime running the CLI)
 znight build --openapi              # after the bundle: dist/openapi.json, next to dist/main.js
+znight build --openapi --openapi-prefix /api # the same, with the prefix of HttpPlugin as servers default
 ```
+
+`--prefix` and `--openapi-prefix` take the `prefix` of `HttpPlugin.configure()` (a path starting with
+`/`; anything else is a usage error). Without it, a document emitted for an application served
+under a prefix has no `servers`, and clients generated from the file call the wrong paths.
+`--openapi-prefix` needs `--openapi` (usage error otherwise). When the Vite config registers its
+own `openapi()`, that plugin emits the document with its own options: `--openapi=<path>` and
+`--openapi-prefix` do not apply, and the CLI warns about it (set `openapi({ output, prefix })` in the
+config instead).
 
 ```ts
 // vite.config.ts
@@ -621,7 +662,11 @@ export default defineConfig({
   plugins: [
     znight(options),
     // vite build / znight build: after the bundle is written; znight dev: after each good rebuild
-    openapi({ output: ['openapi.json', 'dist/openapi.json'], check: process.env['CI'] === 'true' }),
+    openapi({
+      output: ['openapi.json', 'dist/openapi.json'],
+      check: process.env['CI'] === 'true',
+      prefix: '/api', // the prefix of HttpPlugin: servers default when @OpenApiDocument declares none
+    }),
   ],
 })
 ```
@@ -640,6 +685,12 @@ const result = await emitOpenApi({ root: process.cwd(), output: 'openapi.json', 
 - **Commit `openapi.json` and check it in CI** (`znight openapi --check`). An API change then shows
   up in the pull request diff, and clients can be generated from the file without starting
   anything.
+- **Serving the file** (`document: { file }`): `info`, `servers`, `filter` and `transform` apply to
+  it as to a build (operations matched by path and method; empty paths, unused tags and
+  unreferenced components pruned), and a file without `servers` gets `[{ url: prefix }]` under an
+  HTTP prefix, with a ZNIGHT030 warning: emit it with the prefix. Relative servers of the file that
+  do not end with the prefix are a ZNIGHT030 warning too. With none of these, the file is served
+  byte for byte.
 
 ### 5.9 Testing (`@znight/testing` and `@znight/openapi/testing`)
 
@@ -775,6 +826,20 @@ compiled with `@znight/openapi` installed (its stored data is in the manifest, a
 
 ### 6.2 Type shapes: TypeScript → JSON Schema
 
+> **As implemented** (v0.1, after the wave 6 review). Normative text: architecture §6.5 (type
+> shapes) and §9.5 (components). Differences with the first version of this section, all reflected
+> below:
+>
+> - Enum member types (`kind: Kind.Cat`) are the literal of their value, and enums and aliases of
+>   literal unions work as keys (`Record<Genre, T>`, `{ [K in Genre]?: T }`, `Pick` / `Omit` keys,
+>   `T[K]`) and in `Exclude` / `Extract` / `NonNullable`.
+> - A `discriminator` is only emitted with a complete `mapping` (every member a named component).
+> - Generic instantiations with an anonymous type argument, or whose name another instantiation of
+>   the same declaration already has, get a short hash.
+> - A declaration named like a Standard Schema is ZNIGHT034 whatever the route order, except the
+>   `interface User extends z.infer<typeof User>` pattern, documented by the schema.
+> - A `bigint` first met in a request and then in a response is reported again, as an error.
+
 The compiler gets a structural view of type annotations (C1). It works on declarations and AST
 nodes, from sources and from `.d.ts` alike. It records the files it reads for `watchFiles`.
 
@@ -823,32 +888,32 @@ type Shape =
 
 The openapi extension maps shapes to JSON Schema 2020-12:
 
-| TypeScript                                                                                                                                                                      | JSON Schema                                                                                                  | Note                                                                                                                                                                 |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `string`, `number`, `boolean`, `null`                                                                                                                                           | `type`                                                                                                       |                                                                                                                                                                      |
-| Literal `'a'`                                                                                                                                                                   | `const: 'a'`                                                                                                 |                                                                                                                                                                      |
-| Union of literals                                                                                                                                                               | `enum` (`type` when homogeneous)                                                                             |                                                                                                                                                                      |
-| `T \| null`                                                                                                                                                                     | `type: [T, 'null']`, or `anyOf` with `{ type: 'null' }` for references                                       |                                                                                                                                                                      |
-| Optional property `?`, `\| undefined`                                                                                                                                           | Not in `required`                                                                                            |                                                                                                                                                                      |
-| `T[]`, `readonly T[]`, `Array<T>`, `ReadonlyArray<T>`                                                                                                                           | `{ type: 'array', items }`                                                                                   |                                                                                                                                                                      |
-| Tuple `[A, B?, ...C[]]`                                                                                                                                                         | `prefixItems`, `minItems`, `items`                                                                           |                                                                                                                                                                      |
-| Interface, object literal, class                                                                                                                                                | `type: 'object'`, `properties`, `required`                                                                   | Class: own instance fields and parameter properties only. Methods and prototype getters are not serialised by `JSON.stringify`. `additionalProperties` is left unset |
-| `interface A extends B`                                                                                                                                                         | Flattened properties                                                                                         | Generators prefer flat objects                                                                                                                                       |
-| `Record<string, T>`, index signature                                                                                                                                            | `additionalProperties: T`                                                                                    |                                                                                                                                                                      |
-| `Record<'a' \| 'b', T>`                                                                                                                                                         | Object with required `a`, `b`                                                                                |                                                                                                                                                                      |
-| `Partial`, `Required`, `Readonly`, `Pick`, `Omit`, `NonNullable`                                                                                                                | Applied structurally                                                                                         | Other mapped and conditional types: ZNIGHT032                                                                                                                        |
-| `A & B` (objects)                                                                                                                                                               | Merged object                                                                                                |                                                                                                                                                                      |
-| Union of objects                                                                                                                                                                | `anyOf`. `oneOf` plus `discriminator` when every member has a required literal property with distinct values |                                                                                                                                                                      |
-| TypeScript`enum`                                                                                                                                                                | `enum` of the member values, as a named component                                                            |                                                                                                                                                                      |
-| `Date`                                                                                                                                                                          | `{ type: 'string', format: 'date-time' }`                                                                    | `Date.prototype.toJSON`                                                                                                                                              |
-| `URL`                                                                                                                                                                           | `{ type: 'string', format: 'uri' }`                                                                          | `URL.prototype.toJSON`                                                                                                                                               |
-| Template literal type                                                                                                                                                           | `{ type: 'string' }`                                                                                         |                                                                                                                                                                      |
-| Class with `toJSON(): X`                                                                                                                                                        | The shape of `X`                                                                                             | The return type must be annotated, ZNIGHT032 otherwise                                                                                                               |
-| `unknown`, `any`                                                                                                                                                                | `{}`                                                                                                         | As a whole response: ZNIGHT031                                                                                                                                       |
-| `bigint` in a JSON body                                                                                                                                                         | **ZNIGHT032, error**                                                                                         | `JSON.stringify` throws, so the route answers 500                                                                                                                    |
-| `Map`, `Set`, `WeakMap`, `RegExp`, `Error`, typed arrays inside JSON                                                                                                            | ZNIGHT032 (warning)                                                                                          | Serialised as `{}` or as numeric keys                                                                                                                                |
-| Functions, symbols, unbound type parameters, `opaque`                                                                                                                           | ZNIGHT032 (warning), `{}`                                                                                    |                                                                                                                                                                      |
-| `z.output<typeof S>`, `z.infer`, `z.input`, `v.InferOutput`, `v.InferInput`, `StandardSchemaV1.InferOutput`, `InferSchemaOutput` (http), ArkType `typeof S.infer` / `S.inferIn` | `{ $ref }` to the slot of `S` with that io                                                                   | The table of aliases is passed in `schemaAliases`, and tested against the installed libraries                                                                        |
+| TypeScript                                                                                                                                                                      | JSON Schema                                                                                                                                                                      | Note                                                                                                                                                                 |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `string`, `number`, `boolean`, `null`                                                                                                                                           | `type`                                                                                                                                                                           |                                                                                                                                                                      |
+| Literal `'a'`                                                                                                                                                                   | `const: 'a'`                                                                                                                                                                     |                                                                                                                                                                      |
+| Union of literals                                                                                                                                                               | `enum` (`type` when homogeneous)                                                                                                                                                 |                                                                                                                                                                      |
+| `T \| null`                                                                                                                                                                     | `type: [T, 'null']`, or `anyOf` with `{ type: 'null' }` for references                                                                                                           |                                                                                                                                                                      |
+| Optional property `?`, `\| undefined`                                                                                                                                           | Not in `required`                                                                                                                                                                |                                                                                                                                                                      |
+| `T[]`, `readonly T[]`, `Array<T>`, `ReadonlyArray<T>`                                                                                                                           | `{ type: 'array', items }`                                                                                                                                                       |                                                                                                                                                                      |
+| Tuple `[A, B?, ...C[]]`                                                                                                                                                         | `prefixItems`, `minItems`, `items`                                                                                                                                               |                                                                                                                                                                      |
+| Interface, object literal, class                                                                                                                                                | `type: 'object'`, `properties`, `required`                                                                                                                                       | Class: own instance fields and parameter properties only. Methods and prototype getters are not serialised by `JSON.stringify`. `additionalProperties` is left unset |
+| `interface A extends B`                                                                                                                                                         | Flattened properties                                                                                                                                                             | Generators prefer flat objects                                                                                                                                       |
+| `Record<string, T>`, index signature                                                                                                                                            | `additionalProperties: T`                                                                                                                                                        |                                                                                                                                                                      |
+| `Record<'a' \| 'b', T>`, `Record<Enum, T>`, `{ [K in Alias]?: T }`                                                                                                              | Object with a property per key (required for `Record`)                                                                                                                           | Keys go through enums and aliases of unions (as implemented); `Record<never, T>` is `{}`                                                                             |
+| `Partial`, `Required`, `Readonly`, `Pick`, `Omit`, `NonNullable`, `Exclude`, `Extract`                                                                                          | Applied structurally                                                                                                                                                             | Other mapped and conditional types: ZNIGHT032. A filter that removes nothing keeps the named component (`NonNullable<Pet>` is `Pet`)                                 |
+| `A & B` (objects)                                                                                                                                                               | Merged object                                                                                                                                                                    |                                                                                                                                                                      |
+| Union of objects                                                                                                                                                                | `anyOf`. `oneOf` when every member has a required string literal property with distinct values, plus a `discriminator` with its `mapping` when every member is a named component | As implemented: without a complete mapping tools would read the values as component names, so no `discriminator`                                                     |
+| TypeScript `enum`                                                                                                                                                               | `enum` of the member values, as a named component                                                                                                                                | An enum member type (`Kind.Cat`) is `const` of its value (as implemented)                                                                                            |
+| `Date`                                                                                                                                                                          | `{ type: 'string', format: 'date-time' }`                                                                                                                                        | `Date.prototype.toJSON`                                                                                                                                              |
+| `URL`                                                                                                                                                                           | `{ type: 'string', format: 'uri' }`                                                                                                                                              | `URL.prototype.toJSON`                                                                                                                                               |
+| Template literal type                                                                                                                                                           | `{ type: 'string' }`                                                                                                                                                             |                                                                                                                                                                      |
+| Class with `toJSON(): X`                                                                                                                                                        | The shape of `X`                                                                                                                                                                 | The return type must be annotated, ZNIGHT032 otherwise                                                                                                               |
+| `unknown`, `any`                                                                                                                                                                | `{}`                                                                                                                                                                             | As a whole response: ZNIGHT031                                                                                                                                       |
+| `bigint` in a JSON body                                                                                                                                                         | **ZNIGHT032, error** in a response (as implemented: a warning in a request body)                                                                                                 | `JSON.stringify` throws, so the route answers 500                                                                                                                    |
+| `Map`, `Set`, `WeakMap`, `RegExp`, `Error`, typed arrays inside JSON                                                                                                            | ZNIGHT032 (warning)                                                                                                                                                              | Serialised as `{}` or as numeric keys                                                                                                                                |
+| Functions, symbols, unbound type parameters, `opaque`                                                                                                                           | ZNIGHT032 (warning), `{}`                                                                                                                                                        |                                                                                                                                                                      |
+| `z.output<typeof S>`, `z.infer`, `z.input`, `v.InferOutput`, `v.InferInput`, `StandardSchemaV1.InferOutput`, `InferSchemaOutput` (http), ArkType `typeof S.infer` / `S.inferIn` | `{ $ref }` to the slot of `S` with that io                                                                                                                                       | The table of aliases is passed in `schemaAliases`, and tested against the installed libraries                                                                        |
 
 **JSDoc tags on types and properties:**
 
@@ -869,9 +934,19 @@ Tag values are parsed as JSON, or as a string. An invalid value is ZNIGHT032 at 
 
 - A non-generic named declaration uses its display name: `BookResponse`.
 - A generic instantiation joins the names of its arguments: `Page<BookResponse>` gives
-  `Page_BookResponse`, and primitives use their keyword (`Page_string`).
+  `Page_BookResponse`, and primitives use their keyword (`Page_string`). **As implemented:** an
+  argument that does not name itself (an object literal, a tuple, an opaque type, a generic
+  reference) adds the first 8 hexadecimal characters of the SHA-256 of the instantiation key
+  (`Page<{ id: string }>` → `Page_object_1a2b3c4d`), and so does an instantiation whose name another
+  instantiation of the same declaration already has (`Box<Book[]>` and `Box<BookArray>`): two
+  instantiations never clash.
 - A Standard Schema slot uses the export name of its binding (`CreateBook`). The `XInput` variant
-  is decided at assembly (§7.3).
+  is decided at assembly (§7.3), for the slot and for each of its hoisted definitions.
+- **As implemented:** the components are checked against the schema slots once every operation is
+  built, so the result does not depend on the route order. A declaration named like a schema is
+  ZNIGHT034, except a declaration merged with the schema it is inferred from (`export const User =
+  z.object(…)` and `export interface User extends z.infer<typeof User> {}`: one identity), which is
+  documented by the schema (its output variant).
 - Names keep `[A-Za-z0-9._-]`. Other characters are replaced with `_`.
 - The same name for two different identities is ZNIGHT034, with both declarations in the message.
   The fix is to rename one of them.
@@ -891,19 +966,20 @@ Tag values are parsed as JSON, or as a string. An invalid value is ZNIGHT032 at 
   meaning is the same: a decorator on the wrong target is always ZNIGHT005.
 - Third-party packages do not get `ZNIGHT` codes. The catalogue is closed.
 
-**New codes:**
+**New codes** (as implemented in v0.1, after the wave 6 review: the ZNIGHT030, 032, 034 and 035
+rows list the cases added then):
 
-| Code          | Name                         | When                                                                                                                                                                                                                                                                                                                                                                                                                                  | Severity                                       |
-| ------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| ZNIGHT030     | `InvalidOpenApiDefinition`   | Invalid `@OpenApiDocument` options or a second `@OpenApiDocument`. `@Api*` outside a controller or a route handler. Invalid static values (status, media type, tag, header name, operation id, `x-` key, `$znight` keys). A malformed `securityScheme()` definition. At runtime: invalid `OpenApiPlugin` options, a missing `extensions.openapi`, a prefix that the declared servers do not reflect, a stale prebuilt file (warnings) | error / warning                                |
-| ZNIGHT031     | `UndocumentedResponse`       | The success response cannot be documented (§5.4.4) and no `@ApiResponse` covers it                                                                                                                                                                                                                                                                                                                                                    | warning (error with `strict`)                  |
-| ZNIGHT032     | `UnrepresentableType`        | A documented type has no JSON Schema, or does not serialise as declared (§6.2). `bigint` in a JSON body is always an error                                                                                                                                                                                                                                                                                                            | warning / error (error with `strict`)          |
-| ZNIGHT033     | `DuplicateOperationId`       | Two operations with the same id                                                                                                                                                                                                                                                                                                                                                                                                       | error                                          |
-| ZNIGHT034     | `SchemaNameConflict`         | Two different declarations or schemas for one component name: at compile time, or at assembly for hoisted `$defs` and `XInput` names                                                                                                                                                                                                                                                                                                  | error                                          |
-| ZNIGHT035     | `InconsistentOperation`      | The documentation contradicts the route: a body on 204/304, a success status other than the route's, `@ApiQuery('x')` next to `@Query('x')`, a documented `accept` / `content-type` / `authorization` header (use a security scheme), `@ApiBody` next to `@Body(S)`, `@ApiBody` on GET/HEAD (warning), `@ApiExclude` with other `@Api*` (warning)                                                                                     | error / warning                                |
-| ZNIGHT036     | `InvalidSecurityRequirement` | A requirement that is not a `securityScheme()`, scopes on a scheme without scopes, undeclared OAuth2 scopes, one scheme name for two definitions, an invalid `decisions[].when` or `scopes: 'value'` value, a decision never applied (warning)                                                                                                                                                                                        | error / warning                                |
-| ZNIGHT037     | `SchemaConversionFailed`     | At assembly (boot, emission, tests): no converter for a schema, a converter that throws or returns something other than an object, a whole-object `@Query(S)` / `@Param(S)` / `@Headers(S)` schema that is not an object                                                                                                                                                                                                              | error (warning with `unrepresentable: 'warn'`) |
-| ZNIGHT038–039 | —                            | Reserved                                                                                                                                                                                                                                                                                                                                                                                                                              | —                                              |
+| Code          | Name                         | When                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | Severity                                       |
+| ------------- | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| ZNIGHT030     | `InvalidOpenApiDefinition`   | Invalid `@OpenApiDocument` options or a second `@OpenApiDocument`. `@Api*` outside a controller or a route handler. Invalid static values (status, media type, tag, header name, operation id, `x-` key, `$znight` keys). A malformed `securityScheme()` definition. At runtime: invalid `OpenApiPlugin` options, a missing `extensions.openapi`, a prefix that the declared servers do not reflect, a stale prebuilt file, a prebuilt file without `servers` (or with relative servers not ending with the prefix) under an HTTP prefix (warnings) | error / warning                                |
+| ZNIGHT031     | `UndocumentedResponse`       | The success response cannot be documented (§5.4.4) and no `@ApiResponse` covers it                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | warning (error with `strict`)                  |
+| ZNIGHT032     | `UnrepresentableType`        | A documented type has no JSON Schema, or does not serialise as declared (§6.2). `bigint` in a JSON response is always an error (a warning in a request body), also when the type was first reported in a request body                                                                                                                                                                                                                                                                                                                               | warning / error (error with `strict`)          |
+| ZNIGHT033     | `DuplicateOperationId`       | Two operations with the same id                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | error                                          |
+| ZNIGHT034     | `SchemaNameConflict`         | Two different declarations or schemas for one component name: at compile time (a declaration named like a schema included, whatever the route order; not `interface X extends z.infer<typeof X>`), or at assembly for two different schemas of one io under one name (hoisted `$defs` ids, `XInput` names)                                                                                                                                                                                                                                          | error                                          |
+| ZNIGHT035     | `InconsistentOperation`      | The documentation contradicts the route: a body on 204/304 (`@ApiResponse` or `@HttpCode`), a success status other than the route's, `@ApiQuery('x')` next to `@Query('x')`, a documented `accept` / `content-type` / `authorization` header (use a security scheme), `@ApiBody` next to `@Body(S)`. Warnings: `@ApiBody` on GET/HEAD, `@ApiExclude` with other `@Api*`, routes of one path with differently named parameters (one template), a whole-object parameter property documented twice (assembly)                                         | error / warning                                |
+| ZNIGHT036     | `InvalidSecurityRequirement` | A requirement that is not a `securityScheme()`, scopes on a scheme without scopes, undeclared OAuth2 scopes, one scheme name for two definitions, an invalid `decisions[].when` or `scopes: 'value'` value, a decision never applied (warning)                                                                                                                                                                                                                                                                                                      | error / warning                                |
+| ZNIGHT037     | `SchemaConversionFailed`     | At assembly (boot, emission, tests): no converter for a schema, a converter that throws or returns something other than an object, a whole-object `@Query(S)` / `@Param(S)` / `@Headers(S)` schema that is not an object                                                                                                                                                                                                                                                                                                                            | error (warning with `unrepresentable: 'warn'`) |
+| ZNIGHT038–039 | —                            | Reserved                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | —                                              |
 
 **Reused codes:** ZNIGHT005 (targets and arguments, checked by the core), ZNIGHT007 (a docs route
 that collides with a controller route, at boot), ZNIGHT017 (unchanged: a TypeScript-typed body is
@@ -1074,6 +1150,12 @@ import { CreateBook } from '../books/book.schemas.js' // already imported by inv
 
 ### 7.3 Assembly: `buildOpenApiDocument` (normative)
 
+> **As implemented** (v0.1, after the wave 6 review). Steps 2 to 5 below describe the shipped
+> algorithm: dates of coerced Zod schemas and of Valibot responses, `$defs` named per id with their
+> own `XInput` variants, anonymous definitions scoped to their slot, a root `.meta({ id })` equal to
+> the export name unwrapped, and duplicate expanded parameters dropped. The same runtime options
+> also apply to a prebuilt file (§5.8). Normative summary: architecture §9.5.
+
 ```ts
 export function buildOpenApiDocument(
   metadata: ZnightMetadata,
@@ -1116,28 +1198,45 @@ The algorithm:
    1. the user `converters`;
    2. **Standard JSON Schema:**
       `schema['~standard'].jsonSchema[io]({ target: 'draft-2020-12', libraryOptions })`. For
-      `vendor: 'zod'` and `io: 'output'`, `libraryOptions.unrepresentable` maps `z.date()` to
-      `{ type: 'string', format: 'date-time' }`, because Znight serialises dates with `toJSON`;
+      `vendor: 'zod'`, `libraryOptions.unrepresentable` maps `z.date()` to
+      `{ type: 'string', format: 'date-time' }` for `io: 'output'`, because Znight serialises dates
+      with `toJSON`, and a coerced date (`z.coerce.date()`) in both io, since it reads a string in
+      requests;
    3. **Valibot** (`vendor: 'valibot'`, no `jsonSchema`): a lazy import of `@valibot/to-json-schema`,
-      then `toStandardJsonSchema(schema)` and the same call.
+      then `toStandardJsonSchema(schema)` and the same call, its options passed as `libraryOptions`
+      (`toStandardJsonSchema` takes the schema only): `v.date()` is `date-time` for `io: 'output'`,
+      and the lenient mode sets `errorMode: 'ignore'`.
 
    A missing converter, a throw, or a result that is not an object is ZNIGHT037 with the slot name,
    the vendor, the io and the source location. With `unrepresentable: 'warn'`, the conversion is
    retried in lenient mode (Zod: `unrepresentable: 'any'`), else gives `{}`, and a warning is added.
 3. **Normalisation.**
    - Drop `$schema` and `$id`.
-   - Hoist `$defs` (and `definitions`) into `components.schemas`, rewriting `#/$defs/X` into
-     `#/components/schemas/X`. Inside an OpenAPI document, `#` is the document, not the schema, so
-     unhoisted `$defs` references would dangle.
-   - The same name with different content is ZNIGHT034.
-4. **Names.** A slot needed in both io gives one component `Name` when the two JSON values are
-   deeply equal. Otherwise it gives `Name` (output, the resource) and `NameInput`. A clash with an
-   existing component is ZNIGHT034.
+   - Split each converted schema into its root and its `$defs` (and `definitions`), at any depth,
+     hoisted into `components.schemas`. Every local reference is rewritten (`#/$defs/X`, `#`,
+     `#/properties/...`): inside an OpenAPI document, `#` is the document, not the schema, so
+     unhoisted references would dangle.
+   - A definition with a library id (`.meta({ id: 'Address' })`) is named after it. Anonymous
+     definitions (Zod's `__schema0` of a recursive schema without id) are local to one conversion:
+     they are scoped to their slot (`Tree_schema0`), so two slots never clash on them.
+   - A root that only references one definition (`{ $ref: '#/$defs/X', $defs: { X } }`, Zod's
+     `.meta({ id })` on the root) is unwrapped when X is named after the slot (the id equals the
+     export name) or anonymous: X is the slot component. Another id keeps the root as an alias of X.
+4. **Names.** Every global name, slot or hoisted definition, gives one component `Name` when its
+   input and output JSON values are deeply equal. Otherwise it gives `Name` (output, the resource)
+   and `NameInput`. A schema whose own JSON is equal in both io still gets `NameInput` when it
+   references a definition that has one (propagated to a fixed point), so that the input variant
+   references input definitions. Two different schemas of one io under one name, or a clash with a
+   component of a TypeScript declaration, are ZNIGHT034; one name for an input and an output schema
+   is not a conflict.
 5. **Placeholders.**
    - `{ $znight: 'schema' }` becomes `{ $ref: '#/components/schemas/<name>' }`.
    - `{ $znight: 'parameters' }` becomes one parameter per property of the resolved object schema,
      with `required` from its `required` list and `description` from the property. ZNIGHT037 when
-     the schema is not an object.
+     the schema is not an object. OpenAPI forbids two parameters with one name and location: an
+     expanded property that an explicit parameter of the operation, or an earlier expansion,
+     already documents (header names compared case-insensitively) is dropped, and one ZNIGHT035
+     warning lists them.
 6. **Document.**
    - `paths[path][method] = operation`, in metadata order, after `filter`.
    - `components.schemas` gathers the compiler components, the converted slots, the hoisted `$defs`
@@ -1194,20 +1293,22 @@ The token is `@znight/openapi#OpenApi`. The OpenAPI types are our own (about 300
 4. `buildOpenApiDocument(metadata, { prefix, converters })`. ZNIGHT037/034 make the command exit 1.
 5. Write each output (JSON, or YAML by extension) atomically, only when it changed. With `check`,
    never write. A stale or missing output gives exit 1 and lists the files. The Vite plugin then
-   fails the build, as `generate --check` does.
+   fails the build, as `generate --check` does. **As implemented**, the Vite plugin checks only the
+   outputs outside `build.outDir` (the committed files): those inside are build artifacts, emptied
+   by every build, so it always writes them (`emitOpenApi({ check: [...] })` checks a subset).
 
 ## 8. Runtime architecture
 
 ### 8.1 Plugin lifecycle
 
-| Hook                                                      | What happens                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `register`                                                | Throws ZNIGHT030 when `metadata.extensions.openapi` is missing or malformed, or when no plugin named `http` is registered (hint: `HttpPlugin.configure()`). Registers the `OpenApi` external value                                                                                                                                                                                                                                                                                                                      |
-| `httpRoutes()` (called by `HttpPlugin.onBootstrap`, §8.2) | Resolves the options (memoised, container ready) and returns the docs routes, or `[]` when disabled                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `onBootstrap`                                             | Resolves the options (memoised) and reads `http.prefix`. In `'boot'` mode, it builds the document and precomputes the response bodies (JSON bytes and strong ETag, YAML, UI HTML with its CSP), then logs `OpenAPI document built` (debug: operations, schemas, ms). In `{ file }` mode, it reads and parses the file, checks `openapi: 3.1.x` and compares `x-znight-fingerprint` with the metadata (ZNIGHT030 warning when stale). Checks that declared relative servers end with the HTTP prefix (ZNIGHT030 warning) |
-| `onReady`                                                 | Logs `API reference: <address><prefix>/docs` (info) when the UI is on and the server listens                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `onStop`                                                  | Nothing: HttpPlugin drains the docs requests like any other                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `onDispose`                                               | Drops the cached bodies and resets the instance, which can then serve another application (shared test setups, like HttpPlugin)                                                                                                                                                                                                                                                                                                                                                                                         |
+| Hook                                                      | What happens                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `register`                                                | Throws ZNIGHT030 when `metadata.extensions.openapi` is missing or malformed, or when no plugin named `http` is registered (hint: `HttpPlugin.configure()`). Registers the `OpenApi` external value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `httpRoutes()` (called by `HttpPlugin.onBootstrap`, §8.2) | Resolves the options (memoised, container ready) and returns the docs routes, or `[]` when disabled                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `onBootstrap`                                             | Resolves the options (memoised) and reads `http.prefix`. In `'boot'` mode, it builds the document and precomputes the response bodies (JSON bytes and strong ETag, YAML, UI HTML with its CSP), then logs `OpenAPI document built` (debug: operations, schemas, ms). In `{ file }` mode, it reads and parses the file, checks `openapi: 3.1.x` and compares `x-znight-fingerprint` with the metadata (ZNIGHT030 warning when stale); **as implemented**, it then applies `filter`, `info`, `servers` and `transform` to the file, and gives a file without `servers` `[{ url: prefix }]` under an HTTP prefix (ZNIGHT030 warning, §5.8). Checks that declared relative servers (or those of the file) end with the HTTP prefix (ZNIGHT030 warning) |
+| `onReady`                                                 | Logs `API reference: <address><prefix>/docs` (info) when the UI is on and the server listens                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `onStop`                                                  | Nothing: HttpPlugin drains the docs requests like any other                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `onDispose`                                               | Drops the cached bodies and resets the instance, which can then serve another application (shared test setups, like HttpPlugin)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 
 `initRoots()` returns the classes of the `guards` option (the `PluginInitRoots` contract), so
 `TestApp` creates them at boot.
@@ -1259,6 +1360,15 @@ img-src 'self' data: https:; font-src 'self' data: <cdn>; connect-src 'self' <se
 frame-ancestors 'none'; base-uri 'none'; form-action 'none'
 ```
 
+> **As implemented** (v0.1, after the wave 6 review): `connect-src` lists the origins of the
+> servers of the served document in every build mode. With `'first-request'`, the first request
+> of the page builds the document; when that build fails, the page allows the declared servers
+> (static, or the `servers` option) and is not cached. The installed UI package is found from
+> `@znight/openapi`, then from the working directory, through `<package>/package.json` when it
+> resolves, else in the `node_modules` directories of the resolution paths (manifest `name`
+> checked): `@scalar/api-reference`, whose exports map hides its manifest, is found on Node.js as
+> on Bun.
+
 **Third parties.** None, except the pinned CDN, and none at all with local assets. Scalar's fonts
 are disabled, and so are its proxy and the Swagger validator.
 
@@ -1272,7 +1382,9 @@ bumped by Renovate. A network test (`ZNIGHT_NETWORK=1`) checks the hashes.
     way a missing configuration value fails with ZNIGHT006.
   - `'first-request'`: one shared promise. Concurrent first requests wait for it. A failure answers
     500, is logged once, and the next request tries again.
-  - `{ file }`: the bytes are read once. No converter and no schema library code run.
+  - `{ file }`: the bytes are read once. No converter and no schema library code run. **As
+    implemented:** `filter`, `info`, `servers` and `transform` apply to the file (§5.8); the bytes
+    are served as read when none of them applies and the file needs no `servers` default.
 - **Scopes.** `OpenApi` is a singleton value. The handlers of the docs routes resolve nothing
   per request. Guards of the `guards` option may be request-scoped: they are resolved per request
   like global guards. The pipeline opens a request scope for every request anyway.
@@ -1326,7 +1438,9 @@ the catalogue (P0).
 - `znight openapi` (P0): `-o/--output` (repeatable), `--check`, `--prefix`, `--runtime
   <auto|node|bun>`, `--converters`, `--root`, `--config`, `--config-loader`.
 - `znight build --openapi[=path]` (P1): adds `openapi()` to the inline Vite config when the config
-  has none.
+  has none. **As implemented:** `--openapi-prefix <path>` passes the HTTP prefix (§5.8; a usage
+  error without `--openapi`), and a warning says when the config's own `openapi()` makes both
+  options inapplicable.
 - `znight new --features openapi` (P2): adds the plugin, `src/api.ts` with `@OpenApiDocument`, and
   an `openapi` script.
 - `@znight/openapi` becomes an optional peer of the CLI. A command that needs it fails with an

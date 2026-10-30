@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 688 610" width="688" height="610" role="img" aria-labelledby="title desc">
+<title id="title">Lifecycle hooks in order</title>
+<desc id="desc">Sequence of the hooks called by the application. Application.create(): plugins register(), container.init() creates the singletons, plugins onBootstrap(). app.start(): providers onStart(), plugins onStart() (listen, subscribe), providers onReady(), plugins onReady(); the state goes from starting to ready. app.stop(): plugins onStop() in reverse order, providers onStop() then disposal in reverse resolution order, plugins onDispose() in reverse order; the state goes from stopping to stopped.</desc>
+<defs>
+<linearGradient id="zn-card" x1="0" y1="0" x2="0" y2="1">
+<stop offset="0" stop-color="#1A2350"/>
+<stop offset="1" stop-color="#0B1020"/>
+</linearGradient>
+<linearGradient id="zn-accent" x1="0" y1="0" x2="1" y2="1">
+<stop offset="0" stop-color="#2F6AE8"/>
+<stop offset="1" stop-color="#7C4DEF"/>
+</linearGradient>
+<linearGradient id="zn-accent-line" x1="0" y1="0" x2="1" y2="0">
+<stop offset="0" stop-color="#3E7BFA"/>
+<stop offset="1" stop-color="#8B5CF6"/>
+</linearGradient>
+<style>.s{font-family:ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif}.m{font-family:ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace}</style>
+</defs>
+<rect x="0.5" y="0.5" width="687" height="609" rx="16" fill="url(#zn-card)" stroke="#2C3660"/>
+<rect x="42" y="20" width="180" height="48" rx="10" fill="#1E2858" stroke="#4A5AA6" stroke-width="1.25"/>
+<text x="132" y="40.2" text-anchor="middle" class="s" font-size="14" font-weight="600" fill="#F4F6FC">Plugins</text>
+<text x="132" y="57.9" text-anchor="middle" class="s" font-size="12.5" fill="#A9B4D6">in registration order</text>
+<rect x="254" y="20" width="180" height="48" rx="10" fill="url(#zn-accent)"/>
+<text x="344" y="40.2" text-anchor="middle" class="s" font-size="14" font-weight="600" fill="#FFFFFF">Application</text>
+<text x="344" y="57.9" text-anchor="middle" class="s" font-size="12.5" fill="#FFFFFF"><tspan class="m">app.state</tspan></text>
+<rect x="466" y="20" width="180" height="48" rx="10" fill="#1E2858" stroke="#4A5AA6" stroke-width="1.25"/>
+<text x="556" y="40.2" text-anchor="middle" class="s" font-size="14" font-weight="600" fill="#F4F6FC">Providers</text>
+<text x="556" y="57.9" text-anchor="middle" class="s" font-size="12.5" fill="#A9B4D6">singletons, resolution order</text>
+<rect x="24" y="82" width="640" height="150" rx="10" fill="#F4F6FC" fill-opacity="0.03" stroke="#34407A" stroke-width="1"/>
+<rect x="24" y="242" width="640" height="188" rx="10" fill="#F4F6FC" fill-opacity="0.03" stroke="#34407A" stroke-width="1"/>
+<rect x="24" y="440" width="640" height="150" rx="10" fill="#F4F6FC" fill-opacity="0.03" stroke="#34407A" stroke-width="1"/>
+<line x1="132" y1="68" x2="132" y2="590" stroke="#7381B3" stroke-width="1" stroke-dasharray="3 4"/>
+<line x1="344" y1="68" x2="344" y2="590" stroke="#7381B3" stroke-width="1" stroke-dasharray="3 4"/>
+<line x1="556" y1="68" x2="556" y2="590" stroke="#7381B3" stroke-width="1" stroke-dasharray="3 4"/>
+<path d="M24,104 V92 Q24,82 34,82 H194 V94 Q194,104 184,104 Z" fill="#26306A"/>
+<text x="34" y="97.5" class="m" font-size="12.5" font-weight="600" fill="#F4F6FC">Application.create()</text>
+<rect x="307.8" y="87" width="72.4" height="20" rx="10" fill="#251E5C" stroke="#A78BFA" stroke-width="1"/>
+<text x="344" y="101.2" text-anchor="middle" class="m" font-size="12" fill="#EDE9FE">created</text>
+<path d="M24,264 V252 Q24,242 34,242 H126.5 V254 Q126.5,264 116.5,264 Z" fill="#26306A"/>
+<text x="34" y="257.5" class="m" font-size="12.5" font-weight="600" fill="#F4F6FC">app.start()</text>
+<rect x="274.1" y="247" width="139.8" height="20" rx="10" fill="#251E5C" stroke="#A78BFA" stroke-width="1"/>
+<text x="344" y="261.2" text-anchor="middle" class="m" font-size="12" fill="#EDE9FE">starting → ready</text>
+<path d="M24,462 V450 Q24,440 34,440 H119 V452 Q119,462 109,462 Z" fill="#26306A"/>
+<text x="34" y="455.5" class="m" font-size="12.5" font-weight="600" fill="#F4F6FC">app.stop()</text>
+<rect x="266.6" y="445" width="154.8" height="20" rx="10" fill="#251E5C" stroke="#A78BFA" stroke-width="1"/>
+<text x="344" y="459.2" text-anchor="middle" class="m" font-size="12" fill="#EDE9FE">stopping → stopped</text>
+<path d="M344,134 L143.5,134" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M136,134 L144.5,129.4 L144.5,138.6 Z" fill="#A9B4D6"/>
+<circle cx="344" cy="134" r="3" fill="#A9B4D6"/>
+<text x="238" y="126" text-anchor="middle" class="s" font-size="13" fill="#F4F6FC"><tspan class="m">register()</tspan></text>
+<text x="238" y="151" text-anchor="middle" class="s" font-size="12" fill="#A9B4D6">supply externals</text>
+<path d="M344,172 L544.5,172" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M552,172 L543.5,176.6 L543.5,167.4 Z" fill="#A9B4D6"/>
+<circle cx="344" cy="172" r="3" fill="#A9B4D6"/>
+<text x="450" y="164" text-anchor="middle" class="s" font-size="13" fill="#F4F6FC"><tspan class="m">container.init()</tspan></text>
+<text x="450" y="189" text-anchor="middle" class="s" font-size="12" fill="#A9B4D6">create the singletons</text>
+<path d="M344,210 L143.5,210" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M136,210 L144.5,205.4 L144.5,214.6 Z" fill="#A9B4D6"/>
+<circle cx="344" cy="210" r="3" fill="#A9B4D6"/>
+<text x="238" y="202" text-anchor="middle" class="s" font-size="13" fill="#F4F6FC"><tspan class="m">onBootstrap()</tspan></text>
+<text x="238" y="227" text-anchor="middle" class="s" font-size="12" fill="#A9B4D6">register routes, consumers</text>
+<path d="M344,294 L544.5,294" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M552,294 L543.5,298.6 L543.5,289.4 Z" fill="#A9B4D6"/>
+<circle cx="344" cy="294" r="3" fill="#A9B4D6"/>
+<text x="450" y="286" text-anchor="middle" class="s" font-size="13" fill="#F4F6FC"><tspan class="m">onStart()</tspan></text>
+<path d="M344,332 L143.5,332" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M136,332 L144.5,327.4 L144.5,336.6 Z" fill="#A9B4D6"/>
+<circle cx="344" cy="332" r="3" fill="#A9B4D6"/>
+<text x="238" y="324" text-anchor="middle" class="s" font-size="13" fill="#F4F6FC"><tspan class="m">onStart()</tspan></text>
+<text x="238" y="349" text-anchor="middle" class="s" font-size="12" fill="#A9B4D6">listen, subscribe</text>
+<path d="M344,370 L544.5,370" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M552,370 L543.5,374.6 L543.5,365.4 Z" fill="#A9B4D6"/>
+<circle cx="344" cy="370" r="3" fill="#A9B4D6"/>
+<text x="450" y="362" text-anchor="middle" class="s" font-size="13" fill="#F4F6FC"><tspan class="m">onReady()</tspan></text>
+<path d="M344,408 L143.5,408" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M136,408 L144.5,403.4 L144.5,412.6 Z" fill="#A9B4D6"/>
+<circle cx="344" cy="408" r="3" fill="#A9B4D6"/>
+<text x="238" y="400" text-anchor="middle" class="s" font-size="13" fill="#F4F6FC"><tspan class="m">onReady()</tspan></text>
+<path d="M344,492 L143.5,492" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M136,492 L144.5,487.4 L144.5,496.6 Z" fill="#A9B4D6"/>
+<circle cx="344" cy="492" r="3" fill="#A9B4D6"/>
+<text x="238" y="484" text-anchor="middle" class="s" font-size="13" fill="#F4F6FC"><tspan class="m">onStop()</tspan></text>
+<text x="238" y="509" text-anchor="middle" class="s" font-size="12" fill="#A9B4D6">reverse · stop ingress, drain</text>
+<path d="M344,530 L544.5,530" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M552,530 L543.5,534.6 L543.5,525.4 Z" fill="#A9B4D6"/>
+<circle cx="344" cy="530" r="3" fill="#A9B4D6"/>
+<text x="450" y="522" text-anchor="middle" class="s" font-size="13" fill="#F4F6FC"><tspan class="m">onStop()</tspan> + dispose</text>
+<text x="450" y="547" text-anchor="middle" class="s" font-size="12" fill="#A9B4D6">reverse resolution order</text>
+<path d="M344,568 L143.5,568" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M136,568 L144.5,563.4 L144.5,572.6 Z" fill="#A9B4D6"/>
+<circle cx="344" cy="568" r="3" fill="#A9B4D6"/>
+<text x="238" y="560" text-anchor="middle" class="s" font-size="13" fill="#F4F6FC"><tspan class="m">onDispose()</tspan></text>
+<text x="238" y="585" text-anchor="middle" class="s" font-size="12" fill="#A9B4D6">reverse · close, flush</text>
+</svg>

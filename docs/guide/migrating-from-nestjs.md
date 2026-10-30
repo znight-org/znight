@@ -1,5 +1,5 @@
 ---
-description: Move a NestJS application to Znight - decorator mapping, modules to flat DI, forRootAsync to options computed from the container, ValidationPipe to schemas, Reflector to createRouteDecorator.
+description: Move a NestJS application to Znight - decorator mapping, modules to flat DI, forRootAsync to options computed from the container, ValidationPipe to schemas, Reflector to route decisions, Swagger and schedule.
 ---
 
 # Migrating from NestJS
@@ -19,7 +19,7 @@ walks through a migration.
 | `forwardRef()`                                           | `Lazy<T>`                                                               |
 | `forRoot()` / `forRootAsync({ useFactory, inject })`     | `XxxPlugin.configure(options)` / `configure(container => options)`      |
 | `ValidationPipe` + `class-validator` DTOs                | Schemas (Zod, Valibot...) passed to `@Body()` / `@Query()` / `@Param()` |
-| `@SetMetadata()` + `Reflector`                           | `createRouteDecorator()` + `route.meta`                                 |
+| `@SetMetadata()` + `Reflector`                           | `createRouteDecorator()` + `route.meta`, decisions checked at build     |
 | Errors at boot (`Nest can't resolve dependencies of...`) | Errors at build time (`ZNIGHT001`...)                                   |
 
 ## Decorator mapping
@@ -42,22 +42,27 @@ walks through a migration.
 
 ### HTTP
 
-| NestJS                                        | Znight (`@znight/http`)                                       | Notes                                                                             |
-| --------------------------------------------- | ------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `@Controller('users')`                        | `@Controller('/users')`                                       | Also `{ path, scope }`.                                                           |
-| `@Get() @Post() @Put() @Patch() @Delete()`    | Same                                                          | Plus `@Head()`, `@Options()`, `@All()`.                                           |
-| `@Param('id', ParseIntPipe) id: number`       | `@Param('id') id: number`                                     | Coerced from the declared type; invalid → `400`.                                  |
-| `@Query()`, `@Body()`, `@Headers()`           | `@Query(name?, schema?)`, `@Body(schema?)`, `@Headers(name?)` | Schemas validate and transform.                                                   |
-| `@Req()`, `@Res()`                            | `@Req()`, `@Res()`                                            | Adapter-specific escape hatches (warning). Prefer `@Ctx()` (`HttpContext`).       |
-| `@HttpCode(204)`, `@Header('x', 'y')`         | Same                                                          |                                                                                   |
-| `@UseGuards(AuthGuard)`                       | `@UseGuard(AuthGuard)`                                        | Guards are providers implementing `CanActivate`, injected like any other.         |
-| `@UseInterceptors(X)`                         | `@UseInterceptor(X)`                                          | Route-level. For any provider method: `@Intercept()` ([AOP](./aop)).              |
-| `@UsePipes(ValidationPipe)`                   | Schemas on parameters, or `@Validate(schema)`                 | See [validation](#validationpipe-schemas).                                        |
-| `@UseFilters()` / `ExceptionFilter`           | `exceptionMappers` option of `HttpPlugin`                     | `HttpException(status, message, details?)` for expected errors.                   |
-| `@SetMetadata('roles', [...])` + `Reflector`  | `createRouteDecorator<T>('roles')`                            | See [route metadata](#reflector-createroutedecorator).                            |
-| `@UploadedFile()` + `FileInterceptor('file')` | `@UploadedFile('file', { maxSize, mimeTypes })`               | No interceptor nor Multer: standard `File` objects, limits checked while reading. |
+| NestJS                                             | Znight (`@znight/http`)                                       | Notes                                                                                       |
+| -------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `@Controller('users')`                             | `@Controller('/users')`                                       | Also `{ path, scope }`.                                                                     |
+| `@Get() @Post() @Put() @Patch() @Delete()`         | Same                                                          | Plus `@Head()`, `@Options()`, `@All()`.                                                     |
+| `@Param('id', ParseIntPipe) id: number`            | `@Param('id') id: number`                                     | Coerced from the declared type; invalid → `400`.                                            |
+| `@Query()`, `@Body()`, `@Headers()`                | `@Query(name?, schema?)`, `@Body(schema?)`, `@Headers(name?)` | Schemas validate and transform.                                                             |
+| `@Req()`, `@Res()`                                 | `@Req()`, `@Res()`                                            | Adapter-specific escape hatches (warning). Prefer `@Ctx()` (`HttpContext`).                 |
+| `@HttpCode(204)`, `@Header('x', 'y')`              | Same                                                          |                                                                                             |
+| `@UseGuards(AuthGuard)`                            | `@UseGuard(AuthGuard)`                                        | Guards are providers implementing `CanActivate`, injected like any other.                   |
+| `@UseInterceptors(X)`                              | `@UseInterceptor(X)`                                          | Route-level. For any provider method: `@Intercept()` ([AOP](./aop)).                        |
+| `@UsePipes(ValidationPipe)`                        | Schemas on parameters, or `@Validate(schema)`                 | See [validation](#validationpipe-schemas).                                                  |
+| `@UseFilters()` / `ExceptionFilter`                | `exceptionMappers` option of `HttpPlugin`                     | `HttpException(status, message, details?)` for expected errors.                             |
+| `@SetMetadata('roles', [...])` + `Reflector`       | `createRouteDecorator<T>('roles')`                            | See [route metadata](#reflector-createroutedecorator).                                      |
+| `@UploadedFile()` + `FileInterceptor('file')`      | `@UploadedFile('file', { maxSize, mimeTypes })`               | No interceptor nor Multer: standard `File` objects, limits checked while reading.           |
+| `cookie-parser` + `@Req() req.cookies`             | `@Cookie('name')`, `@SignedCookie('name')`, `ctx.cookies`     | Coerced like headers; signed cookies with key rotation ([cookies](/packages/http#cookies)). |
+| `res.cookie()`                                     | `ctx.setCookie()` / `HttpResponse.withCookie()`               | Secure defaults: `Secure; HttpOnly; SameSite=Lax`.                                          |
+| `@Sse()` returning `Observable<MessageEvent>`      | `@Sse()` returning an `AsyncIterable<SseEvent>`               | No RxJS; `EventChannel` instead of a `Subject`.                                             |
+| `app.enableCors()`, `helmet()`                     | `cors` and `securityHeaders` options of `HttpPlugin`          | Handled by the plugin on every adapter ([Security](./security)).                            |
+| `@nestjs/swagger` (`@ApiProperty`, `@ApiResponse`) | [`@znight/openapi`](/packages/openapi)                        | Schemas from TypeScript types and JSDoc, checked at build time; no `@ApiProperty`.          |
 
-### Messaging, config, lifecycle
+### Messaging, config, lifecycle, data
 
 | NestJS                                               | Znight                                                                                              |
 | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
@@ -72,6 +77,11 @@ walks through a migration.
 | `NestFactory.create(AppModule)` + `app.listen(3000)` | `Application.create({ metadata, plugins: [HttpPlugin.configure({ port: 3000 })] })` + `app.start()` |
 | `Test.createTestingModule({...}).compile()`          | `TestBed.create(Class, { metadata })` / `TestApp.create()`                                          |
 | `.overrideProvider(X).useValue(fake)`                | `overrides: [[X, fake]]`                                                                            |
+| `ScheduleModule.forRoot()`, `@Cron()`, `@Interval()` | [`@znight/schedule`](/packages/schedule): `SchedulePlugin`, `@Cron()`, `@Interval('10s')`           |
+| `TypeOrmModule`, `@InjectRepository(User)`           | A `@Factory()` providing the client, repositories behind interfaces ([Data access](./data-access))  |
+| `CacheModule`, `CacheInterceptor`                    | A method interceptor ([cache recipe](./aop#cache)); `@znight/cache` is planned                      |
+| `@WebSocketGateway()`, `@nestjs/graphql`             | Planned for v0.2 ([roadmap](/roadmap#v0-2)); Server-Sent Events today                               |
+| `express-session`, `@Session()`                      | Not included: signed cookies, and cookie sessions in the [Security guide](./security#csrf)          |
 
 ## Modules → flat DI {#modules-to-flat-di}
 
@@ -133,7 +143,8 @@ const app = await Application.create({
 ```
 
 No `imports`, no `inject` array: call `container.get()` with whatever you need. For providers of your
-own (a database client, an SDK), use a `@Factory()`:
+own (a database client, an SDK), use a `@Factory()` ([Data access](./data-access) has the complete
+pattern, with Drizzle):
 
 ```ts
 @Factory()
@@ -199,33 +210,54 @@ export class RolesGuard implements CanActivate {
 ```
 
 In Znight, route metadata is collected by the compiler and stored in the generated route definition
-(`route.meta`). Declare the decorator with `createRouteDecorator` and read the value from the context
-in your guard (`Roles.get(ctx)`, or `ctx.route?.meta['roles']`): no reflection.
+(`route.meta`). Declare the decorators with `createRouteDecorator` and read the values from the
+context in your guard (`Roles.get(ctx)`): no reflection. Give access decorators a common `group` and
+make it `required`: they become alternatives for one **decision** per route (the route's replaces the
+controller's), and a route without a decision fails the build
+([`ZNIGHT023`](/reference/error-codes#znight023)), something NestJS cannot check.
 
 ```ts
 // Znight
-import { Injectable } from '@znight/core'
-import { type CanActivate, Controller, createRouteDecorator, Get, type HttpContext, UseGuard } from '@znight/http'
+import { Injectable, type Lazy } from '@znight/core'
+import { type CanActivate, Controller, createRouteDecorator, Get, type HttpContext } from '@znight/http'
 
-export const Roles = createRouteDecorator<readonly string[]>('roles')
+export const Public = createRouteDecorator('public', { group: 'access', required: true })
+export const Roles = createRouteDecorator<readonly string[]>('roles', { group: 'access', required: true })
 
 @Injectable()
-export class RolesGuard implements CanActivate {
-  canActivate(ctx: HttpContext): boolean {
-    const roles = Roles.get(ctx) // route metadata wins over controller metadata
-    const user = ctx.state.get('user') as { roles: string[] } | undefined // set by an authentication guard
-    return roles === undefined || roles.some(role => user?.roles.includes(role) === true)
+export class AuthGuard implements CanActivate {
+  static readonly enforces = [Public, Roles] // checked at boot: every decision has a guard
+
+  constructor(
+    private readonly authenticator: Authenticator,
+    private readonly user: Lazy<CurrentUser>, // request-scoped, filled here, read by any provider
+  ) {}
+
+  async canActivate(ctx: HttpContext): Promise<boolean> {
+    if (Public.get(ctx)) return true
+    const principal = await this.authenticator.authenticate(ctx) // throws 401
+    this.user.get().authenticate(principal)
+    const roles = Roles.get(ctx) // the nearest decision: the route's, else the controller's
+    return roles !== undefined && roles.some(role => principal.roles.includes(role))
   }
 }
 
 @Controller('/admin')
+@Roles(['admin'])
 export class AdminController {
   @Get('/stats')
-  @Roles(['admin'])
-  @UseGuard(RolesGuard)
   stats() {}
+
+  @Get('/health')
+  @Public() // replaces the controller's decision
+  health() {}
 }
 ```
+
+Register the guard globally (`HttpPlugin.configure({ guards: [AuthGuard] })`, the equivalent of
+`APP_GUARD`). Instead of `ctx.state.get('user')`, a request-scoped `CurrentUser` keeps the caller
+typed and visible in the dependency graph. The [Security guide](./security) has the complete
+recipes: JWT and OIDC with `jose`, API keys, policies, rate limiting, CSRF.
 
 ## Interfaces without tokens
 

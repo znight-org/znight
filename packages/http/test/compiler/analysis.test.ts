@@ -31,6 +31,7 @@ describe('extension', () => {
         'Body',
         'BodyLimit',
         'Controller',
+        'Cookie',
         'Ctx',
         'Delete',
         'Get',
@@ -46,6 +47,8 @@ describe('extension', () => {
         'Query',
         'Req',
         'Res',
+        'SignedCookie',
+        'Sse',
         'UploadedFile',
         'UploadedFiles',
         'UseGuard',
@@ -56,6 +59,9 @@ describe('extension', () => {
     expect(http.decorators['@znight/http#Controller']).toEqual({ targets: ['class'], params: ['static'] })
     expect(http.decorators['@znight/http#Param']).toEqual({ targets: ['parameter'], params: ['value', 'value'] })
     expect(http.decorators['@znight/http#Headers']).toEqual({ targets: ['parameter'], params: ['static'] })
+    expect(http.decorators['@znight/http#Cookie']).toEqual({ targets: ['parameter'], params: ['value', 'value'] })
+    expect(http.decorators['@znight/http#SignedCookie']).toEqual({ targets: ['parameter'], params: ['value', 'value'] })
+    expect(http.decorators['@znight/http#Sse']).toEqual({ targets: ['method'], params: ['static', 'static'] })
     expect(http.decorators['@znight/http#UseGuard']).toEqual({
       targets: ['class', 'method'],
       params: [],

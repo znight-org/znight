@@ -239,7 +239,10 @@ flattened, de-duplicated, sorted, `true | false` → `boolean`, literals absorbe
 substitution (also the aliases supplied at runtime, declared in a manifest `provides` or in
 `options.externals`, unless `resolveType(..., { externalAliases: 'keep' })` keeps them as references
 to their identity, e.g. `@znight/http#RequestId`: what injection points bind to;
-`onExternalAlias` reports their expansion); recursive aliases opaque as a whole. Opaque reasons tell ZNIGHT010 messages why
+`onExternalAlias` reports their expansion); recursive aliases opaque as a whole; an enum member
+type (`Kind.Cat`, `ns.Kind.Cat`, `Zoo.Kind.Bird`) is the literal of the member (`'cat'`), evaluated
+like the shapes API does (an enum is still a `reference`; an unknown member or an enum that cannot
+be evaluated stays `opaque` `unresolved`). Opaque reasons tell ZNIGHT010 messages why
 (`function`, `object-literal`, `typeof`, `import-type`, `mapped`, `conditional`, `unresolved`,
 `missing-annotation`, ...). Unresolvable imports give `opaque` with reason `unresolved`; unknown
 names give a `globalThis#Name` reference.

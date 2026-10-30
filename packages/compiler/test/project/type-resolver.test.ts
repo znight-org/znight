@@ -3,6 +3,7 @@ import type { TypeInfo } from '../../src/project/index.ts'
 import { normalizeOptions } from '../../src/options.ts'
 import {
   formatType,
+  literalType,
   Project,
   primitiveType,
   referenceType,
@@ -130,6 +131,62 @@ describe('resolveType: opaque types', () => {
 
   it('a missing annotation is opaque', () => {
     expect(project.resolveType(sample, undefined)).toEqual({ kind: 'opaque', text: '', reason: 'missing-annotation' })
+  })
+})
+
+describe('resolveType: enum members', () => {
+  it('an enum member type is the literal of the member, like the shapes API', () => {
+    const dir = tempDir({
+      'src/kinds.ts': [
+        "export enum Kind { Cat = 'cat', Dog = 'dog' }",
+        'export enum Level { Low, High = 10, Higher }',
+        "export namespace Zoo { export enum Kind { Bird = 'bird' } }",
+        "export enum Merged { A = 'a' }",
+        "export namespace Merged { export type Extra = 'extra' }",
+        'declare function at(): number',
+        'export enum Computed { X = at() }',
+        "export const NotAnEnum = { Cat: 'cat' } as const",
+      ].join('\n'),
+      'src/use.ts': [
+        "import { Kind, Level, Merged, NotAnEnum, Zoo, Computed } from './kinds.ts'",
+        "import type * as kinds from './kinds.ts'",
+        'type TCat = Kind.Cat',
+        'type TPet = Kind.Cat | Kind.Dog',
+        'type TLevels = [Level.Low, Level.High, Level.Higher]',
+        'type TNamespaced = Zoo.Kind.Bird',
+        'type TQualified = kinds.Kind.Dog',
+        'type TMergedMember = Merged.A',
+        'type TMergedType = Merged.Extra',
+        'type TWhole = Kind',
+        'type TUnknown = Kind.Fish',
+        'type TComputed = Computed.X',
+        'type TNotAnEnum = NotAnEnum.Cat',
+        'type TLocal = Local.Two',
+        'enum Local { One = 1, Two = One + 1 }',
+      ].join('\n'),
+    })
+    try {
+      const temp = new Project(normalizeOptions({ root: dir.root }))
+      temp.refresh()
+      const file = fileOf(temp, 'src/use.ts')
+      const of = (alias: string): TypeInfo => temp.resolveType(file, aliasBody(file, alias))
+      expect(of('TCat')).toEqual(literalType('cat'))
+      expect(serializeType(of('TPet'))).toBe('"cat" | "dog"')
+      expect(serializeType(of('TLevels'))).toBe('[0, 10, 11]')
+      expect(of('TNamespaced')).toEqual(literalType('bird'))
+      expect(of('TQualified')).toEqual(literalType('dog'))
+      expect(of('TMergedMember')).toEqual(literalType('a'))
+      expect(of('TLocal')).toEqual(literalType(2))
+      // a type of a merged namespace is still that type; the enum itself is still a reference
+      expect(of('TMergedType')).toEqual(literalType('extra'))
+      expect(of('TWhole')).toMatchObject({ kind: 'reference', identity: 'src/kinds.ts#Kind' })
+      // an unknown member, an enum that cannot be evaluated, a const object: opaque as before
+      expect(of('TUnknown')).toEqual({ kind: 'opaque', text: 'Kind.Fish', reason: 'unresolved' })
+      expect(of('TComputed')).toEqual({ kind: 'opaque', text: 'Computed.X', reason: 'unresolved' })
+      expect(of('TNotAnEnum')).toMatchObject({ kind: 'opaque', text: 'NotAnEnum.Cat' })
+    } finally {
+      dir.cleanup()
+    }
   })
 })
 

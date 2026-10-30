@@ -11,12 +11,7 @@ preload**, or programmatically.
 
 ## How it works
 
-```txt
-scan ─▶ parse ─▶ per-file facts ─▶ resolve identities ─▶ analyse classes ─▶ bind ─▶ validate ─▶ emit
- │        │            │                                   (core + extensions)
- │        └────────────┴─ cached by content hash
- └─ include / exclude globs + provider libraries
-```
+![Compiler pipeline: 1 scan, 2 parse (cached per file), 3 resolve identities, 4 analyse classes, 5 bind, 6 validate (ZNIGHT diagnostics), 7 emit container.generated.ts, written only if its content changed](/diagrams/compiler-pipeline.svg)
 
 1. **Scan** the files matched by `include` / `exclude`, plus provider libraries.
 2. **Parse** them with [oxc](https://oxc.rs) (a native parser) and extract per-file facts: imports,
@@ -279,11 +274,11 @@ Diagnostics are printed with a code frame and hints:
 
 ```txt
 ✗ ZNIGHT001: Missing provider for 'EmailService' required by NotificationService
-  --> src/notification/notification.service.ts:12:5
+  --> src/notification/notification.service.ts:12:29
    |
 12 |     private readonly email: EmailService,
    |                             ^^^^^^^^^^^^
-   = hint: Add @Injectable() to EmailService (src/email/email.service.ts:3)
+   = hint: EmailService (src/email/email.service.ts:3) is not a provider: add @Injectable()
 ```
 
 Errors fail the build; warnings (such as [`ZNIGHT017`](/reference/error-codes#znight017) without

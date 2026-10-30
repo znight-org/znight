@@ -1,4 +1,4 @@
-/** `znight g <schematic> <name>`: generates a service, controller, consumer, config, guard, interceptor or factory. */
+/** `znight g <schematic> <name>`: generates a service, controller, consumer, config, guard, interceptor, factory or job. */
 import type { Command } from '../command.ts'
 import type { Colors } from '../output.ts'
 
@@ -24,7 +24,7 @@ function schematicList(colors: Colors): string {
 export const schematicCommand: Command = defineCommand({
   meta: {
     name: 'g',
-    description: 'Generate a service, controller, consumer, config, guard, interceptor or factory',
+    description: 'Generate a service, controller, consumer, config, guard, interceptor, factory or job',
     usage: '<schematic> <name> [options]',
     aliases: ['generate <schematic>'],
     details: colors =>
@@ -35,6 +35,7 @@ export const schematicCommand: Command = defineCommand({
       'znight g guard auth --flat            # src/auth.guard.ts (AuthGuard)',
       'znight g interceptor timing --aop     # a method interceptor (@Intercept)',
       'znight g consumer orders --path src/messaging',
+      'znight g job digest                   # src/digest/digest.jobs.ts (DigestJobs)',
     ],
   },
   args: {

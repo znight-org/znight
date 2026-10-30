@@ -1,12 +1,15 @@
 import type { ReplyBody } from './adapter.ts'
+import type { ResponseCookie } from './cookies.ts'
 import type { HeaderValue, HttpErrorBody } from './exceptions.ts'
 import type { ResolvedFile } from './files.ts'
 import type { HttpResponse } from './response.ts'
+import type { SseSession } from './sse.ts'
 
 import { Readable } from 'node:stream'
 
 import { isFileBody } from './files.ts'
 import { isHttpResponse } from './response.ts'
+import { isSseBody } from './sse.ts'
 import { isBodylessStatus } from './status.ts'
 import { discardStream, isByteStream, toByteStream } from './stream.ts'
 import { emptyRecord } from './utils.ts'
@@ -18,10 +21,12 @@ export const ContentType: {
   readonly json: string
   readonly text: string
   readonly bytes: string
+  readonly eventStream: string
 } = Object.freeze({
   json: 'application/json; charset=utf-8',
   text: 'text/plain; charset=utf-8',
   bytes: 'application/octet-stream',
+  eventStream: 'text/event-stream; charset=utf-8',
 })
 
 /** How a handler result is turned into a response. */
@@ -43,6 +48,10 @@ export interface SerializedReply {
   readonly status: number
   readonly headers: Record<string, HeaderValue>
   readonly body: ReplyBody
+  /** Cookies of the `HttpResponse` (`withCookie`), applied by the pipeline over those of the context. */
+  readonly cookies?: readonly ResponseCookie[]
+  /** The event stream of the body (`@Sse`, `HttpResponse.sse()`). */
+  readonly sse?: SseSession
 }
 
 /**
@@ -68,10 +77,12 @@ export function serializeResult(result: unknown, options: SerializeOptions): Ser
   let payload = result
   let status: number | undefined
   let extra: Readonly<Record<string, HeaderValue>> | undefined
+  let cookies: readonly ResponseCookie[] | undefined
   if (isHttpResponse(result)) {
     payload = result.body
     status = result.status
     extra = result.headers
+    cookies = cookiesOf(result)
   }
   const finalStatus = options.status ?? status ?? defaultStatus(options.routeMethod, payload)
   const headers = emptyRecord<HeaderValue>()
@@ -79,7 +90,43 @@ export function serializeResult(result: unknown, options: SerializeOptions): Ser
   if (options.headers !== undefined) assignHeaders(headers, options.headers)
   if (options.context !== undefined) assignHeaders(headers, options.context)
   if (extra !== undefined) assignHeaders(headers, extra)
-  return finish(finalStatus, headers, body, options.method)
+  return withCookies(finish(finalStatus, headers, body, options.method), cookies)
+}
+
+/**
+ * Serialises an event stream (`@Sse` result, `HttpResponse.sse()`): status 200 unless `@HttpCode`
+ * or `HttpResponse.status` say otherwise; `cache-control: no-cache, no-transform` and
+ * `x-accel-buffering: no` under `@Header`, `ctx.setHeader()` and the `HttpResponse` headers;
+ * `content-type: text/event-stream; charset=utf-8` last; never `content-length` or
+ * `transfer-encoding`. A `HEAD` request or a bodyless status cancels the stream before its first read.
+ */
+export function serializeSseReply(
+  session: SseSession,
+  response: HttpResponse | undefined,
+  options: SerializeOptions,
+): SerializedReply {
+  const status = options.status ?? response?.status ?? 200
+  const headers = emptyRecord<HeaderValue>()
+  headers['cache-control'] = 'no-cache, no-transform'
+  headers['x-accel-buffering'] = 'no'
+  if (options.headers !== undefined) assignHeaders(headers, options.headers)
+  if (options.context !== undefined) assignHeaders(headers, options.context)
+  if (response !== undefined) assignHeaders(headers, response.headers)
+  headers['content-type'] = ContentType.eventStream
+  delete headers['content-length']
+  delete headers['transfer-encoding']
+  const reply = finish(status, headers, session.stream, options.method)
+  return withCookies(reply.body === null ? reply : { ...reply, sse: session }, response && cookiesOf(response))
+}
+
+/** The cookies of an `HttpResponse` (none for a copy of the class from an older package version). */
+function cookiesOf(response: HttpResponse): readonly ResponseCookie[] | undefined {
+  const cookies = (response as { cookies?: readonly ResponseCookie[] }).cookies
+  return Array.isArray(cookies) && cookies.length > 0 ? cookies : undefined
+}
+
+function withCookies(reply: SerializedReply, cookies: readonly ResponseCookie[] | undefined): SerializedReply {
+  return cookies === undefined ? reply : { ...reply, cookies }
 }
 
 /**
@@ -98,7 +145,7 @@ export function serializeFileReply(
   if (options.headers !== undefined) assignHeaders(headers, options.headers)
   if (options.context !== undefined) assignHeaders(headers, options.context)
   assignHeaders(headers, response.headers)
-  return finish(status, headers, file.body, options.method)
+  return withCookies(finish(status, headers, file.body, options.method), cookiesOf(response))
 }
 
 /** `201` for POST routes, otherwise `204` without payload and `200` with one. */
@@ -183,6 +230,7 @@ function encode(payload: unknown, headers: Record<string, HeaderValue>): ReplyBo
     return toByteStream(payload)
   }
   if (isFileBody(payload)) throw new TypeError('A file body (HttpResponse.file()) cannot be serialised here')
+  if (isSseBody(payload)) throw new TypeError('An event stream (HttpResponse.sse()) cannot be serialised here')
   const json = JSON.stringify(payload)
   if (json === undefined) throw new TypeError(`Cannot serialise a ${typeof payload} as a response body`)
   return bytes(ENCODER.encode(json), headers, ContentType.json)

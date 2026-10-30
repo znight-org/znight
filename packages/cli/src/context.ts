@@ -3,6 +3,7 @@
  * services (compiler, Vite, processes, prompts, file watching). Tests replace any of them.
  */
 import type { CompilerApi } from './integrations/compiler.ts'
+import type { OpenApiEmitApi, OpenApiViteApi } from './integrations/openapi.ts'
 import type { ProcessService } from './integrations/process.ts'
 import type { Prompts } from './integrations/prompts.ts'
 import type { ViteApi } from './integrations/vite.ts'
@@ -11,6 +12,7 @@ import type { Colors, OutputStream, Reporter } from './output.ts'
 import type { HostRuntime } from './runtime.ts'
 
 import { loadCompiler } from './integrations/compiler.ts'
+import { loadOpenApiEmit, loadOpenApiVite } from './integrations/openapi.ts'
 import { createProcessService } from './integrations/process.ts'
 import { loadPrompts } from './integrations/prompts.ts'
 import { loadVite } from './integrations/vite.ts'
@@ -33,6 +35,10 @@ export interface CliServices {
   loadVite(root: string): Promise<ViteApi>
   /** Loads the interactive prompts. */
   loadPrompts(): Promise<Prompts>
+  /** Loads `@znight/openapi/emit` for the project at `root` (`znight openapi`). */
+  loadOpenApi(root: string): Promise<OpenApiEmitApi>
+  /** Loads `@znight/openapi/vite` for the project at `root` (`znight build --openapi`). */
+  loadOpenApiVite(root: string): Promise<OpenApiViteApi>
   readonly processes: ProcessService
   readonly watch: WatchFactory
 }
@@ -111,6 +117,8 @@ export function createContext(options: CliContextOptions = {}): CliContext {
       loadCompiler: options.services?.loadCompiler ?? loadCompiler,
       loadVite: options.services?.loadVite ?? loadVite,
       loadPrompts: options.services?.loadPrompts ?? loadPrompts,
+      loadOpenApi: options.services?.loadOpenApi ?? loadOpenApiEmit,
+      loadOpenApiVite: options.services?.loadOpenApiVite ?? loadOpenApiVite,
       processes: options.services?.processes ?? createProcessService(),
       watch: options.services?.watch ?? watchFiles,
     },

@@ -68,15 +68,38 @@ download.bytes // Uint8Array: the raw body
 - `TestApp.create({ metadata, plugins?, providers?, overrides?, only?, start?, logger?, shutdown? })`
   runs `Application.create()` then `start()` (unless `start: false`); signal handlers are disabled.
 - `overrides` are applied last (highest precedence).
-- Only the dependency closure of controllers (with their guards and interceptors), consumers,
-  overridden providers and the providers plugins resolve at bootstrap (`HttpPlugin`'s global
-  guards, interceptors and exception mappers, listed by the plugin's `initRoots()`) is instantiated
-  by default (`only: 'all'` or a list of keys otherwise).
-- `inject({ method?, url, headers?, body?, query? })` goes through the HTTP plugin in memory (no
-  network call) and resolves with `{ status, headers, body, bytes, json() }`. Bodies: objects as
-  JSON, strings and bytes as is, `FormData` as `multipart/form-data`, `Blob` / `File` with its type.
+- Only the dependency closure of controllers (with their guards and interceptors), consumers, the
+  hosts of scheduled jobs, overridden providers and the providers plugins resolve at bootstrap
+  (`HttpPlugin`'s global guards, interceptors and exception mappers, listed by the plugin's
+  [`initRoots(context)`](/packages/core#plugins)) is instantiated by default (`only: 'all'` or a
+  list of keys otherwise). The job hosts are read from `metadata.extensions.schedule`; without any
+  controller, consumer or job, every provider is created.
+- `inject({ method?, url, headers?, body?, query?, cookies?, signedCookies? })` goes through the
+  HTTP plugin in memory (no network call) and resolves with
+  `{ status, headers, body, bytes, cookies, json() }`. Bodies: objects as JSON, strings and bytes as
+  is, `FormData` as `multipart/form-data`, `Blob` / `File` with its type. `cookies` are sent in a
+  `cookie` header, `signedCookies` are signed by the plugin first; `response.cookies` holds the
+  parsed `set-cookie` headers by name (`{}` without any).
+- `injectSse(request)` opens an event stream (`@Sse` routes, `HttpResponse.sse()`) in memory and
+  reads it like `EventSource`: `status`, `headers` and `cookies` once it opened (at its first
+  chunk, or after 2 000 ms for a stream that sends nothing yet; it rejects, naming the request,
+  when no response headers arrive within 2 000 ms), then `next()`,
+  `take(n)` or `for await` for the events (each with `event`, `data`, `id` and `json()`),
+  `reconnect()` with `last-event-id`, and `close()` (or `await using`) to disconnect.
+  `injectStream(request)` resolves at the response headers with the body as a `ReadableStream`;
+  both accept a `signal`. `inject()` rejects an event stream instead of waiting for its end.
 - `close()` (or `await using`) stops the application; `get(key)`, `container` and `app` give access
   to it.
+
+```ts
+await using stream = await app.injectSse({ url: '/orders/o-1/events' })
+hub.publish({ orderId: 'o-1', sequence: 42, type: 'status', status: 'paid' })
+expect(await stream.next()).toMatchObject({ event: 'status', id: '42' })
+```
+
+A plugin named `'http'` that does not implement `injectSse()` / `injectStream()` (another plugin
+than `HttpPlugin` registered under that name) fails with
+[`ZNIGHT001`](/reference/error-codes#znight001).
 
 ## Keeping metadata fresh
 

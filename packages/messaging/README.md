@@ -1,22 +1,41 @@
 # @znight/messaging
 
-Message consumers and publishing for [Znight](../../README.md): retries with backoff, dead-letter
-queues, per-consumer concurrency and graceful shutdown, on **RabbitMQ**, **Amazon SQS** or **Kafka**
-(plus an in-memory broker for tests and local development).
+Message consumers and publishing for [Znight](../../README.md), checked at build time and run on
+RabbitMQ, Amazon SQS, Kafka or in memory.
+
+Retries with backoff, dead-letter queues, per-consumer concurrency and graceful shutdown, the same
+on **RabbitMQ**, **Amazon SQS** and **Kafka**; the in-memory broker serves tests and local
+development.
 
 Like the rest of Znight, consumers are discovered **at build time**: `@znight/compiler` (with the
 `@znight/messaging/compiler` extension) reads the decorators and generates the consumer metadata. At
 runtime `MessagingPlugin` only executes it.
 
 ```sh
-bun add @znight/messaging
-bun add amqplib              # RabbitMQ driver
-bun add @aws-sdk/client-sqs  # SQS driver
-bun add @platformatic/kafka  # Kafka driver
+# bun
+bun add @znight/core @znight/messaging
+bun add -d @znight/compiler vite
+bun add amqplib              # optional: RabbitMQ driver
+bun add @aws-sdk/client-sqs  # optional: SQS driver
+bun add @platformatic/kafka  # optional: Kafka driver
+
+# npm
+npm install @znight/core @znight/messaging
+npm install -D @znight/compiler vite
+npm install amqplib              # optional: RabbitMQ driver
+npm install @aws-sdk/client-sqs  # optional: SQS driver
+npm install @platformatic/kafka  # optional: Kafka driver
 ```
 
 Runs on Node.js >= 24 and Bun >= 1.3. Broker clients are optional peer dependencies: install only the
-one you use.
+one you use (the in-memory driver needs none).
+
+**Documentation:** [`@znight/messaging`](https://github.com/znight-org/znight/blob/main/docs/packages/messaging.md).
+**Examples:** [`microservice`](https://github.com/znight-org/znight/tree/main/examples/microservice)
+(publishing from an HTTP API, retries, dead letters, traces across HTTP and messaging),
+[`worker`](https://github.com/znight-org/znight/tree/main/examples/worker) (a worker without HTTP
+server), [`monorepo`](https://github.com/znight-org/znight/tree/main/examples/monorepo) (a consumer
+service whose queue and message contracts come from a shared library package).
 
 ## Quick start
 
@@ -65,7 +84,7 @@ export class OrderService {
 import { Application } from '@znight/core'
 import { MessagingPlugin } from '@znight/messaging'
 import { rabbitmq } from '@znight/messaging/rabbitmq'
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated.ts'
+import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
 
 const app = await Application.create({
   metadata: __ZNIGHT_METADATA__,

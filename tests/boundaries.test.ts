@@ -114,6 +114,8 @@ describe('repository boundaries (architecture §2)', () => {
       '@znight/config',
       '@znight/http',
       '@znight/messaging',
+      '@znight/openapi',
+      '@znight/schedule',
     ])
     expect(runtimeEntries.length).toBeGreaterThanOrEqual(packages.length)
   })

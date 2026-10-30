@@ -198,6 +198,12 @@ export class BookController {
    otherwise). A route with no effective decision for a required group gives ZNIGHT023.
 5. `T`, the rules for arguments and `get(ctx)` do not change. `get` reads the effective metadata.
 
+> **As implemented** (v0.1, after the wave 6 review): the group name grammar
+> (`/^[A-Za-z][\w.-]*$/`) applies to an explicit `group` only. A decorator without `group` (or
+> whose `group` is its key) is its own group, named after its key, whatever the key
+> (`'auth:public'`, `'app/tag'`), in `createRouteDecorator`, in the compiler, in plugin route `meta`
+> and in the compiled `groups` metadata. Normative text: architecture §5 and §9.1.
+
 #### Compiler (`packages/http/src/compiler`)
 
 - **`route-decorators.ts`.** `resolve()` evaluates the optional second argument of
@@ -328,6 +334,14 @@ once, ignoring the HEAD and trailing-slash variants.
 - `(decided(route) ∩ (required ∪ known)) − enforced(route)` is not empty: the decision is not
   enforced.
 
+> **As implemented** (v0.1, after the wave 6 review): `known` also holds the groups enforced by the
+> **guard classes of the application**, the classes of `metadata.providers` with a `canActivate()`
+> method, in a chain or not (their `enforces` is validated the same way). A guard registered in no
+> chain only makes its groups known: it neither declares them nor makes them required. So a
+> decision of a non-required group (`@RateLimit()`) whose guard was forgotten everywhere (a second
+> entrypoint, a worker, a test) fails the boot instead of being silently unenforced, and the
+> ZNIGHT023 hint names the guard classes that enforce the group.
+
 **Report.** All problems are collected into **one** ZNIGHT023 `ZnightError` listing every route,
 by group, when `enforcement` is `'error'`. With `'warn'`, the plugin logs one `logger.warn` per
 group instead.
@@ -430,6 +444,20 @@ HttpPlugin.configure({
 5. **A denied origin on a request that is not a preflight** is served normally, without CORS
    headers. CORS protects what the browser lets a page read. It is not access control (see the CSRF
    recipe).
+
+> **As implemented** (v0.1, after the wave 6 review), differences with rules 3 and 4 and with the
+> option validation:
+>
+> - A **wildcard policy** (`'*'` alone or in a list: `['*']` behaves like `'*'`) puts
+>   `access-control-allow-origin: *` (and `access-control-expose-headers`) on every reply that is
+>   not a preflight, with or without an `origin` request header, and no `vary: origin`: the reply
+>   does not depend on the request, so a cached reply serves CORS and non-CORS requests alike.
+>   Other policies merge `vary: origin` into every reply, as above.
+> - With `credentials: true`, `'*'` is also refused in the `methods`, `allowHeaders` and
+>   `exposeHeaders` lists: on credentialed requests browsers read it as a method or header named
+>   `*`.
+> - Without credentials, `allowHeaders: '*'` (or `*` in the list) never covers `Authorization`
+>   (Fetch): the preflight answer gets `, authorization` appended when the browser asks for it.
 6. **Implementation.**
    - A `preflight` `Target` is handled in `#process`.
    - Preflights are detected in `handle()` (explicit `OPTIONS` routes) and in `#fallback()`

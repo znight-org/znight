@@ -188,8 +188,9 @@ export function parseRouteDecoratorOptions(
   if (unknown !== undefined) {
     return { error: `have an unknown property "${unknown}" (expected group and required)` }
   }
+  // the grammar applies to an explicit group only: without one, any key is its own group
   const group = options['group'] ?? key
-  if (typeof group !== 'string' || !GROUP_NAME.test(group)) {
+  if (typeof group !== 'string' || (group !== key && !GROUP_NAME.test(group))) {
     const shown = typeof group === 'object' && group !== null ? 'a reference' : JSON.stringify(group)
     return { error: `have an invalid group ${shown}: a letter followed by letters, digits, _ . or -` }
   }

@@ -476,3 +476,157 @@ export class Routes {
     }
   })
 })
+
+describe('TypeHelpers.shape() on enum members and key types', () => {
+  const KEYS = `
+export enum Kind {
+  Cat = 'cat',
+  Dog = 'dog',
+}
+export enum Genre {
+  Novel = 'novel',
+  Poetry = 'poetry',
+}
+export enum Level {
+  Low,
+  High,
+}
+export enum Single {
+  Only = 'only',
+}
+export namespace Zoo {
+  export enum Kind {
+    Bird = 'bird',
+  }
+}
+export interface Cat {
+  kind: Kind.Cat
+  meows: boolean
+}
+export interface Dog {
+  kind: Kind.Dog
+  barks: boolean
+}
+export type Pet = Cat | Dog
+export type Status = 'draft' | 'live' | 'deleted'
+export type Maybe = Cat | null
+export interface Base {
+  a: string
+  b: number
+  c: boolean
+}
+export type AB = 'a' | 'b'
+export type AliasOfAB = AB
+export interface Keyed {
+  byGenre: Record<Genre, number>
+  byLevel: Record<Level, string>
+  bySingle: Record<Single, boolean>
+  byStatus: Record<Status, number>
+  mixed: Record<Genre | 'other' | 'novel', number>
+  mapped: { [K in Genre]?: number }
+  mappedAlias: { readonly [K in AliasOfAB]: K }
+  picked: Pick<Base, AB>
+  omitted: Omit<Base, AB>
+  indexed: Base[AB]
+  live: Exclude<Status, 'deleted'>
+  poetry: Exclude<Genre, Genre.Novel>
+  novel: Extract<Genre, 'novel'>
+  cat: Exclude<Pet, Dog>
+  pet: NonNullable<Pet>
+  present: NonNullable<Maybe>
+  bird: Zoo.Kind.Bird
+  low: Level.Low
+  both: Kind.Cat | Kind.Dog
+}
+`
+  const ROUTES_KEYS = `
+import { Mark } from '@acme/mark'
+import type { Keyed, Pet } from './keys.ts'
+import type * as keys from './keys.ts'
+
+@Mark()
+export class Routes {
+  keyed(): Keyed {
+    return null!
+  }
+  pet(): Pet {
+    return null!
+  }
+  qualified(): keys.Kind.Dog {
+    return null!
+  }
+  missing(): keys.Kind.Fish {
+    return null!
+  }
+}
+`
+  let app: TempDir
+  let seen: Seen
+  let routes: ClassInfo
+
+  beforeAll(async () => {
+    app = tempApp({ ...MARK_PACKAGE, 'src/keys.ts': KEYS, 'src/routes.ts': ROUTES_KEYS })
+    seen = (await analyzeMarked(app.root)).seen
+    routes = seen.classes.get('Routes') as ClassInfo
+  })
+  afterAll(() => app.cleanup())
+
+  const shapeOfMethod = (name: string): ShapeResult => {
+    const found = routes.methods.find(candidate => candidate.name === name)
+    if (!found || !seen.types) {
+      throw new Error(`no method ${name}`)
+    }
+    return seen.types.shape({ returnOf: found })
+  }
+
+  it('resolves enum member types to their literal value (discriminated unions keep their tag)', () => {
+    const pet = shapeOfMethod('pet')
+    expect(printShape(namedOf(pet, 'src/keys.ts#Cat').shape)).toBe('{ kind: "cat"; meows: boolean }')
+    expect(printShape(namedOf(pet, 'src/keys.ts#Dog').shape)).toBe('{ kind: "dog"; barks: boolean }')
+    expect(pet.issues).toEqual([])
+    // through a namespace import, and inside a namespace
+    expect(printShape(shapeOfMethod('qualified').root)).toBe('"dog"')
+  })
+
+  it('reports an unknown enum member as unresolved', () => {
+    const missing = shapeOfMethod('missing')
+    expect(printShape(missing.root)).toBe('opaque(unresolved: keys.Kind.Fish)')
+    expect(missing.issues.map(issue => issue.reason)).toEqual(['unresolved'])
+  })
+
+  it('iterates enums and aliases used as keys, and distributes utility types over them', () => {
+    const keyed = shapeOfMethod('keyed')
+    expect(keyed.issues).toEqual([])
+    const shape = namedOf(keyed, 'src/keys.ts#Keyed').shape
+    const properties = shape.kind === 'object' ? shape.properties : []
+    expect(Object.fromEntries(properties.map(property => [property.name, printShape(property.shape)]))).toEqual({
+      byGenre: '{ novel: number; poetry: number }',
+      byLevel: '{ 0: string; 1: string }',
+      bySingle: '{ only: boolean }',
+      byStatus: '{ deleted: number; draft: number; live: number }',
+      mixed: '{ novel: number; other: number; poetry: number }',
+      mapped: '{ novel?: number; poetry?: number }',
+      mappedAlias: '{ readonly a: "a"; readonly b: "b" }',
+      picked: '{ a: string; b: number }',
+      omitted: '{ c: boolean }',
+      indexed: 'number | string',
+      live: '"draft" | "live"',
+      poetry: '"poetry"',
+      novel: '"novel"',
+      cat: '@src/keys.ts#Cat',
+      // nothing removed: the alias keeps its name
+      pet: '@src/keys.ts#Pet',
+      present: '@src/keys.ts#Cat',
+      bird: '"bird"',
+      low: '0',
+      both: '"cat" | "dog"',
+    })
+    // enums consumed as keys are not listed among the named shapes
+    expect([...keyed.named.keys()]).toEqual([
+      'src/keys.ts#Cat',
+      'src/keys.ts#Dog',
+      'src/keys.ts#Keyed',
+      'src/keys.ts#Pet',
+    ])
+  })
+})

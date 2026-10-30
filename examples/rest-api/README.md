@@ -2,7 +2,8 @@
 
 A production-shaped REST API built with [Znight](../../README.md): a shelf of books with a cover
 image each, served by **Fastify**, stored in **PostgreSQL** through **Drizzle ORM**, configured from
-the environment, protected by API keys and observable out of the box.
+the environment, protected by API keys whose access rules are checked at build time, and observable
+out of the box.
 
 It is the reference example of a Znight HTTP service, and of the **recommended data layer**: Znight
 does not ship an ORM and leaves the choice to you; for SQL databases we recommend Drizzle, wired
@@ -16,20 +17,21 @@ constructor types, validates the graph and generates the container (`src/.znight
 
 ## What it shows
 
-| Feature                                                                                               | Where                                                                                                                            |
-| ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| CRUD controller, `@Param` / `@Query` coercion, Zod body schemas                                       | [`books/book.controller.ts`](src/books/book.controller.ts), [`book.schemas.ts`](src/books/book.schemas.ts)                       |
-| Global API-key guard, `@Public()` and `@Roles()` built with `createRouteDecorator`                    | [`auth/auth.guard.ts`](src/auth/auth.guard.ts), [`auth/auth.decorators.ts`](src/auth/auth.decorators.ts)                         |
-| Request-scoped provider filled by the guard, read through `Lazy<T>`                                   | [`auth/request-user.ts`](src/auth/request-user.ts), [`auth/me.controller.ts`](src/auth/me.controller.ts)                         |
-| HTTP interceptor                                                                                      | [`shared/server-timing.interceptor.ts`](src/shared/server-timing.interceptor.ts)                                                 |
-| Domain errors mapped to HTTP (`BookNotFoundError` → 404, duplicate → 409)                             | [`books/book.ts`](src/books/book.ts), [`shared/domain-error.mapper.ts`](src/shared/domain-error.mapper.ts)                       |
-| File upload with limits (`@UploadedFile`) and download (`HttpResponse.file`)                          | `PUT` / `GET /books/:id/cover` in the controller                                                                                 |
-| Drizzle + PGlite through a `@Factory`: async init, migrations, dispose                                | [`db/database.factory.ts`](src/db/database.factory.ts), [`drizzle/`](drizzle)                                                    |
-| Repository behind an interface, injected by interface                                                 | [`books/book.repository.ts`](src/books/book.repository.ts), [`drizzle-book.repository.ts`](src/books/drizzle-book.repository.ts) |
-| `@Config` classes, `@Env`, `@Secret`, `.env` files                                                    | [`config/`](src/config), [`.env.development`](.env.development)                                                                  |
-| JSON logs with request ids, Prometheus `/metrics`, `@Logged`, `@Metric`                               | [`main.ts`](src/main.ts), [`books/book.service.ts`](src/books/book.service.ts)                                                   |
-| Lifecycle hooks (`onReady`, `onStop`) and graceful shutdown                                           | [`app.lifecycle.ts`](src/app.lifecycle.ts), [`main.ts`](src/main.ts)                                                             |
-| Unit tests (`TestBed`), repository tests on a real database, HTTP tests (`TestApp`), end-to-end tests | [`test/`](test)                                                                                                                  |
+| Feature                                                                                                       | Where                                                                                                                            |
+| ------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| CRUD controller, `@Param` / `@Query` coercion, Zod body schemas                                               | [`books/book.controller.ts`](src/books/book.controller.ts), [`book.schemas.ts`](src/books/book.schemas.ts)                       |
+| Access decisions `@Public()` / `@Authenticated()` / `@Roles()`: one required group, checked at build and boot | [`auth/auth.decorators.ts`](src/auth/auth.decorators.ts), [`auth/auth.guard.ts`](src/auth/auth.guard.ts)                         |
+| CORS, security headers and trusted proxies                                                                    | [`shared/http-security.ts`](src/shared/http-security.ts), [`main.ts`](src/main.ts)                                               |
+| Request-scoped provider filled by the guard, read through `Lazy<T>`                                           | [`auth/request-user.ts`](src/auth/request-user.ts), [`auth/me.controller.ts`](src/auth/me.controller.ts)                         |
+| HTTP interceptor                                                                                              | [`shared/server-timing.interceptor.ts`](src/shared/server-timing.interceptor.ts)                                                 |
+| Domain errors mapped to HTTP (`BookNotFoundError` → 404, duplicate → 409)                                     | [`books/book.ts`](src/books/book.ts), [`shared/domain-error.mapper.ts`](src/shared/domain-error.mapper.ts)                       |
+| File upload with limits (`@UploadedFile`) and download (`HttpResponse.file`)                                  | `PUT` / `GET /books/:id/cover` in the controller                                                                                 |
+| Drizzle + PGlite through a `@Factory`: async init, migrations, dispose                                        | [`db/database.factory.ts`](src/db/database.factory.ts), [`drizzle/`](drizzle)                                                    |
+| Repository behind an interface, injected by interface                                                         | [`books/book.repository.ts`](src/books/book.repository.ts), [`drizzle-book.repository.ts`](src/books/drizzle-book.repository.ts) |
+| `@Config` classes, `@Env`, `@Secret`, `.env` files                                                            | [`config/`](src/config), [`.env.development`](.env.development)                                                                  |
+| JSON logs with request ids, Prometheus `/metrics`, `@Logged`, `@Metric`                                       | [`main.ts`](src/main.ts), [`books/book.service.ts`](src/books/book.service.ts)                                                   |
+| Lifecycle hooks (`onReady`, `onStop`) and graceful shutdown                                                   | [`app.lifecycle.ts`](src/app.lifecycle.ts), [`main.ts`](src/main.ts)                                                             |
+| Unit tests (`TestBed`), repository tests on a real database, HTTP tests (`TestApp`), end-to-end tests         | [`test/`](test)                                                                                                                  |
 
 ## Run it
 
@@ -77,17 +79,19 @@ Read by [`ConfigPlugin`](../../packages/config/README.md) from `.env` files (`.e
 `.env.<NODE_ENV>`, `.env.<NODE_ENV>.local`), then from the environment (which wins), and validated
 at boot. Types drive the coercion: `PORT=abc` or `LOG_LEVEL=loud` fail the boot.
 
-| Variable                     | Default            | Description                                                               |
-| ---------------------------- | ------------------ | ------------------------------------------------------------------------- |
-| `API_KEY`                    | (required)         | Administrator key: read and write (`@Secret`: never printed)              |
-| `READONLY_API_KEY`           | —                  | Read-only key                                                             |
-| `PORT` / `HOST`              | `3000` / `0.0.0.0` | API address (`PORT=0`: a free port, logged when ready)                    |
-| `METRICS_PORT`               | `9464`             | Prometheus endpoint, on its own server (not exposed with the API)         |
-| `LOG_LEVEL`                  | `info`             | `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `silent`              |
-| `EXPOSE_ERRORS`              | `false`            | Send the message of unexpected errors in 500 responses (development)      |
-| `DATABASE_DATA_DIR`          | `memory://`        | PGlite data: in memory, or a directory persisted on disk (`./data/shelf`) |
-| `DATABASE_MIGRATIONS_FOLDER` | `drizzle`          | SQL migrations applied at startup, relative to the working directory      |
-| `DATABASE_SEED`              | `false`            | Insert sample books into an empty database                                |
+| Variable                     | Default            | Description                                                                             |
+| ---------------------------- | ------------------ | --------------------------------------------------------------------------------------- |
+| `API_KEY`                    | (required)         | Administrator key: read and write (`@Secret`: never printed)                            |
+| `READONLY_API_KEY`           | —                  | Read-only key                                                                           |
+| `PORT` / `HOST`              | `3000` / `0.0.0.0` | API address (`PORT=0`: a free port, logged when ready)                                  |
+| `METRICS_PORT`               | `9464`             | Prometheus endpoint, on its own server (not exposed with the API)                       |
+| `LOG_LEVEL`                  | `info`             | `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `silent`                            |
+| `EXPOSE_ERRORS`              | `false`            | Send the message of unexpected errors in 500 responses (development)                    |
+| `CORS_ORIGINS`               | —                  | Browser origins allowed to call the API, comma-separated (CORS off when empty)          |
+| `TRUSTED_PROXIES`            | —                  | Proxies in front of the API: addresses, CIDR ranges, `loopback`, `private`, `linklocal` |
+| `DATABASE_DATA_DIR`          | `memory://`        | PGlite data: in memory, or a directory persisted on disk (`./data/shelf`)               |
+| `DATABASE_MIGRATIONS_FOLDER` | `drizzle`          | SQL migrations applied at startup, relative to the working directory                    |
+| `DATABASE_SEED`              | `false`            | Insert sample books into an empty database                                              |
 
 ## Try it
 
@@ -100,6 +104,7 @@ READER='x-api-key: dev-reader-key'
 
 curl $API/health                                     # {"status":"ok","uptime":3}       (@Public)
 curl $API/books                                      # 401: missing API key
+curl $API/me                                         # 401 (@Authenticated)
 curl -H "$READER" $API/me                            # {"name":"reader","roles":["reader"]}
 
 # list: coerced query parameters (repeated `tag`, `sort` is one of title|author|year|newest)
@@ -126,23 +131,29 @@ curl -i $API/books/4/cover                           # 200 image/png, etag, last
 curl -i -H 'if-none-match: "<etag>"' $API/books/4/cover   # 304
 curl -H "$ADMIN" -X DELETE $API/books/4              # 204, the cover goes with the book
 
+# a browser front-end on http://localhost:5173 (CORS_ORIGINS in .env.development): the preflight
+# is answered before the guard, without API key
+curl -i -X OPTIONS -H 'origin: http://localhost:5173' -H 'access-control-request-method: DELETE' \
+  -H 'access-control-request-headers: x-api-key' $API/books/4
+# 204, access-control-allow-origin: http://localhost:5173, access-control-allow-headers: x-api-key
+
 curl -s localhost:9464/metrics | grep -E 'http_server_requests_total|bookshelf_books_added_total'
 ```
 
-| Method   | Path               | Access   | Response                                                                                 |
-| -------- | ------------------ | -------- | ---------------------------------------------------------------------------------------- |
-| `GET`    | `/health`          | public   | `200 {status, uptime}`, `503` when the database is down                                  |
-| `GET`    | `/me`              | any key  | the caller (`RequestUser`)                                                               |
-| `GET`    | `/books`           | `reader` | `{items, total, limit, offset}`; `q`, `author`, `tag`, `sort`, `limit` (1-100), `offset` |
-| `GET`    | `/books/:id`       | `reader` | a book, `404`                                                                            |
-| `POST`   | `/books`           | `admin`  | `201` + `location`, `400`, `409`                                                         |
-| `PATCH`  | `/books/:id`       | `admin`  | the updated book, `400`, `404`, `409`                                                    |
-| `DELETE` | `/books/:id`       | `admin`  | `204`, `404`                                                                             |
-| `PUT`    | `/books/:id/cover` | `admin`  | multipart field `cover`: the book, `400`, `404`, `413`, `415`                            |
-| `GET`    | `/books/:id/cover` | public   | the image (`etag`, ranges), `304`, `404`                                                 |
+| Method   | Path               | Access        | Response                                                                                 |
+| -------- | ------------------ | ------------- | ---------------------------------------------------------------------------------------- |
+| `GET`    | `/health`          | public        | `200 {status, uptime}`, `503` when the database is down                                  |
+| `GET`    | `/me`              | any valid key | the caller (`RequestUser`)                                                               |
+| `GET`    | `/books`           | `reader`      | `{items, total, limit, offset}`; `q`, `author`, `tag`, `sort`, `limit` (1-100), `offset` |
+| `GET`    | `/books/:id`       | `reader`      | a book, `404`                                                                            |
+| `POST`   | `/books`           | `admin`       | `201` + `location`, `400`, `409`                                                         |
+| `PATCH`  | `/books/:id`       | `admin`       | the updated book, `400`, `404`, `409`                                                    |
+| `DELETE` | `/books/:id`       | `admin`       | `204`, `404`                                                                             |
+| `PUT`    | `/books/:id/cover` | `admin`       | multipart field `cover`: the book, `400`, `404`, `413`, `415`                            |
+| `GET`    | `/books/:id/cover` | public        | the image (`etag`, ranges), `304`, `404`                                                 |
 
 Every response carries an `x-request-id` (the client's, when it sends a valid one), also written in
-every log line of the request.
+every log line of the request, and the [security headers](#browsers-and-proxies).
 
 ## How it is built
 
@@ -156,7 +167,7 @@ src/
 │  ├─ database.ts                   # interface Database (the injected type)
 │  ├─ database.factory.ts           # @Factory: PGlite client + migrated Drizzle database
 │  └─ seed.ts                       # sample books (DATABASE_SEED)
-├─ auth/                            # AuthGuard, @Public/@Roles, RequestUser, GET /me
+├─ auth/                            # AuthGuard, @Public/@Authenticated/@Roles, RequestUser, GET /me
 ├─ books/
 │  ├─ book.ts                       # domain types and errors
 │  ├─ book.schemas.ts               # Zod schemas of the request bodies
@@ -166,7 +177,7 @@ src/
 │  ├─ book.controller.ts            # /books routes
 │  └─ image-type.ts                 # cover content sniffing
 ├─ health/health.controller.ts      # GET /health
-├─ shared/                          # ServerTimingInterceptor, DomainErrorMapper
+├─ shared/                          # ServerTimingInterceptor, DomainErrorMapper, HTTP security options
 └─ .znight/                         # generated container (git-ignored)
 drizzle/                            # SQL migrations (drizzle-kit layout)
 test/                               # bun test: unit, repository, HTTP, e2e
@@ -249,14 +260,82 @@ export class DatabaseFactory {
   `drizzle-orm/bun-sql`) in the factory — `@Provides({ dispose: 'end' }) async pool(...): Promise<Pool>`.
   Repositories, services and tests do not change.
 
+### Access decisions, checked at build time and at boot
+
+Every route declares **who may call it** with one of three decorators,
+[`auth.decorators.ts`](src/auth/auth.decorators.ts), that form one decision group:
+
+```ts
+import { createRouteDecorator } from '@znight/http'
+
+export type Role = 'admin' | 'reader'
+
+export const Public = createRouteDecorator('public', { group: 'access', required: true })
+export const Authenticated = createRouteDecorator('authenticated', { group: 'access', required: true })
+export const Roles = createRouteDecorator<readonly Role[]>('roles', { group: 'access', required: true })
+```
+
+| Decorator          | Who may call                          | Used on                                                 |
+| ------------------ | ------------------------------------- | ------------------------------------------------------- |
+| `@Public()`        | anyone, without API key               | `HealthController`, `GET /books/:id/cover`              |
+| `@Authenticated()` | any valid API key                     | `MeController`                                          |
+| `@Roles([...])`    | a valid key granting one of the roles | `BookController` (`reader`), its write routes (`admin`) |
+
+The rules, enforced by the compiler and by `HttpPlugin`:
+
+- **Alternatives, one per target.** `@Public() @Roles(['admin'])` on the same method or class is a
+  build error (ZNIGHT005).
+- **The nearest decision wins.** A decision on the controller is the default of its routes, and a
+  route's own decision **replaces** it: `BookController` is `@Roles(['reader'])`, `POST /books` is
+  `@Roles(['admin'])` (the read-only key gets `403`), `GET /books/:id/cover` is `@Public()`. The guard
+  sees exactly one decision per route in `ctx.route.meta`.
+
+  Without a group, route metadata is merged key by key: `@Public()` on a controller plus
+  `@Roles(['admin'])` on one of its routes gave `{ public: true, roles: ['admin'] }`, and a guard
+  checking `public` first served the admin route to anyone. With the group, that route is
+  `{ roles: ['admin'] }`; [`access.test.ts`](test/access.test.ts) keeps it that way.
+
+- **Every route has a decision, checked at build time.** `required: true` makes a route without
+  decision, neither on itself nor on its controller, fail `znight build`, `znight generate` and
+  `bun test`. Remove `@Authenticated()` from `MeController`:
+
+  ```txt
+  ✗ ZNIGHT023: Route GET /me (MeController.whoami) has no "access" decision
+    --> src/auth/me.controller.ts:18:3
+    ...
+    = hint: Add @Public(), @Authenticated() or @Roles(...) to the route or to MeController
+  ```
+
+  There is no implicit default: a forgotten decorator is a build error, not an open route.
+
+- **Every decision is enforced, checked at boot.** A decision does nothing by itself. `AuthGuard`
+  declares the decorators it enforces, `static readonly enforces = [Public, Authenticated, Roles]`,
+  and `HttpPlugin` checks at boot that every route of the `access` group has such a guard in its
+  chain. An entrypoint (a second `main`, a worker, a test) that forgets `guards: [AuthGuard]` does
+  not start:
+
+  ```txt
+  ZNIGHT023: HttpPlugin: No guard enforces the required "access" group on 9 routes: GET /me (MeController.whoami), GET /books (BookController.list), ...
+  ```
+
+- **Deny by default.** `AuthGuard` lets `@Public()` routes through, authenticates every other
+  request (`401`), then checks the roles of `@Roles` routes (`false`: `403`) and accepts
+  `@Authenticated` routes. A route without decision is refused (unreachable: the build fails first).
+- **Reviewable.** [`access.test.ts`](test/access.test.ts) snapshots `HttpPlugin.routes`, the
+  effective decision and the guard chain of every route. A pull request that changes who can call
+  what changes [the snapshot](test/__snapshots__/access.test.ts.snap); `bun test -u` updates it
+  once reviewed.
+
+The [Security guide](../../docs/guide/security.md) has the complete rules, and recipes for JWT/OIDC,
+policies, rate limiting and webhook signatures.
+
 ### Authentication and request scope
 
 [`AuthGuard`](src/auth/auth.guard.ts) is registered **globally** (`HttpPlugin.configure({ guards })`)
-and runs before every route. It reads route metadata declared with
-[`createRouteDecorator`](src/auth/auth.decorators.ts): `@Public()` skips authentication,
-`@Roles([...])` restricts a controller or a route (route values win). It compares SHA-256 digests of
-the keys in constant time, throws `401` (with a `www-authenticate` header when the key is missing)
-or returns `false` (`403`).
+and runs before the guards of controllers and routes. It compares SHA-256 digests of the keys in
+constant time (every key is compared: the timing does not tell which one matched), throws `401`
+(with a `www-authenticate` header when the key is missing) or returns `false` (`403`). A wrong key
+is logged at `warn` level with the client address and the route, never with the key.
 
 Once the key is verified, the guard records the caller in [`RequestUser`](src/auth/request-user.ts),
 a `scope: 'request'` provider: one instance per request, disposed with it. Singletons (the guard,
@@ -278,9 +357,45 @@ the multipart body is parsed as it arrives and refused as soon as a part breaks 
 `415`). The declared type is not trusted: the service checks the image signature before storing
 anything. Covers are stored in their own table (a `bytea`), so listing books never reads image
 bytes. `GET /books/:id/cover` returns `HttpResponse.file(file, { disposition: 'inline' })`, which
-handles `etag`, `last-modified`, `if-none-match` (`304`) and `range` (`206`); `nosniff` and a cache
-header are added. For large files, upload to object storage instead (see
-[Large files](../../packages/http/README.md#large-files)).
+handles `etag`, `last-modified`, `if-none-match` (`304`) and `range` (`206`). The route sets a public
+`cache-control`, and the default [security headers](#browsers-and-proxies) (`nosniff`, a CSP without
+scripts) keep a file disguised as an image from running as a page. For large files, upload to object
+storage instead (see [Large files](../../packages/http/README.md#large-files)).
+
+### Browsers and proxies
+
+[`http-security.ts`](src/shared/http-security.ts) gives `HttpPlugin` three options, shared by
+`main.ts` and the tests, and validated at boot (ZNIGHT005: a malformed origin or proxy address stops
+the application instead of silently matching nothing):
+
+```ts
+HttpPlugin.configure(container => {
+  const server = container.get(ServerConfig)
+  return {
+    guards: [AuthGuard],
+    // ...
+    cors: server.corsOrigins.length > 0 && { origin: server.corsOrigins, exposeHeaders: ['location', 'x-request-id'] },
+    securityHeaders: { cacheControl: 'no-store' }, // merged over the defaults
+    trustProxy: server.trustedProxies.length > 0 && server.trustedProxies,
+  }
+})
+```
+
+- **CORS**, when `CORS_ORIGINS` is set: a front-end on another origin may call the API with its
+  key. Preflights (`OPTIONS`, sent by browsers without the key) are answered by the pipeline before
+  the guards, identically on every adapter; replies to an allowed origin, errors included, carry
+  `access-control-allow-origin`, and `location` / `x-request-id` are readable by the page. CORS is
+  not access control (`curl` ignores it): the guard decides who may call.
+- **Security headers**, on by default: `content-security-policy: default-src 'none';
+  frame-ancestors 'none'`, `x-content-type-options: nosniff`, `x-frame-options: DENY`,
+  `referrer-policy: no-referrer`. The example adds `cache-control: no-store`: responses depend on the
+  caller's key, shared caches must not keep them. A header set by a route wins, so the public cover
+  keeps `cache-control: public, max-age=300`. HSTS belongs to the TLS terminator.
+- **Trusted proxies**, `TRUSTED_PROXIES`: behind a load balancer, the client address (`ctx.ip`) is
+  the load balancer's. With `TRUSTED_PROXIES=private` (an ingress on the cluster network), it is read
+  from `x-forwarded-for`, walking from the right past the trusted hops only, so a client cannot
+  choose its address by sending the header itself; `ctx.protocol` follows `x-forwarded-proto`. The
+  address is logged with rejected API keys.
 
 ### Observability
 
@@ -315,9 +430,10 @@ bun run test:e2e   # production build, then Node.js and Bun processes: a few sec
 | File                                                                      | Shows                                                                                                                                               |
 | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [`book.service.test.ts`](test/book.service.test.ts)                       | `TestBed`: the real service, its interface dependency auto-mocked                                                                                   |
-| [`auth.guard.test.ts`](test/auth.guard.test.ts)                           | `TestBed` with `@Config` values; `Lazy<RequestUser>` mocked                                                                                         |
+| [`auth.guard.test.ts`](test/auth.guard.test.ts)                           | `TestBed` with `@Config` values; `Lazy<RequestUser>` mocked; deny by default                                                                        |
+| [`access.test.ts`](test/access.test.ts)                                   | the access matrix (snapshot of `HttpPlugin.routes`), the boot check without guard (ZNIGHT023), the former fail-open combination now denied          |
 | [`drizzle-book.repository.test.ts`](test/drizzle-book.repository.test.ts) | the repository against a fresh, migrated in-memory PostgreSQL per test                                                                              |
-| [`books.http.test.ts`](test/books.http.test.ts)                           | `TestApp`: the whole application in memory (`app.inject()`), uploads and downloads included                                                         |
+| [`books.http.test.ts`](test/books.http.test.ts)                           | `TestApp`: the whole application in memory (`app.inject()`), uploads and downloads, CORS, security headers and trusted proxies included             |
 | [`e2e.test.ts`](test/e2e.test.ts)                                         | `ZNIGHT_E2E=1`: `znight build`, the bundle on Node.js then on Bun (same data directory), real HTTP, SIGTERM during an upload (drained, exit code 0) |
 
 ## In this repository

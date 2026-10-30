@@ -5,7 +5,13 @@ import { sql } from 'drizzle-orm'
 
 import { Public } from '../auth/auth.decorators.js'
 
-/** Liveness / readiness probe for load balancers and orchestrators: no API key required. */
+/**
+ * Liveness / readiness probe for load balancers and orchestrators: no API key required.
+ *
+ * `@Public()` on the controller is the access decision of all its routes. A route added here later
+ * may replace it with `@Authenticated()` or `@Roles([...])`: the nearest decision wins, so a
+ * restricted route can never be left public by the controller's `@Public()`.
+ */
 @Controller('/health')
 @Public()
 export class HealthController {

@@ -23,7 +23,8 @@ export interface ZnightHooks {
   /**
    * One occurrence of a job of `@znight/schedule`: executed runs are wrapped with `hooks.run`, then
    * emitted; occurrences that do not execute (`skipped`, `not-acquired`, a lock store failure) are
-   * only emitted.
+   * only emitted. In the wrappers, `outcome` stays `undefined` when the job did not start (veto,
+   * drop, a wrapper that threw first): see `ScheduledRunEvent.outcome`.
    */
   'schedule:run': ScheduledRunEvent
 }
@@ -101,8 +102,16 @@ export type ScheduledRunAbortReason = 'timeout' | 'lock-lost' | 'removed' | 'shu
 
 /**
  * Instrumentation event of the `schedule:run` hook, produced by `@znight/schedule` for every
- * occurrence of a job. Mutable fields are filled in by the producer: before `hooks.run` resolves for
- * executed runs, before `emit` for occurrences that did not execute.
+ * occurrence of a job. Mutable fields are filled in by the producer.
+ *
+ * - **Listeners** (`hooks.on`) always see the final {@link ScheduledRunEvent.outcome}: the event is
+ *   emitted once the occurrence is settled.
+ * - **Occurrences that never reach the wrappers** (`context` is `undefined`: skipped by the overlap
+ *   policy, `not-acquired`, a lock store failure, dropped while the lock lease was acquired) are
+ *   only emitted, with their `outcome`.
+ * - **Runs handed to the job** (`context` is set) are wrapped with `hooks.run`, where `outcome` is
+ *   only known once the job settled, and stays `undefined` when the job did not start: see
+ *   {@link ScheduledRunEvent.outcome} for what a wrapper reads after `next()`.
  */
 export interface ScheduledRunEvent {
   /** Job name (`digest.daily`, `OutboxJobs.flush`). */
@@ -117,13 +126,37 @@ export interface ScheduledRunEvent {
   readonly trigger: ScheduledRunTrigger
   /** Epoch milliseconds of the occurrence (scheduler clock). */
   readonly scheduledAt: number
-  /** `JobContext` from `@znight/schedule`; `undefined` when the run did not execute. */
+  /**
+   * `JobContext` from `@znight/schedule`; `undefined` for an occurrence that never reached the
+   * wrappers (set for a run vetoed or dropped by the wrappers).
+   */
   readonly context: unknown
   /** `performance.now()` when the run started, or was dropped. */
   readonly startTime: number
-  /** Outcome of the run. */
+  /**
+   * Outcome of the run. Listeners always see it. In a `hooks.run` wrapper, it is `undefined` until
+   * the job settles, then:
+   *
+   * - `'completed'` when `next()` resolves after the job ran;
+   * - `'failed'`, with {@link ScheduledRunEvent.error}, when `next()` rejects because the job threw;
+   * - still `undefined` when the job never started: a wrapper returned without calling `next()` (a
+   *   veto: `next()` of the outer wrappers resolves), the run was dropped while the wrappers waited
+   *   (the job was removed or paused, the scheduler stops: `next()` resolves, `aborted` may be set),
+   *   or a wrapper threw before calling `next()` (`next()` of the outer wrappers rejects with that
+   *   error).
+   *
+   * The producer settles an `undefined` outcome after `hooks.run`: `'skipped'` for a veto or a
+   * drop, `'failed'` (with `error`) when a wrapper, or the opening of the run scope, threw before the
+   * job (a wrapper that swallows that rejection turns it into `'skipped'`: rethrow it). A wrapper
+   * that fails after `next()` does not change the outcome of the job (the scheduler logs that error
+   * on its own). A wrapper that reports the outcome reads
+   * `event.outcome ?? (nextRejected ? 'failed' : 'skipped')`.
+   */
   outcome?: ScheduledRunOutcome
-  /** What the job threw or rejected with (`failed`), or the lock store failure. */
+  /**
+   * What the job threw or rejected with (`failed`), what a wrapper threw before the job (set after
+   * `hooks.run`), or the lock store failure.
+   */
   error?: unknown
   /** Set when the run's signal was aborted. */
   aborted?: ScheduledRunAbortReason

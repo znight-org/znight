@@ -3,7 +3,7 @@
  * dependency `hono`). On Bun the server is `Bun.serve()`; on Node.js it is `@hono/node-server`
  * (optional peer dependency, loaded on `listen()`). `inject()` uses `app.request()`.
  */
-import type { Server } from 'node:http'
+import type { Server, ServerResponse } from 'node:http'
 import type {
   AdapterCloseOptions,
   AdapterHandler,
@@ -15,6 +15,8 @@ import type {
   HttpServerAddress,
   InjectRequest,
   InjectResponse,
+  InjectStreamRequest,
+  InjectStreamResponse,
 } from '../adapter.ts'
 
 import { type Context, Hono, type Next } from 'hono'
@@ -22,8 +24,8 @@ import { type Context, Hono, type Next } from 'hono'
 import { toHonoPath } from '../path.ts'
 import { discardStream } from '../stream.ts'
 import { isBun } from '../utils.ts'
-import { ConnectionTracker, closeServer } from './node-io.ts'
-import { injectFetch, readWebStream, serverAddress, webBodyStream } from './shared.ts'
+import { ConnectionTracker, closeServer, onResponseAbort } from './node-io.ts'
+import { bufferInjectStream, injectFetchStream, readWebStream, serverAddress, webBodyStream } from './shared.ts'
 
 /** Options of {@link honoAdapter}. */
 export interface HonoAdapterOptions {
@@ -186,6 +188,25 @@ class HonoHttpAdapter implements HonoAdapter {
   }
 
   #toResponse(c: Context, reply: AdapterReply): Response {
+    const outgoing = nodeOutgoing(c)
+    if (outgoing !== undefined) {
+      const body = reply.body instanceof ReadableStream ? reply.body : null
+      if (outgoing.destroyed) {
+        // @hono/node-server: the client left before the reply was ready (an async pre-flight). The
+        // server would neither read nor cancel the body: release it (event source, request scope)
+        discardStream(body)
+        return toResponse(c, { ...reply, body: null })
+      }
+      if (body !== null) {
+        // the client may leave before @hono/node-server reads the body (its own listener then comes
+        // too late): a body nobody locked is cancelled when the response closes unfinished
+        outgoing.once('close', () => {
+          if (!outgoing.writableFinished) discardStream(body)
+        })
+      }
+      // a quiet event stream must outlive a socket timeout
+      if (reply.eventStream === true && typeof outgoing.setTimeout === 'function') outgoing.setTimeout(0)
+    }
     if (this.#bun === undefined || !(reply.body instanceof ReadableStream)) return toResponse(c, reply)
     // served by Bun.serve(): observe the end of the body (idle timeout, native blob: see #bunFetch)
     const reader = reply.body.getReader()
@@ -324,8 +345,12 @@ class HonoHttpAdapter implements HonoAdapter {
   }
 
   inject(request: InjectRequest): Promise<InjectResponse> {
+    return bufferInjectStream(stream => this.injectStream(stream), request)
+  }
+
+  injectStream(request: InjectStreamRequest): Promise<InjectStreamResponse> {
     this.#prepare()
-    return injectFetch(request => this.app.request(request, undefined, INJECT_ENV), request)
+    return injectFetchStream(request => this.app.request(request, undefined, INJECT_ENV), request)
   }
 }
 
@@ -359,7 +384,32 @@ function adapterRequest(c: Context): AdapterRequest {
       incoming === undefined
         ? request.body !== null
         : incoming.httpVersionMajor >= 2 && incoming.stream?.endAfterHeaders === false,
+    onAbort: (listener: () => void): void => {
+      const outgoing = nodeOutgoing(c)
+      if (outgoing !== undefined) {
+        onResponseAbort(outgoing as unknown as ServerResponse, listener)
+        return
+      }
+      // Bun.serve() and inject(): the request signal aborts when the client leaves
+      const signal = request.signal
+      if (signal.aborted) queueMicrotask(listener)
+      else signal.addEventListener('abort', listener, { once: true })
+    },
   }
+}
+
+/** The part of a Node.js `ServerResponse` used here. */
+interface NodeOutgoing {
+  readonly writableFinished: boolean
+  readonly destroyed: boolean
+  once(event: 'close', listener: () => void): unknown
+  setTimeout?(ms: number): unknown
+}
+
+/** The Node.js response of `@hono/node-server` (`c.env.outgoing`), absent on Bun and for `inject()`. */
+function nodeOutgoing(c: Context): NodeOutgoing | undefined {
+  const outgoing = (c.env as { outgoing?: Partial<NodeOutgoing> } | undefined)?.outgoing
+  return typeof outgoing?.once === 'function' ? (outgoing as NodeOutgoing) : undefined
 }
 
 /** The Node.js request of `@hono/node-server` (`c.env.incoming`), absent on Bun and for `inject()`. */
@@ -410,5 +460,29 @@ function toResponse(c: Context, reply: AdapterReply): Response {
       headers: { 'content-type': 'application/json; charset=utf-8' },
     })
   }
+  keepContextCookies(c, headers)
   return new Response(reply.body, { status: reply.status, headers })
+}
+
+/**
+ * Keeps the cookies Hono middleware set before the Znight route (`setCookie(c, ...)`,
+ * `c.header('set-cookie', ..., { append: true })`) before the reply's own, like the other adapters.
+ * Hono drops the headers of the context when a handler returns its own `Response` (or, when a
+ * middleware read `c.res`, replaces the response's cookies with the context's): the reply's cookies
+ * are added to the context too, so that both ways end with every cookie, in order.
+ */
+function keepContextCookies(c: Context, headers: Headers): void {
+  let context: string[]
+  try {
+    // the headers of the context without changing it (`c.res` would create the context response)
+    context = c.newResponse(null).headers.getSetCookie()
+  } catch {
+    return // a status a bodyless Response refuses (`c.status(101)`): nothing to keep
+  }
+  if (context.length === 0) return
+  const own = headers.getSetCookie()
+  for (const line of own) c.header('set-cookie', line, { append: true })
+  headers.delete('set-cookie')
+  for (const line of context) headers.append('set-cookie', line)
+  for (const line of own) headers.append('set-cookie', line)
 }

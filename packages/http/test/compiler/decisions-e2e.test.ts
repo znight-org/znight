@@ -173,3 +173,100 @@ export class MeController {
     ])
   })
 })
+
+/** The security guide's rate-limit recipe, with route decorators keyed by legacy (pre-group) keys. */
+const LIMITS: Record<string, string> = {
+  'src/limits.ts': `
+import { createRouteDecorator } from '@znight/http'
+
+export const RateLimit = createRouteDecorator<number>('rateLimit')
+export const Legacy = createRouteDecorator('auth:public')
+export const Tagged = createRouteDecorator('app/tag', { required: true })
+`,
+  'src/rate-limit.guard.ts': `
+import { Injectable } from '@znight/core'
+import { type CanActivate, type HttpContext } from '@znight/http'
+import { RateLimit, Tagged } from './limits.ts'
+
+@Injectable()
+export class RateLimitGuard implements CanActivate {
+  static readonly enforces = [RateLimit, Tagged]
+
+  canActivate(ctx: HttpContext): boolean {
+    return RateLimit.get(ctx) === undefined
+  }
+}
+`,
+  'src/hooks.controller.ts': `
+import { Controller, Post } from '@znight/http'
+import { Legacy, RateLimit, Tagged } from './limits.ts'
+
+@Controller('/hooks')
+@Tagged()
+export class HooksController {
+  @Post('/billing')
+  @RateLimit(5)
+  @Legacy()
+  billing() { return 'ok' }
+}
+`,
+}
+
+describe.skipIf(typeof compile !== 'function')('legacy keys and forgotten guards (e2e)', () => {
+  let metadata: ZnightMetadata
+
+  beforeAll(async () => {
+    const result = await compileApp(tempApp(LIMITS))
+    expect(result.errors).toEqual([])
+    fs.mkdirSync(path.dirname(result.outFile), { recursive: true })
+    fs.writeFileSync(result.outFile, result.code)
+    // importing the generated module loads the decorators keyed 'auth:public' and 'app/tag'
+    const generated = (await import(pathToFileURL(result.outFile).href)) as { __ZNIGHT_METADATA__: ZnightMetadata }
+    metadata = generated.__ZNIGHT_METADATA__
+  })
+
+  afterAll(cleanupApps)
+
+  async function boot(guards: readonly unknown[]): Promise<{ app: Application; http: HttpPlugin }> {
+    const http = HttpPlugin.configure({ port: 0, guards: guards as never })
+    const app = await Application.create({
+      metadata,
+      plugins: [http],
+      logger: silentLogger,
+      shutdown: { signals: false },
+    })
+    return { app, http }
+  }
+
+  it('enforces the decisions with the guard in the chain', async () => {
+    const RateLimitGuard = metadata.providers['src/rate-limit.guard.ts#RateLimitGuard']?.class
+    expect(RateLimitGuard).toBeDefined()
+    const { app, http } = await boot([RateLimitGuard])
+    try {
+      const response = await http.inject({ method: 'POST', url: '/hooks/billing' })
+      expect(response.status).toBe(403)
+      expect(http.routes.find(route => route.method === 'POST')?.meta).toEqual({
+        'app/tag': true,
+        rateLimit: 5,
+        'auth:public': true,
+      })
+    } finally {
+      await app.stop()
+    }
+  })
+
+  it('refuses to boot when the guard of a non-required group is registered nowhere', async () => {
+    let error: unknown
+    try {
+      await boot([])
+    } catch (thrown) {
+      error = thrown
+    }
+    expect(error).toBeInstanceOf(ZnightError)
+    expect((error as ZnightError).code).toBe(ErrorCode.MissingRouteDecision)
+    expect((error as ZnightError).message).toContain('no guard enforces the "rateLimit" group on 1 route')
+    expect((error as ZnightError).hints).toContain(
+      'Guards of the application enforcing the "rateLimit" group: RateLimitGuard',
+    )
+  })
+})

@@ -1,8 +1,9 @@
 # @znight/config
 
-Type-safe configuration for [Znight](../../README.md): declare a class, get a validated singleton
-loaded from environment variables, `.env` files, JSON/YAML files, HashiCorp Vault or AWS Secrets
-Manager.
+Type-safe configuration for [Znight](../../README.md): declare a class, get a validated singleton.
+
+Values are loaded from environment variables, `.env` files, JSON/YAML files, HashiCorp Vault or AWS
+Secrets Manager.
 
 - **Compile-time metadata.** The compiler reads your config classes (property names, TypeScript
   types, decorators) and generates their field definitions. No reflection at runtime.
@@ -15,12 +16,26 @@ Manager.
 - **Layered sources.** Loaders run in order and later ones win: `.env` files < environment < Vault…
 
 ```sh
-bun add @znight/config
+# bun
+bun add @znight/core @znight/config
+bun add -d @znight/compiler vite
 bun add yaml                               # optional, for yaml()
 bun add @aws-sdk/client-secrets-manager    # optional, for awsSecretsManager()
+
+# npm
+npm install @znight/core @znight/config
+npm install -D @znight/compiler vite
+npm install yaml                               # optional, for yaml()
+npm install @aws-sdk/client-secrets-manager    # optional, for awsSecretsManager()
 ```
 
 Runs on Node.js >= 24 and Bun >= 1.3 (ESM only).
+
+**Documentation:** [`@znight/config`](https://github.com/znight-org/znight/blob/main/docs/packages/config.md).
+**Examples:** every [example application](https://github.com/znight-org/znight/tree/main/examples)
+is configured with it; [`rest-api`](https://github.com/znight-org/znight/tree/main/examples/rest-api)
+(database and API keys) and [`secure-api`](https://github.com/znight-org/znight/tree/main/examples/secure-api)
+(secrets, validated at boot) are good starting points.
 
 ## Quick start
 
@@ -51,7 +66,7 @@ export class Database {
 // src/main.ts
 import { ConfigPlugin } from '@znight/config'
 import { Application } from '@znight/core'
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated.ts'
+import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
 
 const app = await Application.create({
   metadata: __ZNIGHT_METADATA__,

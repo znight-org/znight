@@ -57,7 +57,20 @@ export {
   ObservabilityPlugin,
   type ObservabilityPluginInstance,
 } from './plugin/plugin.ts'
-export { ObservabilityTokens, REQUEST_ID_TOKEN } from './tokens.ts'
+export {
+  DEFAULT_JOB_DURATION_BUCKETS,
+  DEFAULT_JOB_LATENESS_BUCKETS,
+  DEFAULT_MAX_JOBS,
+  type JobLogOptions,
+  logJobs,
+  measureJobs,
+  OTHER_JOB,
+  type ScheduleMetricsOptions,
+  type ScheduleObserver,
+  type ScheduleTracingOptions,
+  traceJobs,
+} from './schedule/jobs.ts'
+export { JOB_CONTEXT_TOKEN, ObservabilityTokens, REQUEST_ID_TOKEN } from './tokens.ts'
 export {
   type HttpTracingOptions,
   type MessagePublishEventLike,

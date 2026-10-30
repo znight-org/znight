@@ -1,0 +1,8 @@
+{
+  "$schema": "../../node_modules/@biomejs/biome/configuration_schema.json",
+  "root": false,
+  "extends": "//",
+  // Generated and committed byte for byte: openapi.json is compared with the served document, and
+  // src/client/schema.d.ts with the output of openapi-typescript. Never reformat them.
+  "files": { "includes": ["**", "!openapi.json", "!src/client/schema.d.ts"] }
+}

@@ -1,0 +1,1878 @@
+{
+  "openapi": "3.1.1",
+  "info": {
+    "title": "Storefront API",
+    "version": "1.0.0",
+    "license": {
+      "name": "MIT",
+      "identifier": "MIT"
+    },
+    "description": "A small shop: a public catalogue of products with their images, carts and orders for the\ncustomers (bearer token), and a back office (API key).\n\nErrors share one envelope, `{ statusCode, error, message, details? }`; validation errors list\nevery problem in `details`."
+  },
+  "security": [
+    {
+      "bearer": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Catalog",
+      "description": "Products and their images. Public, except the back-office operations."
+    },
+    {
+      "name": "Carts",
+      "description": "Shopping carts of the customers."
+    },
+    {
+      "name": "Orders",
+      "description": "Orders of the customers, and their export."
+    },
+    {
+      "name": "Admin",
+      "description": "The back office."
+    }
+  ],
+  "paths": {
+    "/admin/stats": {
+      "get": {
+        "operationId": "admin.stats",
+        "summary": "Statistics of the shop",
+        "tags": [
+          "Admin"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShopStats"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (see the `www-authenticate` header)",
+            "headers": {
+              "www-authenticate": {
+                "description": "The credentials expected (RFC 9110)",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credentials are valid, but do not grant this operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ]
+      }
+    },
+    "/carts": {
+      "post": {
+        "operationId": "cart.create",
+        "summary": "Create a cart",
+        "tags": [
+          "Carts"
+        ],
+        "responses": {
+          "201": {
+            "description": "The new, empty cart. Its URL is in the `location` header.",
+            "headers": {
+              "location": {
+                "description": "URL of the new cart",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (see the `www-authenticate` header)",
+            "headers": {
+              "www-authenticate": {
+                "description": "The credentials expected (RFC 9110)",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credentials are valid, but do not grant this operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/carts/{id}": {
+      "get": {
+        "operationId": "cart.get",
+        "summary": "Get a cart",
+        "tags": [
+          "Carts"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "description": "Missing or invalid credentials (see the `www-authenticate` header)",
+            "headers": {
+              "www-authenticate": {
+                "description": "The credentials expected (RFC 9110)",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credentials are valid, but do not grant this operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No cart with this id for this customer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/carts/{id}/items": {
+      "post": {
+        "operationId": "cart.addItem",
+        "summary": "Add a product to a cart",
+        "description": "Adds units to the line of the product (a cart has one line per product). The body is validated\nby a Valibot schema.",
+        "tags": [
+          "Carts"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "The product and the units to add.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddCartItem"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The cart, with its new totals.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "description": "Missing or invalid credentials (see the `www-authenticate` header)",
+            "headers": {
+              "www-authenticate": {
+                "description": "The credentials expected (RFC 9110)",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credentials are valid, but do not grant this operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No cart with this id for this customer, or no such product",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not enough units in stock",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorBody"
+                }
+              }
+            }
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          }
+        }
+      }
+    },
+    "/orders": {
+      "post": {
+        "operationId": "order.place",
+        "summary": "Place an order",
+        "description": "Orders every line of a cart, which is then closed. A card payment is captured at once (status\n`paid`); a transfer gives the reference and the IBAN to use (status `awaiting-transfer`).",
+        "tags": [
+          "Orders"
+        ],
+        "requestBody": {
+          "description": "The cart and the payment. `payment.method` selects the payment option.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlaceOrder"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The order. Its URL is in the `location` header.",
+            "headers": {
+              "location": {
+                "description": "URL of the new order",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Order"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "description": "Missing or invalid credentials (see the `www-authenticate` header)",
+            "headers": {
+              "www-authenticate": {
+                "description": "The credentials expected (RFC 9110)",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credentials are valid, but do not grant this operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No cart with this id for this customer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The cart is empty, or a product ran out of stock since it was added",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorBody"
+                }
+              }
+            }
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          }
+        }
+      }
+    },
+    "/orders/export": {
+      "get": {
+        "operationId": "order.export",
+        "summary": "Export the orders",
+        "description": "Back office: an API key with the `admin` role. Every order as newline-delimited JSON (one `Order`\ndocument per line), streamed as it is read: the export never holds every order in memory, and a\nclient that disconnects stops it.",
+        "tags": [
+          "Orders"
+        ],
+        "parameters": [
+          {
+            "name": "since",
+            "in": "query",
+            "description": "Only the orders placed at or after this date (ISO 8601).",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One `Order` per line",
+            "content": {
+              "application/x-ndjson": {
+                "schema": {
+                  "$ref": "#/components/schemas/Order"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "description": "Missing or invalid credentials (see the `www-authenticate` header)",
+            "headers": {
+              "www-authenticate": {
+                "description": "The credentials expected (RFC 9110)",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credentials are valid, but do not grant this operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ]
+      }
+    },
+    "/orders/{id}": {
+      "get": {
+        "operationId": "order.get",
+        "summary": "Get an order",
+        "tags": [
+          "Orders"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Order"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "description": "Missing or invalid credentials (see the `www-authenticate` header)",
+            "headers": {
+              "www-authenticate": {
+                "description": "The credentials expected (RFC 9110)",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credentials are valid, but do not grant this operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No order with this id for this customer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/products": {
+      "get": {
+        "operationId": "product.list",
+        "summary": "List products",
+        "description": "The public catalogue, one page at a time.",
+        "tags": [
+          "Catalog"
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Case-insensitive search in names and descriptions.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "description": "Only the products of this department.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "apparel",
+                "books",
+                "home",
+                "toys"
+              ]
+            }
+          },
+          {
+            "name": "tag",
+            "in": "query",
+            "description": "Only the products carrying every one of these labels (`?tag=mug&tag=gift`).",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": []
+            },
+            "style": "form",
+            "explode": true
+          },
+          {
+            "name": "inStock",
+            "in": "query",
+            "description": "Only the products that can be ordered now.",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "description": "Order of the results.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "name",
+                "newest",
+                "price-asc",
+                "price-desc"
+              ],
+              "default": "name"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, between 1 and 100.",
+            "schema": {
+              "type": "number",
+              "default": 20
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Number of results to skip.",
+            "schema": {
+              "type": "number",
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_ProductSummary"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        },
+        "security": []
+      },
+      "post": {
+        "operationId": "product.create",
+        "summary": "Add a product",
+        "description": "Back office: an API key with the `catalog` role. The SKU is stored in upper case, the tags in\nlower case, and the price, sent in euros as a decimal string (`\"14.90\"`), in cents.",
+        "tags": [
+          "Catalog"
+        ],
+        "requestBody": {
+          "description": "The new product.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateProductInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The new product. Its URL is in the `location` header.",
+            "headers": {
+              "location": {
+                "description": "URL of the new product",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "description": "Missing or invalid credentials (see the `www-authenticate` header)",
+            "headers": {
+              "www-authenticate": {
+                "description": "The credentials expected (RFC 9110)",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credentials are valid, but do not grant this operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A product with this SKU already exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorBody"
+                }
+              }
+            }
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ]
+      }
+    },
+    "/products/validate": {
+      "post": {
+        "operationId": "product.validate",
+        "summary": "Check a product",
+        "description": "Validates a product without adding it, and answers what `POST /products` would store: the\noutput of the `CreateProduct` schema (normalised SKU and tags, price in cents, defaults applied).\nThe request body is the schema **input** (`CreateProductInput` in the document), the response\nits **output** (`CreateProduct`).",
+        "tags": [
+          "Catalog"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateProductInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateProduct"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "description": "Missing or invalid credentials (see the `www-authenticate` header)",
+            "headers": {
+              "www-authenticate": {
+                "description": "The credentials expected (RFC 9110)",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credentials are valid, but do not grant this operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorBody"
+                }
+              }
+            }
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ]
+      }
+    },
+    "/products/{id}": {
+      "get": {
+        "operationId": "product.get",
+        "summary": "Get a product",
+        "tags": [
+          "Catalog"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "description": "No product with this id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/products/{id}/image": {
+      "get": {
+        "operationId": "product.image",
+        "summary": "Download the product image",
+        "description": "Public and cacheable: `<img src>` works without credentials. Conditional requests\n(`if-none-match`) answer `304`, and `range` requests `206`.",
+        "tags": [
+          "Catalog"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The image",
+            "content": {
+              "image/png": {},
+              "image/jpeg": {},
+              "image/webp": {}
+            }
+          },
+          "206": {
+            "description": "The part of the image asked for with `range`",
+            "content": {
+              "image/png": {},
+              "image/jpeg": {},
+              "image/webp": {}
+            }
+          },
+          "304": {
+            "description": "The image did not change since the `etag` sent in `if-none-match`"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "description": "No product with this id, or no image",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      },
+      "put": {
+        "operationId": "product.uploadImage",
+        "summary": "Upload the product image",
+        "description": "A `multipart/form-data` body with one `image` file field: PNG, JPEG or WebP, at most 1 MiB. The\ndeclared media type is checked while the body arrives (`415`), then the content itself: a file\nthat is not really one of these images is refused too.",
+        "tags": [
+          "Catalog"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "image": {
+                    "type": "string",
+                    "contentMediaType": "application/octet-stream",
+                    "description": "At most 1 MiB",
+                    "x-znight-max-size": 1048576
+                  }
+                },
+                "required": [
+                  "image"
+                ]
+              },
+              "encoding": {
+                "image": {
+                  "contentType": "image/png, image/jpeg, image/webp"
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "description": "Missing or invalid credentials (see the `www-authenticate` header)",
+            "headers": {
+              "www-authenticate": {
+                "description": "The credentials expected (RFC 9110)",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credentials are valid, but do not grant this operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No product with this id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpErrorBody"
+                }
+              }
+            }
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AddCartItem": {
+        "type": "object",
+        "properties": {
+          "productId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Id of the product (`GET /products`)"
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 99,
+            "description": "Units to add to the cart",
+            "default": 1
+          }
+        },
+        "required": [
+          "productId"
+        ]
+      },
+      "CardPayment": {
+        "type": "object",
+        "properties": {
+          "method": {
+            "type": "string",
+            "const": "card"
+          },
+          "last4": {
+            "type": "string",
+            "description": "Last four digits of the card.",
+            "pattern": "^[0-9]{4}$",
+            "examples": [
+              "4242"
+            ]
+          },
+          "capturedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "capturedAt",
+          "last4",
+          "method"
+        ],
+        "description": "A card payment, captured when the order was placed."
+      },
+      "CardPaymentInput": {
+        "type": "object",
+        "properties": {
+          "method": {
+            "const": "card"
+          },
+          "token": {
+            "type": "string",
+            "pattern": "^tok_[a-z]+_[0-9]{4}$",
+            "description": "Card token of the payment provider; test tokens end with the last four digits of the card",
+            "examples": [
+              "tok_visa_4242"
+            ]
+          }
+        },
+        "required": [
+          "method",
+          "token"
+        ],
+        "title": "CardPaymentInput",
+        "description": "Pay now, by card: the payment is captured when the order is placed."
+      },
+      "CartLine": {
+        "type": "object",
+        "properties": {
+          "productId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sku": {
+            "type": "string",
+            "examples": [
+              "MUG-ZNIGHT"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 1
+          },
+          "unitPriceCents": {
+            "type": "integer",
+            "description": "Current unit price, in cents.",
+            "format": "int32"
+          },
+          "totalCents": {
+            "type": "integer",
+            "description": "`quantity × unitPriceCents`.",
+            "format": "int32"
+          }
+        },
+        "required": [
+          "name",
+          "productId",
+          "quantity",
+          "sku",
+          "totalCents",
+          "unitPriceCents"
+        ],
+        "description": "A line of a cart, priced with the current catalogue."
+      },
+      "CartResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CartLine"
+            }
+          },
+          "totalCents": {
+            "type": "integer",
+            "description": "Sum of the lines, in cents.",
+            "format": "int32"
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "currency",
+          "id",
+          "lines",
+          "totalCents",
+          "updatedAt"
+        ],
+        "description": "The cart of a customer. Prices follow the catalogue until the order is placed."
+      },
+      "Category": {
+        "type": "string",
+        "enum": [
+          "apparel",
+          "books",
+          "home",
+          "toys"
+        ],
+        "description": "Departments of the shop."
+      },
+      "CreateProduct": {
+        "type": "object",
+        "properties": {
+          "sku": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{2,31}$",
+            "description": "Stock keeping unit, unique in the catalogue (stored in upper case)",
+            "examples": [
+              "MUG-ZNIGHT"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "description": {
+            "default": null,
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "apparel",
+              "books",
+              "home",
+              "toys"
+            ]
+          },
+          "price": {
+            "description": "Unit price: euros as a decimal string in requests (\"14.90\"), cents once parsed (1490)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "stock": {
+            "default": 0,
+            "description": "Units available",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "tags": {
+            "default": [],
+            "description": "Labels, stored in lower case",
+            "maxItems": 10,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 30
+            }
+          }
+        },
+        "required": [
+          "sku",
+          "name",
+          "description",
+          "category",
+          "price",
+          "stock",
+          "tags"
+        ],
+        "additionalProperties": false,
+        "description": "A new product of the catalogue"
+      },
+      "CreateProductInput": {
+        "type": "object",
+        "properties": {
+          "sku": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{2,31}$",
+            "description": "Stock keeping unit, unique in the catalogue (stored in upper case)",
+            "examples": [
+              "MUG-ZNIGHT"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "description": {
+            "default": null,
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "apparel",
+              "books",
+              "home",
+              "toys"
+            ]
+          },
+          "price": {
+            "description": "Unit price: euros as a decimal string in requests (\"14.90\"), cents once parsed (1490)",
+            "type": "string",
+            "pattern": "^\\d{1,6}(\\.\\d{1,2})?$"
+          },
+          "stock": {
+            "default": 0,
+            "description": "Units available",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "tags": {
+            "default": [],
+            "description": "Labels, stored in lower case",
+            "maxItems": 10,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 30
+            }
+          }
+        },
+        "required": [
+          "sku",
+          "name",
+          "category",
+          "price"
+        ],
+        "description": "A new product of the catalogue"
+      },
+      "Currency": {
+        "type": "string",
+        "const": "EUR",
+        "description": "Currency of every price: the shop sells in euros."
+      },
+      "HttpErrorBody": {
+        "type": "object",
+        "properties": {
+          "statusCode": {
+            "type": "integer"
+          },
+          "error": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "details": {}
+        },
+        "required": [
+          "statusCode",
+          "error",
+          "message"
+        ]
+      },
+      "Id": {
+        "type": "string",
+        "format": "uuid",
+        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+        "description": "A UUID",
+        "examples": [
+          "0d6f2c4e-5b1a-4c3e-9f8a-2b7d1e6a9c01"
+        ]
+      },
+      "Order": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "customerId": {
+            "type": "string",
+            "examples": [
+              "alice"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/OrderStatus"
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrderLine"
+            }
+          },
+          "totalCents": {
+            "type": "integer",
+            "description": "Sum of the lines, in cents.",
+            "format": "int32"
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "payment": {
+            "$ref": "#/components/schemas/Payment"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "createdAt",
+          "currency",
+          "customerId",
+          "id",
+          "lines",
+          "payment",
+          "status",
+          "totalCents"
+        ],
+        "description": "An order of a customer."
+      },
+      "OrderLine": {
+        "type": "object",
+        "properties": {
+          "productId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sku": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 1
+          },
+          "unitPriceCents": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "totalCents": {
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        "required": [
+          "name",
+          "productId",
+          "quantity",
+          "sku",
+          "totalCents",
+          "unitPriceCents"
+        ],
+        "description": "A line of an order, at the price of the moment it was placed."
+      },
+      "OrderStatus": {
+        "type": "string",
+        "enum": [
+          "awaiting-transfer",
+          "paid"
+        ],
+        "description": "`paid`: paid by card when placed. `awaiting-transfer`: waiting for the bank transfer."
+      },
+      "Page_ProductSummary": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductSummary"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "description": "Number of results across every page.",
+            "format": "int32"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Page size.",
+            "format": "int32"
+          },
+          "offset": {
+            "type": "integer",
+            "description": "Results skipped before this page.",
+            "format": "int32"
+          }
+        },
+        "required": [
+          "items",
+          "limit",
+          "offset",
+          "total"
+        ],
+        "description": "A page of results.\n\nA generic interface: each instantiation becomes its own component of the OpenAPI document,\nnamed after its type arguments (`Page<ProductSummary>` → `Page_ProductSummary`)."
+      },
+      "Payment": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/CardPayment"
+          },
+          {
+            "$ref": "#/components/schemas/TransferPayment"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "method",
+          "mapping": {
+            "card": "#/components/schemas/CardPayment",
+            "transfer": "#/components/schemas/TransferPayment"
+          }
+        },
+        "description": "How an order is paid."
+      },
+      "PlaceOrder": {
+        "type": "object",
+        "properties": {
+          "cartId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The cart to order (`POST /carts`)"
+          },
+          "payment": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CardPaymentInput"
+              },
+              {
+                "$ref": "#/components/schemas/TransferPaymentInput"
+              }
+            ],
+            "discriminator": {
+              "propertyName": "method",
+              "mapping": {
+                "card": "#/components/schemas/CardPaymentInput",
+                "transfer": "#/components/schemas/TransferPaymentInput"
+              }
+            }
+          }
+        },
+        "required": [
+          "cartId",
+          "payment"
+        ]
+      },
+      "ProductResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sku": {
+            "type": "string",
+            "description": "Stock keeping unit, unique in the catalogue.",
+            "examples": [
+              "MUG-ZNIGHT"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "examples": [
+              "Night owl mug"
+            ]
+          },
+          "category": {
+            "$ref": "#/components/schemas/Category"
+          },
+          "priceCents": {
+            "type": "integer",
+            "description": "Unit price, in cents of `currency`.",
+            "format": "int32",
+            "minimum": 1,
+            "examples": [
+              1490
+            ]
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "inStock": {
+            "type": "boolean",
+            "description": "Whether the product can be ordered now."
+          },
+          "imageUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Path of the product image (`GET /products/{id}/image`), `null` when the product has none."
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "stock": {
+            "type": "integer",
+            "description": "Units available.",
+            "format": "int32",
+            "minimum": 0
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Lower-case labels, used to filter the list (`?tag=`)."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Last change of the product or of its image."
+          }
+        },
+        "required": [
+          "category",
+          "createdAt",
+          "currency",
+          "description",
+          "id",
+          "imageUrl",
+          "inStock",
+          "name",
+          "priceCents",
+          "sku",
+          "stock",
+          "tags",
+          "updatedAt"
+        ],
+        "description": "A product, in full."
+      },
+      "ProductSummary": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sku": {
+            "type": "string",
+            "description": "Stock keeping unit, unique in the catalogue.",
+            "examples": [
+              "MUG-ZNIGHT"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "examples": [
+              "Night owl mug"
+            ]
+          },
+          "category": {
+            "$ref": "#/components/schemas/Category"
+          },
+          "priceCents": {
+            "type": "integer",
+            "description": "Unit price, in cents of `currency`.",
+            "format": "int32",
+            "minimum": 1,
+            "examples": [
+              1490
+            ]
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "inStock": {
+            "type": "boolean",
+            "description": "Whether the product can be ordered now."
+          },
+          "imageUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Path of the product image (`GET /products/{id}/image`), `null` when the product has none."
+          }
+        },
+        "required": [
+          "category",
+          "currency",
+          "id",
+          "imageUrl",
+          "inStock",
+          "name",
+          "priceCents",
+          "sku"
+        ],
+        "description": "A product as listed in the catalogue."
+      },
+      "ShopStats": {
+        "type": "object",
+        "properties": {
+          "products": {
+            "type": "integer",
+            "description": "Products of the catalogue.",
+            "format": "int32"
+          },
+          "outOfStock": {
+            "type": "integer",
+            "description": "Products that cannot be ordered.",
+            "format": "int32"
+          },
+          "orders": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "ordersByStatus": {
+            "type": "object",
+            "properties": {
+              "awaiting-transfer": {
+                "type": "number"
+              },
+              "paid": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "awaiting-transfer",
+              "paid"
+            ],
+            "description": "Orders by status."
+          },
+          "revenueCents": {
+            "type": "integer",
+            "description": "Total of the paid orders, in cents.",
+            "format": "int64"
+          },
+          "generatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "generatedAt",
+          "orders",
+          "ordersByStatus",
+          "outOfStock",
+          "products",
+          "revenueCents"
+        ],
+        "description": "Figures of the shop."
+      },
+      "TransferPayment": {
+        "type": "object",
+        "properties": {
+          "method": {
+            "type": "string",
+            "const": "transfer"
+          },
+          "reference": {
+            "type": "string",
+            "description": "Reference to write on the transfer.",
+            "examples": [
+              "SF-7K2M9Q"
+            ]
+          },
+          "iban": {
+            "type": "string",
+            "description": "IBAN of the shop, to send the transfer to."
+          },
+          "dueBy": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The order is cancelled when the transfer has not arrived by then."
+          }
+        },
+        "required": [
+          "dueBy",
+          "iban",
+          "method",
+          "reference"
+        ],
+        "description": "A bank transfer the customer still has to make."
+      },
+      "TransferPaymentInput": {
+        "type": "object",
+        "properties": {
+          "method": {
+            "const": "transfer"
+          }
+        },
+        "required": [
+          "method"
+        ],
+        "title": "TransferPaymentInput",
+        "description": "Pay by bank transfer: the order answers the reference and the IBAN to use."
+      },
+      "ValidationErrorBody": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/HttpErrorBody"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "details": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "Bad Request",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ValidationErrorBody"
+            }
+          }
+        }
+      },
+      "PayloadTooLarge": {
+        "description": "Content Too Large",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/HttpErrorBody"
+            }
+          }
+        }
+      },
+      "UnsupportedMediaType": {
+        "description": "Unsupported Media Type",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/HttpErrorBody"
+            }
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "apiKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-api-key",
+        "description": "API key of the back office: `catalog` (products and images) or `admin` (everything)."
+      },
+      "bearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Token of a customer. Carts and orders belong to the customer of the token."
+      }
+    }
+  },
+  "x-znight-fingerprint": "t97qLEmamYPXXeysciz6x_S7m7dDIABP9DdBiEWF41U"
+}

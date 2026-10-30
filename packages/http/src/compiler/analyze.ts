@@ -17,7 +17,14 @@ import type {
   ValueRef,
 } from '@znight/compiler'
 import type { HttpMethod } from '../metadata.ts'
-import type { HttpControllerData, HttpParamData, HttpRouteData, ParamCoercion, UploadData } from './model.ts'
+import type {
+  HttpControllerData,
+  HttpParamData,
+  HttpRouteData,
+  ParamCoercion,
+  SseRouteData,
+  UploadData,
+} from './model.ts'
 
 import { isMediaTypePattern } from '../mime.ts'
 import { joinPaths, normalizePath } from '../path.ts'
@@ -45,6 +52,21 @@ const FILE_TYPES: ReadonlyMap<string, boolean> = new Map([
 /** Methods whose requests usually have no body (upload parameters there are a warning). */
 const BODYLESS_METHODS: ReadonlySet<HttpMethod> = new Set<HttpMethod>(['GET', 'HEAD', 'DELETE', 'OPTIONS'])
 const UPLOAD_OPTIONS = ['required', 'maxSize', 'maxFiles', 'mimeTypes']
+/** Smallest `@Sse` heartbeat and `maxDuration` (ms). */
+const MIN_SSE_INTERVAL_MS = 1_000
+/** Longest `@Sse` heartbeat and `maxDuration` (ms): the longest `setTimeout` delay. */
+const MAX_SSE_TIMER_MS = 2_147_483_647
+/** Primitive return types an `@Sse` handler cannot return (`any`, `unknown`, `object`, `never` are accepted). */
+const NOT_SSE_SOURCES: ReadonlySet<string> = new Set([
+  'string',
+  'number',
+  'boolean',
+  'bigint',
+  'symbol',
+  'undefined',
+  'null',
+  'void',
+])
 /** Values that are fine without schema (`@Body() body: string`, `@Body() bytes: Uint8Array`...). */
 const UNVALIDATED_REFERENCES = new Set([
   'globalThis#Uint8Array',
@@ -271,7 +293,7 @@ function analyzeMethod(
   controllerBodyLimit: number | undefined,
 ): HttpRouteData[] {
   const where = `${cls.displayName}.${method.name}`
-  const routeDecorators = method.decorators.filter(decorator => ROUTE_METHODS.has(decorator.identity ?? ''))
+  let routeDecorators = method.decorators.filter(decorator => ROUTE_METHODS.has(decorator.identity ?? ''))
   if (routeDecorators.length === 0) {
     reportNotARoute(ctx, method, where)
     return []
@@ -279,37 +301,54 @@ function analyzeMethod(
   if (!checkHandler(ctx, method, where, routeDecorators[0] as DecoratorInfo)) {
     return []
   }
+  const sseDecorator = routeDecorators.find(decorator => decorator.identity === Ids.Sse)
+  if (sseDecorator !== undefined) {
+    // one handler per event stream: the other route decorators are reported and ignored
+    for (const other of routeDecorators) {
+      if (other === sseDecorator) {
+        continue
+      }
+      error(
+        ctx,
+        other.location,
+        other.identity === Ids.Sse
+          ? `@Sse is applied several times to ${where}`
+          : `@${other.name} cannot be combined with @Sse on ${where}`,
+        [
+          'One handler per event stream: declare other routes on other methods (HttpResponse.sse() serves an event stream from any route)',
+        ],
+      )
+    }
+    routeDecorators = [sseDecorator]
+  }
   const decorators = method.decorators
   const bodyValidation = validateSchema(ctx, decorators)
   const { params, complete } = analyzeParams(ctx, cls, method, where, bodyValidation)
-  const status = httpCode(ctx, decorators)
-  const headers = responseHeaders(ctx, decorators)
+  let status = httpCode(ctx, decorators)
+  let headers = responseHeaders(ctx, decorators)
   const guards = classRefs(ctx, cls, decorators, Ids.UseGuard, 'guard')
   const interceptors = classRefs(ctx, cls, decorators, Ids.UseInterceptor, 'interceptor')
   const meta = routeMeta(ctx, cls, decorators, where)
   const bodySchema =
     bodyValidation !== undefined && !params.some(param => param.source === 'body') ? bodyValidation.schema : undefined
-  const rawResponse = params.some(param => param.source === 'response')
+  let rawResponse = params.some(param => param.source === 'response')
   const bodyLimit = bodyLimitOf(ctx, decorators) ?? controllerBodyLimit
   const uploads = checkUploads(ctx, params, where)
+  if (sseDecorator !== undefined) {
+    checkSseHandler(ctx, method, params, where, bodyValidation)
+    status = undefined
+    headers = headers.filter(([name]) => name !== 'content-type')
+    rawResponse = false
+  }
 
   const routes: HttpRouteData[] = []
   for (const decorator of routeDecorators) {
     const httpMethod = ROUTE_METHODS.get(decorator.identity ?? '') as HttpMethod
-    const [arg] = decorator.args
-    let rawPath = ''
-    if (arg !== undefined) {
-      if (!arg.evaluated) {
-        continue // not evaluable: already reported
-      }
-      if (typeof arg.value !== 'string') {
-        error(ctx, arg.location, `@${decorator.name} expects a path (string), got ${describe(arg.value)}`, [
-          `@${decorator.name}('/:id')`,
-        ])
-        continue
-      }
-      rawPath = arg.value
+    const target = decorator === sseDecorator ? sseArgs(ctx, decorator) : routePath(ctx, decorator)
+    if (target === undefined) {
+      continue
     }
+    const { rawPath, arg } = target
     const path = normalizePath(rawPath)
     if (uploads && BODYLESS_METHODS.has(httpMethod)) {
       ctx.report({
@@ -336,11 +375,198 @@ function analyzeMethod(
       bodySchema,
       bodyLimit,
       rawResponse,
+      ...(target.sse === undefined ? {} : { sse: target.sse }),
       location: decorator.location,
       pathLocation: arg?.location ?? decorator.location,
     })
   }
   return routes
+}
+
+/** The path of a route decorator, its argument and, for `@Sse`, its options. */
+interface RouteTarget {
+  readonly rawPath: string
+  readonly arg: ArgInfo | undefined
+  readonly sse?: SseRouteData
+}
+
+/** The path argument of a route decorator (`undefined` after an error). */
+function routePath(ctx: Context, decorator: DecoratorInfo): RouteTarget | undefined {
+  const [arg] = decorator.args
+  if (arg === undefined) {
+    return { rawPath: '', arg }
+  }
+  if (!arg.evaluated) {
+    return undefined // not evaluable: already reported
+  }
+  if (typeof arg.value !== 'string') {
+    error(ctx, arg.location, `@${decorator.name} expects a path (string), got ${describe(arg.value)}`, [
+      `@${decorator.name}('/:id')`,
+    ])
+    return undefined
+  }
+  return { rawPath: arg.value, arg }
+}
+
+/** `@Sse(path?, options?)` / `@Sse(options)`: the path and the options (`undefined` after an error). */
+function sseArgs(ctx: Context, decorator: DecoratorInfo): RouteTarget | undefined {
+  const [first, second] = decorator.args
+  let pathArg: ArgInfo | undefined
+  let options: ArgInfo | undefined
+  if (first !== undefined) {
+    if (!first.evaluated) {
+      return undefined // already reported
+    }
+    if (typeof first.value === 'string') {
+      pathArg = first
+      options = second
+    } else if (first.value === undefined) {
+      options = second
+    } else if (isPlainObject(first.value)) {
+      if (second !== undefined) {
+        error(ctx, second.location, '@Sse(options) takes a single argument', [
+          "Put the path first: @Sse('/events', { retry: 5000 })",
+        ])
+        return undefined
+      }
+      options = first
+    } else {
+      error(ctx, first.location, `@Sse expects a path (string) or options, got ${describe(first.value)}`, [
+        "@Sse('/events'), @Sse('/events', { heartbeat: 15_000 }) or @Sse({ retry: 5000 })",
+      ])
+      return undefined
+    }
+  }
+  const sse = sseOptions(ctx, options)
+  if (sse === undefined) {
+    return undefined
+  }
+  return { rawPath: typeof pathArg?.value === 'string' ? pathArg.value : '', arg: pathArg, sse }
+}
+
+/** The static `{ heartbeat?, retry?, maxDuration? }` of `@Sse` (`undefined` after an error). */
+function sseOptions(ctx: Context, arg: ArgInfo | undefined): SseRouteData | undefined {
+  if (arg === undefined) {
+    return {}
+  }
+  if (!arg.evaluated) {
+    return undefined
+  }
+  const shape = '{ heartbeat?: number | false, retry?: number, maxDuration?: number }'
+  if (arg.value === undefined) {
+    return {}
+  }
+  if (!isPlainObject(arg.value)) {
+    error(ctx, arg.location, `@Sse options must be an object ${shape}, got ${describe(arg.value)}`)
+    return undefined
+  }
+  const result: { heartbeat?: number; retry?: number; maxDuration?: number } = {}
+  let ok = true
+  const invalid = (message: string, hints: readonly string[] = []): void => {
+    ok = false
+    error(ctx, arg.location, `@Sse: ${message}`, hints)
+  }
+  const integer = (value: StaticValue, min: number, max = Number.MAX_SAFE_INTEGER): value is number =>
+    typeof value === 'number' && Number.isSafeInteger(value) && value >= min && value <= max
+  for (const [key, value] of Object.entries(arg.value)) {
+    if (value === undefined) {
+      continue
+    }
+    switch (key) {
+      case 'heartbeat':
+        if (value === false) {
+          result.heartbeat = 0
+        } else if (integer(value, MIN_SSE_INTERVAL_MS, MAX_SSE_TIMER_MS)) {
+          result.heartbeat = value
+        } else {
+          invalid(
+            `"heartbeat" must be an integer number of ms from ${MIN_SSE_INTERVAL_MS} to ${MAX_SSE_TIMER_MS}, or false, got ${describe(value)}`,
+            ['Keep it below the idle timeouts of the proxies and of Bun.serve() (10 s): the default is 8 000'],
+          )
+        }
+        break
+      case 'retry':
+        if (integer(value, 0)) {
+          result.retry = value
+        } else {
+          invalid(`"retry" must be an integer number of ms ≥ 0, got ${describe(value)}`)
+        }
+        break
+      case 'maxDuration':
+        if (integer(value, MIN_SSE_INTERVAL_MS, MAX_SSE_TIMER_MS)) {
+          result.maxDuration = value
+        } else {
+          invalid(
+            `"maxDuration" must be an integer number of ms from ${MIN_SSE_INTERVAL_MS} to ${MAX_SSE_TIMER_MS} (about 24.8 days), got ${describe(value)}`,
+          )
+        }
+        break
+      default:
+        invalid(`unknown option "${key}"`, [`Options: ${shape}`])
+    }
+  }
+  return ok ? result : undefined
+}
+
+/**
+ * `@Sse` handlers: the plugin writes the stream with status 200 and its own content type, so
+ * `@HttpCode`, `@Header('content-type')` and `@Res()` are errors; a body is a warning (EventSource
+ * sends `GET` without body); a primitive return type is an error.
+ */
+function checkSseHandler(
+  ctx: Context,
+  method: MethodInfo,
+  params: readonly HttpParamData[],
+  where: string,
+  bodyValidation: BodyValidation | undefined,
+): void {
+  for (const decorator of method.decorators) {
+    if (decorator.identity === Ids.HttpCode) {
+      error(ctx, decorator.location, `@HttpCode has no effect on @Sse route ${where}: an event stream answers 200`, [
+        'Throw an HttpException or return an HttpResponse from the handler for other statuses',
+      ])
+    } else if (decorator.identity === Ids.Header) {
+      const [name] = decorator.args
+      if (name?.evaluated === true && typeof name.value === 'string' && name.value.toLowerCase() === 'content-type') {
+        error(ctx, decorator.location, `@Header('content-type') has no effect on @Sse route ${where}`, [
+          'An event stream is always sent as text/event-stream; charset=utf-8',
+        ])
+      }
+    }
+  }
+  for (const param of params) {
+    if (param.source === 'response') {
+      error(ctx, param.location, `@Res() cannot be used on @Sse route ${where}: the plugin writes the event stream`, [
+        'Return an AsyncIterable of SseEvent, or use a plain route to write the response yourself',
+      ])
+    }
+  }
+  const body = params.find(param => param.source === 'body' || param.upload !== undefined)
+  const bodyLocation = body?.location ?? bodyValidation?.decorator.location
+  if (bodyLocation !== undefined) {
+    ctx.report({
+      code: Codes.InvalidDecorator,
+      severity: 'warning',
+      message: `@Sse route ${where} reads a request body: EventSource sends GET requests without body`,
+      location: bodyLocation,
+      hints: ['For fetch() clients streaming a POST, use @Post() and return HttpResponse.sse(source)'],
+    })
+  }
+  const returned = method.returnType === undefined ? undefined : ctx.types.awaited(method.returnType)
+  if (returned !== undefined && !method.generator) {
+    const members = returned.kind === 'union' ? returned.types : [returned]
+    const invalid = members.some(
+      member => member.kind === 'literal' || (member.kind === 'primitive' && NOT_SSE_SOURCES.has(member.name)),
+    )
+    if (invalid) {
+      error(
+        ctx,
+        method.location,
+        `@Sse handler ${where} returns ${ctx.types.format(returned)}: return an AsyncIterable, an Iterable or a ReadableStream of SseEvent (or an HttpResponse)`,
+        ['async events(): Promise<AsyncIterable<SseEvent<T>>> { ...; return channel }'],
+      )
+    }
+  }
 }
 
 /** `@BodyLimit(size)` of a class or method, in bytes. */
@@ -601,7 +827,7 @@ function analyzeParams(
     }
     if (decorator === undefined) {
       error(ctx, param.location, `Parameter '${param.name}' of ${where} has no HTTP decorator`, [
-        'Decorate it with @Param(), @Query(), @Body(), @Headers(), @UploadedFile(), @UploadedFiles(), @Ctx(), @Req() or @Res()',
+        'Decorate it with @Param(), @Query(), @Body(), @Headers(), @Cookie(), @SignedCookie(), @UploadedFile(), @UploadedFiles(), @Ctx(), @Req() or @Res()',
       ])
       complete = false
       continue
@@ -752,7 +978,48 @@ function analyzeParam(
       const coercion = coercionOf(ctx, declared, param, decorator, where, source, key)
       return coercion ? { ...base, key, type, optional, schema: undefined, coercion } : undefined
     }
+    case 'cookie':
+    case 'signedCookie':
+      return cookieParam(ctx, param, decorator, declared, where, base, type)
   }
+}
+
+/** `@Cookie(name?, schema?)` / `@SignedCookie(name, schema?)`. */
+function cookieParam(
+  ctx: Context,
+  param: ParameterInfo,
+  decorator: DecoratorInfo,
+  declared: ReturnType<typeof parameterType>,
+  where: string,
+  base: Omit<HttpParamData, 'key' | 'schema' | 'coercion' | 'optional'>,
+  type: string | undefined,
+): HttpParamData | undefined {
+  const parsed = nameAndSchema(ctx, decorator)
+  if (!parsed.ok) {
+    return undefined
+  }
+  const { key, schema } = parsed
+  const name = `@${decorator.name}`
+  if (key !== undefined && !TOKEN.test(key)) {
+    error(ctx, decorator.args[0]?.location ?? decorator.location, `${name}: invalid cookie name ${describe(key)}`, [
+      `Cookie names are tokens (letters, digits and ! # $ % & ' * + - . ^ _ \` | ~): ${name}('session_id')`,
+    ])
+    return undefined
+  }
+  if (decorator.identity === Ids.SignedCookie && key === undefined) {
+    error(ctx, decorator.location, '@SignedCookie requires a cookie name', ["@SignedCookie('session_id')"])
+    return undefined
+  }
+  const optional = declared.optional
+  if (schema !== undefined) {
+    return { ...base, key, optional, schema, coercion: undefined }
+  }
+  if (key === undefined) {
+    checkUnvalidated(ctx, declared.type, decorator, param, where, 'cookies')
+    return { ...base, key, optional: false, schema: undefined, coercion: undefined }
+  }
+  const coercion = coercionOf(ctx, declared, param, decorator, where, 'cookie', key)
+  return coercion ? { ...base, key, type, optional, schema: undefined, coercion } : undefined
 }
 
 /**
@@ -1073,7 +1340,7 @@ function coercionOf(
   param: ParameterInfo,
   decorator: DecoratorInfo,
   where: string,
-  source: 'param' | 'query' | 'headers',
+  source: 'param' | 'query' | 'headers' | 'cookie',
   key: string,
 ): ParamCoercion | undefined {
   const result = planCoercion(ctx, declared, param, source === 'param')
@@ -1106,7 +1373,7 @@ function checkUnvalidated(
   decorator: DecoratorInfo,
   param: ParameterInfo,
   where: string,
-  what: 'body' | 'query',
+  what: 'body' | 'query' | 'cookies',
 ): void {
   if (type !== undefined && acceptedWithoutSchema(ctx, type)) {
     return
@@ -1123,10 +1390,20 @@ function unvalidated(ctx: Context, decorator: DecoratorInfo, detail: string, ext
     location: decorator.location,
     hints: [
       ...extraHints.filter(hint => !hint.startsWith('Or validate')),
-      `Validate it with a Standard Schema: @${decorator.name}(${decorator.name === 'Body' ? '' : "'name', "}Schema)${decorator.name === 'Body' ? ' or @Validate(Schema)' : ''}`,
+      `Validate it with a Standard Schema: ${schemaHint(decorator.name)}`,
       'Or type the parameter as unknown and check it yourself',
     ],
   })
+}
+
+function schemaHint(decorator: string): string {
+  if (decorator === 'Body') {
+    return '@Body(Schema) or @Validate(Schema)'
+  }
+  if (decorator === 'Cookie') {
+    return "@Cookie(Schema) for every cookie, or @Cookie('name', Schema)"
+  }
+  return `@${decorator}('name', Schema)`
 }
 
 function acceptedWithoutSchema(ctx: Context, type: TypeInfo): boolean {

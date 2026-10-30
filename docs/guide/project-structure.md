@@ -37,15 +37,16 @@ my-service/
 ├─ test/
 │  ├─ users/user.service.test.ts
 │  └─ e2e/users.e2e.test.ts
-├─ vite.config.ts                   # plugins: [znight(options)]
-├─ znight.config.ts                 # compiler options (Vite plugin, Bun preload, znight generate)
-├─ bunfig.toml                      # Bun: preloads @znight/compiler/bun for bun test
+├─ vite.config.ts                  # plugins: [znight(options)]
+├─ znight.config.ts                # compiler options (Vite plugin, Bun preload, znight generate)
+├─ bunfig.toml                     # Bun: preloads @znight/compiler/bun for bun test
 ├─ tsconfig.json
 └─ package.json
 ```
 
 File names such as `*.service.ts` or `*.controller.ts` are a convention for humans: the compiler
-finds providers by their **decorators**, never by file name.
+finds providers by their **decorators**, never by file name. The [example applications](/examples)
+follow this layout; [Data access](./data-access) details the `db/` folder and the repositories.
 
 ## What the compiler scans
 
@@ -152,7 +153,8 @@ it in the `libraries` option, or let the package opt in through its manifest:
 
 In both cases, providers keep package identities (`@acme/auth#JwtService`) and are imported from the
 package's public entry, so dev and production builds agree. Details in
-[The compiler](./compiler#provider-libraries).
+[The compiler](./compiler#provider-libraries); the [monorepo example](/examples#monorepo) runs both
+flows.
 
 ## Tests
 

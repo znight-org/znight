@@ -24,6 +24,7 @@ const ENABLED = process.env.ZNIGHT_E2E === '1'
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const ADMIN_KEY = 'e2e-admin-key'
 const READER_KEY = 'e2e-reader-key'
+const BROWSER_ORIGIN = 'https://shelf.example.com'
 const TIMEOUT = 60_000
 
 /** A JSON log line of the application. */
@@ -181,6 +182,8 @@ describe.skipIf(!ENABLED)('end to end (production build)', () => {
       METRICS_PORT: '0',
       DATABASE_DATA_DIR: dataDir,
       LOG_LEVEL: 'info',
+      CORS_ORIGINS: BROWSER_ORIGIN,
+      TRUSTED_PROXIES: 'loopback',
       ...env,
     })
     running.push(app)
@@ -250,10 +253,24 @@ describe.skipIf(!ENABLED)('end to end (production build)', () => {
       const url = String(ready.url)
       const admin = { 'x-api-key': ADMIN_KEY }
 
-      // public health check, authentication
+      // public health check, authentication (every route has an access decision)
       expect((await fetch(`${url}/health`)).status).toBe(200)
       expect((await fetch(`${url}/books`)).status).toBe(401)
-      expect((await fetch(`${url}/books`, { headers: { 'x-api-key': 'wrong' } })).status).toBe(401)
+      expect((await fetch(`${url}/me`)).status).toBe(401)
+      const wrongKey = await fetch(`${url}/books`, {
+        headers: { 'x-api-key': 'wrong', 'x-forwarded-for': '203.0.113.7' },
+      })
+      expect(wrongKey.status).toBe(401)
+      // security headers, on by default; no-store for the API (configured in main.ts)
+      expect(wrongKey.headers.get('cache-control')).toBe('no-store')
+      expect(wrongKey.headers.get('x-content-type-options')).toBe('nosniff')
+      // CORS_ORIGINS: the preflight is answered without API key, before the guard
+      const preflight = await fetch(`${url}/books`, {
+        method: 'OPTIONS',
+        headers: { origin: BROWSER_ORIGIN, 'access-control-request-method': 'DELETE' },
+      })
+      expect(preflight.status).toBe(204)
+      expect(preflight.headers.get('access-control-allow-origin')).toBe(BROWSER_ORIGIN)
 
       // create (zod-validated body), duplicate (409), invalid (400)
       const book = { isbn: '978-0-441-17271-9', title: 'Dune', author: 'Frank Herbert', tags: ['Classic'] }
@@ -315,8 +332,10 @@ describe.skipIf(!ENABLED)('end to end (production build)', () => {
       expect(metrics).toContain('http_server_requests_total{method="POST",route="/books",status="201"')
       expect(metrics).toMatch(/bookshelf_books_added_total\{[^}]*outcome="success"[^}]*\} 1/)
 
-      // structured logs: one line per request carrying its request id, @Logged on BookService.add
+      // structured logs: one line per request carrying its request id, @Logged on BookService.add;
+      // the rejected key is logged with the client address behind the trusted proxy (TRUSTED_PROXIES)
       const logs = app.logs()
+      expect(logs).toContainEqual(expect.objectContaining({ msg: 'Invalid API key', ip: '203.0.113.7' }))
       expect(logs).toContainEqual(
         expect.objectContaining({ msg: 'request completed', requestId: 'e2e-create-dune', status: 201 }),
       )

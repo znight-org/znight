@@ -206,6 +206,12 @@ Coercion failures answer 400 like for `@Query`. The message **never echoes a coo
 (cookies often carry tokens): `Invalid cookie "visits": expected a number`. `coerce.ts` omits the
 `received …` part for labels starting with `cookie `.
 
+> **As implemented** (v0.1, after the wave 6 review): schema failures are redacted too. The issues
+> of a `cookie "name"` or `cookies` validation (`@Cookie('name', S)`, `@SignedCookie('name', S)`,
+> `@Cookie(S)`) have the message `Invalid value` and a path reduced to its keys, since some
+> libraries quote the value in both (Valibot, ArkType). The parse is linear even for a header made
+> of `;` without `=`: the position of the next `=` is searched again only once passed.
+
 **An invalid cookie is a 400, on purpose.** Cookies outlive deployments, so a stale value fails
 every request until it expires. The recommended tool is a schema with a fallback
 (`z.enum([...]).catch('light')`). We prefer that to lenient coercion that would hide tampering.
@@ -332,6 +338,21 @@ Secure, HttpOnly, SameSite and Partitioned from the defaults merged with the opt
   default, `SameSite=None` together with `secure`), signing and the final size are checked when
   the response is serialised. A violation there gives the generic 500 and is logged as
   `Invalid cookie "x": …`, which is how `#checkHeaders` treats an invalid header today.
+
+> **As implemented** (v0.1, after the wave 6 review):
+>
+> - `expires` must fall in the years 1601 to 9999 (other years are not IMF-fixdates and browsers
+>   ignore them): a `TypeError` suggesting `maxAge` otherwise.
+> - `domain: null` on a cookie makes it host-only whatever `cookies.defaults` says; the jar keys it
+>   as host-only. A `__Host-` cookie (and `__Host-Http-`) never takes the default `domain` or
+>   `path`; its own options are still checked, so an explicit incompatible `domain` or `path`
+>   throws. Login and logout with `__Host-` cookies work under a default `domain`.
+> - Cookies set on the native response by middleware before the Znight route (Express
+>   `res.cookie()`, a Fastify hook, Hono `setCookie(c, …)`) are kept, before the reply's own, on
+>   every adapter, event streams included.
+> - The fallback reply of an `http:request` hook wrapper that failed before `next()` goes through
+>   the same header and cookie checks, so the cookies of an exception mapper's `HttpResponse` are
+>   sent.
 
 ### 4.4 Cookies: secure defaults
 
@@ -685,6 +706,25 @@ export class RequestAbortedError extends Error {
 `shutdownGraceMs` must be lower than `drainTimeoutMs` (when that one is finite). Otherwise the
 boot fails with ZNIGHT005 (`invalidOption`).
 
+> **As implemented** (v0.1, after the wave 6 review), precisions to rules 3, 5 and 7:
+>
+> - The event boundary of raw bytes is tracked across chunks, a CRLF split between two chunks
+>   included, so heartbeats resume after such a split.
+> - An `SseEvent` that follows raw bytes not ending at an event boundary would merge into the
+>   unterminated raw event: it fails the stream like an invalid item (rule 5).
+> - The final jittered `retry` (rule 7) is written only at an event boundary: after an unterminated
+>   raw event the stream ends without it.
+> - `heartbeat`, `maxDuration` and `shutdownGraceMs` are at most 2 147 483 647 ms (2^31 − 1, the
+>   longest timer), checked by the compiler, at boot and by `HttpResponse.sse()`; the session caps
+>   its delays as a backstop.
+> - A pending source read gets one reaction for its whole life, kept across heartbeats: a quiet
+>   source does not accumulate memory per heartbeat.
+> - A streamed body with a `text/event-stream` content type is an event stream for the adapters
+>   whatever produced it (`HttpResponse.stream()`, a proxied `fetch()` response): headers are sent
+>   at once, idle timeouts are lifted. On `@hono/node-server`, a reply whose client already left
+>   has its body discarded, and a stream body nobody locked is cancelled when the response closes
+>   unfinished.
+
 ### 4.8 SSE: response headers, status, scope, interceptors, hooks
 
 **Headers.**
@@ -973,7 +1013,16 @@ for await (const item of parseSseStream(response.body!)) {
 - `InjectRequest` gains `cookies?` and `signedCookies?`, and `InjectResponse` gains `cookies`.
 - `TestApp.injectStream(request)` and `TestApp.injectSse(request)` call the plugin named `http`
   when it has these methods. Otherwise they throw ZNIGHT001 with the hint
-  "requires @znight/http ≥ 0.2".
+  "requires @znight/http ≥ 0.2". **As implemented:** the hint asks to register
+  `HttpPlugin.configure({ adapter })` from `@znight/http` ≥ 0.1.0, the release of
+  `@znight/testing` (no 0.2 exists).
+
+> **As implemented** (v0.1, wave 7): opening never waits forever. `injectSse()` waits at most
+> 2 000 ms for the response headers (past it, the request is aborted and opening rejects, naming
+> the request), then at most 2 000 ms for the first chunk: a stream that sends nothing yet (a
+> hand-written or proxied one; an `@Sse` stream sends its preamble at once) is open anyway and read
+> in the background. A `next()` that times out on such a stream says that the stream has sent
+> nothing since it opened.
 
 ---
 
@@ -1024,6 +1073,8 @@ The specs in `compiler/model.ts` and `compiler/index.ts`:
   - `retry` is an integer ≥ 0;
   - `maxDuration` is an integer ≥ 1 000;
   - any other key is ZNIGHT005.
+  - **As implemented:** `heartbeat` and `maxDuration` are also at most 2 147 483 647 (2^31 − 1 ms,
+    the longest timer: a larger value would fire at once).
 
   The result is stored as `HttpRouteData.sse: { heartbeat?: number /* 0 = disabled */; retry?: number; maxDuration?: number } | undefined`.
 
@@ -1178,7 +1229,7 @@ interface HttpPluginOptions {
 
 Invalid values are rejected by `invalidOption` (ZNIGHT005), like every other plugin option.
 Unknown keys inside `cookies`, `cookies.defaults` and `sse` are rejected the way `uploads` keys
-are.
+are. **As implemented:** `sse.heartbeat` and `sse.shutdownGraceMs` are at most 2^31 − 1 ms.
 
 ## 8. Relation to a future GraphQL subscriptions transport
 

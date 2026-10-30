@@ -1,0 +1,15 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`access decisions access matrix 1`] = `
+[
+  "GET /books → roles reader [AuthGuard]",
+  "POST /books → roles admin [AuthGuard]",
+  "DELETE /books/:id → roles admin [AuthGuard]",
+  "GET /books/:id → roles reader [AuthGuard]",
+  "PATCH /books/:id → roles admin [AuthGuard]",
+  "GET /books/:id/cover → public [AuthGuard]",
+  "PUT /books/:id/cover → roles admin [AuthGuard]",
+  "GET /health → public [AuthGuard]",
+  "GET /me → authenticated [AuthGuard]",
+]
+`;

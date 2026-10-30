@@ -3,7 +3,7 @@ import type { LoggerLevel } from './levels.ts'
 import type { LogTransport } from './transport.ts'
 
 import { loadOptionalPeer } from '../internal/optional.ts'
-import { flushSonicBoom, withLevel } from './transport.ts'
+import { drainSonicBoom, withLevel } from './transport.ts'
 
 /** Options of {@link prettyTransport} (forwarded to `pino-pretty`). */
 export interface PrettyOptions {
@@ -23,7 +23,7 @@ export interface PrettyOptions {
   readonly options?: Readonly<Record<string, unknown>>
 }
 
-type PrettyFactory = (options: Record<string, unknown>) => DestinationStream & { flushSync?: () => void }
+type PrettyFactory = (options: Record<string, unknown>) => DestinationStream
 
 /**
  * Human-readable, colored output for development, through the optional peer dependency
@@ -54,11 +54,8 @@ export function prettyTransport(options: PrettyOptions = {}): LogTransport {
       stream,
       flush: () =>
         new Promise<void>(resolve => {
-          // the prettifier is a transform stream: let it process what was written, then flush its output
-          setImmediate(() => {
-            flushSonicBoom(stream)
-            resolve()
-          })
+          // the prettifier is a transform stream: let it process what was written, then wait for its output
+          setImmediate(() => void drainSonicBoom(stream).then(resolve))
         }),
     },
     options.level,

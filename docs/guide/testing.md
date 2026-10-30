@@ -212,10 +212,12 @@ it('validates the id', async () => {
 `TestApp.create({ metadata, plugins?, providers?, overrides?, only?, start?, logger?, shutdown? })`
 runs `Application.create()` then `app.start()` (unless `start: false`), with signal handlers
 disabled. It applies `overrides` last and by default instantiates only the dependency closure of the
-HTTP controllers (with their guards and interceptors), the message consumers, the overridden
-providers and the global guards, interceptors and exception mappers of
-`HttpPlugin.configure({ ... })` (`only: 'all'` or a list of keys to choose; overrides and those
-globals are added to the list). The default logger only prints warnings and errors.
+HTTP controllers (with their guards and interceptors), the message consumers, the hosts of
+[scheduled jobs](/packages/schedule#observability-and-testing), the overridden providers and the
+providers each plugin lists in its [`initRoots(context)`](/packages/core#plugins): the global
+guards, interceptors and exception mappers of `HttpPlugin.configure({ ... })`, the `guards` of
+`OpenApiPlugin`, the job hosts of `SchedulePlugin` (`only: 'all'` or a list of keys to choose;
+overrides and those plugin roots are added to the list). The default logger only prints warnings and errors.
 `app.get(key)`, `app.container` and `app.app` give access to the running application;
 `await using app = await TestApp.create(...)` closes it automatically.
 
@@ -226,10 +228,58 @@ with [`ZNIGHT015`](/reference/error-codes#znight015) ("its factory is async"): l
 (`only: [UserController, AuthGuard]`), or pass `only: 'all'`.
 :::
 
-`app.inject({ method?, url, headers?, body?, query? })` resolves with
-`{ status, headers, body, bytes, json() }`: `body` is the response decoded as UTF-8, `bytes` the raw
-bytes (downloads). Request bodies are encoded for you: objects as JSON, strings and bytes as is, a
-`FormData` as `multipart/form-data`, a `Blob` / `File` with its type.
+`app.inject({ method?, url, headers?, body?, query?, cookies?, signedCookies? })` resolves with
+`{ status, headers, body, bytes, cookies, json() }`: `body` is the response decoded as UTF-8, `bytes`
+the raw bytes (downloads), `cookies` the cookies the response sets. Request bodies are encoded for
+you: objects as JSON, strings and bytes as is, a `FormData` as `multipart/form-data`, a `Blob` /
+`File` with its type.
+
+### Cookies
+
+Send cookies with `cookies` (or `signedCookies`, signed by the plugin with its current secret) and
+read the ones a response sets, parsed, from `cookies`:
+
+```ts
+test('login sets a signed session cookie', async () => {
+  await using app = await createTestApp()
+  const login = await app.inject({ method: 'POST', url: '/auth/login', body: { email, password } })
+  expect(login.cookies['__Host-uid']).toMatchObject({ httpOnly: true, secure: true, sameSite: 'lax', path: '/' })
+
+  const me = await app.inject({ url: '/auth/me', cookies: { '__Host-uid': login.cookies['__Host-uid']?.value ?? '' } })
+  expect(me.status).toBe(200)
+})
+```
+
+A browser cookie jar is out of scope: tests pass cookies explicitly. To test authenticated routes
+with tokens, keep the real guard and mint test tokens (see
+[testing authenticated routes](/guide/security#testing)).
+
+### Server-Sent Events
+
+`inject()` rejects an event stream instead of waiting for its end. `app.injectSse()` opens it in
+memory and reads it like `EventSource`; events are read only when the test asks for them, so the
+test sets the pace of the client:
+
+```ts
+test('order events follow the order', async () => {
+  await using app = await createTestApp()
+  await using stream = await app.injectSse({ url: '/orders/o-1/events' })
+  expect(stream.status).toBe(200)
+
+  app.get(OrderHub).publish({ orderId: 'o-1', sequence: 42, type: 'status', status: 'paid' })
+  const event = await stream.next() // rejects after 2 000 ms by default
+  expect(event).toMatchObject({ event: 'status', id: '42' })
+  expect(event.json()).toMatchObject({ status: 'paid' })
+
+  const resumed = await stream.reconnect() // sends last-event-id: 42, like EventSource
+  await resumed.close() // a client disconnect: ctx.signal aborts on the server
+})
+```
+
+`take(n)`, `for await`, `comments` (heartbeats), `retry`, `lastEventId` and `done` are available
+too; a stream that answered an error or a 204 exposes its `body` and `json()`. `app.injectStream()`
+gives the raw body as a `ReadableStream` (other streamed responses), and both accept a `signal`.
+See [testing event streams](/packages/http#testing-event-streams).
 
 ### Uploads and downloads
 
@@ -283,6 +333,41 @@ await driver.idle() // nothing in flight, scheduled or deliverable
 expect(driver.settlements('orders')).toMatchObject([{ action: 'ack' }])
 expect(driver.deadLetters('orders')).toEqual([])
 ```
+
+### Scheduled jobs
+
+A job is a method: unit-test it with `TestBed` and a `JobContext` from `createJobContext()`
+(`@znight/schedule/testing`). To test the schedule itself, boot the real `SchedulePlugin` on a
+virtual clock: time only moves when the test advances it, and advancing waits for the runs it
+started.
+
+```ts
+import { SchedulePlugin } from '@znight/schedule'
+import { createTestClock } from '@znight/schedule/testing'
+
+test('the digest is sent at 08:00 in Paris', async () => {
+  const clock = createTestClock('2027-03-26T06:00:00Z')
+  const mailer = new FakeMailer()
+  await using app = await TestApp.create({
+    metadata,
+    plugins: [SchedulePlugin.configure({ clock })],
+    overrides: [[Mailer, mailer]],
+  })
+
+  await clock.advanceTo('2027-03-26T07:00:00Z')
+  expect(mailer.sent).toHaveLength(1)
+})
+```
+
+Advancing waits for the runs it started, real I/O included (a database, `fetch`, the file system). A
+run that makes no progress for `settleTimeoutMs` of real time (1 000 ms by default:
+`createTestClock(start, { settleTimeoutMs })`) is not waited for again during that call: it waits
+for a later timer, such as its `maxDuration`, or for the test. Lower it in tests that keep runs
+pending on purpose.
+
+Tests that do not exercise the schedule pass `SchedulePlugin.configure({ enabled: false })` and can
+still run a job on demand with `app.get(SchedulerRegistry).trigger(name)`. See
+[@znight/schedule](/packages/schedule#observability-and-testing).
 
 ## Testing interceptors and plugins
 

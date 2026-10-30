@@ -1,7 +1,12 @@
 import type { LogTransport } from '../src/index.ts'
 
+import { once } from 'node:events'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Writable } from 'node:stream'
 import { Container, ErrorCode, ZnightError } from '@znight/core'
+import pino from 'pino'
 
 import {
   cloudwatchTransport,
@@ -353,6 +358,32 @@ describe('Logger', () => {
       await new Logger({ destination }).flush()
       expect(flushed).toBe(1)
       await new Logger({ destination: { write: () => undefined } }).flush()
+    })
+
+    it('resolves flush() once a pino.destination() wrote every entry, in order', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'znight-logs-'))
+      try {
+        const file = join(dir, 'app.log')
+        const destination = pino.destination({ dest: file, sync: false, mkdir: true })
+        await once(destination, 'ready')
+        const log = new Logger({ destination, base: null })
+        // well beyond SonicBoom's 16 KB chunks: several asynchronous writes, one at a time
+        const flushes: Promise<void>[] = []
+        for (let i = 0; i < 2000; i++) {
+          log.info('entry', { i })
+          if (i % 100 === 99) flushes.push(log.flush())
+        }
+        // concurrent flushes share one set of listeners (no MaxListenersExceededWarning)
+        expect(destination.listenerCount('write')).toBe(1)
+        await Promise.all(flushes)
+        expect(destination.listenerCount('write')).toBe(0)
+        const written = readFileSync(file, 'utf8').trimEnd().split('\n')
+        expect(written.map(line => JSON.parse(line).i)).toEqual(Array.from({ length: 2000 }, (_, i) => i))
+        destination.end()
+        await once(destination, 'close')
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
     })
 
     it('writes CloudWatch / Lambda JSON (timestamp, upper-case level, message)', () => {

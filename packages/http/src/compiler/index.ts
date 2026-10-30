@@ -3,8 +3,9 @@
  * `@znight/compiler` through `package.json#znight.compiler`.
  *
  * - `analyzeClass`: `@Controller` classes become providers; their decorated methods become routes
- *   (paths, parameters with type-based coercion or Standard Schema validation, uploaded files,
- *   guards, interceptors, status, headers, body limits, `createRouteDecorator` metadata);
+ *   (paths, parameters with type-based coercion or Standard Schema validation, cookies, uploaded
+ *   files, guards, interceptors, status, headers, body limits, `@Sse` event streams,
+ *   `createRouteDecorator` metadata);
  * - `validate`: route paths, `:param` ↔ `@Param`, duplicate routes (ZNIGHT007);
  * - `generate`: `metadata.extensions.http` with one `invoke` function per route (README,
  *   "Compiler contract").
@@ -27,6 +28,7 @@ export type {
   MetaEntry,
   ParamCoercion,
   ScalarCoercion,
+  SseRouteData,
   UploadData,
 } from './model.ts'
 
@@ -55,6 +57,10 @@ const decorators: Readonly<Record<string, DecoratorSpec>> = Object.freeze({
   [Ids.UploadedFile]: UPLOAD,
   [Ids.UploadedFiles]: UPLOAD,
   [Ids.BodyLimit]: { targets: ['class', 'method'], params: ['static'] },
+  [Ids.Cookie]: NAME_OR_SCHEMA,
+  [Ids.SignedCookie]: NAME_OR_SCHEMA,
+  // after the ROUTE spread: `@Sse(path?, options?)` takes two static arguments
+  [Ids.Sse]: { targets: ['method'], params: ['static', 'static'] },
 })
 
 /** The `@znight/http` compiler extension. */

@@ -23,6 +23,26 @@
       "types": "./dist/index.d.mts",
       "default": "./dist/index.mjs"
     },
+    "./compiler": {
+      "@znight/source": "./src/compiler/index.ts",
+      "types": "./dist/compiler.d.mts",
+      "default": "./dist/compiler.mjs"
+    },
+    "./emit": {
+      "@znight/source": "./src/emit/index.ts",
+      "types": "./dist/emit.d.mts",
+      "default": "./dist/emit.mjs"
+    },
+    "./vite": {
+      "@znight/source": "./src/vite.ts",
+      "types": "./dist/vite.d.mts",
+      "default": "./dist/vite.mjs"
+    },
+    "./testing": {
+      "@znight/source": "./src/testing.ts",
+      "types": "./dist/testing.d.mts",
+      "default": "./dist/testing.mjs"
+    },
     "./package.json": "./package.json"
   },
   "types": "./dist/index.d.mts",
@@ -82,5 +102,16 @@
     "@seriousme/openapi-schema-validator": "2.11.0",
     "@cfworker/json-schema": "4.1.1",
     "vite": "catalog:"
+  },
+  "znight": {
+    "apiVersion": 1,
+    "compiler": "@znight/openapi/compiler",
+    "provides": [
+      {
+        "export": "OpenApi",
+        "plugin": "OpenApiPlugin",
+        "scope": "singleton"
+      }
+    ]
   }
 }

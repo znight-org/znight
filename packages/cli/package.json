@@ -30,7 +30,7 @@
     "./package.json": "./package.json"
   },
   "types": "./dist/index.d.mts",
-  "files": ["dist", "src"],
+  "files": ["bin", "dist", "src"],
   "scripts": {
     "build": "tsdown",
     "typecheck": "tsc --noEmit && tsc --noEmit -p test",
@@ -46,7 +46,7 @@
     "picocolors": "^1.1.1"
   },
   "bin": {
-    "znight": "./dist/cli.mjs"
+    "znight": "./bin/znight.mjs"
   },
   "devDependencies": {
     "vite": "catalog:",
