@@ -137,9 +137,10 @@ bun run docs:build   # production build, fails on dead links
 
 ## Releases
 
-Every change to `main` goes through a pull request whose checks pass: CI (lint, typecheck, build
-and pack, unit and example tests, docs build) and CI (full) (end-to-end tests on Node.js and Bun,
-Docker integration tests, the packed packages installed in a fresh application).
+Every change to `main` goes through a pull request, merged once CI passes (lint, typecheck, build
+and pack, unit and example tests, docs build). CI (full) also runs on every pull request (end-to-end
+tests on Node.js and Bun, Docker integration tests, the packed packages installed in a fresh
+application); it is not required to merge, but every release runs it again before publishing.
 
 All `@znight/*` packages are versioned in lockstep with [Changesets](https://changesets.dev): a pull
 request that changes a published package for its users adds a changeset (`bun run changeset`;

@@ -14,7 +14,7 @@ on:
   workflow_call:
     inputs:
       ref:
-        description: Commit to deploy
+        description: Tag, branch or commit to deploy
         type: string
         required: true
 
@@ -53,6 +53,8 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ steps.ref.outputs.ref }}
+          # the "last updated" dates of the pages and the sitemap come from the history of each file
+          fetch-depth: 0
       - uses: ./.github/actions/setup
       - name: GitHub Pages settings
         id: pages

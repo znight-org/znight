@@ -38,6 +38,6 @@ vulnerabilities of third-party dependencies that do not affect Znight (report th
 ## Supply chain
 
 Releases are published from GitHub Actions only (`.github/workflows/release.yml`), after a
-maintainer's approval. Once the repository is public, every version carries an
+maintainer's approval. Every version carries an
 [npm provenance](https://docs.npmjs.com/generating-provenance-statements) attestation linking it to
 the commit and workflow run that built it: check it with `npm audit signatures`.

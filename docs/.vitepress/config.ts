@@ -20,7 +20,8 @@ const repoRoot = resolve(docsDir, '..')
 /**
  * Deployment settings, all optional:
  * - `ZNIGHT_DOCS_BASE`: public base path (e.g. `/znight/` for the GitHub Pages project site, set by docs.yml);
- * - `ZNIGHT_DOCS_URL`: absolute site URL, used for absolute Open Graph URLs and the sitemap.
+ * - `ZNIGHT_DOCS_URL`: origin of the site, without the base path (e.g. `https://znight-org.github.io`,
+ *   set by docs.yml), used for absolute Open Graph URLs and the sitemap.
  */
 const base = normalizeBase(process.env.ZNIGHT_DOCS_BASE)
 const siteUrl = process.env.ZNIGHT_DOCS_URL?.replace(/\/+$/, '')

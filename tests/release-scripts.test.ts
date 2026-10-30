@@ -8,7 +8,13 @@ import type { Manifest, WorkspacePackage } from '../scripts/release/workspace.ts
 
 import { changelogSection, withoutDependencyBumps } from '../scripts/release/notes.ts'
 import { tarballName, verifyTarball } from '../scripts/release/tarball.ts'
-import { distTagFor, lockstepVersion, publishablePackages, sortByDependencies } from '../scripts/release/workspace.ts'
+import {
+  distTagFor,
+  lockstepVersion,
+  publishablePackages,
+  releasesSomething,
+  sortByDependencies,
+} from '../scripts/release/workspace.ts'
 import { describe, expect, test as it } from 'bun:test'
 
 const pkg = (name: string, manifest: Partial<Manifest> = {}): WorkspacePackage => ({
@@ -77,6 +83,13 @@ it('lockstepVersion rejects packages at different versions', () => {
   expect(() => lockstepVersion([pkg('@x/a', { version: '1.0.0' }), pkg('@x/b', { version: '1.1.0' })])).toThrow(
     'must share one version',
   )
+})
+
+it('releasesSomething: an empty changeset (changeset add --empty) releases nothing', () => {
+  expect(releasesSomething("---\n'@znight/http': patch\n---\n\nFix the multipart details\n")).toBe(true)
+  expect(releasesSomething('---\n---\n')).toBe(false)
+  expect(releasesSomething('---\r\n\r\n---\r\n\r\nNothing to release\r\n')).toBe(false)
+  expect(releasesSomething('no front matter')).toBe(true)
 })
 
 it('distTagFor sends prereleases to next', () => {

@@ -11,5 +11,6 @@ change.
 - Docs-, tests-, examples- or CI-only changes need no changeset (CI only reminds you).
 
 When changesets reach `main`, the release workflow opens or updates the "chore: version packages"
-pull request and runs CI on it; merging it bumps the versions and writes the changelogs, then the
-publication waits for a maintainer's approval. See [RELEASING.md](../RELEASING.md).
+pull request; merging it bumps the versions and writes the changelogs, then the publication waits
+for a maintainer's approval. An empty changeset (`bun run changeset --empty`) releases nothing and
+opens no version pull request. See [RELEASING.md](../RELEASING.md).

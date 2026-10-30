@@ -120,12 +120,25 @@ export function lockstepVersion(packages: readonly WorkspacePackage[]): string {
   return version
 }
 
-/** The pending changesets (`.changeset/*.md` except the README), relative to the root. */
+/**
+ * Whether a changeset releases something: its front matter lists at least one package. An empty
+ * changeset (`changeset add --empty`) opens no version pull request (changesets/action skips it)
+ * and is deleted by the next `changeset version`, so it must not block a release.
+ */
+export function releasesSomething(contents: string): boolean {
+  // the delimiters of @changesets/parse; a file without front matter is kept (`changeset` rejects it)
+  const match = /^\s*---([\s\S]*?)\r?\n\s*---/.exec(contents)
+  if (match === null) return true
+  return (match[1] ?? '').split(/\r?\n/).some(line => line.trim() !== '' && !line.trim().startsWith('#'))
+}
+
+/** The pending changesets that release something (`.changeset/*.md` except the README and empty ones). */
 export function pendingChangesets(root: string = ROOT): string[] {
   const dir = join(root, '.changeset')
   if (!existsSync(dir)) return []
   return readdirSync(dir)
     .filter(file => file.endsWith('.md') && file.toLowerCase() !== 'readme.md')
+    .filter(file => releasesSomething(readFileSync(join(dir, file), 'utf8')))
     .sort()
     .map(file => `.changeset/${file}`)
 }

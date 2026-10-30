@@ -1,17 +1,17 @@
 # Releases (see RELEASING.md). Like every change to main, a release goes through pull requests.
 #
 # 1. Pull requests bring their changesets to main (`bun run changeset`).
-# 2. On every push to main, `version` opens or updates the "chore: version packages" pull request
-#    and starts CI and CI (full) on it (a pull request opened with the GITHUB_TOKEN triggers no
-#    workflow by itself; workflow_dispatch does).
-# 3. Merging it bumps the versions and the changelogs. On that push, `plan` finds versions missing
-#    from npm; CI and CI (full) run again on that exact commit; then `publish` waits for an approval
-#    in the `npm` environment (its required reviewers), publishes, tags vX.Y.Z, creates the GitHub
-#    release, and `docs` deploys the documentation of that commit to GitHub Pages.
+# 2. On every push to main, `version` opens or updates the "chore: version packages" pull request.
+#    Opened with the GITHUB_TOKEN, its CI runs wait for a maintainer's "Approve workflows to run".
+# 3. Merging it bumps the versions and the changelogs. On that push, `plan` finds a version missing
+#    from npm (or without its GitHub release); CI and CI (full) run again on that exact commit; then
+#    `publish` waits for an approval in the `npm` environment (its required reviewers), publishes,
+#    tags vX.Y.Z, creates the GitHub release, and `docs` deploys the documentation of that tag to
+#    GitHub Pages.
 #
-# A manual run (Actions > Release > Run workflow, on main) retries a failed release (published
-# versions are skipped) or, with "Dry run" (the default), packs, verifies and runs
-# `npm publish --dry-run` without publishing anything.
+# A failed release is retried with "Re-run failed jobs" on its run (same commit). A manual run
+# (Actions > Release > Run workflow, on main) does the same from the current main, or with
+# "Dry run" (the default) packs, verifies and runs `npm publish --dry-run` without publishing.
 #
 # npm authentication: the NPM_TOKEN secret when set (bootstrap: the first release), otherwise npm
 # trusted publishing (OIDC). Provenance is attested for public repositories.
@@ -42,7 +42,6 @@ jobs:
     permissions:
       contents: write # the changeset-release/main branch
       pull-requests: write # the pull request
-      actions: write # start CI on it (workflow_dispatch)
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
@@ -53,16 +52,15 @@ jobs:
           version-script: bun run version
           commit-message: "chore: version packages"
           pr-title: "chore: version packages"
-      - name: Start CI on the pull request
+      - name: CI of the pull request
         if: steps.changesets.outputs.pr-number != ''
         env:
-          GH_TOKEN: ${{ github.token }}
           PR: ${{ steps.changesets.outputs.pr-number }}
-        run: |
-          for workflow in ci.yml ci-full.yml; do
-            gh workflow run "$workflow" --repo "$GITHUB_REPOSITORY" --ref changeset-release/main
-          done
-          echo "::notice title=Version pull request::#${PR} is up to date; CI and CI (full) started on it."
+        # events of the GITHUB_TOKEN start no run by themselves: GitHub creates the pull request's CI
+        # runs pending, and a maintainer starts them from the pull request
+        run: >-
+          echo "::notice title=Version pull request #${PR}::Up to date. Start its CI with
+          \"Approve workflows to run\" on the pull request, then merge it to release."
 
   plan:
     name: Release plan
@@ -71,7 +69,11 @@ jobs:
     timeout-minutes: 5
     outputs:
       version: ${{ steps.status.outputs.version }}
-      publishable: ${{ steps.status.outputs.publishable }}
+      # a version to release: no pending changeset, and the version missing from npm or without its
+      # GitHub release (a release whose tag step failed is finished by the next run)
+      release: >-
+        ${{ steps.status.outputs.pending-changesets == 'false' && (steps.status.outputs.publishable == 'true'
+        || steps.github.outputs.missing == 'true') }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -82,18 +84,29 @@ jobs:
       - name: Versions not on npm yet
         id: status
         run: bun scripts/release/status.ts
+      - name: GitHub release of that version
+        id: github
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.status.outputs.version }}
+        run: |
+          if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "missing=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "missing=true" >> "$GITHUB_OUTPUT"
+          fi
 
   # the gates, on the exact commit about to be published (a dry run skips them)
   ci:
     name: CI
     needs: plan
-    if: needs.plan.outputs.publishable == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.dry_run)
+    if: needs.plan.outputs.release == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.dry_run)
     uses: ./.github/workflows/ci.yml
 
   ci-full:
     name: CI (full)
     needs: plan
-    if: needs.plan.outputs.publishable == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.dry_run)
+    if: needs.plan.outputs.release == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.dry_run)
     uses: ./.github/workflows/ci-full.yml
 
   dry-run:
@@ -117,7 +130,7 @@ jobs:
   publish:
     name: Publish to npm
     needs: [ plan, ci, ci-full ]
-    if: needs.plan.outputs.publishable == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.dry_run)
+    if: needs.plan.outputs.release == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.dry_run)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # the approval of a required reviewer of this environment is the go of the release
@@ -181,7 +194,8 @@ jobs:
     if: ${{ !contains(needs.plan.outputs.version, '-') }}
     uses: ./.github/workflows/docs.yml
     with:
-      ref: ${{ github.sha }}
+      # the tag the publish job made sure of: the released commit, even on a later run
+      ref: v${{ needs.plan.outputs.version }}
     permissions:
       contents: read
       pages: write

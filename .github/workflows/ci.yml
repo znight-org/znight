@@ -6,8 +6,8 @@ on:
   pull_request:
   push:
     branches: [ main ]
-  # manual runs, and the release workflow running it on the version pull request (see release.yml)
   workflow_dispatch:
+  # the release workflow, on the commit it is about to publish
   workflow_call:
 
 permissions:
@@ -29,7 +29,7 @@ jobs:
         with:
           persist-credentials: false
           # the changeset reminder of pull requests compares with the base branch
-          fetch-depth: ${{ github.event_name == 'pull_request' && 0 || 1 }}
+          fetch-depth: 0
       - uses: ./.github/actions/setup
       - name: Biome
         run: bun run check
@@ -41,7 +41,9 @@ jobs:
         env:
           BASE_REF: ${{ github.base_ref }}
         run: |
-          if ! bun run changeset status --since="origin/$BASE_REF" > /dev/null 2>&1; then
+          if ! git rev-parse --verify --quiet "origin/$BASE_REF" > /dev/null; then
+            echo "::warning title=Changeset reminder skipped::origin/$BASE_REF is not in the checkout"
+          elif ! bun run changeset status --since="origin/$BASE_REF" > /dev/null; then
             echo "::warning title=No changeset::This pull request changes packages without a changeset. If users see the change, add one with \`bun run changeset\` (see .changeset/README.md)."
           fi
 

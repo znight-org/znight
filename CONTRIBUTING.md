@@ -120,9 +120,10 @@ The [full contributing guide](./docs/contributing/index.md#repository-layout) de
 ## Pull requests
 
 Every change to `main` goes through a pull request, the maintainers' included, and is merged once
-its checks pass: CI (lint, typecheck, build and pack, unit and example tests, docs build) and CI
-(full) (end-to-end tests on Node.js and Bun, Docker integration tests, the packed packages installed
-in a fresh application).
+CI passes (lint, typecheck, build and pack, unit and example tests, docs build). CI (full) also
+runs on every pull request (end-to-end tests on Node.js and Bun, Docker integration tests, the
+packed packages installed in a fresh application); it is not required to merge, but every release
+runs it again before publishing.
 
 - Keep each pull request focused on one change, and link the issue or the RFC it addresses.
 - Before pushing, run `bun run check`, `bun run typecheck` and `bun run test`; add

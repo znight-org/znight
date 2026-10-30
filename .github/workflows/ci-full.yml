@@ -11,8 +11,8 @@ on:
     branches: [ main ]
   schedule:
     - cron: "0 4 * * 1" # Mondays, 04:00 UTC
-  # manual runs, and the release workflow running it on the version pull request (see release.yml)
   workflow_dispatch:
+  # the release workflow, on the commit it is about to publish
   workflow_call:
 
 permissions:
