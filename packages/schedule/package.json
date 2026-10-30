@@ -1,6 +1,6 @@
 {
   "name": "@znight/schedule",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Znight schedule: cron, interval and timeout jobs validated at build time, with distributed locks and graceful shutdown",
   "license": "MIT",
   "author": "Ugho STEPHAN",
