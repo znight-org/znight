@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 688 524" width="688" height="524" role="img" aria-labelledby="title desc">
+<title id="title">Memory at idle</title>
+<desc id="desc">Resident memory at idle, MiB. Hand-wired (Fastify): Node.js 24.21.0: 83 MiB, Bun 1.4.4: 48 MiB; Znight (Fastify): Node.js 24.21.0: 89 MiB, Bun 1.4.4: 54 MiB; NestJS (Fastify): Node.js 24.21.0: 122 MiB, Bun 1.4.4: 80 MiB; Hand-wired (Express): Node.js 24.21.0: 75 MiB, Bun 1.4.4: 48 MiB; Znight (Express): Node.js 24.21.0: 89 MiB, Bun 1.4.4: 50 MiB; NestJS (Express): Node.js 24.21.0: 110 MiB, Bun 1.4.4: 68 MiB; Hand-wired (node:http): Node.js 24.21.0: 75 MiB, Bun 1.4.4: 34 MiB; Znight (node:http): Node.js 24.21.0: 79 MiB, Bun 1.4.4: 39 MiB; Hand-wired (Hono): Node.js 24.21.0: 80 MiB, Bun 1.4.4: 32 MiB; Znight (Hono): Node.js 24.21.0: 81 MiB, Bun 1.4.4: 40 MiB.</desc>
+<defs>
+<linearGradient id="zn-card" x1="0" y1="0" x2="0" y2="1">
+<stop offset="0" stop-color="#1A2350"/>
+<stop offset="1" stop-color="#0B1020"/>
+</linearGradient>
+<linearGradient id="zn-accent" x1="0" y1="0" x2="1" y2="1">
+<stop offset="0" stop-color="#2F6AE8"/>
+<stop offset="1" stop-color="#7C4DEF"/>
+</linearGradient>
+<linearGradient id="zn-accent-line" x1="0" y1="0" x2="1" y2="0">
+<stop offset="0" stop-color="#3E7BFA"/>
+<stop offset="1" stop-color="#8B5CF6"/>
+</linearGradient>
+<linearGradient id="zn-accent-soft" x1="0" y1="0" x2="1" y2="0">
+<stop offset="0" stop-color="#3E7BFA" stop-opacity="0.55"/>
+<stop offset="1" stop-color="#8B5CF6" stop-opacity="0.55"/>
+</linearGradient>
+<style>.s{font-family:ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif}.m{font-family:ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace}</style>
+</defs>
+<rect x="0.5" y="0.5" width="687" height="523" rx="16" fill="url(#zn-card)" stroke="#2C3660"/>
+<text x="24" y="36" class="s" font-size="12" font-weight="700" fill="#8E9AC4" letter-spacing="1.2">MEMORY AT IDLE</text>
+<text x="24" y="60" class="s" font-size="13" fill="#A9B4D6">Resident set size after the first response · median · lower is better</text>
+<text x="612.8" y="36" class="s" font-size="12" fill="#D6DCEE">Bun 1.4.4</text>
+<rect x="596.8" y="27" width="10" height="10" rx="3" fill="#5D6A9C"/>
+<text x="494.4" y="36" class="s" font-size="12" fill="#D6DCEE">Node.js 24.21.0</text>
+<rect x="478.4" y="27" width="10" height="10" rx="3" fill="#A9B4D6"/>
+<text x="24" y="104.5" class="s" font-size="13" font-weight="600" fill="#F4F6FC">Fastify</text>
+<text x="101.2" y="104.5" class="s" font-size="13" fill="#D6DCEE">Hand-wired</text>
+<rect x="189.4" y="86" width="280.9" height="12" rx="3" fill="#A9B4D6"/>
+<text x="478.3" y="96" class="s" font-size="12" fill="#A9B4D6">83 MiB</text>
+<rect x="189.4" y="102" width="163" height="12" rx="3" fill="#5D6A9C"/>
+<text x="360.4" y="112" class="s" font-size="12" fill="#A9B4D6">48 MiB</text>
+<text x="101.2" y="144.5" class="s" font-size="13" font-weight="600" fill="#F4F6FC">Znight</text>
+<rect x="189.4" y="126" width="300.5" height="12" rx="3" fill="url(#zn-accent-line)"/>
+<text x="497.9" y="136" class="s" font-size="12" font-weight="600" fill="#F4F6FC">89 MiB</text>
+<rect x="189.4" y="142" width="182.2" height="12" rx="3" fill="url(#zn-accent-soft)"/>
+<text x="379.6" y="152" class="s" font-size="12" font-weight="600" fill="#F4F6FC">54 MiB</text>
+<text x="101.2" y="184.5" class="s" font-size="13" fill="#D6DCEE">NestJS</text>
+<rect x="189.4" y="166" width="410.6" height="12" rx="3" fill="#A9B4D6"/>
+<text x="608" y="176" class="s" font-size="12" fill="#A9B4D6">122 MiB</text>
+<rect x="189.4" y="182" width="269.1" height="12" rx="3" fill="#5D6A9C"/>
+<text x="466.5" y="192" class="s" font-size="12" fill="#A9B4D6">80 MiB</text>
+<line x1="24" y1="201" x2="664" y2="201" stroke="#2C3660" stroke-width="1"/>
+<text x="24" y="230.5" class="s" font-size="13" font-weight="600" fill="#F4F6FC">Express</text>
+<text x="101.2" y="230.5" class="s" font-size="13" fill="#D6DCEE">Hand-wired</text>
+<rect x="189.4" y="212" width="254" height="12" rx="3" fill="#A9B4D6"/>
+<text x="451.4" y="222" class="s" font-size="12" fill="#A9B4D6">75 MiB</text>
+<rect x="189.4" y="228" width="160" height="12" rx="3" fill="#5D6A9C"/>
+<text x="357.4" y="238" class="s" font-size="12" fill="#A9B4D6">48 MiB</text>
+<text x="101.2" y="270.5" class="s" font-size="13" font-weight="600" fill="#F4F6FC">Znight</text>
+<rect x="189.4" y="252" width="298.1" height="12" rx="3" fill="url(#zn-accent-line)"/>
+<text x="495.5" y="262" class="s" font-size="12" font-weight="600" fill="#F4F6FC">89 MiB</text>
+<rect x="189.4" y="268" width="168.8" height="12" rx="3" fill="url(#zn-accent-soft)"/>
+<text x="366.2" y="278" class="s" font-size="12" font-weight="600" fill="#F4F6FC">50 MiB</text>
+<text x="101.2" y="310.5" class="s" font-size="13" fill="#D6DCEE">NestJS</text>
+<rect x="189.4" y="292" width="371.2" height="12" rx="3" fill="#A9B4D6"/>
+<text x="568.6" y="302" class="s" font-size="12" fill="#A9B4D6">110 MiB</text>
+<rect x="189.4" y="308" width="230.1" height="12" rx="3" fill="#5D6A9C"/>
+<text x="427.5" y="318" class="s" font-size="12" fill="#A9B4D6">68 MiB</text>
+<line x1="24" y1="327" x2="664" y2="327" stroke="#2C3660" stroke-width="1"/>
+<text x="24" y="356.5" class="s" font-size="13" font-weight="600" fill="#F4F6FC">node:http</text>
+<text x="101.2" y="356.5" class="s" font-size="13" fill="#D6DCEE">Hand-wired</text>
+<rect x="189.4" y="338" width="252.3" height="12" rx="3" fill="#A9B4D6"/>
+<text x="449.7" y="348" class="s" font-size="12" fill="#A9B4D6">75 MiB</text>
+<rect x="189.4" y="354" width="114.9" height="12" rx="3" fill="#5D6A9C"/>
+<text x="312.3" y="364" class="s" font-size="12" fill="#A9B4D6">34 MiB</text>
+<text x="101.2" y="396.5" class="s" font-size="13" font-weight="600" fill="#F4F6FC">Znight</text>
+<rect x="189.4" y="378" width="265.8" height="12" rx="3" fill="url(#zn-accent-line)"/>
+<text x="463.2" y="388" class="s" font-size="12" font-weight="600" fill="#F4F6FC">79 MiB</text>
+<rect x="189.4" y="394" width="132.7" height="12" rx="3" fill="url(#zn-accent-soft)"/>
+<text x="330.1" y="404" class="s" font-size="12" font-weight="600" fill="#F4F6FC">39 MiB</text>
+<line x1="24" y1="413" x2="664" y2="413" stroke="#2C3660" stroke-width="1"/>
+<text x="24" y="442.5" class="s" font-size="13" font-weight="600" fill="#F4F6FC">Hono</text>
+<text x="101.2" y="442.5" class="s" font-size="13" fill="#D6DCEE">Hand-wired</text>
+<rect x="189.4" y="424" width="269.8" height="12" rx="3" fill="#A9B4D6"/>
+<text x="467.2" y="434" class="s" font-size="12" fill="#A9B4D6">80 MiB</text>
+<rect x="189.4" y="440" width="107.4" height="12" rx="3" fill="#5D6A9C"/>
+<text x="304.9" y="450" class="s" font-size="12" fill="#A9B4D6">32 MiB</text>
+<text x="101.2" y="482.5" class="s" font-size="13" font-weight="600" fill="#F4F6FC">Znight</text>
+<rect x="189.4" y="464" width="274.2" height="12" rx="3" fill="url(#zn-accent-line)"/>
+<text x="471.6" y="474" class="s" font-size="12" font-weight="600" fill="#F4F6FC">81 MiB</text>
+<rect x="189.4" y="480" width="134.4" height="12" rx="3" fill="url(#zn-accent-soft)"/>
+<text x="331.8" y="490" class="s" font-size="12" font-weight="600" fill="#F4F6FC">40 MiB</text>
+</svg>

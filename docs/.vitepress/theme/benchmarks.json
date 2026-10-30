@@ -1,0 +1,20 @@
+{
+  "items": [
+    {
+      "value": "2.0×",
+      "label": "faster cold start than NestJS",
+      "detail": "150 ms vs 302 ms to the first response"
+    },
+    {
+      "value": "26%",
+      "label": "less memory than NestJS",
+      "detail": "89 MiB vs 122 MiB resident at idle"
+    },
+    {
+      "value": "3.4×",
+      "label": "faster DI container than NestJS",
+      "detail": "11 ms vs 36 ms to create 1,000 providers"
+    }
+  ],
+  "context": "Medians on an Apple M5 with Node.js 24.21.0 · HTTP applications on Fastify"
+}

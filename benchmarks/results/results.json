@@ -1,0 +1,2536 @@
+{
+  "version": 1,
+  "boot": {
+    "environment": {
+      "date": "2026-10-30T16:09:00.360Z",
+      "commit": "1c78914",
+      "machine": "Apple M5",
+      "cpus": 10,
+      "memoryGiB": 16,
+      "os": "macOS 26.6.2",
+      "runtimes": {
+        "node": "24.21.0",
+        "bun": "1.4.4"
+      },
+      "packages": {
+        "@znight/core": "0.1.1",
+        "@znight/http": "0.1.1",
+        "@znight/compiler": "0.1.1",
+        "@nestjs/core": "12.3.2",
+        "@nestjs/platform-fastify": "12.3.2",
+        "@nestjs/platform-express": "12.3.2",
+        "fastify": "5.12.7",
+        "express": "5.3.0",
+        "hono": "4.13.14",
+        "@hono/node-server": "2.1.5",
+        "zod": "4.6.7",
+        "tsyringe": "4.10.0",
+        "inversify": "8.2.3",
+        "reflect-metadata": "0.2.2",
+        "autocannon": "8.0.0",
+        "typescript": "7.0.2",
+        "vite": "8.3.5"
+      }
+    },
+    "settings": {
+      "runs": 30,
+      "idleMs": 500
+    },
+    "results": [
+      {
+        "variant": "baseline-fastify",
+        "framework": "baseline",
+        "adapter": "fastify",
+        "runtime": "node",
+        "readyMs": {
+          "n": 30,
+          "median": 131.7,
+          "p25": 124.9,
+          "p75": 140.3,
+          "min": 95.5,
+          "max": 186.4
+        },
+        "rssMiB": {
+          "n": 30,
+          "median": 83.4,
+          "p25": 83.2,
+          "p75": 83.6,
+          "min": 72.1,
+          "max": 83.8
+        }
+      },
+      {
+        "variant": "znight-fastify",
+        "framework": "znight",
+        "adapter": "fastify",
+        "runtime": "node",
+        "readyMs": {
+          "n": 30,
+          "median": 150.3,
+          "p25": 142.4,
+          "p75": 160.1,
+          "min": 121.5,
+          "max": 224.3
+        },
+        "rssMiB": {
+          "n": 30,
+          "median": 89.2,
+          "p25": 89.2,
+          "p75": 89.4,
+          "min": 79.1,
+          "max": 89.7
+        }
+      },
+      {
+        "variant": "nestjs-fastify",
+        "framework": "nestjs",
+        "adapter": "fastify",
+        "runtime": "node",
+        "readyMs": {
+          "n": 30,
+          "median": 301.7,
+          "p25": 291.2,
+          "p75": 319.5,
+          "min": 277.3,
+          "max": 388.7
+        },
+        "rssMiB": {
+          "n": 30,
+          "median": 121.9,
+          "p25": 111.4,
+          "p75": 122.2,
+          "min": 104.2,
+          "max": 122.9
+        }
+      },
+      {
+        "variant": "baseline-express",
+        "framework": "baseline",
+        "adapter": "express",
+        "runtime": "node",
+        "readyMs": {
+          "n": 30,
+          "median": 112.4,
+          "p25": 107.8,
+          "p75": 121.3,
+          "min": 101.6,
+          "max": 275.1
+        },
+        "rssMiB": {
+          "n": 30,
+          "median": 75.4,
+          "p25": 74,
+          "p75": 75.6,
+          "min": 73.6,
+          "max": 75.9
+        }
+      },
+      {
+        "variant": "znight-express",
+        "framework": "znight",
+        "adapter": "express",
+        "runtime": "node",
+        "readyMs": {
+          "n": 30,
+          "median": 137.5,
+          "p25": 132,
+          "p75": 143.1,
+          "min": 113.3,
+          "max": 187.5
+        },
+        "rssMiB": {
+          "n": 30,
+          "median": 88.5,
+          "p25": 88.4,
+          "p75": 88.6,
+          "min": 76.4,
+          "max": 89
+        }
+      },
+      {
+        "variant": "nestjs-express",
+        "framework": "nestjs",
+        "adapter": "express",
+        "runtime": "node",
+        "readyMs": {
+          "n": 30,
+          "median": 250.6,
+          "p25": 241,
+          "p75": 265.3,
+          "min": 195.5,
+          "max": 328.8
+        },
+        "rssMiB": {
+          "n": 30,
+          "median": 110.2,
+          "p25": 110,
+          "p75": 110.4,
+          "min": 93.8,
+          "max": 111.7
+        }
+      },
+      {
+        "variant": "baseline-node",
+        "framework": "baseline",
+        "adapter": "node",
+        "runtime": "node",
+        "readyMs": {
+          "n": 30,
+          "median": 88.3,
+          "p25": 82.5,
+          "p75": 90.1,
+          "min": 67.2,
+          "max": 96.4
+        },
+        "rssMiB": {
+          "n": 30,
+          "median": 74.9,
+          "p25": 74.7,
+          "p75": 75.1,
+          "min": 59.3,
+          "max": 75.5
+        }
+      },
+      {
+        "variant": "znight-node",
+        "framework": "znight",
+        "adapter": "node",
+        "runtime": "node",
+        "readyMs": {
+          "n": 30,
+          "median": 99.1,
+          "p25": 95.1,
+          "p75": 106.4,
+          "min": 80.6,
+          "max": 150
+        },
+        "rssMiB": {
+          "n": 30,
+          "median": 78.9,
+          "p25": 77.9,
+          "p75": 80,
+          "min": 65.8,
+          "max": 80.3
+        }
+      },
+      {
+        "variant": "baseline-hono",
+        "framework": "baseline",
+        "adapter": "hono",
+        "runtime": "node",
+        "readyMs": {
+          "n": 30,
+          "median": 95.5,
+          "p25": 89.1,
+          "p75": 101.2,
+          "min": 79.5,
+          "max": 117.7
+        },
+        "rssMiB": {
+          "n": 30,
+          "median": 80.1,
+          "p25": 80,
+          "p75": 80.2,
+          "min": 61.8,
+          "max": 80.4
+        }
+      },
+      {
+        "variant": "znight-hono",
+        "framework": "znight",
+        "adapter": "hono",
+        "runtime": "node",
+        "readyMs": {
+          "n": 30,
+          "median": 106.5,
+          "p25": 102.9,
+          "p75": 119.8,
+          "min": 91.2,
+          "max": 165.3
+        },
+        "rssMiB": {
+          "n": 30,
+          "median": 81.4,
+          "p25": 81.3,
+          "p75": 81.5,
+          "min": 72.3,
+          "max": 81.7
+        }
+      },
+      {
+        "variant": "baseline-fastify",
+        "framework": "baseline",
+        "adapter": "fastify",
+        "runtime": "bun",
+        "readyMs": {
+          "n": 30,
+          "median": 114.4,
+          "p25": 103.1,
+          "p75": 123.3,
+          "min": 78.9,
+          "max": 169.5
+        },
+        "rssMiB": {
+          "n": 30,
+          "median": 48.4,
+          "p25": 47.9,
+          "p75": 48.6,
+          "min": 38,
+          "max": 49.5
+        }
+      },
+      {
+        "variant": "znight-fastify",
+        "framework": "znight",
+        "adapter": "fastify",
+        "runtime": "bun",
+        "readyMs": {
+          "n": 30,
+          "median": 112.5,
+          "p25": 107.9,
+          "p75": 123,
+          "min": 97.9,
+          "max": 207.2
+        },
+        "rssMiB": {
+          "n": 30,
+          "median": 54.1,
+          "p25": 53.6,
+          "p75": 54.4,
+          "min": 37,
+          "max": 55
+        }
+      },
+      {
+        "variant": "nestjs-fastify",
+        "framework": "nestjs",
+        "adapter": "fastify",
+        "runtime": "bun",
+        "readyMs": {
+          "n": 30,
+          "median": 242.5,
+          "p25": 225.6,
+          "p75": 294.9,
+          "min": 201.6,
+          "max": 656.9
+        },
+        "rssMiB": {
+          "n": 30,
+          "median": 79.9,
+          "p25": 78.8,
+          "p75": 80.7,
+          "min": 68.8,
+          "max": 82
+        }
+      },
+      {
+        "variant": "baseline-express",
+        "framework": "baseline",
+        "adapter": "express",
+        "runtime": "bun",
+        "readyMs": {
+          "n": 30,
+          "median": 87.5,
+          "p25": 82.5,
+          "p75": 90.3,
+          "min": 69.4,
+          "max": 158.4
+        },
+        "rssMiB": {
+          "n": 30,
+          "median": 47.5,
+          "p25": 47.3,
+          "p75": 47.9,
+          "min": 46.9,
+          "max": 48.4
+        }
+      },
+      {
+        "variant": "znight-express",
+        "framework": "znight",
+        "adapter": "express",
+        "runtime": "bun",
+        "readyMs": {
+          "n": 30,
+          "median": 107.5,
+          "p25": 96.6,
+          "p75": 120.5,
+          "min": 80,
+          "max": 173.3
+        },
+        "rssMiB": {
+          "n": 30,
+          "median": 50.1,
+          "p25": 48.8,
+          "p75": 50.4,
+          "min": 40.9,
+          "max": 51.5
+        }
+      },
+      {
+        "variant": "nestjs-express",
+        "framework": "nestjs",
+        "adapter": "express",
+        "runtime": "bun",
+        "readyMs": {
+          "n": 30,
+          "median": 166.1,
+          "p25": 157.1,
+          "p75": 169.9,
+          "min": 143.2,
+          "max": 225.1
+        },
+        "rssMiB": {
+          "n": 30,
+          "median": 68.3,
+          "p25": 67.9,
+          "p75": 68.7,
+          "min": 54.9,
+          "max": 70.6
+        }
+      },
+      {
+        "variant": "baseline-node",
+        "framework": "baseline",
+        "adapter": "node",
+        "runtime": "bun",
+        "readyMs": {
+          "n": 30,
+          "median": 44.5,
+          "p25": 40.6,
+          "p75": 48.1,
+          "min": 33.6,
+          "max": 100.5
+        },
+        "rssMiB": {
+          "n": 30,
+          "median": 34.1,
+          "p25": 33.8,
+          "p75": 34.4,
+          "min": 31,
+          "max": 35.6
+        }
+      },
+      {
+        "variant": "znight-node",
+        "framework": "znight",
+        "adapter": "node",
+        "runtime": "bun",
+        "readyMs": {
+          "n": 30,
+          "median": 61.3,
+          "p25": 52.4,
+          "p75": 65.2,
+          "min": 38.5,
+          "max": 136.6
+        },
+        "rssMiB": {
+          "n": 30,
+          "median": 39.4,
+          "p25": 38.9,
+          "p75": 39.7,
+          "min": 22.7,
+          "max": 40
+        }
+      },
+      {
+        "variant": "baseline-hono",
+        "framework": "baseline",
+        "adapter": "hono",
+        "runtime": "bun",
+        "readyMs": {
+          "n": 30,
+          "median": 34,
+          "p25": 29.9,
+          "p75": 38,
+          "min": 23.4,
+          "max": 55.7
+        },
+        "rssMiB": {
+          "n": 30,
+          "median": 31.9,
+          "p25": 31.4,
+          "p75": 32.3,
+          "min": 23,
+          "max": 33.6
+        }
+      },
+      {
+        "variant": "znight-hono",
+        "framework": "znight",
+        "adapter": "hono",
+        "runtime": "bun",
+        "readyMs": {
+          "n": 30,
+          "median": 61.7,
+          "p25": 58,
+          "p75": 68,
+          "min": 47.8,
+          "max": 92.5
+        },
+        "rssMiB": {
+          "n": 30,
+          "median": 39.9,
+          "p25": 39.7,
+          "p75": 40.2,
+          "min": 32.7,
+          "max": 41.5
+        }
+      }
+    ]
+  },
+  "di": {
+    "environment": {
+      "date": "2026-10-30T16:10:48.896Z",
+      "commit": "1c78914",
+      "machine": "Apple M5",
+      "cpus": 10,
+      "memoryGiB": 16,
+      "os": "macOS 26.6.2",
+      "runtimes": {
+        "node": "24.21.0",
+        "bun": "1.4.4"
+      },
+      "packages": {
+        "@znight/core": "0.1.1",
+        "@znight/http": "0.1.1",
+        "@znight/compiler": "0.1.1",
+        "@nestjs/core": "12.3.2",
+        "@nestjs/platform-fastify": "12.3.2",
+        "@nestjs/platform-express": "12.3.2",
+        "fastify": "5.12.7",
+        "express": "5.3.0",
+        "hono": "4.13.14",
+        "@hono/node-server": "2.1.5",
+        "zod": "4.6.7",
+        "tsyringe": "4.10.0",
+        "inversify": "8.2.3",
+        "reflect-metadata": "0.2.2",
+        "autocannon": "8.0.0",
+        "typescript": "7.0.2",
+        "vite": "8.3.5"
+      }
+    },
+    "settings": {
+      "runs": 30,
+      "sizes": [100, 1000],
+      "layers": 10,
+      "dependenciesPerProvider": 3
+    },
+    "results": [
+      {
+        "framework": "znight",
+        "providers": 100,
+        "runtime": "node",
+        "containerMs": {
+          "n": 30,
+          "median": 1.82,
+          "p25": 1.73,
+          "p75": 2.03,
+          "min": 1.49,
+          "max": 3.61
+        },
+        "importMs": {
+          "n": 30,
+          "median": 18.12,
+          "p25": 16.92,
+          "p75": 21.38,
+          "min": 15.41,
+          "max": 78.26
+        },
+        "processMs": {
+          "n": 30,
+          "median": 45.3,
+          "p25": 42.2,
+          "p75": 55,
+          "min": 39.4,
+          "max": 115.7
+        }
+      },
+      {
+        "framework": "nestjs",
+        "providers": 100,
+        "runtime": "node",
+        "containerMs": {
+          "n": 30,
+          "median": 6.97,
+          "p25": 6.64,
+          "p75": 8.12,
+          "min": 5.98,
+          "max": 12.22
+        },
+        "importMs": {
+          "n": 30,
+          "median": 124.94,
+          "p25": 113.38,
+          "p75": 158.05,
+          "min": 106.12,
+          "max": 209.66
+        },
+        "processMs": {
+          "n": 30,
+          "median": 157.4,
+          "p25": 142,
+          "p75": 191.5,
+          "min": 134.6,
+          "max": 257.6
+        }
+      },
+      {
+        "framework": "tsyringe",
+        "providers": 100,
+        "runtime": "node",
+        "containerMs": {
+          "n": 30,
+          "median": 0.98,
+          "p25": 0.93,
+          "p75": 1.07,
+          "min": 0.89,
+          "max": 2.33
+        },
+        "importMs": {
+          "n": 30,
+          "median": 31.2,
+          "p25": 28.34,
+          "p75": 43.46,
+          "min": 26.61,
+          "max": 83.59
+        },
+        "processMs": {
+          "n": 30,
+          "median": 58.4,
+          "p25": 52.3,
+          "p75": 72.3,
+          "min": 50.4,
+          "max": 145.6
+        }
+      },
+      {
+        "framework": "inversify",
+        "providers": 100,
+        "runtime": "node",
+        "containerMs": {
+          "n": 30,
+          "median": 3.41,
+          "p25": 3.15,
+          "p75": 3.93,
+          "min": 2.94,
+          "max": 12.3
+        },
+        "importMs": {
+          "n": 30,
+          "median": 53.85,
+          "p25": 50.44,
+          "p75": 75.31,
+          "min": 48.49,
+          "max": 132.42
+        },
+        "processMs": {
+          "n": 30,
+          "median": 82.5,
+          "p25": 77.8,
+          "p75": 107.3,
+          "min": 73,
+          "max": 174.2
+        }
+      },
+      {
+        "framework": "znight",
+        "providers": 1000,
+        "runtime": "node",
+        "containerMs": {
+          "n": 30,
+          "median": 10.5,
+          "p25": 9.75,
+          "p75": 12.86,
+          "min": 9.04,
+          "max": 14.71
+        },
+        "importMs": {
+          "n": 30,
+          "median": 135.01,
+          "p25": 130.18,
+          "p75": 205,
+          "min": 121.36,
+          "max": 345.03
+        },
+        "processMs": {
+          "n": 30,
+          "median": 171,
+          "p25": 163.1,
+          "p75": 248.9,
+          "min": 156.1,
+          "max": 415.7
+        }
+      },
+      {
+        "framework": "nestjs",
+        "providers": 1000,
+        "runtime": "node",
+        "containerMs": {
+          "n": 30,
+          "median": 35.85,
+          "p25": 34.43,
+          "p75": 43.21,
+          "min": 32.44,
+          "max": 68.34
+        },
+        "importMs": {
+          "n": 30,
+          "median": 270.21,
+          "p25": 261.64,
+          "p75": 375.03,
+          "min": 255.56,
+          "max": 604.65
+        },
+        "processMs": {
+          "n": 30,
+          "median": 334.8,
+          "p25": 322.8,
+          "p75": 456.1,
+          "min": 317.5,
+          "max": 686.8
+        }
+      },
+      {
+        "framework": "tsyringe",
+        "providers": 1000,
+        "runtime": "node",
+        "containerMs": {
+          "n": 30,
+          "median": 5.89,
+          "p25": 5.48,
+          "p75": 6.36,
+          "min": 5.26,
+          "max": 10.58
+        },
+        "importMs": {
+          "n": 30,
+          "median": 198.6,
+          "p25": 192.54,
+          "p75": 243.14,
+          "min": 185.7,
+          "max": 414.07
+        },
+        "processMs": {
+          "n": 30,
+          "median": 230,
+          "p25": 222.8,
+          "p75": 277.3,
+          "min": 214.4,
+          "max": 458.1
+        }
+      },
+      {
+        "framework": "inversify",
+        "providers": 1000,
+        "runtime": "node",
+        "containerMs": {
+          "n": 30,
+          "median": 15.4,
+          "p25": 14.42,
+          "p75": 18.1,
+          "min": 12.57,
+          "max": 23.28
+        },
+        "importMs": {
+          "n": 30,
+          "median": 211.07,
+          "p25": 199.51,
+          "p75": 268.28,
+          "min": 189.77,
+          "max": 551.03
+        },
+        "processMs": {
+          "n": 30,
+          "median": 259.3,
+          "p25": 239.6,
+          "p75": 316.2,
+          "min": 227.6,
+          "max": 607.1
+        }
+      },
+      {
+        "framework": "znight",
+        "providers": 100,
+        "runtime": "bun",
+        "containerMs": {
+          "n": 30,
+          "median": 2.16,
+          "p25": 2.03,
+          "p75": 3.1,
+          "min": 1.96,
+          "max": 14.86
+        },
+        "importMs": {
+          "n": 30,
+          "median": 12.19,
+          "p25": 9.33,
+          "p75": 14.13,
+          "min": 5.91,
+          "max": 43.41
+        },
+        "processMs": {
+          "n": 30,
+          "median": 39.3,
+          "p25": 34.8,
+          "p75": 41,
+          "min": 21.8,
+          "max": 95.4
+        }
+      },
+      {
+        "framework": "nestjs",
+        "providers": 100,
+        "runtime": "bun",
+        "containerMs": {
+          "n": 30,
+          "median": 11.29,
+          "p25": 9.94,
+          "p75": 14.25,
+          "min": 9.17,
+          "max": 36.63
+        },
+        "importMs": {
+          "n": 30,
+          "median": 85.39,
+          "p25": 82.38,
+          "p75": 98.97,
+          "min": 55.3,
+          "max": 311.72
+        },
+        "processMs": {
+          "n": 30,
+          "median": 106.9,
+          "p25": 103.8,
+          "p75": 132.5,
+          "min": 76.9,
+          "max": 396.4
+        }
+      },
+      {
+        "framework": "tsyringe",
+        "providers": 100,
+        "runtime": "bun",
+        "containerMs": {
+          "n": 30,
+          "median": 1.11,
+          "p25": 1.07,
+          "p75": 1.26,
+          "min": 0.99,
+          "max": 5.39
+        },
+        "importMs": {
+          "n": 30,
+          "median": 10.19,
+          "p25": 9.43,
+          "p75": 12.08,
+          "min": 8.75,
+          "max": 31.42
+        },
+        "processMs": {
+          "n": 30,
+          "median": 22.5,
+          "p25": 21.5,
+          "p75": 29.1,
+          "min": 20.2,
+          "max": 96.7
+        }
+      },
+      {
+        "framework": "inversify",
+        "providers": 100,
+        "runtime": "bun",
+        "containerMs": {
+          "n": 30,
+          "median": 3.89,
+          "p25": 3.24,
+          "p75": 5.11,
+          "min": 2.91,
+          "max": 14.97
+        },
+        "importMs": {
+          "n": 30,
+          "median": 28.61,
+          "p25": 23.68,
+          "p75": 32.44,
+          "min": 17.31,
+          "max": 48.99
+        },
+        "processMs": {
+          "n": 30,
+          "median": 45.9,
+          "p25": 41.6,
+          "p75": 51.7,
+          "min": 31.4,
+          "max": 83.1
+        }
+      },
+      {
+        "framework": "znight",
+        "providers": 1000,
+        "runtime": "bun",
+        "containerMs": {
+          "n": 30,
+          "median": 11.03,
+          "p25": 10.42,
+          "p75": 13.69,
+          "min": 9.9,
+          "max": 24.69
+        },
+        "importMs": {
+          "n": 30,
+          "median": 56.45,
+          "p25": 55.13,
+          "p75": 61.74,
+          "min": 46.22,
+          "max": 116.04
+        },
+        "processMs": {
+          "n": 30,
+          "median": 81.7,
+          "p25": 77.3,
+          "p75": 90.6,
+          "min": 67.3,
+          "max": 166.6
+        }
+      },
+      {
+        "framework": "nestjs",
+        "providers": 1000,
+        "runtime": "bun",
+        "containerMs": {
+          "n": 30,
+          "median": 35.81,
+          "p25": 33.69,
+          "p75": 52.28,
+          "min": 30.83,
+          "max": 125.22
+        },
+        "importMs": {
+          "n": 30,
+          "median": 162.22,
+          "p25": 149.82,
+          "p75": 187.87,
+          "min": 114.83,
+          "max": 331
+        },
+        "processMs": {
+          "n": 30,
+          "median": 222.4,
+          "p25": 210.3,
+          "p75": 262.6,
+          "min": 171.9,
+          "max": 428.9
+        }
+      },
+      {
+        "framework": "tsyringe",
+        "providers": 1000,
+        "runtime": "bun",
+        "containerMs": {
+          "n": 30,
+          "median": 6.73,
+          "p25": 6.04,
+          "p75": 8.93,
+          "min": 5.66,
+          "max": 66.64
+        },
+        "importMs": {
+          "n": 30,
+          "median": 76.56,
+          "p25": 71.13,
+          "p75": 85.94,
+          "min": 51.51,
+          "max": 228.42
+        },
+        "processMs": {
+          "n": 30,
+          "median": 104.1,
+          "p25": 94.2,
+          "p75": 118.5,
+          "min": 72.3,
+          "max": 314
+        }
+      },
+      {
+        "framework": "inversify",
+        "providers": 1000,
+        "runtime": "bun",
+        "containerMs": {
+          "n": 30,
+          "median": 16.09,
+          "p25": 14.4,
+          "p75": 20.08,
+          "min": 13.63,
+          "max": 333.62
+        },
+        "importMs": {
+          "n": 30,
+          "median": 119.71,
+          "p25": 114.76,
+          "p75": 128,
+          "min": 85.65,
+          "max": 327.39
+        },
+        "processMs": {
+          "n": 30,
+          "median": 162.6,
+          "p25": 158.1,
+          "p75": 175.2,
+          "min": 134.1,
+          "max": 632.9
+        }
+      }
+    ],
+    "compile": [
+      {
+        "providers": 100,
+        "runtime": "node",
+        "generateMs": {
+          "n": 10,
+          "median": 81.5,
+          "p25": 73.2,
+          "p75": 96.2,
+          "min": 66.6,
+          "max": 107
+        }
+      },
+      {
+        "providers": 1000,
+        "runtime": "node",
+        "generateMs": {
+          "n": 10,
+          "median": 637.1,
+          "p25": 548.1,
+          "p75": 663.6,
+          "min": 509.1,
+          "max": 797.1
+        }
+      }
+    ]
+  },
+  "http": {
+    "environment": {
+      "date": "2026-10-30T16:39:05.972Z",
+      "commit": "1c78914",
+      "machine": "Apple M5",
+      "cpus": 10,
+      "memoryGiB": 16,
+      "os": "macOS 26.6.2",
+      "runtimes": {
+        "node": "24.21.0",
+        "bun": "1.4.4"
+      },
+      "packages": {
+        "@znight/core": "0.1.1",
+        "@znight/http": "0.1.1",
+        "@znight/compiler": "0.1.1",
+        "@nestjs/core": "12.3.2",
+        "@nestjs/platform-fastify": "12.3.2",
+        "@nestjs/platform-express": "12.3.2",
+        "fastify": "5.12.7",
+        "express": "5.3.0",
+        "hono": "4.13.14",
+        "@hono/node-server": "2.1.5",
+        "zod": "4.6.7",
+        "tsyringe": "4.10.0",
+        "inversify": "8.2.3",
+        "reflect-metadata": "0.2.2",
+        "autocannon": "8.0.0",
+        "typescript": "7.0.2",
+        "vite": "8.3.5"
+      }
+    },
+    "settings": {
+      "tool": "autocannon",
+      "connections": 100,
+      "pipelining": 1,
+      "warmupSeconds": 3,
+      "durationSeconds": 10,
+      "rounds": 3
+    },
+    "results": [
+      {
+        "variant": "baseline-fastify",
+        "framework": "baseline",
+        "adapter": "fastify",
+        "runtime": "node",
+        "endpoint": "get",
+        "rounds": [
+          {
+            "requestsPerSecond": 131651,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 126236,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 136663,
+            "latencyP99Ms": 1
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 131651,
+          "p25": 128944,
+          "p75": 134157,
+          "min": 126236,
+          "max": 136663
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 1,
+          "p25": 1,
+          "p75": 1,
+          "min": 1,
+          "max": 1
+        }
+      },
+      {
+        "variant": "baseline-fastify",
+        "framework": "baseline",
+        "adapter": "fastify",
+        "runtime": "node",
+        "endpoint": "post",
+        "rounds": [
+          {
+            "requestsPerSecond": 93553,
+            "latencyP99Ms": 3
+          },
+          {
+            "requestsPerSecond": 110153,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 100593,
+            "latencyP99Ms": 2
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 100593,
+          "p25": 97073,
+          "p75": 105373,
+          "min": 93553,
+          "max": 110153
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 2,
+          "p25": 1.5,
+          "p75": 2.5,
+          "min": 1,
+          "max": 3
+        }
+      },
+      {
+        "variant": "znight-fastify",
+        "framework": "znight",
+        "adapter": "fastify",
+        "runtime": "node",
+        "endpoint": "get",
+        "rounds": [
+          {
+            "requestsPerSecond": 64285,
+            "latencyP99Ms": 4
+          },
+          {
+            "requestsPerSecond": 67539,
+            "latencyP99Ms": 4
+          },
+          {
+            "requestsPerSecond": 69674,
+            "latencyP99Ms": 4
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 67539,
+          "p25": 65912,
+          "p75": 68607,
+          "min": 64285,
+          "max": 69674
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 4,
+          "p25": 4,
+          "p75": 4,
+          "min": 4,
+          "max": 4
+        }
+      },
+      {
+        "variant": "znight-fastify",
+        "framework": "znight",
+        "adapter": "fastify",
+        "runtime": "node",
+        "endpoint": "post",
+        "rounds": [
+          {
+            "requestsPerSecond": 55434,
+            "latencyP99Ms": 4
+          },
+          {
+            "requestsPerSecond": 55536,
+            "latencyP99Ms": 4
+          },
+          {
+            "requestsPerSecond": 48498,
+            "latencyP99Ms": 7
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 55434,
+          "p25": 51966,
+          "p75": 55485,
+          "min": 48498,
+          "max": 55536
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 4,
+          "p25": 4,
+          "p75": 5.5,
+          "min": 4,
+          "max": 7
+        }
+      },
+      {
+        "variant": "nestjs-fastify",
+        "framework": "nestjs",
+        "adapter": "fastify",
+        "runtime": "node",
+        "endpoint": "get",
+        "rounds": [
+          {
+            "requestsPerSecond": 95114,
+            "latencyP99Ms": 3
+          },
+          {
+            "requestsPerSecond": 104096,
+            "latencyP99Ms": 2
+          },
+          {
+            "requestsPerSecond": 118572,
+            "latencyP99Ms": 1
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 104096,
+          "p25": 99605,
+          "p75": 111334,
+          "min": 95114,
+          "max": 118572
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 2,
+          "p25": 1.5,
+          "p75": 2.5,
+          "min": 1,
+          "max": 3
+        }
+      },
+      {
+        "variant": "nestjs-fastify",
+        "framework": "nestjs",
+        "adapter": "fastify",
+        "runtime": "node",
+        "endpoint": "post",
+        "rounds": [
+          {
+            "requestsPerSecond": 67295,
+            "latencyP99Ms": 4
+          },
+          {
+            "requestsPerSecond": 90522,
+            "latencyP99Ms": 2
+          },
+          {
+            "requestsPerSecond": 93990,
+            "latencyP99Ms": 2
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 90522,
+          "p25": 78909,
+          "p75": 92256,
+          "min": 67295,
+          "max": 93990
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 2,
+          "p25": 2,
+          "p75": 3,
+          "min": 2,
+          "max": 4
+        }
+      },
+      {
+        "variant": "baseline-express",
+        "framework": "baseline",
+        "adapter": "express",
+        "runtime": "node",
+        "endpoint": "get",
+        "rounds": [
+          {
+            "requestsPerSecond": 68911,
+            "latencyP99Ms": 3
+          },
+          {
+            "requestsPerSecond": 71716,
+            "latencyP99Ms": 2
+          },
+          {
+            "requestsPerSecond": 73341,
+            "latencyP99Ms": 2
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 71716,
+          "p25": 70314,
+          "p75": 72529,
+          "min": 68911,
+          "max": 73341
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 2,
+          "p25": 2,
+          "p75": 2.5,
+          "min": 2,
+          "max": 3
+        }
+      },
+      {
+        "variant": "baseline-express",
+        "framework": "baseline",
+        "adapter": "express",
+        "runtime": "node",
+        "endpoint": "post",
+        "rounds": [
+          {
+            "requestsPerSecond": 56772,
+            "latencyP99Ms": 4
+          },
+          {
+            "requestsPerSecond": 56068,
+            "latencyP99Ms": 4
+          },
+          {
+            "requestsPerSecond": 62563,
+            "latencyP99Ms": 3
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 56772,
+          "p25": 56420,
+          "p75": 59668,
+          "min": 56068,
+          "max": 62563
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 4,
+          "p25": 3.5,
+          "p75": 4,
+          "min": 3,
+          "max": 4
+        }
+      },
+      {
+        "variant": "znight-express",
+        "framework": "znight",
+        "adapter": "express",
+        "runtime": "node",
+        "endpoint": "get",
+        "rounds": [
+          {
+            "requestsPerSecond": 55381,
+            "latencyP99Ms": 6
+          },
+          {
+            "requestsPerSecond": 64580,
+            "latencyP99Ms": 4
+          },
+          {
+            "requestsPerSecond": 65008,
+            "latencyP99Ms": 4
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 64580,
+          "p25": 59981,
+          "p75": 64794,
+          "min": 55381,
+          "max": 65008
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 4,
+          "p25": 4,
+          "p75": 5,
+          "min": 4,
+          "max": 6
+        }
+      },
+      {
+        "variant": "znight-express",
+        "framework": "znight",
+        "adapter": "express",
+        "runtime": "node",
+        "endpoint": "post",
+        "rounds": [
+          {
+            "requestsPerSecond": 52691,
+            "latencyP99Ms": 5
+          },
+          {
+            "requestsPerSecond": 53988,
+            "latencyP99Ms": 4
+          },
+          {
+            "requestsPerSecond": 56182,
+            "latencyP99Ms": 4
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 53988,
+          "p25": 53340,
+          "p75": 55085,
+          "min": 52691,
+          "max": 56182
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 4,
+          "p25": 4,
+          "p75": 4.5,
+          "min": 4,
+          "max": 5
+        }
+      },
+      {
+        "variant": "nestjs-express",
+        "framework": "nestjs",
+        "adapter": "express",
+        "runtime": "node",
+        "endpoint": "get",
+        "rounds": [
+          {
+            "requestsPerSecond": 74573,
+            "latencyP99Ms": 2
+          },
+          {
+            "requestsPerSecond": 77955,
+            "latencyP99Ms": 2
+          },
+          {
+            "requestsPerSecond": 77693,
+            "latencyP99Ms": 2
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 77693,
+          "p25": 76133,
+          "p75": 77824,
+          "min": 74573,
+          "max": 77955
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 2,
+          "p25": 2,
+          "p75": 2,
+          "min": 2,
+          "max": 2
+        }
+      },
+      {
+        "variant": "nestjs-express",
+        "framework": "nestjs",
+        "adapter": "express",
+        "runtime": "node",
+        "endpoint": "post",
+        "rounds": [
+          {
+            "requestsPerSecond": 60077,
+            "latencyP99Ms": 3
+          },
+          {
+            "requestsPerSecond": 61177,
+            "latencyP99Ms": 3
+          },
+          {
+            "requestsPerSecond": 63905,
+            "latencyP99Ms": 2
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 61177,
+          "p25": 60627,
+          "p75": 62541,
+          "min": 60077,
+          "max": 63905
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 3,
+          "p25": 2.5,
+          "p75": 3,
+          "min": 2,
+          "max": 3
+        }
+      },
+      {
+        "variant": "baseline-node",
+        "framework": "baseline",
+        "adapter": "node",
+        "runtime": "node",
+        "endpoint": "get",
+        "rounds": [
+          {
+            "requestsPerSecond": 113135,
+            "latencyP99Ms": 3
+          },
+          {
+            "requestsPerSecond": 139852,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 135671,
+            "latencyP99Ms": 1
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 135671,
+          "p25": 124403,
+          "p75": 137762,
+          "min": 113135,
+          "max": 139852
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 1,
+          "p25": 1,
+          "p75": 2,
+          "min": 1,
+          "max": 3
+        }
+      },
+      {
+        "variant": "baseline-node",
+        "framework": "baseline",
+        "adapter": "node",
+        "runtime": "node",
+        "endpoint": "post",
+        "rounds": [
+          {
+            "requestsPerSecond": 96829,
+            "latencyP99Ms": 3
+          },
+          {
+            "requestsPerSecond": 118182,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 117385,
+            "latencyP99Ms": 1
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 117385,
+          "p25": 107107,
+          "p75": 117784,
+          "min": 96829,
+          "max": 118182
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 1,
+          "p25": 1,
+          "p75": 2,
+          "min": 1,
+          "max": 3
+        }
+      },
+      {
+        "variant": "znight-node",
+        "framework": "znight",
+        "adapter": "node",
+        "runtime": "node",
+        "endpoint": "get",
+        "rounds": [
+          {
+            "requestsPerSecond": 73893,
+            "latencyP99Ms": 3
+          },
+          {
+            "requestsPerSecond": 76141,
+            "latencyP99Ms": 3
+          },
+          {
+            "requestsPerSecond": 62134,
+            "latencyP99Ms": 5
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 73893,
+          "p25": 68014,
+          "p75": 75017,
+          "min": 62134,
+          "max": 76141
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 3,
+          "p25": 3,
+          "p75": 4,
+          "min": 3,
+          "max": 5
+        }
+      },
+      {
+        "variant": "znight-node",
+        "framework": "znight",
+        "adapter": "node",
+        "runtime": "node",
+        "endpoint": "post",
+        "rounds": [
+          {
+            "requestsPerSecond": 64167,
+            "latencyP99Ms": 4
+          },
+          {
+            "requestsPerSecond": 63693,
+            "latencyP99Ms": 4
+          },
+          {
+            "requestsPerSecond": 64813,
+            "latencyP99Ms": 4
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 64167,
+          "p25": 63930,
+          "p75": 64490,
+          "min": 63693,
+          "max": 64813
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 4,
+          "p25": 4,
+          "p75": 4,
+          "min": 4,
+          "max": 4
+        }
+      },
+      {
+        "variant": "baseline-hono",
+        "framework": "baseline",
+        "adapter": "hono",
+        "runtime": "node",
+        "endpoint": "get",
+        "rounds": [
+          {
+            "requestsPerSecond": 124163,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 121620,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 130531,
+            "latencyP99Ms": 1
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 124163,
+          "p25": 122892,
+          "p75": 127347,
+          "min": 121620,
+          "max": 130531
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 1,
+          "p25": 1,
+          "p75": 1,
+          "min": 1,
+          "max": 1
+        }
+      },
+      {
+        "variant": "baseline-hono",
+        "framework": "baseline",
+        "adapter": "hono",
+        "runtime": "node",
+        "endpoint": "post",
+        "rounds": [
+          {
+            "requestsPerSecond": 101734,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 87098,
+            "latencyP99Ms": 2
+          },
+          {
+            "requestsPerSecond": 98796,
+            "latencyP99Ms": 2
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 98796,
+          "p25": 92947,
+          "p75": 100265,
+          "min": 87098,
+          "max": 101734
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 2,
+          "p25": 1.5,
+          "p75": 2,
+          "min": 1,
+          "max": 2
+        }
+      },
+      {
+        "variant": "znight-hono",
+        "framework": "znight",
+        "adapter": "hono",
+        "runtime": "node",
+        "endpoint": "get",
+        "rounds": [
+          {
+            "requestsPerSecond": 54224,
+            "latencyP99Ms": 5
+          },
+          {
+            "requestsPerSecond": 52807,
+            "latencyP99Ms": 5
+          },
+          {
+            "requestsPerSecond": 56752,
+            "latencyP99Ms": 5
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 54224,
+          "p25": 53516,
+          "p75": 55488,
+          "min": 52807,
+          "max": 56752
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 5,
+          "p25": 5,
+          "p75": 5,
+          "min": 5,
+          "max": 5
+        }
+      },
+      {
+        "variant": "znight-hono",
+        "framework": "znight",
+        "adapter": "hono",
+        "runtime": "node",
+        "endpoint": "post",
+        "rounds": [
+          {
+            "requestsPerSecond": 31643,
+            "latencyP99Ms": 6
+          },
+          {
+            "requestsPerSecond": 28343,
+            "latencyP99Ms": 8
+          },
+          {
+            "requestsPerSecond": 30993,
+            "latencyP99Ms": 7
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 30993,
+          "p25": 29668,
+          "p75": 31318,
+          "min": 28343,
+          "max": 31643
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 7,
+          "p25": 6.5,
+          "p75": 7.5,
+          "min": 6,
+          "max": 8
+        }
+      },
+      {
+        "variant": "baseline-fastify",
+        "framework": "baseline",
+        "adapter": "fastify",
+        "runtime": "bun",
+        "endpoint": "get",
+        "rounds": [
+          {
+            "requestsPerSecond": 145878,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 154816,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 145100,
+            "latencyP99Ms": 1
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 145878,
+          "p25": 145489,
+          "p75": 150347,
+          "min": 145100,
+          "max": 154816
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 1,
+          "p25": 1,
+          "p75": 1,
+          "min": 1,
+          "max": 1
+        }
+      },
+      {
+        "variant": "baseline-fastify",
+        "framework": "baseline",
+        "adapter": "fastify",
+        "runtime": "bun",
+        "endpoint": "post",
+        "rounds": [
+          {
+            "requestsPerSecond": 122179,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 115290,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 123279,
+            "latencyP99Ms": 1
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 122179,
+          "p25": 118735,
+          "p75": 122729,
+          "min": 115290,
+          "max": 123279
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 1,
+          "p25": 1,
+          "p75": 1,
+          "min": 1,
+          "max": 1
+        }
+      },
+      {
+        "variant": "znight-fastify",
+        "framework": "znight",
+        "adapter": "fastify",
+        "runtime": "bun",
+        "endpoint": "get",
+        "rounds": [
+          {
+            "requestsPerSecond": 102711,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 84501,
+            "latencyP99Ms": 3
+          },
+          {
+            "requestsPerSecond": 109821,
+            "latencyP99Ms": 1
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 102711,
+          "p25": 93606,
+          "p75": 106266,
+          "min": 84501,
+          "max": 109821
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 1,
+          "p25": 1,
+          "p75": 2,
+          "min": 1,
+          "max": 3
+        }
+      },
+      {
+        "variant": "znight-fastify",
+        "framework": "znight",
+        "adapter": "fastify",
+        "runtime": "bun",
+        "endpoint": "post",
+        "rounds": [
+          {
+            "requestsPerSecond": 85158,
+            "latencyP99Ms": 2
+          },
+          {
+            "requestsPerSecond": 73759,
+            "latencyP99Ms": 3
+          },
+          {
+            "requestsPerSecond": 86839,
+            "latencyP99Ms": 2
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 85158,
+          "p25": 79459,
+          "p75": 85999,
+          "min": 73759,
+          "max": 86839
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 2,
+          "p25": 2,
+          "p75": 2.5,
+          "min": 2,
+          "max": 3
+        }
+      },
+      {
+        "variant": "nestjs-fastify",
+        "framework": "nestjs",
+        "adapter": "fastify",
+        "runtime": "bun",
+        "endpoint": "get",
+        "rounds": [
+          {
+            "requestsPerSecond": 127537,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 97498,
+            "latencyP99Ms": 3
+          },
+          {
+            "requestsPerSecond": 97722,
+            "latencyP99Ms": 4
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 97722,
+          "p25": 97610,
+          "p75": 112630,
+          "min": 97498,
+          "max": 127537
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 3,
+          "p25": 2,
+          "p75": 3.5,
+          "min": 1,
+          "max": 4
+        }
+      },
+      {
+        "variant": "nestjs-fastify",
+        "framework": "nestjs",
+        "adapter": "fastify",
+        "runtime": "bun",
+        "endpoint": "post",
+        "rounds": [
+          {
+            "requestsPerSecond": 105708,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 97423,
+            "latencyP99Ms": 2
+          },
+          {
+            "requestsPerSecond": 94246,
+            "latencyP99Ms": 2
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 97423,
+          "p25": 95835,
+          "p75": 101566,
+          "min": 94246,
+          "max": 105708
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 2,
+          "p25": 1.5,
+          "p75": 2,
+          "min": 1,
+          "max": 2
+        }
+      },
+      {
+        "variant": "baseline-express",
+        "framework": "baseline",
+        "adapter": "express",
+        "runtime": "bun",
+        "endpoint": "get",
+        "rounds": [
+          {
+            "requestsPerSecond": 126502,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 116064,
+            "latencyP99Ms": 2
+          },
+          {
+            "requestsPerSecond": 127610,
+            "latencyP99Ms": 1
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 126502,
+          "p25": 121283,
+          "p75": 127056,
+          "min": 116064,
+          "max": 127610
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 1,
+          "p25": 1,
+          "p75": 1.5,
+          "min": 1,
+          "max": 2
+        }
+      },
+      {
+        "variant": "baseline-express",
+        "framework": "baseline",
+        "adapter": "express",
+        "runtime": "bun",
+        "endpoint": "post",
+        "rounds": [
+          {
+            "requestsPerSecond": 96963,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 96207,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 99087,
+            "latencyP99Ms": 1
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 96963,
+          "p25": 96585,
+          "p75": 98025,
+          "min": 96207,
+          "max": 99087
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 1,
+          "p25": 1,
+          "p75": 1,
+          "min": 1,
+          "max": 1
+        }
+      },
+      {
+        "variant": "znight-express",
+        "framework": "znight",
+        "adapter": "express",
+        "runtime": "bun",
+        "endpoint": "get",
+        "rounds": [
+          {
+            "requestsPerSecond": 105196,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 102909,
+            "latencyP99Ms": 2
+          },
+          {
+            "requestsPerSecond": 111409,
+            "latencyP99Ms": 1
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 105196,
+          "p25": 104053,
+          "p75": 108303,
+          "min": 102909,
+          "max": 111409
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 1,
+          "p25": 1,
+          "p75": 1.5,
+          "min": 1,
+          "max": 2
+        }
+      },
+      {
+        "variant": "znight-express",
+        "framework": "znight",
+        "adapter": "express",
+        "runtime": "bun",
+        "endpoint": "post",
+        "rounds": [
+          {
+            "requestsPerSecond": 80722,
+            "latencyP99Ms": 3
+          },
+          {
+            "requestsPerSecond": 85011,
+            "latencyP99Ms": 2
+          },
+          {
+            "requestsPerSecond": 66466,
+            "latencyP99Ms": 7
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 80722,
+          "p25": 73594,
+          "p75": 82867,
+          "min": 66466,
+          "max": 85011
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 3,
+          "p25": 2.5,
+          "p75": 5,
+          "min": 2,
+          "max": 7
+        }
+      },
+      {
+        "variant": "nestjs-express",
+        "framework": "nestjs",
+        "adapter": "express",
+        "runtime": "bun",
+        "endpoint": "get",
+        "rounds": [
+          {
+            "requestsPerSecond": 85662,
+            "latencyP99Ms": 4
+          },
+          {
+            "requestsPerSecond": 108687,
+            "latencyP99Ms": 2
+          },
+          {
+            "requestsPerSecond": 99475,
+            "latencyP99Ms": 3
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 99475,
+          "p25": 92569,
+          "p75": 104081,
+          "min": 85662,
+          "max": 108687
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 3,
+          "p25": 2.5,
+          "p75": 3.5,
+          "min": 2,
+          "max": 4
+        }
+      },
+      {
+        "variant": "nestjs-express",
+        "framework": "nestjs",
+        "adapter": "express",
+        "runtime": "bun",
+        "endpoint": "post",
+        "rounds": [
+          {
+            "requestsPerSecond": 74944,
+            "latencyP99Ms": 4
+          },
+          {
+            "requestsPerSecond": 82284,
+            "latencyP99Ms": 2
+          },
+          {
+            "requestsPerSecond": 85001,
+            "latencyP99Ms": 2
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 82284,
+          "p25": 78614,
+          "p75": 83643,
+          "min": 74944,
+          "max": 85001
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 2,
+          "p25": 2,
+          "p75": 3,
+          "min": 2,
+          "max": 4
+        }
+      },
+      {
+        "variant": "baseline-node",
+        "framework": "baseline",
+        "adapter": "node",
+        "runtime": "bun",
+        "endpoint": "get",
+        "rounds": [
+          {
+            "requestsPerSecond": 141597,
+            "latencyP99Ms": 2
+          },
+          {
+            "requestsPerSecond": 157379,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 166383,
+            "latencyP99Ms": 1
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 157379,
+          "p25": 149488,
+          "p75": 161881,
+          "min": 141597,
+          "max": 166383
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 1,
+          "p25": 1,
+          "p75": 1.5,
+          "min": 1,
+          "max": 2
+        }
+      },
+      {
+        "variant": "baseline-node",
+        "framework": "baseline",
+        "adapter": "node",
+        "runtime": "bun",
+        "endpoint": "post",
+        "rounds": [
+          {
+            "requestsPerSecond": 136224,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 128701,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 129100,
+            "latencyP99Ms": 2
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 129100,
+          "p25": 128901,
+          "p75": 132662,
+          "min": 128701,
+          "max": 136224
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 1,
+          "p25": 1,
+          "p75": 1.5,
+          "min": 1,
+          "max": 2
+        }
+      },
+      {
+        "variant": "znight-node",
+        "framework": "znight",
+        "adapter": "node",
+        "runtime": "bun",
+        "endpoint": "get",
+        "rounds": [
+          {
+            "requestsPerSecond": 110665,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 101513,
+            "latencyP99Ms": 2
+          },
+          {
+            "requestsPerSecond": 107197,
+            "latencyP99Ms": 2
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 107197,
+          "p25": 104355,
+          "p75": 108931,
+          "min": 101513,
+          "max": 110665
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 2,
+          "p25": 1.5,
+          "p75": 2,
+          "min": 1,
+          "max": 2
+        }
+      },
+      {
+        "variant": "znight-node",
+        "framework": "znight",
+        "adapter": "node",
+        "runtime": "bun",
+        "endpoint": "post",
+        "rounds": [
+          {
+            "requestsPerSecond": 91063,
+            "latencyP99Ms": 2
+          },
+          {
+            "requestsPerSecond": 88265,
+            "latencyP99Ms": 2
+          },
+          {
+            "requestsPerSecond": 93206,
+            "latencyP99Ms": 2
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 91063,
+          "p25": 89664,
+          "p75": 92135,
+          "min": 88265,
+          "max": 93206
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 2,
+          "p25": 2,
+          "p75": 2,
+          "min": 2,
+          "max": 2
+        }
+      },
+      {
+        "variant": "baseline-hono",
+        "framework": "baseline",
+        "adapter": "hono",
+        "runtime": "bun",
+        "endpoint": "get",
+        "rounds": [
+          {
+            "requestsPerSecond": 126912,
+            "latencyP99Ms": 3
+          },
+          {
+            "requestsPerSecond": 163569,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 166371,
+            "latencyP99Ms": 1
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 163569,
+          "p25": 145241,
+          "p75": 164970,
+          "min": 126912,
+          "max": 166371
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 1,
+          "p25": 1,
+          "p75": 2,
+          "min": 1,
+          "max": 3
+        }
+      },
+      {
+        "variant": "baseline-hono",
+        "framework": "baseline",
+        "adapter": "hono",
+        "runtime": "bun",
+        "endpoint": "post",
+        "rounds": [
+          {
+            "requestsPerSecond": 120688,
+            "latencyP99Ms": 2
+          },
+          {
+            "requestsPerSecond": 147834,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 148023,
+            "latencyP99Ms": 2
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 147834,
+          "p25": 134261,
+          "p75": 147929,
+          "min": 120688,
+          "max": 148023
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 2,
+          "p25": 1.5,
+          "p75": 2,
+          "min": 1,
+          "max": 2
+        }
+      },
+      {
+        "variant": "znight-hono",
+        "framework": "znight",
+        "adapter": "hono",
+        "runtime": "bun",
+        "endpoint": "get",
+        "rounds": [
+          {
+            "requestsPerSecond": 101792,
+            "latencyP99Ms": 2
+          },
+          {
+            "requestsPerSecond": 94509,
+            "latencyP99Ms": 3
+          },
+          {
+            "requestsPerSecond": 117204,
+            "latencyP99Ms": 1
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 101792,
+          "p25": 98151,
+          "p75": 109498,
+          "min": 94509,
+          "max": 117204
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 2,
+          "p25": 1.5,
+          "p75": 2.5,
+          "min": 1,
+          "max": 3
+        }
+      },
+      {
+        "variant": "znight-hono",
+        "framework": "znight",
+        "adapter": "hono",
+        "runtime": "bun",
+        "endpoint": "post",
+        "rounds": [
+          {
+            "requestsPerSecond": 49110,
+            "latencyP99Ms": 4
+          },
+          {
+            "requestsPerSecond": 54002,
+            "latencyP99Ms": 3
+          },
+          {
+            "requestsPerSecond": 57791,
+            "latencyP99Ms": 3
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 54002,
+          "p25": 51556,
+          "p75": 55897,
+          "min": 49110,
+          "max": 57791
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 3,
+          "p25": 3,
+          "p75": 3.5,
+          "min": 3,
+          "max": 4
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,4 @@
+# Generated projects of the dependency injection benchmark
+.work
+# Runs with --quick (setup checks)
+results/quick.json

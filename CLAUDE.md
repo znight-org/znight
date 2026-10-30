@@ -136,6 +136,9 @@ packages/compiler/src/   project/ (scan, parse, identities), analysis/, binding/
 examples/                runnable applications with their tests: rest-api, microservice, worker,
                          secure-api, storefront-api, uptime-monitor, monorepo (packages/shared,
                          services/users-api, services/notifications-worker)
+benchmarks/              performance benchmarks, run by hand (not in CI): apps/ (znight, nestjs,
+                         hand-wired baseline), src/ (runner, report), results/results.json; they
+                         feed docs/benchmarks.md, the home page and the README (checked by docs/test)
 docs/                    VitePress site: guide/, packages/, reference/, contributing/, test/,
                          internals/architecture.md (the normative spec, served at /contributing/architecture)
 rfcs/                    design documents, their status and the error code allocation (README.md)
@@ -285,19 +288,20 @@ Affects, Decision) and a row in `rfcs/README.md`. Implement it only once it is a
 
 ## Development commands
 
-| Command                    | What it does                                                                           |
-| -------------------------- | -------------------------------------------------------------------------------------- |
-| `bun install`              | Install every workspace (also installs the husky hook)                                 |
-| `bun run build`            | Build every package with tsdown (`dist/`)                                              |
-| `bun run test`             | Tests of `packages/`, `docs/` and `tests/`, packages used from source                  |
-| `bun run test:coverage`    | The same with coverage                                                                 |
-| `bun run test:examples`    | The `test` script of every example                                                     |
-| `bun run test:e2e`         | Build, then the examples, the golden test and the CLI end-to-end test with their flags |
-| `bun run test:integration` | Messaging drivers against real brokers (Docker required)                               |
-| `bun run typecheck`        | `tsc --noEmit` for every workspace (sources and tests) and `tests/`                    |
-| `bun run check`            | Biome lint + format check (`check:fix` to fix, `lint`, `format`)                       |
-| `bun run docs:dev`         | Documentation site in development mode                                                 |
-| `bun run docs:build`       | Production build of the site (fails on dead links)                                     |
+| Command                          | What it does                                                                           |
+| -------------------------------- | -------------------------------------------------------------------------------------- |
+| `bun install`                    | Install every workspace (also installs the husky hook)                                 |
+| `bun run build`                  | Build every package with tsdown (`dist/`)                                              |
+| `bun run test`                   | Tests of `packages/`, `docs/` and `tests/`, packages used from source                  |
+| `bun run test:coverage`          | The same with coverage                                                                 |
+| `bun run test:examples`          | The `test` script of every example                                                     |
+| `bun run test:e2e`               | Build, then the examples, the golden test and the CLI end-to-end test with their flags |
+| `bun run test:integration`       | Messaging drivers against real brokers (Docker required)                               |
+| `bun run typecheck`              | `tsc --noEmit` for every workspace (sources and tests) and `tests/`                    |
+| `bun run check`                  | Biome lint + format check (`check:fix` to fix, `lint`, `format`)                       |
+| `bun run docs:dev`               | Documentation site in development mode                                                 |
+| `bun run docs:build`             | Production build of the site (fails on dead links)                                     |
+| `bun run --cwd benchmarks bench` | The benchmarks (about 40 minutes, by hand), then `report` to update the docs           |
 
 Targeted runs: `bun test --conditions=@znight/source ./packages/http` (one package),
 `bunx biome check --diagnostic-level=error <paths>`, `bun run --cwd packages/http typecheck`.

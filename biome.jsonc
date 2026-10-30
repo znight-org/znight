@@ -86,6 +86,14 @@
     }
   },
   "html": { "formatter": { "selfCloseVoidElements": "always" } },
+  "overrides": [
+    {
+      // NestJS reads constructor parameter types from the metadata emitted by tsc
+      // (emitDecoratorMetadata): an `import type` of an injected class breaks its injection
+      "includes": ["benchmarks/apps/nestjs/**"],
+      "linter": { "rules": { "style": { "useImportType": "off" } } }
+    }
+  ],
   "assist": {
     "enabled": true,
     "actions": {

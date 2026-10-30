@@ -24,6 +24,7 @@
   <a href="#getting-started">Getting started</a> ·
   <a href="#packages">Packages</a> ·
   <a href="#examples">Examples</a> ·
+  <a href="./docs/benchmarks.md">Benchmarks</a> ·
   <a href="#documentation">Documentation</a> ·
   <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
@@ -37,6 +38,16 @@ preload) reads your sources, binds every constructor parameter to a provider, va
 graph and generates a plain TypeScript module. At runtime, the container only calls the generated
 factories, in an order computed at build time. It is the approach of [Micronaut](https://micronaut.io)
 and [Dagger](https://dagger.dev), brought to TypeScript.
+
+<p align="center">
+  <a href="./docs/benchmarks.md"><img src="./docs/public/benchmarks/highlights.svg" alt="2.0× faster cold start than NestJS (150 ms vs 302 ms to the first response); 26% less memory than NestJS (89 MiB vs 122 MiB resident at idle); 3.4× faster DI container than NestJS (11 ms vs 36 ms to create 1,000 providers)." width="880" /></a>
+</p>
+
+<p align="center">
+  <sub>Medians of 30 runs on an Apple M5 with Node.js 24, HTTP applications on Fastify. Under load, NestJS still
+  serves more requests per second on Node.js: the <a href="./docs/benchmarks.md">benchmarks page</a> has every
+  result and how to reproduce them.</sub>
+</p>
 
 ## Quick start
 

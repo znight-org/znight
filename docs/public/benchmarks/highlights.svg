@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 236" width="880" height="236" role="img" aria-labelledby="title desc">
+<title id="title">Znight benchmarks</title>
+<desc id="desc">2.0× faster cold start than NestJS (150 ms vs 302 ms to the first response); 26% less memory than NestJS (89 MiB vs 122 MiB resident at idle); 3.4× faster DI container than NestJS (11 ms vs 36 ms to create 1,000 providers). Medians on an Apple M5 with Node.js 24.21.0 · HTTP applications on Fastify.</desc>
+<defs>
+<linearGradient id="zn-card" x1="0" y1="0" x2="0" y2="1">
+<stop offset="0" stop-color="#1A2350"/>
+<stop offset="1" stop-color="#0B1020"/>
+</linearGradient>
+<linearGradient id="zn-accent" x1="0" y1="0" x2="1" y2="1">
+<stop offset="0" stop-color="#2F6AE8"/>
+<stop offset="1" stop-color="#7C4DEF"/>
+</linearGradient>
+<linearGradient id="zn-accent-line" x1="0" y1="0" x2="1" y2="0">
+<stop offset="0" stop-color="#3E7BFA"/>
+<stop offset="1" stop-color="#8B5CF6"/>
+</linearGradient>
+<style>.s{font-family:ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif}.m{font-family:ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace}</style>
+</defs>
+<rect x="0.5" y="0.5" width="879" height="235" rx="16" fill="url(#zn-card)" stroke="#2C3660"/>
+<text x="162.66666666666666" y="104" text-anchor="middle" class="s" font-size="64" font-weight="700" letter-spacing="-1.5" fill="url(#zn-accent-line)">2.0×</text>
+<text x="162.7" y="140" text-anchor="middle" class="s" font-size="16" font-weight="600" fill="#F4F6FC">faster cold start than NestJS</text>
+<text x="162.7" y="164" text-anchor="middle" class="s" font-size="13" fill="#A9B4D6">150 ms vs 302 ms to the first response</text>
+<text x="440" y="104" text-anchor="middle" class="s" font-size="64" font-weight="700" letter-spacing="-1.5" fill="url(#zn-accent-line)">26%</text>
+<text x="440" y="140" text-anchor="middle" class="s" font-size="16" font-weight="600" fill="#F4F6FC">less memory than NestJS</text>
+<text x="440" y="164" text-anchor="middle" class="s" font-size="13" fill="#A9B4D6">89 MiB vs 122 MiB resident at idle</text>
+<line x1="301.3333333333333" y1="56" x2="301.3333333333333" y2="172" stroke="#2C3660" stroke-width="1"/>
+<text x="717.3333333333333" y="104" text-anchor="middle" class="s" font-size="64" font-weight="700" letter-spacing="-1.5" fill="url(#zn-accent-line)">3.4×</text>
+<text x="717.3" y="140" text-anchor="middle" class="s" font-size="16" font-weight="600" fill="#F4F6FC">faster DI container than NestJS</text>
+<text x="717.3" y="164" text-anchor="middle" class="s" font-size="13" fill="#A9B4D6">11 ms vs 36 ms to create 1,000 providers</text>
+<line x1="578.6666666666666" y1="56" x2="578.6666666666666" y2="172" stroke="#2C3660" stroke-width="1"/>
+<text x="440" y="210" text-anchor="middle" class="s" font-size="12" fill="#8E9AC4">Medians on an Apple M5 with Node.js 24.21.0 · HTTP applications on Fastify</text>
+</svg>

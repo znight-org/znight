@@ -1,0 +1,32 @@
+{
+  "name": "@znight-benchmarks/runner",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun src/cli.ts build",
+    "bench": "bun src/cli.ts all",
+    "bench:boot": "bun src/cli.ts boot",
+    "bench:http": "bun src/cli.ts http",
+    "bench:di": "bun src/cli.ts di",
+    "report": "bun src/report.ts",
+    "report:check": "bun src/report.ts --check",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@nestjs/common": "12.3.2",
+    "@nestjs/core": "12.3.2",
+    "@znight/compiler": "workspace:*",
+    "@znight/core": "workspace:*",
+    "autocannon": "8.0.0",
+    "inversify": "8.2.3",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2",
+    "tsyringe": "4.10.0"
+  },
+  "devDependencies": {
+    "@types/bun": "catalog:",
+    "@types/node": "catalog:",
+    "typescript": "catalog:"
+  }
+}

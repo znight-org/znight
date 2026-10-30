@@ -88,6 +88,7 @@ export default defineConfig({
     sidebar: {
       '/guide/': sidebarGuide(),
       '/examples': sidebarGuide(),
+      '/benchmarks': sidebarGuide(),
       '/roadmap': sidebarGuide(),
       '/contributing/': sidebarGuide(),
       '/packages/': sidebarPackages(),
@@ -147,6 +148,7 @@ function sidebarGuide(): DefaultTheme.SidebarItem[] {
         { text: 'Getting started', link: '/guide/getting-started' },
         { text: 'Project structure', link: '/guide/project-structure' },
         { text: 'Examples', link: '/examples' },
+        { text: 'Benchmarks', link: '/benchmarks' },
       ],
     },
     {

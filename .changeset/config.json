@@ -7,7 +7,7 @@
   "format": false,
   "fixed": [["@znight/*", "!@znight/docs"]],
   "linked": [],
-  "ignore": ["@znight-examples/*", "@znight/docs"],
+  "ignore": ["@znight-examples/*", "@znight-benchmarks/*", "@znight/docs"],
   "updateInternalDependencies": "patch",
   "privatePackages": { "version": false, "tag": false }
 }
