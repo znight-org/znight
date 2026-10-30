@@ -1695,7 +1695,9 @@ handler returning its own `Response`.
 | `serveOptions` | Options of `Bun.serve()` (`tls`, `idleTimeout`, `development`, `error`...; Znight sets `port`, `hostname`, `fetch`). Bun only |
 
 On Bun, the body limits are Znight's (`bodyLimit`, `@BodyLimit`): `maxRequestBodySize` defaults to
-unlimited instead of Bun's 128 MiB. Bun's `idleTimeout` (10 s by default) still closes idle
+unlimited instead of Bun's 128 MiB. A body with a `Content-Length` is read at once
+(`request.bytes()`, refused with 413 before reading when the length is above the limit), a chunked
+one as a stream (413 as soon as it passes the limit). Bun's `idleTimeout` (10 s by default) still closes idle
 connections and stalled requests, but is lifted while a streamed response is sent (SSE, slow
 producers), then restored. In your own `Bun.serve({ fetch: adapter.fetch })` the adapter cannot
 lift it: keep the SSE `heartbeat` below `idleTimeout` (the 8 s default does).

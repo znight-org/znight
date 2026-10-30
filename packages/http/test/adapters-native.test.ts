@@ -8,7 +8,7 @@ import { expressAdapter } from '../src/adapters/express.ts'
 import { fastifyAdapter } from '../src/adapters/fastify.ts'
 import { honoAdapter } from '../src/adapters/hono.ts'
 import { nodeAdapter } from '../src/adapters/node.ts'
-import { coerce } from '../src/index.ts'
+import { coerce, type HttpContext } from '../src/index.ts'
 import { ADAPTERS, controller, createApp, metadata, provider, route, t } from './helpers.ts'
 import { describe, expect, it } from 'bun:test'
 
@@ -117,6 +117,66 @@ describe('honoAdapter({ app })', () => {
     expect(await fetched.json()).toEqual({ id: 6 })
     await app.stop()
   })
+
+  class ReadsController {
+    get(ctx: HttpContext) {
+      return { get: ctx.params }
+    }
+    head(ctx: HttpContext) {
+      ctx.setHeader('x-head', 'explicit')
+      return undefined
+    }
+    rest(ctx: HttpContext) {
+      return { rest: ctx.params['*'] }
+    }
+  }
+
+  function readsMetadata() {
+    const context = { params: [{ index: 0, source: 'context' as const }] }
+    return metadata({ [t('ReadsController')]: provider(ReadsController) }, [
+      controller(t('ReadsController'), '/', [
+        // a HEAD route without GET route
+        route('head', '/head-only', (c: ReadsController, ctx) => c.head(ctx), { method: 'HEAD', ...context }),
+        // the HEAD and GET routes of one shape, with other parameter names (two Hono paths)
+        route('head', '/named/:a', (c: ReadsController, ctx) => c.head(ctx), { method: 'HEAD', ...context }),
+        route('get', '/named/:b', (c: ReadsController, ctx) => c.get(ctx), context),
+        // a static path, a parameter and a wildcard matching the same requests
+        route('get', '/files/readme', (c: ReadsController, ctx) => c.get(ctx), context),
+        route('get', '/files/:name', (c: ReadsController, ctx) => c.get(ctx), context),
+        route('rest', '/files/*', (c: ReadsController, ctx) => c.rest(ctx), context),
+      ]),
+    ])
+  }
+
+  for (const middleware of [false, true]) {
+    it(`serves the GET and HEAD routes of a path from one Hono route (${middleware ? 'with' : 'without'} middleware)`, async () => {
+      const native = new Hono()
+      if (middleware) native.use('*', (_c, next) => next())
+      const adapter = honoAdapter({ app: native })
+      const app = await createApp(readsMetadata(), { adapter }, { start: false })
+      const send = (method: string, url: string) => app.http.inject({ method, url })
+      const headOnly = await send('GET', '/head-only')
+      expect(headOnly.status).toBe(405)
+      expect(headOnly.headers['allow']).toBe('HEAD, OPTIONS')
+      expect((await send('HEAD', '/head-only')).headers['x-head']).toBe('explicit')
+      expect((await send('GET', '/named/1')).json()).toEqual({ get: { b: '1' } })
+      const head = await send('HEAD', '/named/1')
+      expect(head.headers['x-head']).toBe('explicit')
+      expect(head.body).toBe('')
+      expect((await send('GET', '/files/readme')).json()).toEqual({ get: {} })
+      expect((await send('GET', '/files/a')).json()).toEqual({ get: { name: 'a' } })
+      expect((await send('GET', '/files/a/b')).json()).toEqual({ rest: 'a/b' })
+      const files = await send('HEAD', '/files/a/b')
+      expect(files.status).toBe(200)
+      expect(files.headers['content-length']).toBe(String('{"rest":"a/b"}'.length))
+      expect(files.body).toBe('')
+      // one Hono route per path for GET and HEAD
+      const routes = native.routes.filter(entry => entry.method === 'GET').map(entry => entry.path)
+      expect(routes.filter(path => path === '/named/:a' || path === '/named/:b')).toHaveLength(2)
+      expect(new Set(routes).size).toBe(routes.length)
+      await app.stop()
+    })
+  }
 })
 
 describe('nodeAdapter', () => {
