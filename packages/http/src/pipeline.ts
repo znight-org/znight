@@ -124,6 +124,11 @@ type Outcome = SerializedReply | typeof RAW
 type CheckedReply = SerializedReply & { readonly cookieLines?: readonly SerializedCookie[] }
 
 const REQUEST_ID = /^[\w\-.:@/+=]{1,128}$/
+
+/** The default request id generator: a random UUID. */
+export function randomRequestId(): string {
+  return crypto.randomUUID()
+}
 const MAX_PATH_IN_MESSAGE = 200
 
 /**
@@ -139,6 +144,8 @@ export class Pipeline {
   readonly #table: RouteTable<RoutePlan>
   /** The `securityHeaders` option as entries (lower-case names, values validated at boot). */
   readonly #securityHeaders: readonly (readonly [string, string])[]
+  /** Every request id is a valid header value: an incoming one matched `REQUEST_ID`, the generated ones are UUIDs. */
+  readonly #validIds: boolean
   #inflight = 0
   #idle: (() => void)[] = []
   /** Open event streams. */
@@ -158,6 +165,7 @@ export class Pipeline {
     this.#logger = logger
     this.#options = options
     this.#table = table
+    this.#validIds = options.generateRequestId === randomRequestId
     this.#securityHeaders = Object.entries(options.securityHeaders ?? {}).map(
       ([name, value]) => [name.toLowerCase(), value] as const,
     )
@@ -352,7 +360,8 @@ export class Pipeline {
             await this.#hooks.run('http:request', event, async () => {
               outcome = await this.#process(ctx, target, event, cors)
               if (outcome !== RAW) {
-                outcome = this.#checkCookies(this.#checkHeaders(outcome, ctx, event), ctx, event)
+                const checked = outcome.ownHeaders === true ? outcome : this.#checkHeaders(outcome, ctx, event)
+                outcome = this.#checkCookies(checked, ctx, event)
                 // stream producers run in the context of the handler (scope, hooks)
                 if (isStreamed(outcome.body)) run = captureContext()
               }
@@ -507,7 +516,9 @@ export class Pipeline {
     preflight: boolean,
   ): void {
     const header = this.#options.requestIdHeader
-    if (header !== undefined && headers[header] === undefined && isHeaderValue(requestId)) headers[header] = requestId
+    if (header !== undefined && headers[header] === undefined && (this.#validIds || isHeaderValue(requestId))) {
+      headers[header] = requestId
+    }
     const policy = this.#options.cors
     if (policy !== undefined) {
       // a preflight answer carries its own CORS headers; other replies get them for allowed origins,
@@ -833,6 +844,8 @@ export class Pipeline {
  * before a quiet stream's first byte, and lifts idle timeouts.
  */
 function adapterReply(serialized: SerializedReply, body: ReplyBody, blob?: Blob): AdapterReply {
+  const text = serialized.text
+  if (text !== undefined) return { status: serialized.status, headers: serialized.headers, body, text }
   const reply: AdapterReply = { status: serialized.status, headers: serialized.headers, body }
   if (blob !== undefined) return { ...reply, blob }
   const eventStream =
