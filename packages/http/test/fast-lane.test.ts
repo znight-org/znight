@@ -18,6 +18,7 @@ import type { TestApp } from './helpers.ts'
 import { CoreTokens } from '@znight/core'
 
 import { BadRequestException, HttpResponse, HttpTokens, NotFoundException } from '../src/index.ts'
+import { randomRequestId } from '../src/pipeline.ts'
 import { controller, createApp, metadata, provider, route, sleep, t } from './helpers.ts'
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
 
@@ -492,5 +493,32 @@ describe('fast lane options', () => {
   it('takes the general pipeline with CORS on', async () => {
     const cors = await reply({ cors: { origin: '*' } }, { url: '/object', headers: { origin: 'https://a.example' } })
     expect(cors.headers['access-control-allow-origin']).toBe('*')
+  })
+})
+
+describe('randomRequestId()', () => {
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+
+  function check(ids: readonly string[]): void {
+    for (const id of ids) expect(id).toMatch(UUID)
+    expect(new Set(ids).size).toBe(ids.length)
+    // every hexadecimal digit shows up in the random positions
+    expect(new Set(ids.join('').replaceAll('-', '')).size).toBe(16)
+  }
+
+  it('generates distinct version 4 UUIDs (Bun: crypto.randomUUID())', () => {
+    check(Array.from({ length: 1000 }, () => randomRequestId()))
+  })
+
+  it('generates distinct version 4 UUIDs on Node.js, across refills of its pool of random bytes', async () => {
+    const source = new URL('../src/pipeline.ts', import.meta.url).href
+    const script = `const { randomRequestId } = await import(${JSON.stringify(source)}); console.log(JSON.stringify(Array.from({ length: 1000 }, () => randomRequestId())))`
+    const child = Bun.spawn(['node', '--conditions=@znight/source', '--input-type=module', '-e', script], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    const [stdout, code] = await Promise.all([new Response(child.stdout).text(), child.exited])
+    expect(code).toBe(0)
+    check(JSON.parse(stdout) as string[])
   })
 })
