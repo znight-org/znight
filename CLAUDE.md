@@ -17,7 +17,7 @@ ahead of time. It is the approach of Micronaut and Dagger, brought to TypeScript
 `reflect-metadata`, no `emitDecoratorMetadata`, wiring errors at build time.
 
 - Repository: <https://github.com/znight-org/znight> (MIT), npm scope `@znight`.
-- Version `0.1.0`, every `@znight/*` package versioned in lockstep, **not published yet**.
+- Version `0.1.0`, published on npm, every `@znight/*` package versioned in lockstep.
 - Runtime packages run on Node.js >= 24 and Bun >= 1.3, ESM only.
 
 ## Principles
@@ -308,7 +308,7 @@ Run an example (the CLI and Vite load the packages' `dist`, so build first):
 bun install
 bun run build
 bun run --cwd examples/rest-api dev    # rebuilds and restarts on change, NODE_ENV=development
-bun run --cwd examples/rest-api test   # bun test --conditions=@znight/source
+bun run --cwd examples/rest-api test   # bun test --conditions=@znight/source --timeout 30000
 ```
 
 Each example README lists its endpoints with `curl` commands.

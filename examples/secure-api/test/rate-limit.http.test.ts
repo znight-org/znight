@@ -23,8 +23,6 @@ describe('rate limiting', () => {
     expect((await app.inject({ url: '/notes', headers: alice })).status).toBe(200)
   })
 
-  // these sign-ins cost seven scrypt hashes (128 MiB each, on purpose: the decoy of unknown names, then
-  // one per attempt that reaches the controller), more than the default 5 s on a busy CI runner
   it('keys anonymous callers by client address (x-forwarded-for behind the trusted proxy)', async () => {
     await using app = await createTestApp()
     const signIn = (ip: string) =>
@@ -38,7 +36,7 @@ describe('rate limiting', () => {
     for (let i = 0; i < 5; i++) expect((await signIn('198.51.100.1')).status).toBe(401) // 5 attempts per minute
     expect((await signIn('198.51.100.1')).status).toBe(429)
     expect((await signIn('198.51.100.2')).status).toBe(401)
-  }, 30_000)
+  })
 
   it('does not count requests refused by AuthGuard: they never reach the limiter', async () => {
     await using app = await createTestApp()

@@ -9,7 +9,10 @@ export const inGitHubActions: boolean = process.env['GITHUB_ACTIONS'] === 'true'
 export interface RunOptions {
   readonly cwd?: string
   readonly env?: Readonly<Record<string, string | undefined>>
-  /** Streams the output to the console instead of capturing it. */
+  /**
+   * Gives the command the console instead of capturing its output: it can also read the terminal
+   * (npm's two-factor prompts).
+   */
   readonly inherit?: boolean
 }
 
@@ -26,7 +29,7 @@ export async function run(command: string, args: readonly string[], options: Run
     const child = Bun.spawn([command, ...args], {
       cwd: options.cwd,
       env,
-      stdin: 'ignore',
+      stdin: 'inherit',
       stdout: 'inherit',
       stderr: 'inherit',
     })

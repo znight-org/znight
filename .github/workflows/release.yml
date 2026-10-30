@@ -14,8 +14,8 @@
 # (Actions > Release > Run workflow, on main) does the same from the current main, or with
 # "Dry run" (the default) packs, verifies and runs `npm publish --dry-run` without publishing.
 #
-# npm authentication: the NPM_TOKEN secret when set (only to publish a new package for the first
-# time), otherwise npm trusted publishing (OIDC). Provenance is attested for public repositories.
+# npm authentication: npm trusted publishing (OIDC), configured on every package (RELEASING.md, npm
+# setup); no npm token. Provenance is attested for public repositories.
 name: Release
 
 on:
@@ -162,7 +162,6 @@ jobs:
 
       - name: Publish
         env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           ZNIGHT_REPOSITORY_VISIBILITY: ${{ github.event.repository.visibility }}
         run: bun scripts/release/publish.ts
 

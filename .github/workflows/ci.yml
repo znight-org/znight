@@ -2,7 +2,7 @@
 # tests, Docker integration tests and the packed-tarball smoke test. See RELEASING.md.
 #
 # On every pull request; on main, the release workflow runs it on every push (main starts no CI run
-# of its own); and on demand. The ruleset of main requires one check: all-checks-complete.
+# of its own); and on demand. The ruleset of main requires one check: All Checks Complete.
 name: CI
 
 on:

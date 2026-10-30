@@ -14,8 +14,8 @@
  *   --verbose                     print the npm output of every package
  *
  * Authentication, first match:
- *   1. `NPM_TOKEN`: an npm granular access token. Only needed to bootstrap: npm trusted publishing
- *      can only be configured for packages that already exist on the registry.
+ *   1. `NPM_TOKEN`: an npm granular access token. The release workflow sets none: every package
+ *      publishes through trusted publishing and disallows tokens.
  *   2. GitHub Actions OIDC (`permissions: id-token: write`): npm trusted publishing, no secret.
  *   3. Outside GitHub Actions: the local npm login (`npm login`).
  *

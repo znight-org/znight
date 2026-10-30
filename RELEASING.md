@@ -23,7 +23,7 @@ CI still completes), and the next one updates the pull request with every change
 ## Pull requests
 
 `main` is protected: every change, the maintainers' included, goes through a pull request whose CI
-passes: the [ruleset](#owner-setup-checklist) requires one check, `all-checks-complete`, which only
+passes: the [ruleset](#owner-setup-checklist) requires one check, _All Checks Complete_, which only
 passes when every CI job did. Actions minutes are free for public repositories.
 
 A pull request that changes a published package for its users (feature, fix, behaviour or
@@ -61,18 +61,20 @@ Versions and changelogs are managed with [Changesets](https://changesets.dev)
 | E2E (Node 24 + Bun)         | `bun run test:e2e`: every suite starts the production build on Node.js **and** on Bun, so one job covers both         |
 | Integration (Docker)        | `bun run test:integration` (testcontainers: RabbitMQ, LocalStack SQS, Kafka), then the examples' e2e against RabbitMQ |
 | Packed tarballs (npm / bun) | `bun run release:smoke --pm <npm or bun>`, see [Smoke test](#smoke-test)                                              |
-| all-checks-complete         | waits for every job above and fails unless all of them succeeded                                                      |
+| All Checks Complete         | waits for every job above and fails unless all of them succeeded                                                      |
 
 It runs on every pull request; on every push to `main`, called by the release workflow; and on
 demand (**Actions → CI → Run workflow**).
 
-`all-checks-complete` is the only check the ruleset of `main` requires, so the ruleset does not
-change when jobs do: a new job is required once it is listed in the `needs` of
-`all-checks-complete`. The job runs even when a job it waits for failed or was skipped (a skipped
-required check would count as passed) and fails unless every one of them succeeded.
+_All Checks Complete_ (job `all-checks-complete`) is the only check the ruleset of `main` requires,
+so the ruleset does not change when jobs do: a new job is required once it is listed in the `needs`
+of `all-checks-complete`. The job runs even when a job it waits for failed or was skipped (a
+skipped required check would count as passed) and fails unless every one of them succeeded.
 
 The build runs before the typecheck and the tests because the examples call the `znight` binary,
-which loads `packages/cli/dist/cli.mjs`.
+which loads `packages/cli/dist/cli.mjs`. The examples' `test` scripts give each test 30 s instead of
+Bun's 5 s: their tests do real I/O (PGlite, scrypt, the CLI), and the e2e job runs them in parallel
+with the production builds, several times slower than on a laptop.
 
 `release:pack` packs every package exactly as it will be published and verifies the tarballs (see
 [What the release script checks](#what-the-release-script-checks)). In pull requests a missing
@@ -158,14 +160,13 @@ files.
 
 The publish step uses, in this order:
 
-1. the **`NPM_TOKEN`** secret when it is set: an npm granular access token. It is only needed to
-   [bootstrap](#first-release-010): npm trusted publishing can only be configured for a package
-   that already exists on the registry;
-2. otherwise **npm trusted publishing** (OIDC): the job has `permissions: id-token: write` and
-   npm ≥ 11.5.1 (Node.js 24) exchanges the GitHub OIDC token for a short-lived publish token. No
-   secret at all. npm checks the repository (`znight-org/znight`), the workflow file
-   (`release.yml`) and the environment (`npm`) against the trusted publisher configured on each
-   package.
+1. the **`NPM_TOKEN`** environment variable when it is set: an npm granular access token. The
+   release workflow sets none, and every package disallows tokens;
+2. otherwise **npm trusted publishing** (OIDC), what every release uses: the job has
+   `permissions: id-token: write` and npm ≥ 11.5.1 (Node.js 24) exchanges the GitHub OIDC token for
+   a short-lived publish token. No secret at all. npm checks the repository (`znight-org/znight`),
+   the workflow file (`release.yml`) and the environment (`npm`) against the trusted publisher
+   configured on each package (see [npm setup](#npm-setup)).
 
 **Provenance** (`--provenance`, a signed statement linking each version to its commit and workflow
 run) is attested automatically: the workflow passes the repository visibility to the script
@@ -212,48 +213,67 @@ for the "last updated" date of each page. Locally:
 (export ZNIGHT_DOCS_BASE=/znight/ && bun run docs:build && bun run --cwd docs preview)   # http://localhost:4173/znight/
 ```
 
-## First release (0.1.0)
+## npm setup
 
-Every package is already at `0.1.0` and nothing is on npm yet, so **the first release publishes the
-current versions as they are**: the release workflow publishes whatever version is missing from
-npm, it does not need a changeset. There is deliberately **no changeset for 0.1.0**: Changesets
-always bumps (a changeset would turn `0.1.0` into `0.1.1` or `0.2.0` before anything is
-published). The initial-release notes are written directly in each `packages/*/CHANGELOG.md` under
-`## 0.1.0` (Changesets adds the next versions above them) and become the `v0.1.0` GitHub release.
+Every `@znight/*` package on npm has:
 
-**Merging the pull request that adds these workflows starts the release of 0.1.0**: on that push,
-the plan finds 0.1.0 missing from npm, the gates run, and the publish job waits for an approval.
-Prepare the [checklist](#owner-setup-checklist) first (at least the `npm` environment with its
-reviewers and the `NPM_TOKEN` secret); otherwise reject the deployment, or let the job refuse to
-start, and run the release by hand later.
+- a **trusted publisher**: _GitHub Actions_, organization `znight-org`, repository `znight`,
+  workflow `release.yml`, environment `npm`;
+- the publishing access **Require two-factor authentication and disallow tokens**: no token can
+  publish it, trusted publishing keeps working (and a maintainer can still publish by hand with
+  2FA, if ever needed).
 
-1. **Dry run** (optional, once the workflows are on `main`): Actions → Release → Run workflow
-   (`main`, _Dry run_ checked). Check the job summary.
-2. **npm token** (bootstrap only): on npmjs.com → _Access Tokens_ → _Generate New Token_ →
-   _Granular Access Token_: packages and scopes **Read and write** on the `@znight` scope, _Bypass
-   two-factor authentication_ checked (CI cannot answer a 2FA prompt), expiration **7 days**. Save it
-   as the **`NPM_TOKEN`** secret of the `npm` environment (Settings → Environments → `npm` →
-   Environment secrets, or `gh secret set NPM_TOKEN --env npm --repo znight-org/znight`).
-3. **Approve**: on the release workflow run, **Review deployments** → `npm` → **Approve and
-   deploy**. It publishes the ten packages at 0.1.0 with the token (with provenance), creates
-   `v0.1.0` and deploys the documentation.
-4. **Trusted publishing**: now that the packages exist, configure them, logged in to npm with 2FA:
+No npm token is stored anywhere. [`trust.ts`](scripts/release/trust.ts) configures both, logged in
+to npm with 2FA, in a terminal. npm asks for two-factor authentication on the first command: on the
+npm page that opens, check **skip two-factor authentication for the next 5 minutes**, and the next
+`npm trust` commands run without asking again (the script waits 2 seconds between commands, as npm
+recommends; `npm access` may still ask).
+
+```sh
+npm install -g npm@latest                                # npm trust needs npm >= 11.15
+npm login
+bun scripts/release/trust.ts                             # prints the npm commands
+bun scripts/release/trust.ts --apply --disallow-tokens   # runs them, for every package
+npm trust list @znight/core                              # check one (name the package)
+```
+
+Or by hand on npmjs.com, for every package: _Settings_ → _Trusted publishing_ → _GitHub Actions_
+(the values above), and _Settings_ → _Publishing access_.
+
+### The first publish validates it
+
+A trusted publisher that has not published anything **expires 48 hours after it is created**; the
+first release that publishes through it validates it for good. Configure it at most two days before
+a release, and merge the version pull request and approve the deployment within that window.
+
+An expired trusted publisher can no longer be used or edited: remove it and create it again, then
+release within two days:
+
+```sh
+npm trust list @znight/<name>                     # its id
+npm trust revoke @znight/<name> --id <id>
+bun scripts/release/trust.ts --apply --package @znight/<name>
+```
+
+### A new package
+
+npm only configures a trusted publisher for a package that exists, and the release workflow cannot
+create a package through trusted publishing. Reserve the name first, from your machine, then
+configure it shortly before the release that publishes the package:
+
+1. **Reserve the name** (any time; npm asks for 2FA): publish an empty `0.0.0` and deprecate it.
 
    ```sh
-   npm install -g npm@latest              # npm trust needs npm >= 11.15
-   npm login
-   bun scripts/release/trust.ts           # prints one `npm trust github` command per package
-   bun scripts/release/trust.ts --apply   # runs them
+   cd "$(mktemp -d)"
+   echo '{ "name": "@znight/<name>", "version": "0.0.0", "license": "MIT", "repository": { "type": "git", "url": "git+https://github.com/znight-org/znight.git" } }' > package.json
+   npm publish --access public
+   npm deprecate @znight/<name>@0.0.0 "Name reserved for Znight: install a released version"
    ```
 
-   Or by hand on npmjs.com, for every package: _Settings_ → _Trusted publishing_ → _GitHub
-   Actions_: organization `znight-org`, repository `znight`, workflow `release.yml`, environment
-   `npm`.
-
-5. **Remove the token**: delete the secret (`gh secret delete NPM_TOKEN --env npm --repo
-   znight-org/znight`) and revoke the token on npmjs.com. Then, for every package, _Settings_ →
-   _Publishing access_ → **Require two-factor authentication and disallow tokens** (trusted
-   publishing keeps working). Every later release uses OIDC only.
+2. **At most two days before the release**:
+   `bun scripts/release/trust.ts --apply --disallow-tokens --package @znight/<name>`.
+3. **Release as usual**: the package's first real version is published through trusted publishing,
+   with provenance, and validates its trusted publisher.
 
 ## Owner setup checklist
 
@@ -270,7 +290,7 @@ GitHub (repository `znight-org/znight`, public):
   _Required approvals_ at **0** while there is a single maintainer (GitHub does not let authors
   approve their own pull requests: with 1 approval and an empty bypass list, nobody can merge their
   own pull request), or keep 1 and add **Repository admin** to the _Bypass list_ in _For pull
-  requests only_ mode; **Require status checks to pass** with one check, **all-checks-complete**
+  requests only_ mode; **Require status checks to pass** with one check, **All Checks Complete**
   (source _GitHub Actions_; it appears in the picker once it has run on a pull request); **Block
   force pushes**; **Restrict deletions**.
 - [ ] **Environment `npm`** (the approval of every release):
@@ -281,10 +301,7 @@ GitHub (repository `znight-org/znight`, public):
      merge, which you must be able to approve. **Save protection rules**.
   3. _Deployment branches and tags_: **Selected branches and tags** → **Add deployment branch or
      tag rule** → _Ref type_ Branch, pattern `main` → **Add rule**.
-  4. _Environment secrets_ → **Add environment secret**: name `NPM_TOKEN`, value the npm token of
-     the [first release](#first-release-010) (or
-     `gh secret set NPM_TOKEN --env npm --repo znight-org/znight`). Delete it after the first
-     release.
+  4. _Environment secrets_: none, releases publish through [trusted publishing](#npm-setup).
 - [ ] **GitHub Pages**: Settings → Pages → _Build and deployment_ → _Source_: **GitHub Actions**
   (instead of _Deploy from a branch_; ignore the suggested workflows). It is saved at once, and
   creates the `github-pages` environment, which deploys from `main` (the release workflow and the
@@ -305,10 +322,10 @@ GitHub (repository `znight-org/znight`, public):
 npm (organization `@znight`):
 
 - [ ] Your npm account has 2FA enabled and can publish to the `@znight` organization.
-- [ ] Granular token for the first release ([step 2](#first-release-010)), then trusted publishing
-  on every package and the token revoked ([steps 4–5](#first-release-010)).
-- [ ] A new package (a new `packages/*` folder) is published the first time with a token as well,
-  then gets its trusted publisher.
+- [ ] Trusted publishing and _Require two-factor authentication and disallow tokens_ on every
+  package, no `NPM_TOKEN` secret ([npm setup](#npm-setup)).
+- [ ] A new package (a new `packages/*` folder): its name reserved, then its trusted publisher
+  configured at most two days before its first release ([A new package](#a-new-package)).
 
 ## Troubleshooting
 
@@ -322,7 +339,9 @@ npm (organization `@znight`):
   environment, then re-run the job (or run the Release workflow by hand).
 - **`npm publish` E404 / E403 with OIDC**: the trusted publisher of that package does not match
   (owner `znight-org`, repository `znight`, workflow file `release.yml`, environment `npm`, all
-  case-sensitive) or the package has none yet (new package: publish it once with a token).
+  case-sensitive), it expired before its first publish
+  ([The first publish validates it](#the-first-publish-validates-it)), or the package has none yet
+  ([A new package](#a-new-package)).
 - **A release failed halfway** (some versions missing from npm, or every package published but no
   tag, GitHub release or docs): **Re-run failed jobs** on that Release run (within 30 days). The
   approval is asked again; published versions are skipped, then the tag, the GitHub release and the
