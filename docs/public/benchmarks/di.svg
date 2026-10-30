@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 688 432" width="688" height="432" role="img" aria-labelledby="title desc">
+<title id="title">Dependency injection</title>
+<desc id="desc">Container creation, milliseconds. Znight (100 providers): Node.js 24.21.0: 1.8 ms, Bun 1.4.4: 2.2 ms; tsyringe (100 providers): Node.js 24.21.0: 1.0 ms, Bun 1.4.4: 1.1 ms; InversifyJS (100 providers): Node.js 24.21.0: 3.4 ms, Bun 1.4.4: 3.9 ms; NestJS (100 providers): Node.js 24.21.0: 7.0 ms, Bun 1.4.4: 11 ms; Znight (1,000 providers): Node.js 24.21.0: 11 ms, Bun 1.4.4: 11 ms; tsyringe (1,000 providers): Node.js 24.21.0: 5.9 ms, Bun 1.4.4: 6.7 ms; InversifyJS (1,000 providers): Node.js 24.21.0: 15 ms, Bun 1.4.4: 16 ms; NestJS (1,000 providers): Node.js 24.21.0: 36 ms, Bun 1.4.4: 36 ms.</desc>
+<defs>
+<linearGradient id="zn-card" x1="0" y1="0" x2="0" y2="1">
+<stop offset="0" stop-color="#1A2350"/>
+<stop offset="1" stop-color="#0B1020"/>
+</linearGradient>
+<linearGradient id="zn-accent" x1="0" y1="0" x2="1" y2="1">
+<stop offset="0" stop-color="#2F6AE8"/>
+<stop offset="1" stop-color="#7C4DEF"/>
+</linearGradient>
+<linearGradient id="zn-accent-line" x1="0" y1="0" x2="1" y2="0">
+<stop offset="0" stop-color="#3E7BFA"/>
+<stop offset="1" stop-color="#8B5CF6"/>
+</linearGradient>
+<linearGradient id="zn-accent-soft" x1="0" y1="0" x2="1" y2="0">
+<stop offset="0" stop-color="#3E7BFA" stop-opacity="0.55"/>
+<stop offset="1" stop-color="#8B5CF6" stop-opacity="0.55"/>
+</linearGradient>
+<style>.s{font-family:ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif}.m{font-family:ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace}</style>
+</defs>
+<rect x="0.5" y="0.5" width="687" height="431" rx="16" fill="url(#zn-card)" stroke="#2C3660"/>
+<text x="24" y="36" class="s" font-size="12" font-weight="700" fill="#8E9AC4" letter-spacing="1.2">DEPENDENCY INJECTION</text>
+<text x="24" y="60" class="s" font-size="13" fill="#A9B4D6">Container created and every provider instantiated · median · lower is better</text>
+<text x="612.8" y="36" class="s" font-size="12" fill="#D6DCEE">Bun 1.4.4</text>
+<rect x="596.8" y="27" width="10" height="10" rx="3" fill="#5D6A9C"/>
+<text x="494.4" y="36" class="s" font-size="12" fill="#D6DCEE">Node.js 24.21.0</text>
+<rect x="478.4" y="27" width="10" height="10" rx="3" fill="#A9B4D6"/>
+<text x="24" y="104.5" class="s" font-size="13" font-weight="600" fill="#F4F6FC">100 providers</text>
+<text x="139.7" y="104.5" class="s" font-size="13" font-weight="600" fill="#F4F6FC">Znight</text>
+<rect x="232.7" y="86" width="18.6" height="12" rx="3" fill="url(#zn-accent-line)"/>
+<text x="259.3" y="96" class="s" font-size="12" font-weight="600" fill="#F4F6FC">1.8 ms</text>
+<rect x="232.7" y="102" width="22.1" height="12" rx="3" fill="url(#zn-accent-soft)"/>
+<text x="262.8" y="112" class="s" font-size="12" font-weight="600" fill="#F4F6FC">2.2 ms</text>
+<text x="139.7" y="144.5" class="s" font-size="13" fill="#D6DCEE">tsyringe</text>
+<rect x="232.7" y="126" width="10" height="12" rx="3" fill="#A9B4D6"/>
+<text x="250.7" y="136" class="s" font-size="12" fill="#A9B4D6">1.0 ms</text>
+<rect x="232.7" y="142" width="11.4" height="12" rx="3" fill="#5D6A9C"/>
+<text x="252" y="152" class="s" font-size="12" fill="#A9B4D6">1.1 ms</text>
+<text x="139.7" y="184.5" class="s" font-size="13" fill="#D6DCEE">InversifyJS</text>
+<rect x="232.7" y="166" width="34.9" height="12" rx="3" fill="#A9B4D6"/>
+<text x="275.6" y="176" class="s" font-size="12" fill="#A9B4D6">3.4 ms</text>
+<rect x="232.7" y="182" width="39.9" height="12" rx="3" fill="#5D6A9C"/>
+<text x="280.5" y="192" class="s" font-size="12" fill="#A9B4D6">3.9 ms</text>
+<text x="139.7" y="224.5" class="s" font-size="13" fill="#D6DCEE">NestJS</text>
+<rect x="232.7" y="206" width="71.4" height="12" rx="3" fill="#A9B4D6"/>
+<text x="312.1" y="216" class="s" font-size="12" fill="#A9B4D6">7.0 ms</text>
+<rect x="232.7" y="222" width="115.7" height="12" rx="3" fill="#5D6A9C"/>
+<text x="356.4" y="232" class="s" font-size="12" fill="#A9B4D6">11 ms</text>
+<line x1="24" y1="241" x2="664" y2="241" stroke="#2C3660" stroke-width="1"/>
+<text x="24" y="270.5" class="s" font-size="13" font-weight="600" fill="#F4F6FC">1,000 providers</text>
+<text x="139.7" y="270.5" class="s" font-size="13" font-weight="600" fill="#F4F6FC">Znight</text>
+<rect x="232.7" y="252" width="107.6" height="12" rx="3" fill="url(#zn-accent-line)"/>
+<text x="348.3" y="262" class="s" font-size="12" font-weight="600" fill="#F4F6FC">11 ms</text>
+<rect x="232.7" y="268" width="113" height="12" rx="3" fill="url(#zn-accent-soft)"/>
+<text x="353.7" y="278" class="s" font-size="12" font-weight="600" fill="#F4F6FC">11 ms</text>
+<text x="139.7" y="310.5" class="s" font-size="13" fill="#D6DCEE">tsyringe</text>
+<rect x="232.7" y="292" width="60.4" height="12" rx="3" fill="#A9B4D6"/>
+<text x="301" y="302" class="s" font-size="12" fill="#A9B4D6">5.9 ms</text>
+<rect x="232.7" y="308" width="69" height="12" rx="3" fill="#5D6A9C"/>
+<text x="309.6" y="318" class="s" font-size="12" fill="#A9B4D6">6.7 ms</text>
+<text x="139.7" y="350.5" class="s" font-size="13" fill="#D6DCEE">InversifyJS</text>
+<rect x="232.7" y="332" width="157.8" height="12" rx="3" fill="#A9B4D6"/>
+<text x="398.5" y="342" class="s" font-size="12" fill="#A9B4D6">15 ms</text>
+<rect x="232.7" y="348" width="164.9" height="12" rx="3" fill="#5D6A9C"/>
+<text x="405.5" y="358" class="s" font-size="12" fill="#A9B4D6">16 ms</text>
+<text x="139.7" y="390.5" class="s" font-size="13" fill="#D6DCEE">NestJS</text>
+<rect x="232.7" y="372" width="367.3" height="12" rx="3" fill="#A9B4D6"/>
+<text x="608" y="382" class="s" font-size="12" fill="#A9B4D6">36 ms</text>
+<rect x="232.7" y="388" width="366.9" height="12" rx="3" fill="#5D6A9C"/>
+<text x="607.6" y="398" class="s" font-size="12" fill="#A9B4D6">36 ms</text>
+</svg>

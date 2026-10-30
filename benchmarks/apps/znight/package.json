@@ -1,0 +1,26 @@
+{
+  "name": "@znight-benchmarks/znight",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "znight build",
+    "typecheck": "znight generate && tsc --noEmit"
+  },
+  "dependencies": {
+    "@hono/node-server": "2.1.5",
+    "@znight/core": "workspace:*",
+    "@znight/http": "workspace:*",
+    "express": "5.3.0",
+    "fastify": "5.12.7",
+    "hono": "4.13.14",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@znight/cli": "workspace:*",
+    "@znight/compiler": "workspace:*",
+    "typescript": "catalog:",
+    "vite": "catalog:"
+  }
+}

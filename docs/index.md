@@ -50,9 +50,9 @@ features:
     linkText: Explore the packages
   - icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2c3 2.5 4.5 6 4.5 10.5L14 17h-4l-2.5-4.5C7.5 8 9 4.5 12 2z"/><circle cx="12" cy="9" r="1.5"/><path d="m10 17-1 4 3-2 3 2-1-4"/></svg>
     title: Fast everywhere
-    details: Factories run in a precomputed order, independent async singletons start concurrently, cold starts are instant. Runs on Node.js 24+ and Bun 1.3+.
-    link: /guide/deployment
-    linkText: Deploy anywhere
+    details: Factories run in a precomputed order and independent async singletons start concurrently, so an application starts much faster than the same NestJS application. Runs on Node.js 24+ and Bun 1.3+.
+    link: /benchmarks
+    linkText: See the benchmarks
   - icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/><path d="M12 15v2"/></svg>
     title: Secure by default
     details: Declare an access decision group and a route without a decision fails the build, a decision no guard enforces fails the boot. CORS, security headers (on by default) and trusted proxies are built in, with tested recipes for JWT, API keys, sessions and CSRF.

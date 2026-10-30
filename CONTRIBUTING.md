@@ -76,6 +76,7 @@ The examples that need development settings (credentials, sample data) read them
 packages/   the published packages: core, compiler, http, openapi, messaging, schedule, config,
             observability, testing, cli (sources in src/, tests in test/)
 examples/   runnable example applications, with their tests
+benchmarks/ performance benchmarks against NestJS and others, run by hand (not in CI)
 tests/      repository-wide tests: package boundaries, golden test of the examples
 docs/       the documentation site (VitePress); docs/internals/architecture.md is the specification
 rfcs/       design documents for significant changes

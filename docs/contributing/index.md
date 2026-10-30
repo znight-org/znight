@@ -67,6 +67,8 @@ znight/
 │  └─ cli/            # the znight binary
 ├─ examples/          # runnable applications with their tests: rest-api, secure-api, storefront-api,
 │                     # uptime-monitor, microservice, worker, monorepo
+├─ benchmarks/        # performance benchmarks, run by hand (not in CI): one application per
+│                     # framework, the runner, the results of the benchmarks page
 ├─ rfcs/              # design documents of significant features, with their status
 ├─ tests/             # repository-wide tests: package boundaries, golden test of the examples
 ├─ scripts/           # generators of the brand assets and of the documentation diagrams

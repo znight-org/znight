@@ -283,3 +283,197 @@
     white-space: normal;
   }
 }
+
+/*
+ * Benchmark highlights (benchmark-highlights.ts). On the home page: a night band, the same in both
+ * color schemes, with the numbers in the accent gradient. On the benchmarks page: a card.
+ */
+.zn-bench-value {
+  background-image: var(--zn-gradient);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+
+.zn-bench-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 40px;
+  text-align: center;
+}
+
+.zn-bench-label {
+  margin-top: 14px;
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.zn-bench-detail {
+  margin-top: 6px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.zn-bench-home {
+  margin-top: 72px;
+  padding: 72px 24px;
+  background:
+    radial-gradient(60% 80% at 15% 0%, rgba(62, 123, 250, 0.22), transparent 70%),
+    radial-gradient(50% 70% at 90% 100%, rgba(139, 92, 246, 0.2), transparent 70%),
+    linear-gradient(180deg, var(--zn-night-2) 0%, var(--zn-night-1) 100%);
+  color: var(--zn-silver-1);
+  text-align: center;
+}
+
+.zn-bench-container {
+  max-width: 1152px;
+  margin: 0 auto;
+}
+
+.zn-bench-eyebrow {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #8aaeff;
+}
+
+.zn-bench-title {
+  max-width: 760px;
+  margin: 14px auto 0;
+  font-size: 32px;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  color: var(--zn-silver-1);
+}
+
+.zn-bench-lead {
+  max-width: 620px;
+  margin: 18px auto 56px;
+  font-size: 17px;
+  line-height: 1.55;
+  color: var(--zn-silver-2);
+}
+
+.zn-bench-home .zn-bench-value {
+  background-image: linear-gradient(120deg, #6f9bff 10%, #b18cff 90%);
+  font-size: 64px;
+}
+
+.zn-bench-home .zn-bench-label {
+  color: var(--zn-silver-1);
+}
+
+.zn-bench-home .zn-bench-detail {
+  color: #8e9ac4;
+}
+
+.zn-bench-context {
+  margin-top: 48px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #7d89b3;
+}
+
+.zn-bench-context a {
+  font-weight: 500;
+  color: #8aaeff;
+  text-decoration: none;
+}
+
+.zn-bench-context a:hover {
+  text-decoration: underline;
+}
+
+.vp-doc .zn-bench-page {
+  margin: 24px 0 32px;
+  padding: 32px 24px 20px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 16px;
+  background-color: var(--vp-c-bg-soft);
+}
+
+.vp-doc .zn-bench-page .zn-bench-grid {
+  gap: 28px;
+}
+
+.vp-doc .zn-bench-page .zn-bench-value {
+  font-size: 48px;
+}
+
+.vp-doc .zn-bench-page .zn-bench-label {
+  color: var(--vp-c-text-1);
+}
+
+.vp-doc .zn-bench-page .zn-bench-detail {
+  color: var(--vp-c-text-2);
+}
+
+.vp-doc .zn-bench-page .zn-bench-context {
+  margin: 24px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+  text-align: center;
+  color: var(--vp-c-text-3);
+}
+
+/* Benchmarks page: a number stays on one line with its range (the tables scroll on small screens) */
+.zn-benchmarks .vp-doc td:not(:first-child) {
+  white-space: nowrap;
+}
+
+.zn-benchmarks .vp-doc td small {
+  color: var(--vp-c-text-3);
+}
+
+@media (min-width: 640px) {
+  .zn-bench-home {
+    padding: 96px 48px;
+  }
+
+  .zn-bench-title {
+    font-size: 44px;
+  }
+
+  .zn-bench-grid {
+    grid-auto-columns: 1fr;
+    grid-auto-flow: column;
+    gap: 0;
+  }
+
+  .zn-bench-item {
+    padding: 0 20px;
+  }
+
+  .zn-bench-item + .zn-bench-item {
+    border-left: 1px solid rgba(169, 180, 214, 0.18);
+  }
+
+  .vp-doc .zn-bench-page .zn-bench-grid {
+    gap: 0;
+  }
+
+  .vp-doc .zn-bench-page .zn-bench-item + .zn-bench-item {
+    border-left-color: var(--vp-c-divider);
+  }
+}
+
+@media (min-width: 960px) {
+  .zn-bench-home {
+    padding: 112px 64px;
+  }
+
+  .zn-bench-title {
+    font-size: 52px;
+  }
+
+  .zn-bench-home .zn-bench-value {
+    font-size: 84px;
+  }
+}
