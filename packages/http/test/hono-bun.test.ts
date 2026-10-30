@@ -210,7 +210,7 @@ describe('honoAdapter() on Bun.serve()', () => {
     })
   }
 
-  it('reads a body Hono middleware already read like before (no second read)', async () => {
+  it('fails like the stream path (500) when Hono middleware already read the body', async () => {
     const native = new Hono()
     native.use('*', async (c, next) => {
       await c.req.raw.text()
@@ -219,6 +219,27 @@ describe('honoAdapter() on Bun.serve()', () => {
     const app = await createApp(meta, { adapter: honoAdapter({ app: native }) })
     const response = await fetch(`${String(app.http.address)}/echo`, { method: 'POST', body: 'hello' })
     expect(response.status).toBe(500)
+    await app.stop()
+  })
+
+  it('gives the stream to a Hono middleware replacing the body, then serves text replies', async () => {
+    const native = new Hono()
+    native.use('*', async (c, next) => {
+      await next()
+      const body = c.res.body
+      if (body !== null && c.req.path === '/blob') {
+        c.res = new Response(body.pipeThrough(new TransformStream()), c.res)
+      }
+    })
+    const app = await createApp(meta, { adapter: honoAdapter({ app: native }) })
+    const port = app.http.address?.port as number
+    const received = await exchange(port, 'GET /blob HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n')
+    expect(received).toStartWith('HTTP/1.1 200')
+    expect(received).toContain('file content')
+    for (let index = 0; index < 3; index++) {
+      const text = await fetch(`${String(app.http.address)}/echo`, { method: 'POST', body: `text ${index}` })
+      expect(await text.json()).toEqual({ text: `text ${index}` })
+    }
     await app.stop()
   })
 })
