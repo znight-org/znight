@@ -1,6 +1,6 @@
 {
   "name": "@znight/testing",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Znight testing utilities: TestBed with auto-mocking and TestApp for end-to-end tests",
   "license": "MIT",
   "author": "Ugho STEPHAN",
