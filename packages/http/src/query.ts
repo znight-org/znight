@@ -23,8 +23,14 @@ export function parseQuery(query: string): QueryRecord {
   return result
 }
 
+/** A request target split into its raw path and raw query string (without `?`). */
+export interface RequestTarget {
+  readonly path: string
+  readonly query: string
+}
+
 /** Splits a request target (`/users?page=2`) into its raw path and raw query (without `?`). */
-export function splitUrl(url: string): { readonly path: string; readonly query: string } {
+export function splitUrl(url: string): RequestTarget {
   const index = url.indexOf('?')
   return index === -1 ? { path: url, query: '' } : { path: url.slice(0, index), query: url.slice(index + 1) }
 }

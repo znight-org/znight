@@ -5,6 +5,7 @@ import type { ResolvedFile } from './files.ts'
 import type { HttpResponse } from './response.ts'
 import type { SseSession } from './sse.ts'
 
+import { Buffer } from 'node:buffer'
 import { Readable } from 'node:stream'
 
 import { isFileBody } from './files.ts'
@@ -12,9 +13,15 @@ import { isHttpResponse } from './response.ts'
 import { isSseBody } from './sse.ts'
 import { isBodylessStatus } from './status.ts'
 import { discardStream, isByteStream, toByteStream } from './stream.ts'
-import { emptyRecord } from './utils.ts'
+import { emptyRecord, isBun } from './utils.ts'
 
 const ENCODER = new TextEncoder()
+
+/**
+ * UTF-8 encoding of a text body: a pooled `Buffer` (a `Uint8Array`) is several times cheaper than
+ * `TextEncoder` on Node.js, `TextEncoder` is the fastest on Bun.
+ */
+const utf8: (text: string) => Uint8Array = isBun() ? text => ENCODER.encode(text) : text => Buffer.from(text, 'utf8')
 
 /** Content types set by the serialiser. */
 export const ContentType: {
@@ -209,7 +216,7 @@ function discard(body: ReplyBody): void {
 
 function encode(payload: unknown, headers: Record<string, HeaderValue>): ReplyBody {
   if (payload === undefined) return null
-  if (typeof payload === 'string') return bytes(ENCODER.encode(payload), headers, ContentType.text)
+  if (typeof payload === 'string') return bytes(utf8(payload), headers, ContentType.text)
   if (payload instanceof Uint8Array) return bytes(payload, headers, ContentType.bytes)
   if (payload instanceof ArrayBuffer) return bytes(new Uint8Array(payload), headers, ContentType.bytes)
   if (ArrayBuffer.isView(payload)) {
@@ -233,7 +240,7 @@ function encode(payload: unknown, headers: Record<string, HeaderValue>): ReplyBo
   if (isSseBody(payload)) throw new TypeError('An event stream (HttpResponse.sse()) cannot be serialised here')
   const json = JSON.stringify(payload)
   if (json === undefined) throw new TypeError(`Cannot serialise a ${typeof payload} as a response body`)
-  return bytes(ENCODER.encode(json), headers, ContentType.json)
+  return bytes(utf8(json), headers, ContentType.json)
 }
 
 function bytes(data: Uint8Array, headers: Record<string, HeaderValue>, type: string): Uint8Array {

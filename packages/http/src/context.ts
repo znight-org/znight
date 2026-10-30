@@ -11,7 +11,7 @@ import { DEFAULT_COOKIE_SETTINGS, missingSecrets, serializeWith, verifySigned } 
 import { parseCookieHeader } from './cookies.ts'
 import { UnsupportedMediaTypeException } from './exceptions.ts'
 import { parseMultipart, readMultipart } from './multipart.ts'
-import { parseQuery, type QueryRecord, splitUrl } from './query.ts'
+import { parseQuery, type QueryRecord, type RequestTarget, splitUrl } from './query.ts'
 import { emptyRecord } from './utils.ts'
 
 declare const requestIdBrand: unique symbol
@@ -226,11 +226,13 @@ export class RequestContext implements HttpContext {
     init: {
       readonly requestId: RequestId
       readonly adapter: string
+      /** `source.url` split (default: split here). */
+      readonly url?: RequestTarget
       readonly route: HttpRouteInfo | undefined
       readonly params: Readonly<Record<string, string>>
       readonly body: BodyPlan
       /** Client address and protocol (`trustProxy`); default: the adapter's `ip` and `encrypted`. */
-      readonly client?: { readonly ip: string | undefined; readonly protocol: 'http' | 'https' }
+      readonly client?: { readonly ip: string | undefined; readonly protocol: 'http' | 'https' } | undefined
       /** Cookie defaults and signing key (plugin option `cookies`); default: secure defaults, no signing. */
       readonly cookies?: CookieSettings
     },
@@ -238,7 +240,7 @@ export class RequestContext implements HttpContext {
     this.#source = source
     this.#plan = init.body
     this.#cookieSettings = init.cookies ?? DEFAULT_COOKIE_SETTINGS
-    const { path, query } = splitUrl(source.url)
+    const { path, query } = init.url ?? splitUrl(source.url)
     this.#rawQuery = query
     this.requestId = init.requestId
     this.method = source.method
@@ -333,7 +335,7 @@ export class RequestContext implements HttpContext {
 
   /** The `Set-Cookie` lines of {@link setCookie} / {@link clearCookie}, with their keys, in order (internal). */
   get cookieLines(): readonly SerializedCookie[] {
-    return this.#jar === undefined ? [] : [...this.#jar].map(([key, entry]) => ({ key, line: entry.line }))
+    return this.#jar === undefined ? NO_LINES : [...this.#jar].map(([key, entry]) => ({ key, line: entry.line }))
   }
 
   #addCookie(cookie: ResponseCookie): void {
@@ -530,4 +532,5 @@ function withoutLifetime(options: ClearCookieOptions): ClearCookieOptions {
 
 const EMPTY_HEADERS: Readonly<Record<string, HeaderValue>> = Object.freeze({})
 const NO_COOKIES: readonly ResponseCookie[] = Object.freeze([])
+const NO_LINES: readonly SerializedCookie[] = Object.freeze([])
 const NO_FILES: Readonly<Record<string, readonly File[]>> = Object.freeze(emptyRecord<readonly File[]>())
