@@ -200,6 +200,7 @@ class HonoHttpAdapter implements HonoAdapter {
   }
 
   #toResponse(c: Context, reply: AdapterReply): Response {
+    const middleware = this.#middleware()
     const outgoing = nodeOutgoing(c)
     if (outgoing !== undefined) {
       const body = reply.body instanceof ReadableStream ? reply.body : null
@@ -207,7 +208,7 @@ class HonoHttpAdapter implements HonoAdapter {
         // @hono/node-server: the client left before the reply was ready (an async pre-flight). The
         // server would neither read nor cancel the body: release it (event source, request scope)
         discardStream(body)
-        return toResponse(c, { ...reply, body: null }, this.#middleware())
+        return toResponse(c, { ...reply, body: null }, middleware)
       }
       if (body !== null) {
         // the client may leave before @hono/node-server reads the body (its own listener then comes
@@ -219,8 +220,7 @@ class HonoHttpAdapter implements HonoAdapter {
       // a quiet event stream must outlive a socket timeout
       if (reply.eventStream === true && typeof outgoing.setTimeout === 'function') outgoing.setTimeout(0)
     }
-    if (this.#bun === undefined || !(reply.body instanceof ReadableStream))
-      return toResponse(c, reply, this.#middleware())
+    if (this.#bun === undefined || !(reply.body instanceof ReadableStream)) return toResponse(c, reply, middleware)
     // served by Bun.serve(): observe the end of the body (idle timeout, native blob: see #bunFetch)
     const reader = reply.body.getReader()
     let ended = false
@@ -260,7 +260,7 @@ class HonoHttpAdapter implements HonoAdapter {
         onEnd = callback
       },
     })
-    return toResponse(c, { ...reply, body }, this.#middleware())
+    return toResponse(c, { ...reply, body }, middleware)
   }
 
   /** The fetch handler given to `Bun.serve()`. */
