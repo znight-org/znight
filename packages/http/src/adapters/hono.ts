@@ -709,7 +709,11 @@ function toResponse(c: Context, reply: AdapterReply, middleware: boolean): Respo
 
 /** Whether every header has a single value (a record of strings is a valid `HeadersInit`). */
 function isStringRecord(headers: Readonly<Record<string, HeaderValue>>): boolean {
-  for (const name in headers) if (typeof headers[name] !== 'string') return false
+  // Object.keys: faster than for...in on the null-prototype records of the pipeline (V8)
+  const names = Object.keys(headers)
+  for (let index = 0; index < names.length; index++) {
+    if (typeof headers[names[index] as string] !== 'string') return false
+  }
   return true
 }
 
