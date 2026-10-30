@@ -4,23 +4,27 @@ Maintainer guide: how CI works, how versions are bumped, how packages reach npm 
 documentation reaches GitHub Pages, and what has to be configured on GitHub and npm. Contributors
 only need the [pull request](#pull-requests) part.
 
-| Workflow                                       | When                                                                         | What                                                                                                                                          |
-| ---------------------------------------------- | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`ci.yml`](.github/workflows/ci.yml)           | every pull request, every push to `main`, before every release               | Biome + actionlint (+ a changeset reminder), typecheck, build + pack verification, unit and example tests, docs build                         |
-| [`ci-full.yml`](.github/workflows/ci-full.yml) | every pull request, every push to `main`, before every release, every Monday | e2e (production builds on Node.js 24 and Bun), Docker integration tests, packed-tarball smoke test (npm and Bun)                              |
-| [`release.yml`](.github/workflows/release.yml) | every push to `main`, manual run                                             | the "chore: version packages" pull request; when a version is missing from npm: the gates, then **an approval**, publish, tag, GitHub release |
-| [`docs.yml`](.github/workflows/docs.yml)       | after each stable release, manual run                                        | the documentation site on GitHub Pages                                                                                                        |
+| Workflow                                       | When                                                                         | What                                                                                                                                                   |
+| ---------------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| [`ci.yml`](.github/workflows/ci.yml)           | every pull request, every push to `main` (through `release.yml`), manual run | every check: lint, typecheck, build and pack, unit and example tests, docs build, e2e, Docker integration, packed tarballs                             |
+| [`release.yml`](.github/workflows/release.yml) | every push to `main`, manual run                                             | CI on the pushed commit; the "chore: version packages" pull request; when a version is missing from npm: **an approval**, publish, tag, GitHub release |
+| [`docs.yml`](.github/workflows/docs.yml)       | after each stable release, manual run                                        | the documentation site on GitHub Pages                                                                                                                 |
+
+A push to `main` starts one workflow, **Release**: it runs CI on the pushed commit (its jobs appear
+as _CI / …_ in the run) and gates the publication on it. `main` has no CI run of its own.
 
 All jobs run on `ubuntu-latest`, install Bun from `package.json#packageManager` and Node.js 24
 ([`.github/actions/setup`](.github/actions/setup/action.yml)), and cache the Bun install cache by
-`bun.lock`. A new push to a pull request cancels its previous runs; runs on `main` are never
-cancelled.
+`bun.lock`. A new push to a pull request cancels its previous CI run; the CI of a push to `main` is
+never cancelled. The version pull request job runs one at a time and keeps only its latest pending
+update: when several pushes land together, a Release run in the middle can end as cancelled (its
+CI still completes), and the next one updates the pull request with every changeset.
 
 ## Pull requests
 
-`main` is protected: every change, the maintainers' included, goes through a pull request whose
-checks pass (see [the ruleset](#owner-setup-checklist)). CI and CI (full) run on every pull request:
-Actions minutes are free for public repositories.
+`main` is protected: every change, the maintainers' included, goes through a pull request whose CI
+passes: the [ruleset](#owner-setup-checklist) requires one check, `all-checks-complete`, which only
+passes when every CI job did. Actions minutes are free for public repositories.
 
 A pull request that changes a published package for its users (feature, fix, behaviour or
 dependency change) adds a **changeset**:
@@ -45,15 +49,27 @@ Versions and changelogs are managed with [Changesets](https://changesets.dev)
 
 ## CI
 
-### Fast checks (`ci.yml`)
+[`ci.yml`](.github/workflows/ci.yml) runs every check, in parallel jobs:
 
-| Job                  | Commands                                                                                    |
-| -------------------- | ------------------------------------------------------------------------------------------- |
-| Lint & format        | `bun run check`, actionlint (Docker image `rhysd/actionlint`), changeset reminder (PR only) |
-| Typecheck            | `bun run build`, `bun run typecheck`                                                        |
-| Build & pack         | `bun run build`, `bun run release:pack`, `bun run release:status`                           |
-| Unit & example tests | `bun run build`, `bun run test`, `bun run test:examples`                                    |
-| Docs build           | `bun run docs:build`                                                                        |
+| Job                         | Commands                                                                                                              |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Lint & format               | `bun run check`, actionlint (Docker image `rhysd/actionlint`), changeset reminder (PR only)                           |
+| Typecheck                   | `bun run build`, `bun run typecheck`                                                                                  |
+| Build & pack                | `bun run build`, `bun run release:pack`, `bun run release:status`                                                     |
+| Unit & example tests        | `bun run build`, `bun run test`, `bun run test:examples`                                                              |
+| Docs build                  | `bun run docs:build`                                                                                                  |
+| E2E (Node 24 + Bun)         | `bun run test:e2e`: every suite starts the production build on Node.js **and** on Bun, so one job covers both         |
+| Integration (Docker)        | `bun run test:integration` (testcontainers: RabbitMQ, LocalStack SQS, Kafka), then the examples' e2e against RabbitMQ |
+| Packed tarballs (npm / bun) | `bun run release:smoke --pm <npm or bun>`, see [Smoke test](#smoke-test)                                              |
+| all-checks-complete         | waits for every job above and fails unless all of them succeeded                                                      |
+
+It runs on every pull request; on every push to `main`, called by the release workflow; and on
+demand (**Actions → CI → Run workflow**).
+
+`all-checks-complete` is the only check the ruleset of `main` requires, so the ruleset does not
+change when jobs do: a new job is required once it is listed in the `needs` of
+`all-checks-complete`. The job runs even when a job it waits for failed or was skipped (a skipped
+required check would count as passed) and fails unless every one of them succeeded.
 
 The build runs before the typecheck and the tests because the examples call the `znight` binary,
 which loads `packages/cli/dist/cli.mjs`.
@@ -63,22 +79,13 @@ which loads `packages/cli/dist/cli.mjs`.
 package README is only a warning, so that packages in progress do not block unrelated work; the
 release refuses to publish without it.
 
-### Slow suites (`ci-full.yml`)
-
-| Job                         | Commands                                                                                                              |
-| --------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| E2E (Node 24 + Bun)         | `bun run test:e2e`: every suite starts the production build on Node.js **and** on Bun, so one job covers both         |
-| Integration (Docker)        | `bun run test:integration` (testcontainers: RabbitMQ, LocalStack SQS, Kafka), then the examples' e2e against RabbitMQ |
-| Packed tarballs (npm / bun) | `bun run release:smoke --pm <npm or bun>`, see [Smoke test](#smoke-test)                                              |
-
-They also run every Monday, to catch what changes without a commit (base images, brokers, the npm
-registry), and on demand (**Actions → CI (full) → Run workflow**). The first e2e run needs the npm
-registry: the `client:check` of `examples/storefront-api` runs `openapi-typescript` through
-`npm exec`.
+The e2e job needs the npm registry: the `client:check` of `examples/storefront-api` runs
+`openapi-typescript` through `npm exec`.
 
 ### Running it locally
 
 ```sh
+bun run build                     # typecheck and the example tests call the znight binary (dist)
 bun run check && bun run typecheck && bun run test && bun run test:examples
 bun run test:e2e                  # builds first
 bun run test:integration          # needs Docker
@@ -102,11 +109,10 @@ bun run build && bun run release:smoke     # install the tarballs in a clean app
 3. **The maintainer merges it** when a release is wanted. Changesets merged in the meantime are
    added to it.
 4. **On that push**, the **Release plan** job finds the versions that are not on npm (or that have
-   no GitHub release yet: see [Troubleshooting](#troubleshooting)), then CI and
-   CI (full) run again **on that exact commit** (called by the release workflow). If they pass, the
-   **Publish to npm** job waits for an approval in the `npm` environment: GitHub notifies its
-   required reviewers (**Review deployments**). The approval is the go of the release; rejecting it
-   publishes nothing.
+   no GitHub release yet: see [Troubleshooting](#troubleshooting)), while CI runs **on that exact
+   commit**, like on every push to `main`. If it passes, the **Publish to npm** job waits for an
+   approval in the `npm` environment: GitHub notifies its required reviewers (**Review
+   deployments**). The approval is the go of the release; rejecting it publishes nothing.
 5. **The job publishes** every version that is not on npm yet, then creates the `vX.Y.Z` tag and
    GitHub release (notes gathered from the changelogs by [`notes.ts`](scripts/release/notes.ts)).
 6. **The documentation** of the `vX.Y.Z` tag is deployed to GitHub Pages
@@ -114,10 +120,11 @@ bun run build && bun run release:smoke     # install the tarballs in a clean app
 
 Publishing **never happens without an explicit go**: on a push, the publish job refuses to start if
 the `npm` environment has no required reviewers. A failed release is retried with **Re-run failed
-jobs** on its run: same commit, same gates, the approval again, and the versions already on npm are
-skipped. A manual run (**Actions → Release → Run workflow**, on `main`, _Dry run_ unchecked) does the
-same from the current `main`. Its **Dry run** option, checked by default, packs, verifies and runs
-`npm publish --dry-run` without the gates and without publishing anything.
+jobs** on its run: same commit (a CI job that failed runs again), the approval again, and the
+versions already on npm are skipped. A manual run (**Actions → Release → Run workflow**, on `main`,
+_Dry run_ unchecked) does the same from the current `main`, CI included. Its **Dry run** option,
+checked by default, packs, verifies and runs `npm publish --dry-run` without CI and without
+publishing anything.
 
 ### What the release script does
 
@@ -263,11 +270,9 @@ GitHub (repository `znight-org/znight`, public):
   _Required approvals_ at **0** while there is a single maintainer (GitHub does not let authors
   approve their own pull requests: with 1 approval and an empty bypass list, nobody can merge their
   own pull request), or keep 1 and add **Repository admin** to the _Bypass list_ in _For pull
-  requests only_ mode; **Require status checks to pass** with the fast checks: _Lint & format_, _Typecheck_,
-  _Build & pack_, _Unit & example tests_, _Docs build_ (a check appears in the picker once it has
-  run on a pull request); **Block force pushes**; **Restrict deletions**. CI (full) runs on every
-  pull request too but is not required: it takes 20 to 30 minutes, and the release runs it again
-  on the merged commit before publishing anything.
+  requests only_ mode; **Require status checks to pass** with one check, **all-checks-complete**
+  (source _GitHub Actions_; it appears in the picker once it has run on a pull request); **Block
+  force pushes**; **Restrict deletions**.
 - [ ] **Environment `npm`** (the approval of every release):
   1. Settings → Environments → **New environment**, name `npm` (lowercase) → **Configure
      environment**.
