@@ -221,5 +221,11 @@ describe('HttpResponse', () => {
     Object.defineProperty(HttpResponseLike, 'name', { value: 'HttpResponse' })
     expect(isHttpResponse(new HttpResponseLike())).toBe(true)
     expect(isHttpResponse({ body: 1, headers: {} })).toBe(false)
+    expect(isHttpResponse([1])).toBe(false)
+    expect(isHttpResponse(Object.assign(Object.create(null), { body: 1, headers: {} }))).toBe(false)
+    // an object literal whose own `constructor` looks like the class is still recognised
+    expect(isHttpResponse({ constructor: { name: 'HttpResponse' }, body: 1, headers: {} })).toBe(true)
+    expect(isHttpResponse({ constructor: { name: 'HttpResponse' }, body: 1 })).toBe(false)
+    expect([null, undefined, 'x', 1].some(isHttpResponse)).toBe(false)
   })
 })
