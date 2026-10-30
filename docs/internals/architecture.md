@@ -2603,7 +2603,7 @@ Every `@znight/*` package is versioned in lockstep (§2, a `fixed` Changesets gr
   tests on Node.js 24 and Bun); user-facing changes carry a changeset;
 - changesets on `main` feed a "chore: version packages" pull request (versions and changelogs);
 - merging it runs CI on that commit, like every push to `main`, then publishes the versions missing from npm
-  after an approval in the `npm` environment (npm trusted publishing with provenance), tags
+  after an approval in the `npm` environment (an npm token, with provenance), tags
   `vX.Y.Z`, creates the GitHub release and deploys the documentation site to GitHub Pages;
 - the release script refuses tarballs that are incomplete (README, LICENSE, `dist`, `exports`
   targets, `bin` shebangs), that keep a `workspace:` or `catalog:` range, or whose versions differ.

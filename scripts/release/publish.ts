@@ -13,11 +13,10 @@
  *   --out <dir>                   keep the tarballs in <dir> (default: a temporary directory)
  *   --verbose                     print the npm output of every package
  *
- * Authentication, first match:
- *   1. `NPM_TOKEN`: an npm granular access token. Only needed to publish a new package for the first
- *      time: npm trusted publishing can only be configured for packages that already exist.
- *   2. GitHub Actions OIDC (`permissions: id-token: write`): npm trusted publishing, no secret.
- *   3. Outside GitHub Actions: the local npm login (`npm login`).
+ * Authentication:
+ *   - `NPM_TOKEN`: an npm granular access token (in the release workflow, the secret of the `npm`
+ *     environment, see RELEASING.md). Required in GitHub Actions, except for a dry run.
+ *   - Otherwise, outside GitHub Actions: the local npm login (`npm login`).
  *
  * Provenance (`auto`): on only in GitHub Actions, with an OIDC token, for a PUBLIC repository (the
  * workflow passes `ZNIGHT_REPOSITORY_VISIBILITY`): npm cannot attest packages built from private
@@ -36,11 +35,9 @@ import { packAndVerify, reportPacked } from './tarball.ts'
 import { distTagFor, lockstepVersion, pendingChangesets, publishablePackages } from './workspace.ts'
 
 const DEFAULT_REGISTRY = 'https://registry.npmjs.org'
-/** npm trusted publishing (OIDC) needs npm 11.5.1 or later. */
-const MIN_NPM_FOR_OIDC = '11.5.1'
 
 interface Authentication {
-  readonly mode: 'token' | 'oidc' | 'local'
+  readonly mode: 'token' | 'local'
   readonly description: string
   /** Environment of the `npm publish` processes. */
   readonly env: Readonly<Record<string, string>>
@@ -54,12 +51,9 @@ async function authenticate(workDir: string, dryRun: boolean): Promise<Authentic
     writeFileSync(npmrc, `${REGISTRY.replace(/^https?:/, '')}/:_authToken=\${NPM_TOKEN}\n`)
     return { mode: 'token', description: 'NPM_TOKEN', env: { NPM_CONFIG_USERCONFIG: npmrc } }
   }
-  if (process.env['ACTIONS_ID_TOKEN_REQUEST_URL']) {
-    return { mode: 'oidc', description: 'npm trusted publishing (OIDC)', env: {} }
-  }
   if (inGitHubActions && !dryRun) {
     throw new Error(
-      'No npm credentials: give the job `permissions: id-token: write` (trusted publishing) or set the NPM_TOKEN secret',
+      'No npm credentials: set the NPM_TOKEN secret of the `npm` environment (an npm granular access token, see RELEASING.md)',
     )
   }
   if (!dryRun) {
@@ -70,12 +64,8 @@ async function authenticate(workDir: string, dryRun: boolean): Promise<Authentic
   return { mode: 'local', description: 'local npm configuration', env: {} }
 }
 
-async function checkNpmVersion(auth: Authentication): Promise<void> {
-  const version = (await runOrThrow('npm', ['--version'])).stdout.trim()
-  log.info(`npm ${version}`)
-  if (auth.mode === 'oidc' && Bun.semver.order(version, MIN_NPM_FOR_OIDC) < 0) {
-    throw new Error(`npm trusted publishing needs npm >= ${MIN_NPM_FOR_OIDC}, found ${version} (use Node.js 24)`)
-  }
+async function logNpmVersion(): Promise<void> {
+  log.info(`npm ${(await runOrThrow('npm', ['--version'])).stdout.trim()}`)
 }
 
 /** Whether to ask npm for provenance attestations (see the header). */
@@ -166,7 +156,7 @@ main(async () => {
     }
 
     const auth = await authenticate(workDir, dryRun)
-    await checkNpmVersion(auth)
+    await logNpmVersion()
     const provenance = provenanceFor(values.provenance)
     log.step(
       `${dryRun ? '[dry run] ' : ''}Publishing ${toPublish.length} package(s) at ${version}: dist-tag ${tag}, ` +

@@ -14,8 +14,8 @@
 # (Actions > Release > Run workflow, on main) does the same from the current main, or with
 # "Dry run" (the default) packs, verifies and runs `npm publish --dry-run` without publishing.
 #
-# npm authentication: the NPM_TOKEN secret when set (only to publish a new package for the first
-# time), otherwise npm trusted publishing (OIDC). Provenance is attested for public repositories.
+# npm authentication: the NPM_TOKEN secret of the `npm` environment, an npm granular access token
+# (90 days at most: see RELEASING.md). Provenance is attested for public repositories.
 name: Release
 
 on:
@@ -137,7 +137,7 @@ jobs:
       cancel-in-progress: false
     permissions:
       contents: write # tag + GitHub release
-      id-token: write # npm trusted publishing (OIDC) and provenance
+      id-token: write # npm provenance (signed with the job's OIDC token)
       actions: read # read the protection rules of the npm environment
     steps:
       - name: Require an approval
