@@ -45,7 +45,7 @@ import { isSseBody, isSseSource, type SseOptions, SseSession, type SseSource } f
 import { isBodylessStatus } from './status.ts'
 import { type ContextRunner, captureContext, discardStream, trackStream } from './stream.ts'
 import { HttpTokens } from './tokens.ts'
-import { emptyRecord, errorMessage, fastRecord, isBun, isThenable } from './utils.ts'
+import { emptyRecord, errorMessage, isBun, isThenable } from './utils.ts'
 
 /** A dependency of the pipeline: an instance resolved at bootstrap, or a token resolved per request. */
 export type Resolvable<T> = { readonly instance: T } | { readonly token: Token }
@@ -225,6 +225,8 @@ export class Pipeline {
   readonly #emptyHeaders: Readonly<Record<string, HeaderValue>>
   /** The request id header of {@link #emptyHeaders}, `undefined` when the reply has none. */
   readonly #emptyIdHeader: string | undefined
+  /** Whether {@link #jsonHeaders} and {@link #emptyHeaders} hold every framework header (see {@link #fastRoute}). */
+  readonly #fastHeaders: boolean
   /** The `cookies` option (secure defaults, no signing, when not set). */
   readonly #cookies: CookieSettings
   #inflight = 0
@@ -255,17 +257,17 @@ export class Pipeline {
     // not draining), with a placeholder where the request id goes
     const placeholder = '-' as RequestId
     const idHeader = options.requestIdHeader
-    // records without Object.prototype, like the serialiser's: any header name is an own property
-    const json = fastRecord<HeaderValue>()
-    json['content-type'] = ContentType.json
-    json['content-length'] = '0'
+    // plain objects: a spread copies them several times faster than a record without prototype
+    const json: Record<string, HeaderValue> = { 'content-type': ContentType.json, 'content-length': '0' }
     this.#frameworkHeaders(json, placeholder, undefined, false)
     this.#jsonHeaders = json
     this.#jsonIdHeader = idHeader !== undefined && json[idHeader] === placeholder ? idHeader : undefined
-    const empty = fastRecord<HeaderValue>()
+    const empty: Record<string, HeaderValue> = {}
     this.#frameworkHeaders(empty, placeholder, undefined, false)
     this.#emptyHeaders = empty
     this.#emptyIdHeader = idHeader !== undefined && empty[idHeader] === placeholder ? idHeader : undefined
+    // a `__proto__` header is not a property of a plain object: such options take the general pipeline
+    this.#fastHeaders = idHeader !== '__proto__' && this.#securityHeaders.every(([name]) => name !== '__proto__')
   }
 
   /** Number of requests being processed. */
@@ -307,6 +309,7 @@ export class Pipeline {
   #fastRoute(plan: RoutePlan): FastRoute | undefined {
     const definition = plan.definition
     if (
+      !this.#fastHeaders ||
       this.#options.cors !== undefined ||
       plan.redirect === true ||
       plan.guards.length > 0 ||
