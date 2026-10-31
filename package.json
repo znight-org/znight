@@ -21,7 +21,7 @@
     ],
     "catalog": {
       "@types/bun": "1.4.4",
-      "@types/node": "24.19.2",
+      "@types/node": "26.6.5",
       "typescript": "7.0.2",
       "tsdown": "0.23.2",
       "vite": "8.3.5",
