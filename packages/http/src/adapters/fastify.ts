@@ -142,6 +142,8 @@ interface InternalKeys {
   readonly headers: symbol | null
   /** The trailers set with `reply.trailer()`. */
   readonly trailers: symbol | null
+  /** The serializer set with `reply.serializer()` (`null` when none). */
+  readonly serializer: symbol | null
 }
 
 class FastifyHttpAdapter implements FastifyAdapter {
@@ -273,6 +275,7 @@ class FastifyHttpAdapter implements FastifyAdapter {
       context: ownSymbol(request, 'fastify.context'),
       headers: ownSymbol(reply, 'fastify.reply.headers'),
       trailers: ownSymbol(reply, 'fastify.reply.trailers'),
+      serializer: ownSymbol(reply, 'fastify.reply.serializer'),
     }
     const key = this.#keys.context
     const context = key === null ? undefined : (request as unknown as Record<symbol, unknown>)[key]
@@ -325,7 +328,9 @@ class FastifyHttpAdapter implements FastifyAdapter {
     const headers = result.headers
     const length = headers['content-length']
     if (typeof length !== 'string' || Number(length) !== body.byteLength) return false
-    if (!sendsTextAsIs(headers['content-type'])) return false
+    // a content type Fastify cannot parse is replaced by `reply.send()` (text/plain)
+    const type = headers['content-type']
+    if (!sendsTextAsIs(type) || (type !== JSON_TYPE && !MEDIA_TYPE.test(type as string))) return false
     const response = reply.raw
     if (reply.sent || response.destroyed || response.headersSent || reply.request.raw.httpVersionMajor !== 1) {
       return false
@@ -333,6 +338,8 @@ class FastifyHttpAdapter implements FastifyAdapter {
     const keys = this.#keys as InternalKeys
     const state = reply as unknown as Record<symbol, unknown>
     if (keys.headers === null || keys.trailers === null || state[keys.trailers] !== null) return false
+    // a serializer set by a hook transforms text sent with `reply.send()`
+    if (keys.serializer === null || state[keys.serializer] !== null) return false
     if (!isEmptyRecord(state[keys.headers])) return false
     response.writeHead(result.status, headers as OutgoingHttpHeaders)
     response.end(text)
@@ -478,6 +485,9 @@ const JSON_TYPE = 'application/json; charset=utf-8'
  * Whether Fastify sends a string with this content type unchanged: it adds a charset to a JSON
  * type without one, and a content type to a string without one.
  */
+/** A `type/subtype` media type, optionally followed by parameters: what Fastify's `ContentType` accepts. */
+const MEDIA_TYPE = /^\s*[\w!#$%&'*+.^`|~-]+\/[\w!#$%&'*+.^`|~-]+\s*(?:;|$)/
+
 function sendsTextAsIs(type: HeaderValue | undefined): boolean {
   if (typeof type !== 'string') return false
   if (type === JSON_TYPE) return true

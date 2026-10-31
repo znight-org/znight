@@ -1,7 +1,13 @@
 /** Internal helpers (not part of the public API). */
 
-/** Whether `value` is a promise-like object (has a callable `then`). */
-export function isThenable(value: unknown): value is PromiseLike<unknown> {
+/**
+ * Whether `value` is a promise-like object (has a callable `then`). The guard keeps the thenable
+ * part of the value's type (`Promise<R>` of `R | Promise<R>`, even when `R` is `object` or `any`), so
+ * that generated code awaiting it gets `R`.
+ */
+export function isThenable<T>(
+  value: T,
+): value is unknown extends T ? T & PromiseLike<unknown> : Extract<T, PromiseLike<unknown>> {
   return (
     value !== null &&
     (typeof value === 'object' || typeof value === 'function') &&

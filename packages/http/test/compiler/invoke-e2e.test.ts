@@ -65,13 +65,18 @@ export const AsyncName = schema('async name', named, true)
 export const Deferred = schema('deferred', value =>
   typeof value === 'string' ? Promise.resolve(\`deferred \${value}\`) : undefined,
 )
+/** Loose outputs: the generated invoke must still type-check (the thenable guard keeps the output type). */
+export const Loose = schema<Record<string, any>>('loose', value =>
+  typeof value === 'object' && value !== null ? (value as Record<string, any>) : undefined,
+)
+export const Plain = schema<object>('plain', value => (typeof value === 'object' && value !== null ? value : undefined))
 `
 
 const CONTROLLER = `
 import type { CallHandler, HttpContext, HttpInterceptor } from '@znight/http'
 import { Injectable } from '@znight/core'
 import { Body, Controller, Ctx, Get, Headers, Param, Patch, Post, Put, Query, UseInterceptor } from '@znight/http'
-import { AsyncId, AsyncName, calls, Deferred, SyncId, SyncName } from './schemas.ts'
+import { AsyncId, AsyncName, calls, Deferred, Loose, Plain, SyncId, SyncName } from './schemas.ts'
 
 @Injectable()
 export class TagInterceptor implements HttpInterceptor {
@@ -121,6 +126,11 @@ export class ChecksController {
   @Get('/deferred')
   deferred(@Query('v', Deferred) v: string) {
     return { v }
+  }
+
+  @Post('/loose')
+  loose(@Body(Loose) body: Record<string, any>, @Query('p', Plain) p?: object) {
+    return { keys: Object.keys(body).length, p: p === undefined ? null : typeof p }
   }
 
   /** Whole records cast to the declared types, @Ctx() inlined, an optional coercion after the validation. */

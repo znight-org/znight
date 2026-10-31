@@ -183,7 +183,7 @@ class HonoHttpAdapter implements HonoAdapter {
   readonly #serveOptions: HonoServeOptions
   /** Number of routes of `app` registered by the adapter (see {@link #middleware}). */
   #routes = 0
-  /** The GET and HEAD handlers of each path, served by one route of `app` (see {@link registerRoute}). */
+  /** The GET and HEAD handlers of each path shape, served by one route of `app` (see {@link registerRoute}). */
   readonly #reads = new Map<string, ReadHandlers>()
   #fallback: FallbackHandler | undefined
   #prepared = false
@@ -216,8 +216,10 @@ class HonoHttpAdapter implements HonoAdapter {
     if (route.method === 'GET' || route.method === 'HEAD') {
       // Hono routes HEAD requests to GET handlers: one GET handler per path serves both methods (the
       // plugin registers HEAD routes first), so that a request matches a single handler and Hono
-      // skips its middleware composition
-      const existing = this.#reads.get(path)
+      // skips its middleware composition. Paths are keyed by their shape (`/users/:` for
+      // `/users/:id` and `/users/:userId`): a GET route joins the HEAD route matching the same
+      // requests, at its rank (Znight reads the parameters itself, never Hono's names)
+      const existing = this.#reads.get(route.path.shape)
       if (existing !== undefined) {
         if (route.method === 'GET') existing.get = handler
         else existing.head = handler
@@ -225,7 +227,7 @@ class HonoHttpAdapter implements HonoAdapter {
       }
       const reads: ReadHandlers =
         route.method === 'GET' ? { get: handler, head: undefined } : { get: undefined, head: handler }
-      this.#reads.set(path, reads)
+      this.#reads.set(route.path.shape, reads)
       this.#routes++
       this.app.get(path, (c: Context, next: Next) => {
         const read = c.req.raw.method === 'HEAD' ? reads.head : reads.get

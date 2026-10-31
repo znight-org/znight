@@ -266,8 +266,11 @@ export class Pipeline {
     this.#frameworkHeaders(empty, placeholder, undefined, false)
     this.#emptyHeaders = empty
     this.#emptyIdHeader = idHeader !== undefined && empty[idHeader] === placeholder ? idHeader : undefined
-    // a `__proto__` header is not a property of a plain object: such options take the general pipeline
-    this.#fastHeaders = idHeader !== '__proto__' && this.#securityHeaders.every(([name]) => name !== '__proto__')
+    // a header named like a property of Object.prototype (`__proto__`, `constructor`...) is not an own
+    // property of these plain objects: such options take the general pipeline
+    this.#fastHeaders =
+      (idHeader === undefined || !(idHeader in Object.prototype)) &&
+      this.#securityHeaders.every(([name]) => !(name in Object.prototype))
   }
 
   /** Number of requests being processed. */
@@ -328,7 +331,8 @@ export class Pipeline {
       plan,
       target: { kind: 'route', plan },
       method: definition.method,
-      jsonStatus: isBodylessStatus(json) ? undefined : json,
+      // a HEAD reply has no body: JSON results of an explicit `@Head` route take the general pipeline
+      jsonStatus: definition.method === 'HEAD' || isBodylessStatus(json) ? undefined : json,
       emptyStatus: definition.status ?? (post ? 201 : 204),
     }
   }
@@ -340,9 +344,10 @@ export class Pipeline {
    * is the route's (not a `HEAD` served by a `GET` route); a plain object or array returned by the
    * handler is serialised as JSON, and `undefined` answered without body, with the headers in their
    * final order (a template precomputed at boot).
-   * Anything else — a malformed path (before the request starts), a thrown error, a thenable, an
-   * `HttpResponse`, a `Response` or any other result, headers or cookies set through the context —
-   * continues in the general pipeline, in the same request scope, with the same outcome.
+   * A thenable result is awaited in the lane (see {@link #fastAsync}). Anything else — a malformed
+   * path (before the request starts), a thrown error or a rejection, an `HttpResponse`, a `Response`
+   * or any other result, headers or cookies set through the context — continues in the general
+   * pipeline, in the same request scope, with the same outcome.
    */
   #fast(route: FastRoute, request: AdapterRequest): Promise<AdapterReply> {
     const plan = route.plan

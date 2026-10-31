@@ -129,6 +129,9 @@ describe('honoAdapter({ app })', () => {
     rest(ctx: HttpContext) {
       return { rest: ctx.params['*'] }
     }
+    other(ctx: HttpContext) {
+      return { other: { ...ctx.params } }
+    }
   }
 
   function readsMetadata() {
@@ -140,6 +143,8 @@ describe('honoAdapter({ app })', () => {
         // the HEAD and GET routes of one shape, with other parameter names (two Hono paths)
         route('head', '/named/:a', (c: ReadsController, ctx) => c.head(ctx), { method: 'HEAD', ...context }),
         route('get', '/named/:b', (c: ReadsController, ctx) => c.get(ctx), context),
+        // a GET route less specific than /named/:b, without HEAD route of its own shape before it
+        route('other', '/:section/:key', (c: ReadsController, ctx) => c.other(ctx), context),
         // a static path, a parameter and a wildcard matching the same requests
         route('get', '/files/readme', (c: ReadsController, ctx) => c.get(ctx), context),
         route('get', '/files/:name', (c: ReadsController, ctx) => c.get(ctx), context),
@@ -160,6 +165,7 @@ describe('honoAdapter({ app })', () => {
       expect(headOnly.headers['allow']).toBe('HEAD, OPTIONS')
       expect((await send('HEAD', '/head-only')).headers['x-head']).toBe('explicit')
       expect((await send('GET', '/named/1')).json()).toEqual({ get: { b: '1' } })
+      expect((await send('GET', '/other/1')).json()).toEqual({ other: { section: 'other', key: '1' } })
       const head = await send('HEAD', '/named/1')
       expect(head.headers['x-head']).toBe('explicit')
       expect(head.body).toBe('')
@@ -170,9 +176,9 @@ describe('honoAdapter({ app })', () => {
       expect(files.status).toBe(200)
       expect(files.headers['content-length']).toBe(String('{"rest":"a/b"}'.length))
       expect(files.body).toBe('')
-      // one Hono route per path for GET and HEAD
+      // one Hono route per path shape for GET and HEAD
       const routes = native.routes.filter(entry => entry.method === 'GET').map(entry => entry.path)
-      expect(routes.filter(path => path === '/named/:a' || path === '/named/:b')).toHaveLength(2)
+      expect(routes.filter(path => path === '/named/:a' || path === '/named/:b')).toEqual(['/named/:a'])
       expect(new Set(routes).size).toBe(routes.length)
       await app.stop()
     })

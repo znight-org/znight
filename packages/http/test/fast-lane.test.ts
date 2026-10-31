@@ -198,6 +198,8 @@ const ROUTES = [
   }),
   route('status', '/status', () => ({ accepted: true }), { status: 202 }),
   route('nothing', '/nothing', () => undefined, { method: 'POST' }),
+  route('headObject', '/head-object', () => ({ dropped: true }), { method: 'HEAD' }),
+  route('headNothing', '/head-nothing', () => undefined, { method: 'HEAD' }),
   route('emptyOk', '/empty-ok', () => undefined, { status: 200 }),
   route('emptyNoContent', '/empty-no-content', () => undefined, { status: 204 }),
   route('noContent', '/no-content', () => ({ dropped: true }), { status: 204 }),
@@ -362,6 +364,9 @@ describe('fast lane', () => {
     ['@HttpCode(204) (general pipeline)', { url: '/no-content' }, '/no-content', false],
     ['@Header (general pipeline)', { url: '/with-header' }, '/with-header', false],
     ['HEAD of a GET route (general pipeline)', { method: 'HEAD', url: '/object' }, '/object', false],
+    // a HEAD reply has no body: an object goes through the general pipeline, `undefined` stays
+    ['an object from a @Head route (general pipeline)', { method: 'HEAD', url: '/head-object' }, '/head-object', false],
+    ['undefined from a @Head route', { method: 'HEAD', url: '/head-nothing' }, '/head-nothing', true],
     // the scope holds an instance: the request is over once it was disposed (asynchronously)
     ['a request-scoped controller', { url: '/per-request' }, '/per-request', false],
     [
@@ -485,6 +490,14 @@ describe('fast lane options', () => {
     const invalid = await reply({ generateRequestId: () => 'bad\nid' })
     expect(invalid.headers['x-request-id']).toBeUndefined()
     expect(invalid.status).toBe(200)
+  })
+
+  it('sends a request id header named like a property of Object.prototype', async () => {
+    for (const name of ['constructor', 'tostring', '__proto__']) {
+      const named = await reply({ requestIdHeader: name })
+      expect(Object.hasOwn(named.headers, name)).toBe(true)
+      expect(named.headers[name]).toMatch(ID)
+    }
   })
 
   it('keeps a request id header named like a security header', async () => {
