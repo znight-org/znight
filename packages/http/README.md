@@ -1493,6 +1493,14 @@ app.hooks.wrap('http:request', async (event, next) => {
 stream, `run` resolves when the stream opens (`status: 200`): durations measure the time to open.
 A stream-lifetime hook is not provided.
 
+When no `http:request` wrapper or listener is registered (and CORS is off), routes (other than
+`@All`) without guards, interceptors, `@Sse`, `@Res()` or `@Header` take a fast lane: the plugin
+decides at boot what the pipeline would do for them, runs a synchronous handler without creating a
+promise and builds the headers of a JSON reply from a template. The replies are the same as through
+the full pipeline (a thrown error, an `HttpResponse` or anything unusual continues there, in the
+same request scope; a promise is awaited first); registering a hook simply sends every request
+through the full pipeline again.
+
 ## Plugin options
 
 `HttpPlugin.configure(options)` — `options` may also be a function of the container, evaluated
@@ -1638,8 +1646,18 @@ HttpPlugin.configure({ adapter: fastifyAdapter({ instance }) })
 
 Znight routes are registered in an encapsulated context with their own body handling and 404
 handler, so your other routes keep Fastify's parsers. A `content-type` Fastify cannot parse (`foo`,
-an empty one) is hidden from Fastify for Znight routes, which then answer like on the other adapters
-instead of Fastify's `415`. Created instances use
+an empty one) never reaches Fastify's parsers for Znight routes, which then answer like on the other
+adapters instead of Fastify's `415`.
+
+Znight parses bodies itself, so a Znight route that no other hook needs is served straight from the
+`onRequest` hook of its context: Fastify skips its content type parsing and the steps before the
+handler, and a text reply is written on the raw response exactly as `reply.send()` writes it. Your
+hooks always run: with a `preParsing`, `preValidation` or `preHandler` hook (or an `onRoute` hook
+wrapping the handler, a schema, a subscriber of the `fastify.request.handler` tracing channel), the
+request goes through Fastify's whole lifecycle; with an `onSend` or `onResponse` hook, or headers
+and trailers set by an `onRequest` hook, the reply goes through `reply.send()`. The adapter reads
+these hooks on Fastify's internal route and reply state: should a Fastify release change it, every
+request goes through the lifecycle (slower, same responses). Created instances use
 `exposeHeadRoutes: false` (Znight serves HEAD), a `maxParamLength` of 8 KiB and a
 `frameworkErrors` handler rendering Znight errors (with your own instance, malformed URLs are
 answered by Fastify). `inject()` uses `fastify.inject()`. Event streams are sent through
@@ -1695,10 +1713,13 @@ handler returning its own `Response`.
 | `serveOptions` | Options of `Bun.serve()` (`tls`, `idleTimeout`, `development`, `error`...; Znight sets `port`, `hostname`, `fetch`). Bun only |
 
 On Bun, the body limits are Znight's (`bodyLimit`, `@BodyLimit`): `maxRequestBodySize` defaults to
-unlimited instead of Bun's 128 MiB. Bun's `idleTimeout` (10 s by default) still closes idle
+unlimited instead of Bun's 128 MiB. A body with a `Content-Length` is read at once
+(`request.bytes()`, refused with 413 before reading when the length is above the limit), a chunked
+one as a stream (413 as soon as it passes the limit). Bun's `idleTimeout` (10 s by default) still closes idle
 connections and stalled requests, but is lifted while a streamed response is sent (SSE, slow
 producers), then restored. In your own `Bun.serve({ fetch: adapter.fetch })` the adapter cannot
-lift it: keep the SSE `heartbeat` below `idleTimeout` (the 8 s default does).
+lift it: keep the SSE `heartbeat` below `idleTimeout` (the 8 s default does). Bun checks idle timeouts
+every 4 seconds, so an `idleTimeout` of 4 s or less closes a connection even while it is written to.
 
 `Bun.serve()` sends streamed bodies with chunked transfer encoding even when a `Content-Length`
 header is set (unless the whole stream is available at once): files sent with
@@ -2084,7 +2105,8 @@ Rules:
   boot.
 - `@Validate(S)` applies `S` to the `@Body()` parameter (`@Validate(S)` + `@Body()` ≡ `@Body(S)`);
   `@Validate(S)` + `@Body(S2)` is ZNIGHT005. Without a `@Body()` parameter the body is still
-  validated (and discarded): `invoke: async (c, ctx) => { await validate(S, await ctx.parseBody(), 'body'); return c.m() }`.
+  validated (and discarded): `invoke: async (c, ctx) => { await validate(S, await ctx.parseBody(), 'body'); return c.m() }`
+  (this `async` arrow `await`s its other validations too).
 - The plugin parses the body before the interceptors when `params` contains a `source: 'body'`
   entry or `uploads` is not empty; `ctx.body` is `undefined` otherwise (generated code then uses
   `await ctx.parseBody()`).
@@ -2117,31 +2139,53 @@ Rules:
 
 ### `invoke` generation
 
-`invoke(controller, ctx)` extracts every argument in parameter order and calls the handler. It is
-`async` and `await`s every `validate()` call when the route has at least one schema; otherwise it
-is synchronous. It returns the handler result as is (promises included).
+`invoke(controller, ctx)` extracts every argument in parameter order and calls the handler. It
+returns the handler result as is (promises included); the plugin awaits it only when it is a
+thenable. Without schema it is a synchronous arrow:
+`(c: UserController, ctx: HttpContext) => c.find(coerce.number(ctx.params['id'], 'param "id"'))`.
 
-| Parameter                               | Generated expression                                                           |
-| --------------------------------------- | ------------------------------------------------------------------------------ |
-| `@Param('id') id: T`                    | `coerce.X(ctx.params['id'], 'param "id"')` (see below)                         |
-| `@Param('id', S)`                       | `await validate(S, ctx.params['id'], 'param "id"')`                            |
-| `@Param()`                              | `ctx.params as never` · with schema: `await validate(S, ctx.params, 'params')` |
-| `@Query('page') page: T`                | `coerce.X(ctx.query['page'], 'query "page"')`                                  |
-| `@Query('page', S)`                     | `await validate(S, ctx.query['page'], 'query "page"')`                         |
-| `@Query()` / `@Query(S)`                | `ctx.query as never` / `await validate(S, ctx.query, 'query')`                 |
-| `@Body()` / `@Body(S)` / `@Validate(S)` | `ctx.body as never` / `await validate(S, ctx.body, 'body')`                    |
-| `@Headers('X-Api-Key') key: T`          | `coerce.X(ctx.headers['x-api-key'], 'header "x-api-key"')` (name lower-cased)  |
-| `@Headers()`                            | `ctx.headers as never`                                                         |
-| `@Cookie('sid') sid: T`                 | `coerce.X(ctx.cookies['sid'], 'cookie "sid"')` (or `coerce.optional(...)`)     |
-| `@Cookie('sid', S)`                     | `await validate(S, ctx.cookies['sid'], 'cookie "sid"')`                        |
-| `@Cookie()` / `@Cookie(S)`              | `ctx.cookies as never` / `await validate(S, ctx.cookies, 'cookies')`           |
-| `@SignedCookie('sid') sid: T`           | `coerce.X(ctx.signedCookie('sid'), 'cookie "sid"')`                            |
-| `@SignedCookie('sid', S)`               | `await validate(S, ctx.signedCookie('sid'), 'cookie "sid"')`                   |
-| `@Req()` / `@Res()`                     | `ctx.request as never` / `ctx.response as never` (+ `rawResponse: true`)       |
-| `@UploadedFile('f') f: File`            | `uploads.file(ctx, 'f')` · optional: `uploads.optionalFile(ctx, 'f')`          |
-| `@UploadedFiles('f') f: File[]`         | `uploads.files(ctx, 'f')` · optional: `uploads.optionalFiles(ctx, 'f')`        |
-| `@UploadedFile()` / `@UploadedFiles()`  | the same helpers with `undefined` as field (any field)                         |
-| `@Ctx()`                                | `ctx`                                                                          |
+With schemas it stays synchronous as long as every `validate()` returns a value (Zod, Valibot or
+ArkType schemas without async refinements): no promise, no `await` per request. The arguments up to
+the last validated one are evaluated in order into `a<index>` constants (`@Ctx()` stays `ctx`), the
+later ones are inlined in the call, and each validated argument is followed by a fallback for
+asynchronous schemas:
+
+```ts
+invoke: (c: UserController, ctx: HttpContext) => {
+  const a0 = coerce.number(ctx.params['id'], 'param "id"')
+  const a1 = validate(UpdateUser, ctx.body, 'body')
+  if (isThenable(a1)) return (async () => c.update(a0, await a1, ctx))()
+  return c.update(a0, a1, ctx)
+},
+```
+
+When `validate()` returns a thenable (an async refinement, or an output that is itself a promise),
+the `async` arrow awaits it, then evaluates the remaining arguments (`await`ing their validations)
+and calls the handler: the order of evaluation, the error of the first invalid argument and the
+values received by the handler are those of an `async` invoke `await`ing every `validate()`. The
+expressions of the table below are `validate(S, ...)` calls in both forms.
+
+| Parameter                               | Generated expression                                                          |
+| --------------------------------------- | ----------------------------------------------------------------------------- |
+| `@Param('id') id: T`                    | `coerce.X(ctx.params['id'], 'param "id"')` (see below)                        |
+| `@Param('id', S)`                       | `validate(S, ctx.params['id'], 'param "id"')`                                 |
+| `@Param()`                              | `ctx.params as never` · with schema: `validate(S, ctx.params, 'params')`      |
+| `@Query('page') page: T`                | `coerce.X(ctx.query['page'], 'query "page"')`                                 |
+| `@Query('page', S)`                     | `validate(S, ctx.query['page'], 'query "page"')`                              |
+| `@Query()` / `@Query(S)`                | `ctx.query as never` / `validate(S, ctx.query, 'query')`                      |
+| `@Body()` / `@Body(S)` / `@Validate(S)` | `ctx.body as never` / `validate(S, ctx.body, 'body')`                         |
+| `@Headers('X-Api-Key') key: T`          | `coerce.X(ctx.headers['x-api-key'], 'header "x-api-key"')` (name lower-cased) |
+| `@Headers()`                            | `ctx.headers as never`                                                        |
+| `@Cookie('sid') sid: T`                 | `coerce.X(ctx.cookies['sid'], 'cookie "sid"')` (or `coerce.optional(...)`)    |
+| `@Cookie('sid', S)`                     | `validate(S, ctx.cookies['sid'], 'cookie "sid"')`                             |
+| `@Cookie()` / `@Cookie(S)`              | `ctx.cookies as never` / `validate(S, ctx.cookies, 'cookies')`                |
+| `@SignedCookie('sid') sid: T`           | `coerce.X(ctx.signedCookie('sid'), 'cookie "sid"')`                           |
+| `@SignedCookie('sid', S)`               | `validate(S, ctx.signedCookie('sid'), 'cookie "sid"')`                        |
+| `@Req()` / `@Res()`                     | `ctx.request as never` / `ctx.response as never` (+ `rawResponse: true`)      |
+| `@UploadedFile('f') f: File`            | `uploads.file(ctx, 'f')` · optional: `uploads.optionalFile(ctx, 'f')`         |
+| `@UploadedFiles('f') f: File[]`         | `uploads.files(ctx, 'f')` · optional: `uploads.optionalFiles(ctx, 'f')`       |
+| `@UploadedFile()` / `@UploadedFiles()`  | the same helpers with `undefined` as field (any field)                        |
+| `@Ctx()`                                | `ctx`                                                                         |
 
 `coerce.X` by declared type (`T`):
 
@@ -2187,6 +2231,8 @@ function validate<S extends StandardSchemaV1>(
   location: string,
 ): InferSchemaOutput<S> | Promise<InferSchemaOutput<S>>
 
+function isThenable(value: unknown): value is PromiseLike<unknown> // a `then` method: validate() result to await
+
 const uploads: {
   file(ctx: HttpContext, field: string | undefined): File // 400 `Missing file "field"` when absent
   optionalFile(ctx: HttpContext, field: string | undefined): File | undefined
@@ -2199,8 +2245,9 @@ Every coercion failure throws `BadRequestException` (400); `validate` throws `Va
 (400, `details: [{ path, message }]`) and `TypeError` when `schema` is not a Standard Schema; the
 `uploads` helpers read `ctx.files` (`undefined` field: every field) and throw `BadRequestException`
 for missing required files (`Expected a file in field "f", received a text value` when the field
-was sent as text). Generated modules import them with
-`import { coerce, uploads, validate } from '@znight/http'` and the context type with
+was sent as text). `validate` returns the output synchronously when the schema validates
+synchronously, a promise otherwise. Generated modules import them with
+`import { coerce, isThenable, uploads, validate } from '@znight/http'` and the context type with
 `import type { HttpContext } from '@znight/http'`.
 
 ### Manifest

@@ -297,8 +297,8 @@ Rules for generated code:
   bare specifiers, then relative paths; for one specifier `import type` comes before the value
   import, and a type and a value import of the same binding are merged. Only imports and constants
   reachable from the emitted metadata are printed. Identifiers are validated and de-duplicated by
-  identity order (`UserService`, `UserService$1`); they never shadow a global (`Date$1`) nor an arrow
-  parameter.
+  identity order (`UserService`, `UserService$1`); they never shadow a global (`Date$1`), an arrow
+  parameter nor a local declared by a block (`GenerateContext.block`, §6.5).
 - **Constants**: `GenerateContext.constant(name, value, { type })` (§6.5) declares a module-level
   `const <name>: <type> = <value>` printed before `__ZNIGHT_METADATA__`, in declaration order,
   de-duplicated like imports (`AppConfig$fields`, `AppConfig$fields$1`). `@znight/config` uses it
@@ -1114,7 +1114,9 @@ interface DecoratorSpec {
     by identity); the files read are part of `watchFiles`. The extension decides the severity of
     issues.
 - `GenerateContext`: pure builders `lit`, `obj`, `arr`, `ref`, `member`, `call`, `construct`,
-  `arrow` (typed parameters), `code` (tagged template escaping every interpolation) — also available
+  `arrow` (typed parameters), `block(locals, statements)` (an arrow body printed one statement per
+  line; its `locals`, the `const`s its statements declare, are reserved like arrow parameters),
+  `code` (tagged template escaping every interpolation) — also available
   as `createGenBuilders()` — plus `importValue` / `importType(ValueRef | ArgInfo | ClassInfo |
   ClassRef | identity)`, `importFrom(bareSpecifier, name, { type? })`, `tokenOf(target)`,
   `binding(handle)`, `provider(token)`, `constant(name, value, { type? })` (§3.3), `report`, and
@@ -1180,6 +1182,7 @@ class Container {
   tokenOf(key: ProviderKey): Token | undefined
   instances(): ManagedInstance[] // created singletons in resolution order, idempotent dispose()
   runInScope<R>(fn: () => R | Promise<R>, values?: Iterable<[ProviderKey, unknown]>): Promise<R>
+  openScope(values?: Iterable<[ProviderKey, unknown]>): OpenedScope // { context, run(fn, ...args), close() }
   currentScope(): ScopeContext | undefined // get / has / set / closed
   dispose(): Promise<void>
 }
@@ -1213,7 +1216,12 @@ type ProviderKey<T> = TypedToken<T> | ProviderClass<T> | ClassKey<T> // ClassKey
   request-scoped providers and request-scoped externals are resolved from it (ZNIGHT013 when
   absent); a seed value for a token bound as singleton/transient is ignored (the binding wins);
   instances created in the scope are disposed in reverse creation order when `fn` settles (only a
-  disposal failure rejects, with ZNIGHT021).
+  disposal failure rejects, with ZNIGHT021). `openScope` is the callback-free form for hot paths:
+  the same scope, whose owner calls `run(fn, ...args)` (synchronous; the code and the continuations
+  it creates see the scope) as many times as needed, then `close()`, which disposes the instances
+  created in it and returns `undefined` when there were none (nothing to wait for), otherwise a
+  promise rejecting with ZNIGHT021 when a disposal fails. Seed values are copied into the scope's
+  map when it is first read.
 - **Lifecycle** is duck-typed on instantiated singletons (compiled providers and `@Provides`
   values): `onStart`, `onReady`, `onStop`, then disposal (`dispose` method name,
   `Symbol.asyncDispose`, `Symbol.dispose`). Transient instances belong to their consumer.
@@ -1506,17 +1514,38 @@ interface HttpRouteDefinition {
 matched in linear time; `date` accepts an ISO 8601 date (UTC midnight), an ISO 8601 date-time
 **with** an offset (`Z`, `+02:00`, `+0200`) or an integer millisecond timestamp, checks the calendar
 (`2024-02-30` → 400) and rejects a date-time without offset, which would depend on the server time
-zone; `validate(schema, value, location)` with any Standard Schema, `await`ed, so the arrow is
-`async` only when a schema is used). `@Validate(S)` without `@Body()` generates `await validate(S,
-await ctx.parseBody(), 'body')`. Upload parameters read `ctx.files` through the `uploads` helper,
+zone; `validate(schema, value, location)` with any Standard Schema, which returns the output, or a
+promise of it when the schema validates asynchronously). `@Validate(S)` without `@Body()` generates
+an `async` arrow, `await validate(S, await ctx.parseBody(), 'body')`, whose other validations are
+`await`ed too. Upload parameters read `ctx.files` through the `uploads` helper,
 imported by the generated module only when a route uses it: `@UploadedFile('avatar') avatar: File` →
 `uploads.file(ctx, 'avatar')` (400 `Missing file "avatar"` when absent; `optionalFile` for an
 optional parameter, `files` / `optionalFiles` for `@UploadedFiles`; `undefined` field = every
 field). `@Body()` on an upload route receives the text fields. Cookie parameters read
 `ctx.cookies['name']` (`@Cookie`) or `ctx.signedCookie('name')` (`@SignedCookie`) with the label
-`cookie "name"` (`coerce.X`, `coerce.optional` or `await validate(S, ..., 'cookie "name"')`), the
+`cookie "name"` (`coerce.X`, `coerce.optional` or `validate(S, ..., 'cookie "name"')`), the
 whole record `ctx.cookies` (`validate(S, ctx.cookies, 'cookies')` with a schema). Unused `ctx` is
 omitted.
+
+An `invoke` without validation is an expression arrow (`(c, ctx) => c.m(coerce.number(...))`). An
+`invoke` validating arguments MUST stay synchronous while every `validate()` returns a value, and
+MUST otherwise behave exactly like an `async` arrow `await`ing every `validate()` in parameter order:
+the arguments up to the last validated one are evaluated in order into `const a<index>` (`@Ctx()` is
+passed as `ctx`), each validated one is followed by `if (isThenable(a<i>)) return (async () =>
+c.m(...))()`, which `await`s it, then evaluates the remaining arguments (`await`ing their
+validations) and calls the handler; the arguments after the last validated one are inlined in the
+calls. A thenable output is therefore awaited, a failure stops the evaluation of the later
+arguments, and the first failing argument is the one reported. The plugin `await`s the result of
+`invoke` only when it is a thenable.
+
+```ts
+['invoke']: (c: UserController, ctx: HttpContext) => {
+  const a0 = coerce.number(ctx.params['id'], 'param "id"')
+  const a1 = validate(UpdateUser, ctx.body, 'body')
+  if (isThenable(a1)) return (async () => c.update(a0, await a1, ctx))()
+  return c.update(a0, a1, ctx)
+},
+```
 
 Pipeline (normative), per request — matched or not:
 `container.runInScope({ HttpContext, RequestId }) → hooks.run('http:request', event, () =>
@@ -1532,6 +1561,18 @@ none of them. The
 request scope (request-scoped instances) and the in-flight count last until a streamed response
 body (a file or `Blob` included) has been fully read or cancelled by the adapter; stream sources are
 read in the async context of the handler (request-scoped providers and tracing keep working).
+**Impl.** fast lane: when CORS is off, a route other than `@All` without guards, interceptors,
+`@Sse`, `@Res()` or `@Header` (and not a trailing-slash redirect) gets a specialised handler
+(`Pipeline.handler`). A request of the route's method takes it when no `http:request` wrapper or
+listener is registered and the server is not draining: the request scope is opened with
+`openScope`, the handler runs in it synchronously and a plain object or array result is serialised
+as JSON (`undefined`: no body) with the headers built in their final order from a template computed
+at boot, with no promise until something is asynchronous (a body to read, a thenable result, both
+awaited in the lane). With a bodyless status (`@HttpCode(204)`, `304`) or on an explicit `@Head`
+route, only an `undefined` result is answered there. Anything else (a malformed or unmatched path
+before the request starts; a thrown error or rejection, any other result, headers or cookies set
+on the context) continues in the general pipeline in the same scope; replies are identical byte
+for byte, header order included.
 
 - Path grammar: static segments, `:name` params, trailing `*` wildcard (`ctx.params['*']`); anything
   else ZNIGHT007 (at build time, and at boot for hand-written metadata). Routing happens on the
@@ -1892,10 +1933,18 @@ once the server holds the blob (its file opened), which releases the request sco
 the file). An adapter MUST NOT rethrow a failure to write a reply into its framework's error handler
 (the request would be served twice): it releases the body and answers a plain 500. When its native
 router misses a request (normalised path...), it calls the fallback handler, which routes the raw
-path. **Impl.** adapter specifics: Fastify hides a `content-type` it cannot parse from its own
-parsers on Znight routes (restored for the plugin), so they answer like the other adapters instead of
-Fastify's 415; Express answers 500 with an explicit log entry when a body parser already consumed
-the body; `honoAdapter({ app?, serveOptions? })` passes `serveOptions` to `Bun.serve()` with
+path. **Impl.** adapter specifics: Fastify serves a Znight route from the `onRequest` hook of the
+Znight context when nothing else would run before the handler (no `preParsing`, `preValidation` or
+`preHandler` hook, schema, later `onRequest` hook, `onRoute` wrapper of the handler, nor
+subscriber of the `fastify.request.handler` tracing channel), so Fastify never parses its content
+type, and then writes a text reply on the raw response as `reply.send()` would (same headers in the
+same order) when no `onSend` or `onResponse` hook runs and no hook set reply headers or trailers (it
+reads Fastify's internal route context and reply state, and takes the lifecycle when they are not
+found); otherwise the request goes through Fastify's lifecycle, where a `content-type` Fastify
+cannot parse is hidden from its parsers on Znight routes (restored for the plugin), so they answer
+like the other adapters instead of Fastify's 415; Express answers 500 with an explicit log entry
+when a body parser already consumed the body; `honoAdapter({ app?, serveOptions? })` passes
+`serveOptions` to `Bun.serve()` with
 `maxRequestBodySize` unlimited by default (the plugin enforces the body limits) and lifts Bun's
 `idleTimeout` while a streamed response is sent; on `Bun.serve()` a file is handed to Bun, which
 opens it at once, and the scope closes then. On `@hono/node-server`, a reply whose client already
@@ -1904,7 +1953,13 @@ locked is cancelled when the response closes unfinished: the server would neithe
 it, and the event source, the request scope and the in-flight count would stay open. There, an
 HTTP/1.1 request is read from the Node.js request (its body, and its headers when none is repeated,
 the case where they equal its Fetch `Headers`), and without other routes or middleware in the Hono
-application a reply whose headers are single strings is handed over as a record, written as is.
+application a reply whose headers are single strings is handed over as a record, written as is. On
+`Bun.serve()`, a body whose `content-length` is declared (no `transfer-encoding`) is read at once
+(`request.bytes()`: Bun's parser reads exactly that length, checked against the limit first), other
+bodies as a stream; without other routes or middleware in the Hono application the `Response` of a
+Znight route is the one Bun sends (a streamed one is prepared at once: native blob, idle timeout),
+otherwise the fetch handler finds its body in the final `Response`. The GET and HEAD routes of a path
+are one Hono route (Hono routes HEAD requests as GET), so a request matches a single handler.
 Fastify gets `text` only for a content type it sends unchanged (it adds a charset to a JSON type
 without one).
 

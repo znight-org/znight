@@ -260,6 +260,10 @@ export function print(node: GenNode, indent = ''): string {
         .join(', ')
       return `${node.async ? 'async ' : ''}(${params}) => ${print(node.body, indent)}`
     }
+    case 'gen:block':
+      return node.statements.length === 0
+        ? '{}'
+        : `{\n${node.statements.map(statement => `${inner}${print(statement, inner)}`).join('\n')}\n${indent}}`
     case 'gen:code': {
       let text = node.parts[0] ?? ''
       node.values.forEach((value, index) => {

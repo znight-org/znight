@@ -90,6 +90,17 @@ export interface GenArrow {
 }
 
 /**
+ * A block, as the body of a {@link GenArrow}: `{` then one statement per line, then `}`. `locals` are
+ * the names of the bindings its statements declare: they are reserved like arrow parameters (an
+ * import or a constant never takes one of these names).
+ */
+export interface GenBlock {
+  readonly kind: 'gen:block'
+  readonly locals: readonly string[]
+  readonly statements: readonly GenNode[]
+}
+
+/**
  * Code from a tagged template: `parts` come from the template literal written by the extension
  * author (never from user input), every interpolation is a node (strings become string literals).
  */
@@ -121,6 +132,7 @@ export type GenNode =
   | GenMember
   | GenCall
   | GenArrow
+  | GenBlock
   | GenCode
   | GenConstant
 
@@ -153,6 +165,13 @@ export interface GenBuilders {
     body: (...params: GenParam[]) => GenInput,
     options?: { readonly async?: boolean },
   ): GenNode
+  /**
+   * A block body for {@link arrow}, printed one statement per line. `locals` are the identifiers of
+   * the `const`s the statements declare (reserved like arrow parameters, so that no import or
+   * constant takes their name); `statements` receives one {@link GenParam} per local:
+   * `block(['a'], a => [code`const ${a} = ${value}`, code`return ${a}`])`.
+   */
+  block(locals: readonly string[], statements: (...locals: GenParam[]) => readonly GenInput[]): GenNode
   /** Tagged template: ``code`${a} ?? ${b}` ``. Interpolations are escaped (strings become literals). */
   code(strings: TemplateStringsArray, ...values: readonly GenInput[]): GenNode
 }
@@ -293,6 +312,22 @@ export function createGenBuilders(): GenBuilders {
         params: Object.freeze(normalized),
         body: input(body(...nodes)),
         async: options?.async === true,
+      })
+    },
+    block(locals, statements) {
+      for (const name of locals) {
+        if (!isSafeIdentifier(name)) {
+          throw new TypeError(`[znight] invalid local name ${JSON.stringify(name)}`)
+        }
+      }
+      if (new Set(locals).size !== locals.length) {
+        throw new TypeError('[znight] duplicate block local')
+      }
+      const nodes = locals.map(name => freeze<GenParam>({ kind: 'gen:param', name }))
+      return freeze({
+        kind: 'gen:block',
+        locals: Object.freeze([...locals]),
+        statements: Object.freeze(statements(...nodes).map(input)),
       })
     },
     code(strings, ...values) {

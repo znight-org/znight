@@ -97,6 +97,7 @@ Created by the application (`app.container`), or directly with `Container.create
 | `get(key)` / `getOptional(key)`    | Resolve by class, token, alias or unique display name (below)                        |
 | `has(key)` / `tokenOf(key)`        | Lookups                                                                              |
 | `runInScope(fn, values?)`          | Runs `fn` in a new request scope seeded with `[key, value]` pairs                    |
+| `openScope(values?)`               | The same scope without a callback: `run(fn, ...args)` in it, then `close()` it       |
 | `currentScope()`                   | The active `ScopeContext` (`get`, `set`, `has`) or `undefined`                       |
 | `instances()`                      | Created singletons in resolution order                                               |
 | `dispose()`                        | Disposes singletons in reverse creation order                                        |

@@ -238,6 +238,18 @@ Scopes are isolated with `AsyncLocalStorage` (concurrent requests never share in
 request-scoped provider outside of a scope throws `ZNIGHT013`. `container.currentScope()` exposes the
 active scope (`get`, `set`, `has`). Plugins (HTTP, messaging) open the scopes for you.
 
+`container.openScope(values?)` opens the same scope without a callback, for hot paths that stay
+synchronous as long as their work is (the HTTP pipeline): `run(fn, ...args)` calls `fn` in the scope
+and returns its result (its continuations stay in the scope), `close()` disposes the instances created
+in it. `close()` returns `undefined` when there is nothing to dispose, otherwise a promise that
+rejects with `ZNIGHT021` when a disposal fails; it must be called once the work is over.
+
+```ts
+const scope = container.openScope([['@znight/http#HttpContext', ctx]])
+const user = scope.run(() => container.get(CurrentUser).name)
+await scope.close()
+```
+
 ## Lazy dependencies
 
 `Lazy<T>` injects a handle resolved at call time, in the current scope. It breaks cycles and lets a

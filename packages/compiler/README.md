@@ -708,6 +708,7 @@ Code is generated with **nodes, never strings**, so an extension cannot break th
 | `importFrom('@pkg', 'name', { type? })`                 | import of a package helper (`coerce` from `@znight/http`)                                              |
 | `member(node, 'a', 'b')`, `call(fn, args)`, `construct` | `node.a.b`, `fn(args)`, `new C(args)`                                                                  |
 | `arrow([['c', type], 'ctx'], (c, ctx) => body)`         | `(c: Type, ctx) => body` (typed parameters keep handler signatures type-checked)                       |
+| ``block(['a'], a => [code`const ${a} = ${v}`])``        | an arrow body `{ ... }`, one statement per line, whose locals no import or constant ever takes         |
 | `` code`${a}.params[${'id'}]` ``                        | an expression template: every interpolation is a node, strings become escaped literals                 |
 | `constant('Name$fields', value, { type })`              | a module-level `const Name$fields: Type = value`, referenced from factories and the section            |
 | `tokenOf(cls)`, `binding(handle)`, `provider(token)`    | provider token (aliases resolved), binding result, provider node                                       |

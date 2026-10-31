@@ -96,13 +96,34 @@ export class PrefsController {
       `(c: PrefsController, ctx: HttpContext) => c.optional(coerce.optional(ctx.cookies['visits'], 'cookie "visits"', coerce.number), coerce.optional(ctx.cookies['name'], 'cookie "name"', coerce.string))`,
     )
     expect(invoke(routes, 'schema')).toBe(
-      `async (c: PrefsController, ctx: HttpContext) => c.schema(await validate(Theme, ctx.cookies['theme'], 'cookie "theme"'))`,
+      [
+        '(c: PrefsController, ctx: HttpContext) => {',
+        `  const a0 = validate(Theme, ctx.cookies['theme'], 'cookie "theme"')`,
+        '  if (isThenable(a0)) return (async () => c.schema(await a0))()',
+        '  return c.schema(a0)',
+        '}',
+      ].join('\n'),
     )
     expect(invoke(routes, 'all')).toBe(
-      `async (c: PrefsController, ctx: HttpContext) => c.all(ctx.cookies as never, await validate(Cookies, ctx.cookies, 'cookies'))`,
+      [
+        '(c: PrefsController, ctx: HttpContext) => {',
+        '  const a0 = ctx.cookies as never',
+        "  const a1 = validate(Cookies, ctx.cookies, 'cookies')",
+        '  if (isThenable(a1)) return (async () => c.all(a0, await a1))()',
+        '  return c.all(a0, a1)',
+        '}',
+      ].join('\n'),
     )
     expect(invoke(routes, 'signed')).toBe(
-      `async (c: PrefsController, ctx: HttpContext) => c.signed(coerce.string(ctx.signedCookie('__Host-uid'), 'cookie "__Host-uid"'), coerce.optional(ctx.signedCookie('n'), 'cookie "n"', coerce.number), await validate(Theme, ctx.signedCookie('s'), 'cookie "s"'))`,
+      [
+        '(c: PrefsController, ctx: HttpContext) => {',
+        `  const a0 = coerce.string(ctx.signedCookie('__Host-uid'), 'cookie "__Host-uid"')`,
+        `  const a1 = coerce.optional(ctx.signedCookie('n'), 'cookie "n"', coerce.number)`,
+        `  const a2 = validate(Theme, ctx.signedCookie('s'), 'cookie "s"')`,
+        '  if (isThenable(a2)) return (async () => c.signed(a0, a1, await a2))()',
+        '  return c.signed(a0, a1, a2)',
+        '}',
+      ].join('\n'),
     )
     expect(code).not.toContain('sse:')
   })

@@ -178,7 +178,7 @@ function request(
 }
 
 function context(source: AdapterRequest, plan: BodyPlan = bodyPlan({}, 1000, LIMITS)): RequestContext {
-  return new RequestContext(source, {
+  return RequestContext.of(source, {
     requestId: 'id' as RequestId,
     adapter: 'test',
     route: undefined,

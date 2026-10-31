@@ -30,6 +30,7 @@ const UPLOAD_HELPERS = {
 interface Helpers {
   coerce(): GenNode
   validate(): GenNode
+  isThenable(): GenNode
   uploads(): GenNode
   context(): GenNode
 }
@@ -98,6 +99,7 @@ function groupsNode(ctx: Context, controllers: readonly HttpControllerData[]): G
 function createHelpers(ctx: Context): Helpers {
   let coerce: GenNode | undefined
   let validate: GenNode | undefined
+  let isThenable: GenNode | undefined
   let uploads: GenNode | undefined
   let context: GenNode | undefined
   return {
@@ -108,6 +110,10 @@ function createHelpers(ctx: Context): Helpers {
     validate: () => {
       validate ??= ctx.importFrom(HTTP_PACKAGE, 'validate')
       return validate
+    },
+    isThenable: () => {
+      isThenable ??= ctx.importFrom(HTTP_PACKAGE, 'isThenable')
+      return isThenable
     },
     uploads: () => {
       uploads ??= ctx.importFrom(HTTP_PACKAGE, 'uploads')
@@ -239,37 +245,136 @@ function tokens(ctx: Context, refs: readonly ClassRef[]): GenNode {
 // -------------------------------------------------------------------------------------------------
 
 /**
- * `(c: Controller, ctx: HttpContext) => c.handler(...args)`: `async` (awaiting every `validate()`)
- * when the route validates something with a schema, synchronous otherwise.
+ * `(c: Controller, ctx: HttpContext) => c.handler(...args)`, synchronous when no argument is
+ * validated with a schema. A route validating arguments gets a block that stays synchronous as long
+ * as every `validate()` returns a value (see {@link validatingBlock}). `@Validate(S)` without
+ * `@Body()` parameter reads the body in `invoke`: that arrow is `async` and `await`s every
+ * `validate()`.
  */
 function invokeNode(ctx: Context, helpers: Helpers, controller: HttpControllerData, route: HttpRouteData): GenNode {
-  const async = route.bodySchema !== undefined || route.params.some(param => param.schema !== undefined)
   const params: [string, GenNode][] = [['c', ctx.importType(controller.identity)]]
   // `ctx` is declared only when used (generated code type-checks with `noUnusedParameters`)
   if (route.params.length > 0 || route.bodySchema !== undefined) {
     params.push(['ctx', helpers.context()])
   }
-  return ctx.arrow(
-    params,
-    (c, http) => {
-      const args: GenNode[] = []
-      for (const param of route.params) {
-        args[param.index] = argumentNode(ctx, helpers, http as GenNode, param)
-      }
-      const call = ctx.call(
-        ctx.member(c, route.handler),
-        Array.from(args, arg => arg ?? ctx.lit(undefined)),
-      )
-      if (route.bodySchema === undefined) {
-        return call
-      }
-      // @Validate(S) without @Body() parameter: the body is validated (and discarded)
-      const body = ctx.code`await ${ctx.call(ctx.member(http as GenNode, 'parseBody'))}`
-      const check = validation(ctx, helpers, route.bodySchema, body, 'body')
-      return ctx.code`{ ${check}; return ${call} }`
-    },
-    { async },
+  // arguments in evaluation order (handler parameter order); a hole is passed as `undefined`
+  const slots: (HttpParamData | undefined)[] = []
+  for (const param of route.params) {
+    slots[param.index] = param
+  }
+  const bodySchema = route.bodySchema
+  if (bodySchema !== undefined) {
+    return ctx.arrow(
+      params,
+      (c, http) => {
+        const call = handlerCall(
+          ctx,
+          c,
+          route,
+          Array.from(slots, param => awaitedArgument(ctx, helpers, http as GenNode, param)),
+        )
+        // @Validate(S) without @Body() parameter: the body is validated (and discarded)
+        const body = ctx.code`await ${ctx.call(ctx.member(http as GenNode, 'parseBody'))}`
+        const check = ctx.code`await ${validation(ctx, helpers, bodySchema, body, 'body')}`
+        return ctx.code`{ ${check}; return ${call} }`
+      },
+      { async: true },
+    )
+  }
+  const last = slots.findLastIndex(param => param?.schema !== undefined)
+  return ctx.arrow(params, (c, http) =>
+    last === -1
+      ? handlerCall(
+          ctx,
+          c,
+          route,
+          Array.from(slots, param => plainArgument(ctx, helpers, http as GenNode, param)),
+        )
+      : validatingBlock(ctx, helpers, route, slots, last, c, http as GenNode),
   )
+}
+
+/** `c.handler(args)`. */
+function handlerCall(ctx: Context, c: GenNode, route: HttpRouteData, args: readonly GenNode[]): GenNode {
+  return ctx.call(ctx.member(c, route.handler), args)
+}
+
+/**
+ * The body of the `invoke` of a route validating arguments with schemas: the arguments up to the
+ * last validated one are evaluated in order into `const`s (`a<index>`), the handler is called with
+ * them. `validate()` returns the value when the schema validates synchronously (Zod, Valibot and
+ * ArkType without async refinements), so the request needs no promise; when one returns a
+ * thenable, the rest runs in an `async` arrow that awaits it, then evaluates the remaining arguments
+ * (`await`ing their validations) and calls the handler: the order of evaluation, the error reported
+ * when several arguments are invalid and the value received by the handler are those of an `async`
+ * `invoke` awaiting every `validate()`.
+ *
+ * ```ts
+ * (c: UserController, ctx: HttpContext) => {
+ *   const a0 = coerce.number(ctx.params['id'], 'param "id"')
+ *   const a1 = validate(UpdateUser, ctx.body, 'body')
+ *   if (isThenable(a1)) return (async () => c.update(a0, await a1, ctx))()
+ *   return c.update(a0, a1, ctx)
+ * }
+ * ```
+ */
+function validatingBlock(
+  ctx: Context,
+  helpers: Helpers,
+  route: HttpRouteData,
+  slots: readonly (HttpParamData | undefined)[],
+  last: number,
+  c: GenNode,
+  http: GenNode,
+): GenNode {
+  // `@Ctx()` and holes are inlined: nothing to evaluate
+  const bound: number[] = []
+  for (let index = 0; index <= last; index++) {
+    const param = slots[index]
+    if (param !== undefined && param.source !== 'context') {
+      bound.push(index)
+    }
+  }
+  return ctx.block(
+    bound.map(index => `a${index}`),
+    (...locals) => {
+      const local = new Map(bound.map((index, position) => [index, locals[position] as GenNode]))
+      // the value of an argument evaluated before the current statement
+      const evaluated = (index: number): GenNode => local.get(index) ?? plainArgument(ctx, helpers, http, slots[index])
+      const statements: GenNode[] = []
+      for (const index of bound) {
+        const param = slots[index] as HttpParamData
+        const name = local.get(index) as GenNode
+        statements.push(ctx.code`const ${name} = ${plainArgument(ctx, helpers, http, param)}`)
+        if (param.schema !== undefined) {
+          const rest = Array.from(slots, (other, position) => {
+            if (position < index) {
+              return evaluated(position)
+            }
+            return position === index ? ctx.code`await ${name}` : awaitedArgument(ctx, helpers, http, other)
+          })
+          const resume = ctx.arrow([], () => handlerCall(ctx, c, route, rest), { async: true })
+          statements.push(ctx.code`if (${ctx.call(helpers.isThenable(), [name])}) return (${resume})()`)
+        }
+      }
+      const args = Array.from(slots, (param, position) =>
+        position <= last ? evaluated(position) : plainArgument(ctx, helpers, http, param),
+      )
+      statements.push(ctx.code`return ${handlerCall(ctx, c, route, args)}`)
+      return statements
+    },
+  )
+}
+
+/** An argument evaluated in an `async` arrow: its validation, if any, is `await`ed. */
+function awaitedArgument(ctx: Context, helpers: Helpers, http: GenNode, param: HttpParamData | undefined): GenNode {
+  const node = plainArgument(ctx, helpers, http, param)
+  return param?.schema === undefined ? node : ctx.code`await ${node}`
+}
+
+/** An argument as an expression (`validate()` not awaited); `undefined` for a hole. */
+function plainArgument(ctx: Context, helpers: Helpers, http: GenNode, param: HttpParamData | undefined): GenNode {
+  return param === undefined ? ctx.lit(undefined) : argumentNode(ctx, helpers, http, param)
 }
 
 /** The expression passed to the handler for one parameter. */
@@ -333,9 +438,9 @@ function argumentNode(ctx: Context, helpers: Helpers, http: GenNode, param: Http
   }
 }
 
-/** `await validate(schema, value, location)`. */
+/** `validate(schema, value, location)` (the value, or a promise when the schema validates asynchronously). */
 function validation(ctx: Context, helpers: Helpers, schema: ValueRef, value: GenNode, location: string): GenNode {
-  return ctx.code`await ${ctx.call(helpers.validate(), [ctx.ref(schema), value, location])}`
+  return ctx.call(helpers.validate(), [ctx.ref(schema), value, location])
 }
 
 /** `coerce.X(value, label, ...)`, cast with `as never` when the result does not have the declared type. */

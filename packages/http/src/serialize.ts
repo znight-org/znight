@@ -13,7 +13,7 @@ import { isHttpResponse } from './response.ts'
 import { isSseBody } from './sse.ts'
 import { isBodylessStatus } from './status.ts'
 import { discardStream, isByteStream, toByteStream } from './stream.ts'
-import { emptyRecord, isBun } from './utils.ts'
+import { fastRecord, isBun } from './utils.ts'
 
 const ENCODER = new TextEncoder()
 
@@ -96,8 +96,16 @@ export function serializeResult(result: unknown, options: SerializeOptions): Ser
     cookies = cookiesOf(result)
   }
   const finalStatus = options.status ?? status ?? defaultStatus(options.routeMethod, payload)
-  const headers = emptyRecord<HeaderValue>()
-  const body = encode(payload, headers)
+  const headers = fastRecord<HeaderValue>()
+  const encoded = encode(payload, headers)
+  let body: ReplyBody
+  let text: string | undefined
+  if (typeof encoded === 'string') {
+    text = encoded
+    body = encodeText(encoded, headers, sendsBody(finalStatus, options.method))
+  } else {
+    body = encoded
+  }
   let own = true
   if (options.headers !== undefined) {
     assignHeaders(headers, options.headers)
@@ -111,7 +119,7 @@ export function serializeResult(result: unknown, options: SerializeOptions): Ser
     assignHeaders(headers, extra)
     own = false
   }
-  return withCookies(finish(finalStatus, headers, body, options.method, own), cookies)
+  return withCookies(finish(finalStatus, headers, body, options.method, text, own), cookies)
 }
 
 /**
@@ -127,7 +135,7 @@ export function serializeSseReply(
   options: SerializeOptions,
 ): SerializedReply {
   const status = options.status ?? response?.status ?? 200
-  const headers = emptyRecord<HeaderValue>()
+  const headers = fastRecord<HeaderValue>()
   headers['cache-control'] = 'no-cache, no-transform'
   headers['x-accel-buffering'] = 'no'
   if (options.headers !== undefined) assignHeaders(headers, options.headers)
@@ -161,7 +169,7 @@ export function serializeFileReply(
   options: SerializeOptions,
 ): SerializedReply {
   const status = file.status === 200 ? (options.status ?? response.status ?? 200) : file.status
-  const headers = emptyRecord<HeaderValue>()
+  const headers = fastRecord<HeaderValue>()
   assignHeaders(headers, file.headers)
   if (options.headers !== undefined) assignHeaders(headers, options.headers)
   if (options.context !== undefined) assignHeaders(headers, options.context)
@@ -177,9 +185,10 @@ function defaultStatus(routeMethod: string, payload: unknown): number {
 
 /** Serialises an error body as JSON. */
 export function serializeError(status: number, body: HttpErrorBody | unknown, method: string): SerializedReply {
-  const headers = emptyRecord<HeaderValue>()
+  const headers = fastRecord<HeaderValue>()
   const encoded = encode(body, headers)
-  return finish(status, headers, encoded, method)
+  if (typeof encoded !== 'string') return finish(status, headers, encoded, method)
+  return finish(status, headers, encodeText(encoded, headers, sendsBody(status, method)), method, encoded)
 }
 
 /** Copies headers with lower-case names (later values win). */
@@ -206,14 +215,15 @@ export function addMissingHeaders(
 }
 
 /**
- * The reply of a body: a string (see {@link encode}) is sent as its UTF-8 bytes, with its text.
- * `own`: only {@link encode} set `headers`, which are then valid for a text body.
+ * The reply of a body: `text` is the string `body` encodes (see {@link encodeText}). `own`: only
+ * {@link encode} set `headers`, which are then valid for a text body.
  */
 function finish(
   status: number,
   headers: Record<string, HeaderValue>,
-  body: ReplyBody | string,
+  body: ReplyBody,
   method: string,
+  text?: string,
   own = false,
 ): SerializedReply {
   if (isBodylessStatus(status)) {
@@ -226,19 +236,38 @@ function finish(
     discard(body)
     return { status, headers, body: null }
   }
-  if (typeof body !== 'string') return { status, headers, body }
-  return own
-    ? { status, headers, body: utf8(body), text: body, ownHeaders: true }
-    : { status, headers, body: utf8(body), text: body }
+  if (text === undefined) return { status, headers, body }
+  return own ? { status, headers, body, text, ownHeaders: true } : { status, headers, body, text }
 }
 
-function discard(body: ReplyBody | string): void {
+function discard(body: ReplyBody): void {
   if (body instanceof ReadableStream) discardStream(body)
 }
 
+/** Whether a reply with this status, to this method, carries its body (see {@link finish}). */
+function sendsBody(status: number, method: string): boolean {
+  return method !== 'HEAD' && !isBodylessStatus(status)
+}
+
 /**
- * The body of a payload, its `content-type` and, for bytes and text, its `content-length` set in
- * `headers`. Text (a string, JSON) is returned as a string, encoded as UTF-8 by {@link finish}.
+ * Sets the `content-length` of a text body (right after its `content-type`, before the route
+ * headers) and returns its UTF-8 bytes: their length is the header, a lone surrogate counting as
+ * U+FFFD. `null` when the reply sends no body (`HEAD`, bodyless status): nothing is encoded then,
+ * `Buffer.byteLength` counts the same bytes.
+ */
+function encodeText(text: string, headers: Record<string, HeaderValue>, sent: boolean): Uint8Array | null {
+  if (!sent) {
+    headers['content-length'] = String(Buffer.byteLength(text, 'utf8'))
+    return null
+  }
+  const bytes = utf8(text)
+  headers['content-length'] = String(bytes.byteLength)
+  return bytes
+}
+
+/**
+ * The body of a payload, its `content-type` and, for bytes, its `content-length` set in `headers`.
+ * Text (a string, JSON) is returned as a string: {@link encodeText} sets its length and encodes it.
  */
 function encode(payload: unknown, headers: Record<string, HeaderValue>): ReplyBody | string {
   if (payload === undefined) return null
@@ -277,8 +306,6 @@ function bytes(data: Uint8Array, headers: Record<string, HeaderValue>, type: str
 
 function text(data: string, headers: Record<string, HeaderValue>, type: string): string {
   headers['content-type'] = type
-  // the length of its UTF-8 encoding (a lone surrogate counts as U+FFFD, like the encoders)
-  headers['content-length'] = String(Buffer.byteLength(data, 'utf8'))
   return data
 }
 
@@ -294,7 +321,7 @@ function isNodeReadable(value: unknown): value is Readable {
 }
 
 function fromWebResponse(response: Response, method: string): SerializedReply {
-  const headers = emptyRecord<HeaderValue>()
+  const headers = fastRecord<HeaderValue>()
   for (const [name, value] of response.headers) {
     if (name !== 'set-cookie') headers[name] = value
   }

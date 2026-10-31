@@ -133,6 +133,8 @@ class ExpressHttpAdapter implements ExpressAdapter {
   }
 
   readonly #listener = (request: IncomingMessage, response: ServerResponse): void => {
+    // the listening server's connections (an injected request is ignored)
+    this.#tracker?.track(request, response)
     this.app(request as Request, response as Response)
   }
 
@@ -141,7 +143,8 @@ class ExpressHttpAdapter implements ExpressAdapter {
     const server = this.#givenServer ?? createServer()
     if (!server.listeners('request').includes(this.#listener)) server.on('request', this.#listener)
     this.#server = server
-    this.#tracker ??= new ConnectionTracker(server)
+    // `#listener` counts the requests
+    this.#tracker ??= new ConnectionTracker(server, { requests: false })
     this.#closing = undefined
     await new Promise<void>((resolve, reject) => {
       const onError = (error: Error): void => reject(error)

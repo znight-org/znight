@@ -229,12 +229,10 @@ function withCookie(cookies: readonly ResponseCookie[], cookie: ResponseCookie):
 
 /** Whether `value` is an {@link HttpResponse} (also across duplicated package copies). */
 export function isHttpResponse(value: unknown): value is HttpResponse {
-  return (
-    value instanceof HttpResponse ||
-    (value !== null &&
-      typeof value === 'object' &&
-      (value as { constructor?: { name?: unknown } }).constructor?.name === 'HttpResponse' &&
-      'body' in value &&
-      'headers' in value)
-  )
+  if (value instanceof HttpResponse) return true
+  if (value === null || typeof value !== 'object') return false
+  const type = (value as { constructor?: { name?: unknown } }).constructor
+  // object literals and arrays (most handler results): reading a function's name is slow
+  if (type === Object || type === Array) return false
+  return type?.name === 'HttpResponse' && 'body' in value && 'headers' in value
 }

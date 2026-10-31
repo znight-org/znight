@@ -19,9 +19,30 @@ export interface MediaType {
   readonly charset: string | undefined
 }
 
+/**
+ * Parsed `content-type` values: an application receives a handful of them, parsed twice per request
+ * with a body (request context, then {@link parseBody}). Bounded, since clients choose the values:
+ * cleared when full.
+ */
+const MEDIA_TYPES = new Map<string, MediaType>()
+const MEDIA_TYPES_MAX = 64
+
 /** Parses a `content-type` header value (`application/json; charset=utf-8`). */
 export function parseMediaType(header: string | undefined): MediaType | undefined {
   if (header === undefined) return undefined
+  // the most common value, compared faster than hashed
+  if (header === 'application/json') return { type: 'application/json', charset: undefined }
+  const cached = MEDIA_TYPES.get(header)
+  // a fresh object, as when parsing (callers own the result)
+  if (cached !== undefined) return { type: cached.type, charset: cached.charset }
+  const media = parseUncached(header)
+  if (media === undefined) return undefined
+  if (MEDIA_TYPES.size === MEDIA_TYPES_MAX) MEDIA_TYPES.clear()
+  MEDIA_TYPES.set(header, media)
+  return { type: media.type, charset: media.charset }
+}
+
+function parseUncached(header: string): MediaType | undefined {
   const separator = header.indexOf(';')
   const type = (separator === -1 ? header : header.slice(0, separator)).trim().toLowerCase()
   if (type === '') return undefined
@@ -86,13 +107,21 @@ export function parseBody(
   contentEncoding?: string | undefined,
 ): Promise<unknown> {
   try {
-    return Promise.resolve(parseBytes(bytes, contentType, contentEncoding))
+    return Promise.resolve(parseBodyBytes(bytes, contentType, contentEncoding))
   } catch (error) {
     return Promise.reject(error)
   }
 }
 
-function parseBytes(bytes: Uint8Array, contentType: string | undefined, contentEncoding: string | undefined): unknown {
+/**
+ * {@link parseBody} without the promise: returns the parsed body or throws its `HttpException`
+ * (internal: the request context parses the buffered body with it, without an extra microtask).
+ */
+export function parseBodyBytes(
+  bytes: Uint8Array,
+  contentType: string | undefined,
+  contentEncoding: string | undefined,
+): unknown {
   if (bytes.byteLength === 0) return undefined
   checkContentEncoding(contentEncoding)
   const media = parseMediaType(contentType)

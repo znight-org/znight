@@ -1,6 +1,5 @@
 import type { Container, Plugin, PluginContext, PluginOptions, ProviderKey, Token, ZnightMetadata } from '@znight/core'
 import type {
-  AdapterReply,
   HttpAdapter,
   HttpServerAddress,
   InjectRequest,
@@ -519,7 +518,7 @@ export class HttpPlugin implements Plugin {
       adapter.registerRoute({
         method: registration.method,
         path: registration.path,
-        handler: (request): Promise<AdapterReply> => pipeline.handle(plan, request),
+        handler: pipeline.handler(plan),
       })
       routes.push(
         Object.freeze({

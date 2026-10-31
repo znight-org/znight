@@ -84,6 +84,7 @@ export type {
 export type {
   GenArray,
   GenArrow,
+  GenBlock,
   GenBuilders,
   GenCall,
   GenCode,

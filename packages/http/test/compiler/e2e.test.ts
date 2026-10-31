@@ -65,7 +65,14 @@ describe.skipIf(typeof compile !== 'function')('compiled application (e2e)', () 
     // compared without whitespace and trailing commas (independent of the printer's line breaks)
     const compact = (text: string): string => text.replace(/\s+/g, '').replace(/,([)\]}])/g, '$1')
     const generated = compact(code)
-    expect(generated).toContain(compact("import { coerce, validate } from '@znight/http'"))
+    expect(generated).toContain(compact("import { coerce, isThenable, validate } from '@znight/http'"))
+    expect(generated).toContain(
+      compact(`(c: UserController, ctx: HttpContext) => {
+        const a0 = validate(CreateUser, ctx.body, 'body')
+        if (isThenable(a0)) return (async () => c.create(await a0))()
+        return c.create(a0)
+      }`),
+    )
     expect(generated).toContain(compact("import type { HttpContext } from '@znight/http'"))
     expect(generated).toContain(
       compact(`(c: UserController, ctx: HttpContext) => c.find(coerce.number(ctx.params['id'], 'param "id"'))`),

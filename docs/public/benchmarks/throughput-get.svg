@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 688 524" width="688" height="524" role="img" aria-labelledby="title desc">
 <title id="title">Throughput · read</title>
-<desc id="desc">Requests per second for GET /users/:id. Hand-wired (Fastify): Node.js 24.21.0: 149,999, Bun 1.4.4: 164,823; Znight (Fastify): Node.js 24.21.0: 114,237, Bun 1.4.4: 117,711; NestJS (Fastify): Node.js 24.21.0: 127,025, Bun 1.4.4: 129,728; Hand-wired (Express): Node.js 24.21.0: 92,529, Bun 1.4.4: 124,268; Znight (Express): Node.js 24.21.0: 98,982, Bun 1.4.4: 117,187; NestJS (Express): Node.js 24.21.0: 84,855, Bun 1.4.4: 118,112; Hand-wired (node:http): Node.js 24.21.0: 148,637, Bun 1.4.4: 167,475; Znight (node:http): Node.js 24.21.0: 121,807, Bun 1.4.4: 136,108; Hand-wired (Hono): Node.js 24.21.0: 143,552, Bun 1.4.4: 175,447; Znight (Hono): Node.js 24.21.0: 101,402, Bun 1.4.4: 135,930.</desc>
+<desc id="desc">Requests per second for GET /users/:id. Hand-wired (Fastify): Node.js 24.21.0: 142,807, Bun 1.4.4: 158,435; Znight (Fastify): Node.js 24.21.0: 125,344, Bun 1.4.4: 138,164; NestJS (Fastify): Node.js 24.21.0: 124,646, Bun 1.4.4: 132,817; Hand-wired (Express): Node.js 24.21.0: 89,172, Bun 1.4.4: 130,176; Znight (Express): Node.js 24.21.0: 108,064, Bun 1.4.4: 128,736; NestJS (Express): Node.js 24.21.0: 80,945, Bun 1.4.4: 117,670; Hand-wired (node:http): Node.js 24.21.0: 145,100, Bun 1.4.4: 168,396; Znight (node:http): Node.js 24.21.0: 127,625, Bun 1.4.4: 138,537; Hand-wired (Hono): Node.js 24.21.0: 131,183, Bun 1.4.4: 174,307; Znight (Hono): Node.js 24.21.0: 116,460, Bun 1.4.4: 147,031.</desc>
 <defs>
 <linearGradient id="zn-card" x1="0" y1="0" x2="0" y2="1">
 <stop offset="0" stop-color="#1A2350"/>
@@ -29,59 +29,59 @@
 <rect x="478.4" y="27" width="10" height="10" rx="3" fill="#A9B4D6"/>
 <text x="24" y="104.5" class="s" font-size="13" font-weight="600" fill="#F4F6FC">Fastify</text>
 <text x="101.2" y="104.5" class="s" font-size="13" fill="#D6DCEE">Hand-wired</text>
-<rect x="189.4" y="86" width="351" height="12" rx="3" fill="#A9B4D6"/>
-<text x="548.4" y="96" class="s" font-size="12" fill="#A9B4D6">150k</text>
-<rect x="189.4" y="102" width="385.7" height="12" rx="3" fill="#5D6A9C"/>
-<text x="583.1" y="112" class="s" font-size="12" fill="#A9B4D6">165k</text>
+<rect x="189.4" y="86" width="336.4" height="12" rx="3" fill="#A9B4D6"/>
+<text x="533.8" y="96" class="s" font-size="12" fill="#A9B4D6">143k</text>
+<rect x="189.4" y="102" width="373.2" height="12" rx="3" fill="#5D6A9C"/>
+<text x="570.6" y="112" class="s" font-size="12" fill="#A9B4D6">158k</text>
 <text x="101.2" y="144.5" class="s" font-size="13" font-weight="600" fill="#F4F6FC">Znight</text>
-<rect x="189.4" y="126" width="267.3" height="12" rx="3" fill="url(#zn-accent-line)"/>
-<text x="464.8" y="136" class="s" font-size="12" font-weight="600" fill="#F4F6FC">114k</text>
-<rect x="189.4" y="142" width="275.5" height="12" rx="3" fill="url(#zn-accent-soft)"/>
-<text x="472.9" y="152" class="s" font-size="12" font-weight="600" fill="#F4F6FC">118k</text>
+<rect x="189.4" y="126" width="295.3" height="12" rx="3" fill="url(#zn-accent-line)"/>
+<text x="492.7" y="136" class="s" font-size="12" font-weight="600" fill="#F4F6FC">125k</text>
+<rect x="189.4" y="142" width="325.5" height="12" rx="3" fill="url(#zn-accent-soft)"/>
+<text x="522.9" y="152" class="s" font-size="12" font-weight="600" fill="#F4F6FC">138k</text>
 <text x="101.2" y="184.5" class="s" font-size="13" fill="#D6DCEE">NestJS</text>
-<rect x="189.4" y="166" width="297.3" height="12" rx="3" fill="#A9B4D6"/>
-<text x="494.7" y="176" class="s" font-size="12" fill="#A9B4D6">127k</text>
-<rect x="189.4" y="182" width="303.6" height="12" rx="3" fill="#5D6A9C"/>
-<text x="501" y="192" class="s" font-size="12" fill="#A9B4D6">130k</text>
+<rect x="189.4" y="166" width="293.6" height="12" rx="3" fill="#A9B4D6"/>
+<text x="491" y="176" class="s" font-size="12" fill="#A9B4D6">125k</text>
+<rect x="189.4" y="182" width="312.9" height="12" rx="3" fill="#5D6A9C"/>
+<text x="510.3" y="192" class="s" font-size="12" fill="#A9B4D6">133k</text>
 <line x1="24" y1="201" x2="664" y2="201" stroke="#2C3660" stroke-width="1"/>
 <text x="24" y="230.5" class="s" font-size="13" font-weight="600" fill="#F4F6FC">Express</text>
 <text x="101.2" y="230.5" class="s" font-size="13" fill="#D6DCEE">Hand-wired</text>
-<rect x="189.4" y="212" width="216.5" height="12" rx="3" fill="#A9B4D6"/>
-<text x="413.9" y="222" class="s" font-size="12" fill="#A9B4D6">93k</text>
-<rect x="189.4" y="228" width="290.8" height="12" rx="3" fill="#5D6A9C"/>
-<text x="488.2" y="238" class="s" font-size="12" fill="#A9B4D6">124k</text>
+<rect x="189.4" y="212" width="210.1" height="12" rx="3" fill="#A9B4D6"/>
+<text x="407.5" y="222" class="s" font-size="12" fill="#A9B4D6">89k</text>
+<rect x="189.4" y="228" width="306.6" height="12" rx="3" fill="#5D6A9C"/>
+<text x="504" y="238" class="s" font-size="12" fill="#A9B4D6">130k</text>
 <text x="101.2" y="270.5" class="s" font-size="13" font-weight="600" fill="#F4F6FC">Znight</text>
-<rect x="189.4" y="252" width="231.6" height="12" rx="3" fill="url(#zn-accent-line)"/>
-<text x="429" y="262" class="s" font-size="12" font-weight="600" fill="#F4F6FC">99k</text>
-<rect x="189.4" y="268" width="274.3" height="12" rx="3" fill="url(#zn-accent-soft)"/>
-<text x="471.7" y="278" class="s" font-size="12" font-weight="600" fill="#F4F6FC">117k</text>
+<rect x="189.4" y="252" width="254.6" height="12" rx="3" fill="url(#zn-accent-line)"/>
+<text x="452" y="262" class="s" font-size="12" font-weight="600" fill="#F4F6FC">108k</text>
+<rect x="189.4" y="268" width="303.3" height="12" rx="3" fill="url(#zn-accent-soft)"/>
+<text x="500.7" y="278" class="s" font-size="12" font-weight="600" fill="#F4F6FC">129k</text>
 <text x="101.2" y="310.5" class="s" font-size="13" fill="#D6DCEE">NestJS</text>
-<rect x="189.4" y="292" width="198.6" height="12" rx="3" fill="#A9B4D6"/>
-<text x="396" y="302" class="s" font-size="12" fill="#A9B4D6">85k</text>
-<rect x="189.4" y="308" width="276.4" height="12" rx="3" fill="#5D6A9C"/>
-<text x="473.8" y="318" class="s" font-size="12" fill="#A9B4D6">118k</text>
+<rect x="189.4" y="292" width="190.7" height="12" rx="3" fill="#A9B4D6"/>
+<text x="388.1" y="302" class="s" font-size="12" fill="#A9B4D6">81k</text>
+<rect x="189.4" y="308" width="277.2" height="12" rx="3" fill="#5D6A9C"/>
+<text x="474.6" y="318" class="s" font-size="12" fill="#A9B4D6">118k</text>
 <line x1="24" y1="327" x2="664" y2="327" stroke="#2C3660" stroke-width="1"/>
 <text x="24" y="356.5" class="s" font-size="13" font-weight="600" fill="#F4F6FC">node:http</text>
 <text x="101.2" y="356.5" class="s" font-size="13" fill="#D6DCEE">Hand-wired</text>
-<rect x="189.4" y="338" width="347.9" height="12" rx="3" fill="#A9B4D6"/>
-<text x="545.3" y="348" class="s" font-size="12" fill="#A9B4D6">149k</text>
-<rect x="189.4" y="354" width="391.9" height="12" rx="3" fill="#5D6A9C"/>
-<text x="589.3" y="364" class="s" font-size="12" fill="#A9B4D6">167k</text>
+<rect x="189.4" y="338" width="341.8" height="12" rx="3" fill="#A9B4D6"/>
+<text x="539.2" y="348" class="s" font-size="12" fill="#A9B4D6">145k</text>
+<rect x="189.4" y="354" width="396.7" height="12" rx="3" fill="#5D6A9C"/>
+<text x="594.1" y="364" class="s" font-size="12" fill="#A9B4D6">168k</text>
 <text x="101.2" y="396.5" class="s" font-size="13" font-weight="600" fill="#F4F6FC">Znight</text>
-<rect x="189.4" y="378" width="285.1" height="12" rx="3" fill="url(#zn-accent-line)"/>
-<text x="482.5" y="388" class="s" font-size="12" font-weight="600" fill="#F4F6FC">122k</text>
-<rect x="189.4" y="394" width="318.5" height="12" rx="3" fill="url(#zn-accent-soft)"/>
-<text x="515.9" y="404" class="s" font-size="12" font-weight="600" fill="#F4F6FC">136k</text>
+<rect x="189.4" y="378" width="300.6" height="12" rx="3" fill="url(#zn-accent-line)"/>
+<text x="498" y="388" class="s" font-size="12" font-weight="600" fill="#F4F6FC">128k</text>
+<rect x="189.4" y="394" width="326.3" height="12" rx="3" fill="url(#zn-accent-soft)"/>
+<text x="523.7" y="404" class="s" font-size="12" font-weight="600" fill="#F4F6FC">139k</text>
 <line x1="24" y1="413" x2="664" y2="413" stroke="#2C3660" stroke-width="1"/>
 <text x="24" y="442.5" class="s" font-size="13" font-weight="600" fill="#F4F6FC">Hono</text>
 <text x="101.2" y="442.5" class="s" font-size="13" fill="#D6DCEE">Hand-wired</text>
-<rect x="189.4" y="424" width="336" height="12" rx="3" fill="#A9B4D6"/>
-<text x="533.4" y="434" class="s" font-size="12" fill="#A9B4D6">144k</text>
+<rect x="189.4" y="424" width="309" height="12" rx="3" fill="#A9B4D6"/>
+<text x="506.4" y="434" class="s" font-size="12" fill="#A9B4D6">131k</text>
 <rect x="189.4" y="440" width="410.6" height="12" rx="3" fill="#5D6A9C"/>
-<text x="608" y="450" class="s" font-size="12" fill="#A9B4D6">175k</text>
+<text x="608" y="450" class="s" font-size="12" fill="#A9B4D6">174k</text>
 <text x="101.2" y="482.5" class="s" font-size="13" font-weight="600" fill="#F4F6FC">Znight</text>
-<rect x="189.4" y="464" width="237.3" height="12" rx="3" fill="url(#zn-accent-line)"/>
-<text x="434.7" y="474" class="s" font-size="12" font-weight="600" fill="#F4F6FC">101k</text>
-<rect x="189.4" y="480" width="318.1" height="12" rx="3" fill="url(#zn-accent-soft)"/>
-<text x="515.5" y="490" class="s" font-size="12" font-weight="600" fill="#F4F6FC">136k</text>
+<rect x="189.4" y="464" width="274.3" height="12" rx="3" fill="url(#zn-accent-line)"/>
+<text x="471.7" y="474" class="s" font-size="12" font-weight="600" fill="#F4F6FC">116k</text>
+<rect x="189.4" y="480" width="346.3" height="12" rx="3" fill="url(#zn-accent-soft)"/>
+<text x="543.7" y="490" class="s" font-size="12" font-weight="600" fill="#F4F6FC">147k</text>
 </svg>

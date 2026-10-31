@@ -68,11 +68,14 @@ describe.skipIf(typeof compile !== 'function')('compiled files application (e2e)
   it('generates the upload rules, body limits and invoke code', () => {
     const compact = (text: string): string => text.replace(/\s+/g, '').replace(/,([)\]}])/g, '$1')
     const generated = compact(code)
-    expect(generated).toContain(compact("import { coerce, uploads, validate } from '@znight/http'"))
+    expect(generated).toContain(compact("import { coerce, isThenable, uploads, validate } from '@znight/http'"))
     expect(generated).toContain(
-      compact(
-        "async (c: FilesController, ctx: HttpContext) => c.avatar(uploads.file(ctx, 'avatar'), await validate(AvatarMeta, ctx.body, 'body'))",
-      ),
+      compact(`(c: FilesController, ctx: HttpContext) => {
+        const a0 = uploads.file(ctx, 'avatar')
+        const a1 = validate(AvatarMeta, ctx.body, 'body')
+        if (isThenable(a1)) return (async () => c.avatar(a0, await a1))()
+        return c.avatar(a0, a1)
+      }`),
     )
     expect(generated).toContain(
       compact(

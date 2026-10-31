@@ -166,7 +166,8 @@ With `prune`, drop `graph.reachability.unreachable` providers from `metadata.pro
 ## `GenerateContext`
 
 `src/extensions/generate.ts` defines `GenNode`, `GenerateContext` and implements the pure builders
-(`createGenBuilders()`: `lit`, `obj`, `arr`, `ref`, `member`, `call`, `construct`, `arrow`, `code`).
+(`createGenBuilders()`: `lit`, `obj`, `arr`, `ref`, `member`, `call`, `construct`, `arrow`, `block`,
+`code`).
 The code generator (`src/codegen/context.ts`, `module.ts`, `container.ts`) adds:
 
 - `importValue(target)` / `importType(target)`: a `GenImport` node (`target.kind: 'ref' |
@@ -179,5 +180,6 @@ The code generator (`src/codegen/context.ts`, `module.ts`, `container.ts`) adds:
 - `constant(name, value, { type })`: a module-level `const` (`gen:constant` node);
 - the printer: `gen:literal` → literal emitter (ValueRefs imported), `gen:object` → computed string
   keys, `gen:code` → `parts` verbatim with each value printed, `gen:arrow` params typed when a type
-  node is given. Only nodes created by the builders are printed (forged objects are reported). The
+  node is given, `gen:block` → `{`, one statement per line, `}` (its locals reserved like arrow
+  parameters). Only nodes created by the builders are printed (forged objects are reported). The
   section returned by `generate()` becomes `metadata.extensions[name]`.

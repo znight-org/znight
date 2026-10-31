@@ -22,15 +22,15 @@ number on this page comes from
 - **2.0× faster cold start than NestJS**: 150 ms vs 302 ms to the first response.
 - **26% less memory than NestJS**: 89 MiB vs 122 MiB resident at idle.
 - **3.4× faster DI container than NestJS**: 11 ms vs 36 ms to create 1,000 providers.
-- **Throughput: Znight is behind NestJS on Node.js** with Fastify: 114,237 requests per second for `GET /users/:id`, against 127,025 for NestJS and 149,999 for hand-wired Fastify, about 1 µs more per request (see [Throughput](#throughput-and-latency)).
+- **Throughput: Znight is level with NestJS on Node.js** with Fastify: 125,344 requests per second for `GET /users/:id`, against 124,646 for NestJS (0.6% more) and 142,807 for hand-wired Fastify (see [Throughput](#throughput-and-latency)).
 
 <!-- /benchmarks:summary -->
 
 Znight starts up to twice as fast as the same NestJS application and uses less memory, because
-there is less to load and less to do at boot. Under load, it is close to NestJS: ahead of it on
-Express, about a microsecond per request behind it on Fastify. Its request pipeline does more per
-request than the hand-wired servers, which matters for services that answer in microseconds and much
-less for those that wait for a database.
+there is less to load and less to do at boot. Under load, it is level with NestJS on Fastify and
+ahead of it on Express, on Node.js and on Bun. Its request pipeline does more per request than the
+hand-wired servers, which matters for services that answer in microseconds and much less for those
+that wait for a database.
 
 ## What is measured
 
@@ -60,19 +60,19 @@ application runs the same build on Node.js and on Bun, with `NODE_ENV=production
 
 <!-- benchmarks:environment -->
 
-| Setup            |                        Value |
-| ---------------- | ---------------------------: |
-| CPU              |           Apple M5, 10 cores |
-| Memory           |                       16 GiB |
-| Operating system |                 macOS 26.6.2 |
-| Runtimes         |   Node.js 24.21.0, Bun 1.4.4 |
-| Measured         | 2026-10-30, commit `67d1ade` |
+| Setup            |                                    Value |
+| ---------------- | ---------------------------------------: |
+| CPU              |                       Apple M5, 10 cores |
+| Memory           |                                   16 GiB |
+| Operating system |                             macOS 26.6.2 |
+| Runtimes         |               Node.js 24.21.0, Bun 1.4.4 |
+| Measured         | 2026-10-30, 2026-10-31, commit `e1e4e4c` |
 
 | Package                    | Version |
 | -------------------------- | ------: |
-| `@znight/core`             |   0.1.1 |
-| `@znight/http`             |   0.1.1 |
-| `@znight/compiler`         |   0.1.1 |
+| `@znight/core`             |   0.1.2 |
+| `@znight/http`             |   0.1.2 |
+| `@znight/compiler`         |   0.1.2 |
 | `@nestjs/core`             |  12.3.2 |
 | `@nestjs/platform-fastify` |  12.3.2 |
 | `@nestjs/platform-express` |  12.3.2 |
@@ -145,48 +145,47 @@ of the applications.
 
 | Application            |                        Node.js: requests/s | Node.js: p99 |                            Bun: requests/s | Bun: p99 |
 | ---------------------- | -----------------------------------------: | -----------: | -----------------------------------------: | -------: |
-| Hand-wired (Fastify)   |     149,999 <small>144,143–150,057</small> |         1 ms |     164,823 <small>157,213–165,510</small> |     1 ms |
-| **Znight (Fastify)**   | **114,237** <small>113,990–115,401</small> |         1 ms | **117,711** <small>103,315–126,490</small> |     1 ms |
-| NestJS (Fastify)       |     127,025 <small>122,836–129,969</small> |         1 ms |     129,728 <small>126,269–136,873</small> |     1 ms |
-| Hand-wired (Express)   |        92,529 <small>90,010–93,158</small> |         2 ms |     124,268 <small>113,271–135,581</small> |     1 ms |
-| **Znight (Express)**   |    **98,982** <small>95,695–99,552</small> |         1 ms | **117,187** <small>116,698–119,537</small> |     1 ms |
-| NestJS (Express)       |        84,855 <small>82,313–85,356</small> |         2 ms |     118,112 <small>113,830–125,716</small> |     1 ms |
-| Hand-wired (node:http) |     148,637 <small>142,807–150,662</small> |         1 ms |     167,475 <small>157,492–174,714</small> |     1 ms |
-| **Znight (node:http)** | **121,807** <small>121,079–122,063</small> |         1 ms | **136,108** <small>121,824–136,666</small> |     1 ms |
-| Hand-wired (Hono)      |     143,552 <small>136,047–143,855</small> |         1 ms |     175,447 <small>172,876–178,298</small> |     1 ms |
-| **Znight (Hono)**      | **101,402** <small>101,117–103,596</small> |         1 ms | **135,930** <small>126,170–136,035</small> |     1 ms |
+| Hand-wired (Fastify)   |     142,807 <small>142,028–144,634</small> |         1 ms |     158,435 <small>157,376–159,098</small> |     1 ms |
+| **Znight (Fastify)**   | **125,344** <small>120,294–126,432</small> |         1 ms | **138,164** <small>127,334–138,781</small> |     1 ms |
+| NestJS (Fastify)       |     124,646 <small>121,975–124,948</small> |         1 ms |     132,817 <small>131,468–133,088</small> |     1 ms |
+| Hand-wired (Express)   |        89,172 <small>78,275–89,213</small> |         2 ms |     130,176 <small>129,091–130,327</small> |     1 ms |
+| **Znight (Express)**   | **108,064** <small>107,529–109,507</small> |         1 ms | **128,736** <small>122,319–129,865</small> |     1 ms |
+| NestJS (Express)       |        80,945 <small>79,671–82,627</small> |         2 ms |     117,670 <small>117,396–118,007</small> |     1 ms |
+| Hand-wired (node:http) |     145,100 <small>144,762–146,787</small> |         1 ms |     168,396 <small>167,779–168,721</small> |     1 ms |
+| **Znight (node:http)** | **127,625** <small>125,804–128,294</small> |         1 ms | **138,537** <small>137,245–140,259</small> |     1 ms |
+| Hand-wired (Hono)      |     131,183 <small>127,540–132,407</small> |         1 ms |     174,307 <small>160,381–174,854</small> |     1 ms |
+| **Znight (Hono)**      | **116,460** <small>111,840–118,577</small> |         1 ms | **147,031** <small>140,620–147,718</small> |     1 ms |
 
 #### `POST /users` (validated body)
 
 ![Requests per second of each application for POST /users (validated body), on Node.js and Bun](/benchmarks/throughput-post.svg)
 
-| Application            |                     Node.js: requests/s | Node.js: p99 |                            Bun: requests/s | Bun: p99 |
-| ---------------------- | --------------------------------------: | -----------: | -----------------------------------------: | -------: |
-| Hand-wired (Fastify)   |  123,633 <small>122,836–123,889</small> |         1 ms |     134,313 <small>129,638–135,744</small> |     1 ms |
-| **Znight (Fastify)**   | **87,747** <small>85,414–88,579</small> |         2 ms |   **93,984** <small>91,087–101,553</small> |     1 ms |
-| NestJS (Fastify)       |   100,474 <small>98,458–104,058</small> |         1 ms |     106,412 <small>100,559–113,329</small> |     1 ms |
-| Hand-wired (Express)   |     77,344 <small>76,599–78,042</small> |         2 ms |       99,180 <small>99,104–104,207</small> |     1 ms |
-| **Znight (Express)**   | **82,860** <small>80,823–84,250</small> |         2 ms |   **99,884** <small>99,348–108,890</small> |     1 ms |
-| NestJS (Express)       |     69,056 <small>65,500–69,169</small> |         2 ms |        94,956 <small>86,880–95,631</small> |     1 ms |
-| Hand-wired (node:http) |  129,597 <small>128,771–130,621</small> |         1 ms |     149,370 <small>138,572–150,243</small> |     1 ms |
-| **Znight (node:http)** | **97,030** <small>96,637–98,447</small> |         1 ms | **115,692** <small>100,297–116,698</small> |     1 ms |
-| Hand-wired (Hono)      |  111,852 <small>108,815–112,416</small> |         1 ms |     170,013 <small>157,993–170,816</small> |     1 ms |
-| **Znight (Hono)**      | **86,758** <small>85,530–88,265</small> |         2 ms |    **59,891** <small>57,910–60,237</small> |     3 ms |
+| Application            |                        Node.js: requests/s | Node.js: p99 |                            Bun: requests/s | Bun: p99 |
+| ---------------------- | -----------------------------------------: | -----------: | -----------------------------------------: | -------: |
+| Hand-wired (Fastify)   |     118,420 <small>114,929–118,659</small> |         1 ms |     127,985 <small>126,886–130,057</small> |     1 ms |
+| **Znight (Fastify)**   | **107,174** <small>107,110–108,029</small> |         1 ms | **117,065** <small>107,488–117,065</small> |     1 ms |
+| NestJS (Fastify)       |        99,703 <small>99,028–99,732</small> |         1 ms |     107,116 <small>106,767–107,853</small> |     1 ms |
+| Hand-wired (Express)   |        74,627 <small>65,873–74,947</small> |         2 ms |      101,652 <small>97,975–102,415</small> |     1 ms |
+| **Znight (Express)**   |    **89,242** <small>86,874–89,585</small> |         2 ms | **110,566** <small>110,124–110,787</small> |     1 ms |
+| NestJS (Express)       |        64,887 <small>62,772–66,406</small> |         2 ms |        88,323 <small>88,259–89,975</small> |     2 ms |
+| Hand-wired (node:http) |     126,019 <small>125,734–126,077</small> |         1 ms |     143,040 <small>142,592–143,366</small> |     1 ms |
+| **Znight (node:http)** | **108,751** <small>104,428–109,763</small> |         1 ms | **117,676** <small>117,268–118,391</small> |     1 ms |
+| Hand-wired (Hono)      |     105,766 <small>104,457–107,529</small> |         1 ms |     161,844 <small>160,250–162,240</small> |     1 ms |
+| **Znight (Hono)**      |    **95,828** <small>93,455–99,674</small> |         1 ms | **123,244** <small>117,018–124,111</small> |     1 ms |
 
 Median of 3 rounds of 10 seconds (minimum–maximum in small type), each after a 3-second warm-up, 100 connections, no pipelining. Latency: the 99th percentile reported by autocannon, which records whole milliseconds.
 
 <!-- /benchmarks:http -->
 
-Under load, Znight is close to NestJS and below the hand-wired servers. On Node.js it serves more
-requests per second than NestJS on Express (and than the hand-wired Express application, whose
-`res.json()` it does not use), and 10% to 13% fewer on Fastify: one to one and a half microseconds
-per request. On Bun it is level with NestJS on Express and behind it on Fastify. The servers are the
-same, so the difference with the hand-wired servers is Znight's request pipeline: for every request
+Under load, Znight serves at least as many requests per second as NestJS on the same server. On
+Fastify it is 1% to 9% ahead, which is within this machine's noise (see [Caveats](#caveats)); on
+Express it is 9% to 38% ahead, and level with or ahead of the hand-wired Express application, whose
+`res.json()` it does not use. It stays 9% to 24% below the hand-wired Fastify, `node:http` and Hono
+servers. The servers are the same, so that difference is Znight's request pipeline: for every request
 it opens a request scope, generates a request id, writes its security headers, and serializes the
-response itself before handing it to the server. One result stands apart: `POST` with Hono on Bun,
-where the body is read through a Web stream, is far below the hand-wired Hono application. These
-microseconds matter for services that answer from memory; for a service whose requests wait for a
-database or another service, they are rarely what limits throughput.
+response itself before handing it to the server. This overhead matters for services that answer
+from memory; for a service whose requests wait for a database or another service, it is rarely what
+limits throughput.
 
 ## Dependency injection
 
