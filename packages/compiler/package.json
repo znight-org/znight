@@ -1,6 +1,6 @@
 {
   "name": "@znight/compiler",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Znight compiler: Vite plugin that analyzes your code and generates the DI container at build time",
   "license": "MIT",
   "author": "Ugho STEPHAN",

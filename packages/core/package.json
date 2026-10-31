@@ -1,6 +1,6 @@
 {
   "name": "@znight/core",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Znight core runtime: compile-time DI container, lifecycle, plugins and marker decorators",
   "license": "MIT",
   "author": "Ugho STEPHAN",
