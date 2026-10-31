@@ -341,11 +341,13 @@ function summaryBlock(results: Results): string {
   const nest = rps('nestjs-fastify', 'node')
   const raw = rps('baseline-fastify', 'node')
   if (ours !== undefined && nest !== undefined && raw !== undefined) {
-    const verdict = ours >= nest ? 'ahead of' : 'behind'
-    const cost = Math.round(Math.abs(1 / ours - 1 / nest) * 1e6)
-    const sign = ours >= nest ? 'less' : 'more'
+    let verdict = ours >= nest ? 'ahead of' : 'behind'
+    // within the noise stated in the page's caveats (about 10%), the two are level
+    if (Math.abs(ours / nest - 1) <= 0.1) verdict = 'level with'
+    const gap = (Math.abs(ours / nest - 1) * 100).toFixed(1)
+    const sign = ours >= nest ? 'more' : 'fewer'
     lines.push(
-      `- **Throughput: Znight is ${verdict} NestJS on Node.js** with Fastify: ${integer(ours)} requests per second for \`GET /users/:id\`, against ${integer(nest)} for NestJS and ${integer(raw)} for hand-wired Fastify, about ${cost} µs ${sign} per request (see [Throughput](#throughput-and-latency)).`,
+      `- **Throughput: Znight is ${verdict} NestJS on Node.js** with Fastify: ${integer(ours)} requests per second for \`GET /users/:id\`, against ${integer(nest)} for NestJS (${gap}% ${sign}) and ${integer(raw)} for hand-wired Fastify (see [Throughput](#throughput-and-latency)).`,
     )
   }
   return lines.join('\n')
