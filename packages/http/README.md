@@ -1718,7 +1718,8 @@ unlimited instead of Bun's 128 MiB. A body with a `Content-Length` is read at on
 one as a stream (413 as soon as it passes the limit). Bun's `idleTimeout` (10 s by default) still closes idle
 connections and stalled requests, but is lifted while a streamed response is sent (SSE, slow
 producers), then restored. In your own `Bun.serve({ fetch: adapter.fetch })` the adapter cannot
-lift it: keep the SSE `heartbeat` below `idleTimeout` (the 8 s default does).
+lift it: keep the SSE `heartbeat` below `idleTimeout` (the 8 s default does). Bun checks idle timeouts
+every 4 seconds, so an `idleTimeout` of 4 s or less closes a connection even while it is written to.
 
 `Bun.serve()` sends streamed bodies with chunked transfer encoding even when a `Content-Length`
 header is set (unless the whole stream is available at once): files sent with

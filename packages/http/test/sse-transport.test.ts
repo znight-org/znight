@@ -135,22 +135,25 @@ describe('idle timeouts', () => {
   it('a user-managed Bun.serve(): heartbeats keep a quiet stream alive', async () => {
     const adapter = honoAdapter()
     const app = await createApp(meta, { adapter }, { start: false })
-    const server = Bun.serve({ port: 0, hostname: '127.0.0.1', idleTimeout: 2, fetch: adapter.fetch })
+    // Bun checks idle timeouts every 4 s: an idleTimeout of 4 s or less closes the connection at the
+    // next check whatever is written, 5 s closes it 4 to 8 s after the last write. A 9 s pause would
+    // be cut without the heartbeats
+    const server = Bun.serve({ port: 0, hostname: '127.0.0.1', idleTimeout: 5, fetch: adapter.fetch })
     try {
-      const response = await fetch(`http://127.0.0.1:${server.port}/beat?ms=3000`)
+      const response = await fetch(`http://127.0.0.1:${server.port}/beat?ms=9000`)
       const items: unknown[] = []
       for await (const item of parseSseStream(response.body as ReadableStream<Uint8Array>)) {
         items.push(item.type === 'event' ? item.data : item.type)
       }
       expect(items[0]).toBe('comment')
       expect(items[1]).toBe('before')
-      expect(items.filter(item => item === 'comment').length).toBeGreaterThanOrEqual(3)
+      expect(items.filter(item => item === 'comment').length).toBeGreaterThanOrEqual(5)
       expect(items.at(-1)).toBe('after')
     } finally {
       await server.stop(true)
       await app.stop()
     }
-  }, 10_000)
+  }, 15_000)
 
   const timed: readonly { name: string; create: () => HttpAdapter }[] = [
     {
