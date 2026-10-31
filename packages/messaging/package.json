@@ -1,6 +1,6 @@
 {
   "name": "@znight/messaging",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Znight messaging plugin: consumers, retries and dead-letter queues with RabbitMQ, SQS or Kafka",
   "license": "MIT",
   "author": "Ugho STEPHAN",
