@@ -7,10 +7,11 @@
 import type { Location, ValidateContext } from '@znight/compiler'
 import type { RoutePath } from '../path.ts'
 import type { HttpControllerData, HttpRouteData, MetaEntry } from './model.ts'
+import type { RequiredRouteGroup, RouteGroupMember } from './route-groups.ts'
 
 import { checkRoutePath, compareStrings, parseRoutePath, WILDCARD_PARAM } from '../path.ts'
-import { Codes, Ids } from './model.ts'
-import { parseRouteDecoratorOptions } from './route-decorators.ts'
+import { Codes } from './model.ts'
+import { analyzeRouteGroups } from './route-groups.ts'
 
 type Context = ValidateContext<HttpControllerData>
 
@@ -69,80 +70,12 @@ export function validateHttp(ctx: Context): void {
   validateDecisions(ctx, controllers)
 }
 
-/** A route decorator definition seen during the compile (applied, or found by `definitionsOf`). */
-interface Definition {
-  readonly identity: string
-  readonly name: string
-  readonly key: string
-  readonly group: string
-  readonly required: boolean
-  readonly definition: Location
-  /** A flag (`@Public()`): no type argument, or every usage without argument. */
-  flag: boolean
-}
-
-/**
- * Every route decorator definition, sorted by identity: the applied ones (first usage) and, when
- * the compiler provides `definitionsOf`, the ones applied nowhere (invalid ones are left to the
- * usages, which report them).
- */
-function routeDecoratorDefinitions(ctx: Context, controllers: readonly HttpControllerData[]): Definition[] {
-  const definitions = new Map<string, Definition>()
-  const visit = (entries: readonly MetaEntry[]): void => {
-    for (const entry of entries) {
-      const known = definitions.get(entry.identity)
-      if (known === undefined) {
-        definitions.set(entry.identity, {
-          identity: entry.identity,
-          name: entry.decorator,
-          key: entry.key,
-          group: entry.group,
-          required: entry.required,
-          definition: entry.definition,
-          flag: entry.value === true,
-        })
-      } else if (entry.value !== true) {
-        known.flag = false
-      }
-    }
-  }
+/** Every route metadata entry of the controllers: controller entries, then route entries. */
+function* appliedEntries(controllers: readonly HttpControllerData[]): Generator<MetaEntry> {
   for (const controller of controllers) {
-    visit(controller.meta)
-    for (const route of controller.routes) visit(route.meta)
+    yield* controller.meta
+    for (const route of controller.routes) yield* route.meta
   }
-  // compilers before RFC 0001 have no definitionsOf: only applied decorators are known then
-  const all = typeof ctx.definitionsOf === 'function' ? ctx.definitionsOf(Ids.createRouteDecorator) : []
-  for (const found of all) {
-    const [keyArg, optionsArg, ...extra] = found.args
-    const key = keyArg?.evaluated === true ? keyArg.value : undefined
-    if (
-      typeof key !== 'string' ||
-      key === '' ||
-      extra.length > 0 ||
-      (optionsArg !== undefined && !optionsArg.evaluated)
-    ) {
-      continue
-    }
-    const parsed = parseRouteDecoratorOptions(key, optionsArg?.value)
-    if ('error' in parsed) {
-      continue
-    }
-    const flag = found.typeArgs.length === 0
-    const known = definitions.get(found.identity)
-    if (known !== undefined) {
-      known.flag &&= flag
-      continue
-    }
-    definitions.set(found.identity, {
-      identity: found.identity,
-      name: found.name,
-      key,
-      ...parsed,
-      definition: found.location,
-      flag,
-    })
-  }
-  return [...definitions.values()].sort((a, b) => compareStrings(a.identity, b.identity))
 }
 
 /**
@@ -151,45 +84,10 @@ function routeDecoratorDefinitions(ctx: Context, controllers: readonly HttpContr
  * a decision of every required group, its own or its controller's (ZNIGHT023).
  */
 function validateDecisions(ctx: Context, controllers: readonly HttpControllerData[]): void {
-  const definitions = routeDecoratorDefinitions(ctx, controllers)
-  if (definitions.length === 0) {
-    return
+  const { conflicts, required } = analyzeRouteGroups(ctx, appliedEntries(controllers))
+  for (const conflict of conflicts) {
+    ctx.report(conflict)
   }
-  const byKey = new Map<string, Definition>()
-  const byGroup = new Map<string, Definition>()
-  const members = new Map<string, Definition[]>()
-  for (const definition of definitions) {
-    const sameKey = byKey.get(definition.key)
-    if (sameKey !== undefined && (sameKey.group !== definition.group || sameKey.required !== definition.required)) {
-      ctx.report({
-        code: Codes.InvalidDecorator,
-        severity: 'error',
-        message: `The route decorator ${definition.name} defines the key "${definition.key}" with ${describeOptions(definition)}, but ${sameKey.name} defines it with ${describeOptions(sameKey)}`,
-        location: definition.definition,
-        hints: ['Every definition of a key must use the same options: share one definition'],
-        related: [{ message: `${sameKey.name} is defined here`, location: sameKey.definition }],
-      })
-      continue
-    }
-    const sameGroup = byGroup.get(definition.group)
-    if (sameGroup !== undefined && sameGroup.required !== definition.required) {
-      ctx.report({
-        code: Codes.InvalidDecorator,
-        severity: 'error',
-        message: `The "${definition.group}" group is ${definition.required ? '' : 'not '}required for ${definition.name} but ${sameGroup.required ? '' : 'not '}required for ${sameGroup.name}`,
-        location: definition.definition,
-        hints: [`All the decorators of the "${definition.group}" group must agree on required`],
-        related: [{ message: `${sameGroup.name} is defined here`, location: sameGroup.definition }],
-      })
-      continue
-    }
-    byKey.set(definition.key, sameKey ?? definition)
-    byGroup.set(definition.group, sameGroup ?? definition)
-    const list = members.get(definition.group) ?? []
-    list.push(definition)
-    members.set(definition.group, list)
-  }
-  const required = [...byGroup.values()].filter(definition => definition.required)
   if (required.length === 0) {
     return
   }
@@ -201,23 +99,14 @@ function validateDecisions(ctx: Context, controllers: readonly HttpControllerDat
         if (decided.has(group.group)) {
           continue
         }
-        // the decorators of the group in source order: `@Public(), @Authenticated() or @Roles(...)`
-        const inOrder = [...(members.get(group.group) ?? [group])].sort(
-          (a, b) => compareStrings(a.definition.file, b.definition.file) || a.definition.start - b.definition.start,
-        )
-        const decorators = inOrder.map(definition => `@${definition.name}(${definition.flag ? '' : '...'})`)
-        const listed =
-          decorators.length === 1
-            ? (decorators[0] as string)
-            : `${decorators.slice(0, -1).join(', ')} or ${decorators.at(-1) as string}`
         ctx.report({
           code: Codes.MissingRouteDecision,
           severity: 'error',
           message: `Route ${route.method} ${route.fullPath} (${controller.displayName}.${route.handler}) has no "${group.group}" decision`,
           location: route.location,
-          hints: [`Add ${listed} to the route or to ${controller.displayName}`],
+          hints: [`Add ${group.suggestion} to the route or to ${controller.displayName}`],
           related: [
-            { message: `The "${group.group}" group is required`, location: (inOrder[0] ?? group).definition },
+            { message: `The "${group.group}" group is required`, location: firstDefinition(group) },
             { message: `${controller.displayName} is declared here`, location: controller.location },
           ],
         })
@@ -226,9 +115,9 @@ function validateDecisions(ctx: Context, controllers: readonly HttpControllerDat
   }
 }
 
-function describeOptions(entry: Definition): string {
-  const group = entry.group === entry.key ? 'no group' : `group "${entry.group}"`
-  return entry.required ? `${group}, required` : group
+/** Where the first decorator of a group (source order) is defined. */
+function firstDefinition(group: RequiredRouteGroup): Location {
+  return (group.decorators[0] as RouteGroupMember).definition
 }
 
 const GRAMMAR_HINTS: readonly string[] = [

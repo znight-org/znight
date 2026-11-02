@@ -92,6 +92,7 @@ export {
   type RouteDecoratorArgs,
   type RouteDecoratorInfo,
   type RouteDecoratorOptions,
+  type RouteMetaCarrier,
   type RouteMetaEntry,
   SignedCookie,
   Sse,

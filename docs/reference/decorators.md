@@ -100,6 +100,14 @@ export const Public = createRouteDecorator('public', { group: 'access', required
 export const Roles = createRouteDecorator<readonly Role[]>('roles', { group: 'access', required: true })
 ```
 
+At runtime, `Decorator.get(ctx)` reads the effective value of a decorator. `ctx` is any
+`RouteMetaCarrier`, an object with an optional `route: { meta }`: the `HttpContext` of a request,
+or the context of another transport that reuses route decorators. `Decorator.meta(value?)` returns
+the same metadata as data, for [plugin routes](/packages/http#plugin-routes). Compiler extensions
+read route decorators on their own classes and methods with `readRouteMeta`, `effectiveRouteMeta`
+and `requiredRouteGroups` from `@znight/http/compiler`
+([reference](../../packages/http/README.md#route-metadata-in-other-extensions)).
+
 Guide: [HTTP](/packages/http) · [Files](/packages/http#files) · [Security](/guide/security)
 
 ## `@znight/messaging`

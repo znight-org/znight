@@ -1222,8 +1222,18 @@ export class AdminController {
 HttpPlugin.configure({ guards: [AuthGuard] })
 ```
 
-`decorator.get(ctx)` reads the route metadata (`ctx.route.meta`) with its type. Guards,
-interceptors and mappers are providers: they may be request-scoped (resolved per request) and have
+`decorator.get(ctx)` reads the route metadata (`ctx.route.meta`) with its type. It accepts any
+`RouteMetaCarrier` (`{ route?: { meta } }`), not only an `HttpContext`: the contexts of other
+transports that reuse route decorators (a GraphQL resolver, a WebSocket gateway) expose their
+effective metadata the same way, so one guard helper serves every transport:
+
+```ts
+import type { RouteMetaCarrier } from '@znight/http'
+
+const isPublic = (ctx: RouteMetaCarrier): boolean => Public.get(ctx) === true
+```
+
+Guards, interceptors and mappers are providers: they may be request-scoped (resolved per request) and have
 dependencies. Plugin options also accept instances (`guards: [new IpAllowList(['10.0.0.0/8'])]`).
 
 ## Route decisions
@@ -1587,6 +1597,7 @@ export class StatusPlugin implements Plugin, PluginHttpRoutes {
         handler: ctx => ({ up: true }), // (ctx: HttpContext) => result, serialised like a controller result
         meta: [Public.meta()], // route metadata: read by guards, checked by the route decision check
         guards: [], // extra guards (classes or instances)
+        bodyLimit: '100kb', // optional: this route's body limit, instead of the HttpPlugin bodyLimit
       },
     ]
   }
@@ -1599,9 +1610,12 @@ export class StatusPlugin implements Plugin, PluginHttpRoutes {
   then the route `guards`, the handler and the exception mappers. Global interceptors do not wrap
   plugin routes (a response envelope would break a document). The body is read lazily
   (`ctx.parseBody()`). `GET` routes answer `HEAD`; `ALL` works as for controllers.
+- `bodyLimit` (a `ByteSize`: `1048576`, `'100kb'`, `Infinity`, the grammar of the plugin option)
+  replaces the `HttpPlugin` `bodyLimit` for that route only, lower or higher, like `@BodyLimit` on a
+  controller route: reading a larger body answers 413. Without it, the plugin limit applies.
 - `meta` entries (`decorator.meta(value)`, one per group) are the route metadata. A required group
   needs a decision there too: without one the boot fails (ZNIGHT023), with a hint naming the plugin.
-- An invalid route (method, path grammar, name, handler, meta) or a collision with another route is
+- An invalid route (method, path grammar, name, handler, meta, body limit) or a collision with another route is
   ZNIGHT007 naming the plugin. `HttpPlugin.routes` lists the routes with `source: '<plugin name>'`.
 
 ## Adapters
@@ -2292,6 +2306,62 @@ ZNIGHT018):
 Controllers are stored in identity order of the classes; sort them by `token` for deterministic
 output. The effective metadata of a route is the controller's entries whose `group` has no entry on
 the route, then the route's entries.
+
+### Route metadata in other extensions
+
+Extensions whose own targets carry route decorators (WebSocket gateways, GraphQL resolvers) read
+them with the functions of `@znight/http/compiler`, which apply exactly the rules of controllers and
+routes (RFC 0001 groups). They are stable API, like the types above, and the entry stays
+runtime-free (it never loads the HTTP runtime):
+
+| Function                             | What it does                                                                                                                                                                                                                                                                                              |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `readRouteMeta(ctx, cls, method?)`   | The `MetaEntry[]` of the route decorators applied to a class (`method` omitted) or to one of its methods, in source order. Works with the `AnalyzeContext` of any extension. Problems (uncalled decorator, two decisions of one group...) are reported as ZNIGHT005, once per call: read each target once |
+| `effectiveRouteMeta(classMeta, own)` | The effective metadata of a method: the class entries whose group the method does not decide, then the method entries (the rule of `ctx.route.meta`)                                                                                                                                                      |
+| `requiredRouteGroups(ctx, applied?)` | The `RequiredRouteGroup[]` of the application (in the `ValidateContext` of any extension): every group declared `required`, applied anywhere or not. `applied` are the entries the caller read. Inconsistent definitions are left out (the http extension reports them)                                   |
+
+A `RequiredRouteGroup` has `group`, `decorators` (`RouteGroupMember[]`, source order: `identity`,
+`name`, `key`, `group`, `required`, `definition`, `flag`) and `suggestion`
+(`@Public(), @Authenticated() or @Roles(...)`). A target of the extension without a decision of a
+required group is **ZNIGHT023**, reported by the extension itself:
+
+```ts
+import type { CompilerExtension, Location } from '@znight/compiler'
+import type { MetaEntry } from '@znight/http/compiler'
+
+import { readRouteMeta, requiredRouteGroups } from '@znight/http/compiler'
+
+interface GatewayData {
+  readonly name: string
+  readonly meta: readonly MetaEntry[] // the class entries (methods: effectiveRouteMeta(classMeta, own))
+  readonly location: Location
+}
+
+const ws: CompilerExtension<GatewayData> = {
+  apiVersion: 1,
+  name: 'ws',
+  decorators: { '@acme/ws#Gateway': { targets: ['class'], params: [] } },
+  analyzeClass(cls, ctx) {
+    ctx.store({ name: cls.displayName, meta: readRouteMeta(ctx, cls), location: cls.location })
+  },
+  validate(ctx) {
+    const required = requiredRouteGroups(
+      ctx,
+      ctx.stored.flatMap(gateway => gateway.meta),
+    )
+    for (const gateway of ctx.stored)
+      for (const group of required)
+        if (!gateway.meta.some(entry => entry.group === group.group))
+          ctx.report({
+            code: 'ZNIGHT023',
+            severity: 'error',
+            message: `${gateway.name} has no "${group.group}" decision`,
+            location: gateway.location,
+            hints: [`Add ${group.suggestion} to ${gateway.name}`],
+          })
+  },
+}
+```
 
 ## Writing an adapter
 

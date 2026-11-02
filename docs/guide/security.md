@@ -154,6 +154,10 @@ export class AuthGuard implements CanActivate {
 }
 ```
 
+`Public.get(ctx)` takes any `RouteMetaCarrier` (an object with an optional `route: { meta }`), not
+only an `HttpContext`: a helper typed `(ctx: RouteMetaCarrier) => boolean` reads the same decisions
+on the contexts of other transports that reuse route decorators.
+
 The `Authenticator` tries the credentials of the request: a bearer token, an API key or a session
 cookie (see [several strategies](#several-strategies)). Register the guard **globally**, so that it
 runs before the controller and route guards: `HttpPlugin.configure({ guards: [AuthGuard] })`. When

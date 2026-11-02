@@ -656,7 +656,10 @@ options `{ group?, required? }` (`required` default `false`; `group` default the
 `'app/tag'`). Invalid values throw a `TypeError` when the module loads, and the compiler reports
 them as ZNIGHT005. The decorator carries `key`, `group`, `required` (`RouteDecoratorInfo`), `get(ctx)`
 (the effective value of the current route) and `meta(value?)` (the same metadata as data, `{ key,
-value, group, required }`, for plugin routes, §9.1). Decorators of a group are alternatives: one
+value, group, required }`, for plugin routes, §9.1). `get` accepts any `RouteMetaCarrier`
+(`{ readonly route?: { readonly meta: Readonly<Record<string, unknown>> } | undefined }`) and returns
+`route?.meta[key]`: an `HttpContext` is one, and so is the context of another transport that reuses
+route decorators (RFC 0003, RFC 0005). Decorators of a group are alternatives: one
 decision per group and target (ZNIGHT005), every definition of a key uses the same options, and the
 decorators of a group agree on `required` (ZNIGHT005). For each route and each **required** group
 seen during the compile (applied somewhere, or only defined: `definitionsOf`, §6.5), the compiler
@@ -667,6 +670,26 @@ declare the decisions they enforce with a static `enforces: readonly RouteDecora
 
 **Impl.** routes are not inherited: route decorators on a class without `@Controller` (e.g. a base
 class) are ZNIGHT005; a route decorator created in a `.d.ts` (its key is not readable) is ZNIGHT005.
+
+Route decorators on the targets of other extensions (RFC 0003 §6.4, RFC 0005 H3). Besides its
+default-exported extension, `@znight/http/compiler` exports three stable functions, so that an
+extension whose targets carry route decorators (gateways, resolvers) applies exactly these rules:
+
+- `readRouteMeta(ctx: AnalyzeContext<unknown>, cls: ClassInfo, method?: MethodInfo): MetaEntry[]`:
+  the entries of the route decorators applied to the class (no `method`) or to the method, in
+  source order (`{ key, value, location, group, required, decorator, identity, definition }`), with
+  the problems above reported as ZNIGHT005 through `ctx` (once per call). The http extension reads
+  controllers and routes with it.
+- `effectiveRouteMeta(classMeta, methodMeta): MetaEntry[]`: the class entries whose group the
+  method does not decide, then the method entries (the rule of `ctx.route.meta`, §9.1).
+- `requiredRouteGroups(ctx: ValidateContext<unknown>, applied?: Iterable<MetaEntry>):
+  readonly RequiredRouteGroup[]`: the required groups of the compile (applied entries, then
+  `definitionsOf`, §6.5), in the order of their first definition by identity, each
+  `{ group, decorators: RouteGroupMember[] (source order), suggestion }`. Inconsistent definitions are
+  left out and reported only by the http extension. A target of the caller without a decision of a
+  returned group is ZNIGHT023, reported by the caller.
+
+The entry stays runtime-free (§2): other `<pkg>/compiler` entries may import it.
 
 ### `@znight/openapi`
 
@@ -1754,12 +1777,15 @@ for byte, header order included.
 - **Plugin routes** (`PluginHttpRoutes`). A plugin implementing `httpRoutes({ prefix, container }):
   readonly PluginRoute[]` has it called once in `HttpPlugin.onBootstrap`, after `container.init()`
   and after the compiled routes, whatever the plugin order. A `PluginRoute` is `{ method, path,
-  name, handler: (ctx) => unknown, meta?: RouteMetaEntry[], guards?: GuardRef[] }`: `path` follows
-  the controller grammar, relative to the prefix; `meta` entries (`decorator.meta(value)`, one per
-  group) are the route metadata. The routes are registered through `adapter.registerRoute` in the
-  same pipeline: hook, request scope, global guards, then the route's `guards`, the handler and the
-  exception mappers; global interceptors do not wrap them; the body is read lazily; `GET` answers
-  `HEAD`. An invalid route or a collision with another route is ZNIGHT007 naming the plugin. The
+  name, handler: (ctx) => unknown, meta?: RouteMetaEntry[], guards?: GuardRef[], bodyLimit?:
+  ByteSize }`: `path` follows the controller grammar, relative to the prefix; `meta` entries
+  (`decorator.meta(value)`, one per group) are the route metadata; `bodyLimit` (the grammar of the
+  plugin option, parsed at boot) replaces the plugin `bodyLimit` for that route only, like
+  `@BodyLimit` (the body plan of the route). The routes are registered through
+  `adapter.registerRoute` in the same pipeline: hook, request scope, global guards, then the route's
+  `guards`, the handler and the exception mappers; global interceptors do not wrap them; the body is
+  read lazily; `GET` answers `HEAD`. An invalid route (a `bodyLimit` that `parseByteSize` rejects
+  included) or a collision with another route is ZNIGHT007 naming the plugin. The
   plugin name is `ctx.route.controller` and the `source` of the route summary.
 - **Cookies** (RFC 0006; `cookies.ts` is import-free). Request: the `cookie` header is split on `;`
   only, pairs trimmed, quoted values unquoted, `%` sequences decoded (malformed: kept raw); pairs
