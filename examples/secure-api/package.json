@@ -19,7 +19,7 @@
     "@znight/http": "workspace:*",
     "@znight/config": "workspace:*",
     "@znight/observability": "workspace:*",
-    "jose": "6.2.13",
+    "jose": "6.2.14",
     "rate-limiter-flexible": "11.2.3",
     "zod": "catalog:"
   },
