@@ -416,6 +416,19 @@ export interface ShapeProperty {
   readonly doc: DocComment | undefined
   /** The property declaration (`undefined` for properties created by `Record<'a' | 'b', T>`). */
   readonly location: Location | undefined
+  /**
+   * A field (instance field, parameter property, auto-accessor, property signature) or a getter
+   * (`get x(): T`, also a getter signature of an interface). Set with {@link ShapeOptions.members}
+   * `'instance'` only.
+   */
+  readonly kind?: 'field' | 'getter'
+  /**
+   * Canonical identity of the class, interface or type alias whose source declares the member
+   * (`src/base.ts#Entity` for an inherited field; kept through `Partial`, `Pick`, mapped types and
+   * intersections), `undefined` for a member written in the annotation of the target itself. Set
+   * with {@link ShapeOptions.members} `'instance'` only.
+   */
+  readonly declaredBy?: string
 }
 
 /**
@@ -478,6 +491,30 @@ export interface NamedShape {
   readonly doc: DocComment | undefined
   /** Location of the declaration name. */
   readonly location: Location
+  /**
+   * The members of an enum (`declaration: 'enum'`), in declaration order (merged declarations
+   * included), with their evaluated values (no reverse mapping for numeric members). `undefined`
+   * for other declarations and for enums whose values cannot be evaluated.
+   */
+  readonly enumMembers?: readonly ShapeEnumMember[]
+  /**
+   * The literals of an alias of a union of literal types (`type Sort = 'title' | 'newest'`), in
+   * source order and de-duplicated, while {@link shape} is a normalised (sorted) union. Set when
+   * every member of the union is written as a literal type (parenthesised unions of them included)
+   * and the union keeps them all (`true | false` is `boolean`: not set); `undefined` otherwise.
+   */
+  readonly literals?: readonly (string | number | boolean)[]
+}
+
+/** A member of an enum ({@link NamedShape.enumMembers}). */
+export interface ShapeEnumMember {
+  /** Member name as written (`Draft`, `'two words'` → `two words`). */
+  readonly name: string
+  readonly value: string | number
+  /** JSDoc of the member (`undefined` with `jsdoc: false`). */
+  readonly doc: DocComment | undefined
+  /** Location of the member name. */
+  readonly location: Location
 }
 
 /**
@@ -532,8 +569,20 @@ export interface ShapeOptions {
    * (`'@znight/http#HttpResponse'`, `'globalThis#Response'`, `'globalThis#AsyncIterable'`).
    */
   readonly keep?: readonly string[]
-  /** Read JSDoc comments (`doc` of properties and named shapes). Default `true`. */
+  /** Read JSDoc comments (`doc` of properties, enum members and named shapes). Default `true`. */
   readonly jsdoc?: boolean
+  /**
+   * Which members describe a class or an interface. `'json'` (default): what `JSON.stringify`
+   * produces (a `toJSON()` method gives the shape of its annotated return type; fields and parameter
+   * properties, `protected` ones included; no accessors). `'instance'`: what reading the members of
+   * an instance gives (GraphQL object types): `toJSON()` ignored, public instance fields, parameter
+   * properties and auto-accessors, getters (the annotated return type, `readonly` without a setter;
+   * a getter without annotation is `opaque`, reason `missing-annotation`) and getter signatures of
+   * interfaces, without `protected`, `private`, `#private` and static members, methods and setters;
+   * each property carries {@link ShapeProperty.kind} and {@link ShapeProperty.declaredBy}.
+   * Function-typed properties are `opaque` (reason `function`) in both modes.
+   */
+  readonly members?: 'json' | 'instance'
 }
 
 /**
@@ -690,6 +739,14 @@ export interface DefinitionInfo {
   readonly args: readonly ArgInfo[]
   /** Type arguments of the call (`createRouteDecorator<readonly Role[]>(...)`), resolved. */
   readonly typeArgs: readonly TypeInfo[]
+  /**
+   * For each type argument of the call, the canonical identity of the type it names when it is a
+   * plain type reference without type arguments (`scalar<EmailAddress>(...)` →
+   * `'src/email.ts#EmailAddress'`, `scalar<Uint8Array>(...)` → `'globalThis#Uint8Array'`),
+   * `undefined` otherwise. Unlike {@link typeArgs}, aliases are not expanded: an identity can be
+   * passed to {@link ShapeOptions.keep}, so that shapes keep the type as a `reference`.
+   */
+  readonly typeArgIdentities?: readonly (string | undefined)[]
   readonly doc: DocComment | undefined
   /** The generated module can import the constant (`importValue(identity)`). */
   readonly exported: boolean

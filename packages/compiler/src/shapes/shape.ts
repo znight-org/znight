@@ -136,14 +136,17 @@ export function mergeObjects(
         property.name,
         previous === undefined
           ? property
-          : {
-              name: property.name,
-              shape: intersection([previous.shape, property.shape], toObject),
-              optional: previous.optional && property.optional,
-              readonly: previous.readonly || property.readonly,
-              doc: property.doc ?? previous.doc,
-              location: property.location ?? previous.location,
-            },
+          : withOrigin(
+              {
+                name: property.name,
+                shape: intersection([previous.shape, property.shape], toObject),
+                optional: previous.optional && property.optional,
+                readonly: previous.readonly || property.readonly,
+                doc: property.doc ?? previous.doc,
+                location: property.location ?? previous.location,
+              },
+              property.kind === undefined ? previous : property,
+            ),
       )
     }
     if (current.additional !== undefined) {
@@ -164,6 +167,19 @@ export function overrideProperties(base: readonly ShapeProperty[], own: readonly
     result.set(property.name, property)
   }
   return [...result.values()]
+}
+
+/**
+ * `property` with the `kind` and `declaredBy` of `origin` (set in `'instance'` mode only, so that
+ * `'json'` properties keep their exact keys).
+ */
+export function withOrigin(property: ShapeProperty, origin: ShapeProperty | undefined): ShapeProperty {
+  if (origin?.kind === undefined) {
+    return property
+  }
+  return origin.declaredBy === undefined
+    ? { ...property, kind: origin.kind }
+    : { ...property, kind: origin.kind, declaredBy: origin.declaredBy }
 }
 
 /** Removes `undefined` from a shape: `{ shape, undefinable }`. */
