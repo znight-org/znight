@@ -1,11 +1,16 @@
 # RFC 0005: GraphQL (`@znight/graphql`)
 
-|          |                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Status   | Deferred to v0.2                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| Date     | 2026-10-27                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| Affects  | New `@znight/graphql`; `@znight/compiler` (type shapes, alias provenance, lazy edges, extra outputs); `@znight/http` (routes contributed by plugins); `@znight/core` (one hook, error codes ZNIGHT050–056); `@znight/testing`, `@znight/observability`, `@znight/cli`; docs; examples. Builds on RFC 0001 (route decision groups), RFC 0003 (route metadata outside controllers) and RFC 0006 (SSE, `ctx.signal`, `EventChannel`) |
-| Decision | **Ship `@znight/graphql` in v0.1, code-first only.** The compiler derives the GraphQL schema from TypeScript types at build time. Runtime on graphql-js 17, served by Znight's own GraphQL-over-HTTP transport mounted on `HttpPlugin`, subscriptions over SSE (`HttpResponse.sse`), DataLoader batching per execution, access control with the same route decorators and guards as HTTP                                          |
+|          |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Status   | Accepted (v0.2)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Date     | 2026-11-02                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Affects  | New `@znight/graphql`; `@znight/compiler` (type shapes additions, lazy edges, extra outputs); `@znight/http` (a body limit on plugin routes, route metadata outside controllers); `@znight/core` (one hook, error codes ZNIGHT060–066); `@znight/testing`, `@znight/observability`, `@znight/cli`; docs; examples. Builds on RFC 0001 (route decision groups), RFC 0002 (plugin routes, type shapes), RFC 0006 (SSE, `ctx.signal`, `EventChannel`) and the route metadata readers designed by RFC 0003 (made here, H3) |
+| Decision | **Ship `@znight/graphql` in v0.1, code-first only.** The compiler derives the GraphQL schema from TypeScript types at build time. Runtime on graphql-js 17, served by Znight's own GraphQL-over-HTTP transport mounted on `HttpPlugin`, subscriptions over SSE (`HttpResponse.sse`), DataLoader batching per execution, access control with the same route decorators and guards as HTTP                                                                                                                               |
+
+**Acceptance (2026-11-02).** Accepted for v0.2 with the repository's error code allocation
+(ZNIGHT060–066, §6.6) and the corrections of a review against the code: plugin routes, SSE and
+type shapes already exist (§2, §6.8, §8.3, §10). The text was written when the package targeted
+v0.1: below, "v0.1" means the first release of `@znight/graphql` and "v0.2" its follow-ups (§15).
 
 ## 1. Summary
 
@@ -20,7 +25,7 @@ What only a compile-time framework can offer:
 
 1. **Schema errors at build time.** `Uint8Array` reached from a query, two types named `Review`, a
    type used as both input and output, a union that cannot be told apart at runtime, a field
-   resolver without parent, a loader with the wrong key type: each is a `ZNIGHT05x` diagnostic with
+   resolver without parent, a loader with the wrong key type: each is a `ZNIGHT06x` diagnostic with
    a code frame and the path from the root field (`Query.book → Book.cover`).
 2. **Zero schema construction cost at boot.** The generated metadata holds the type graph as data
    and one precompiled `invoke` arrow per resolver, like `@znight/http` routes. The runtime builds
@@ -46,21 +51,21 @@ and federation are v0.2 (§15).
 
 ## 2. What exists today (checked against the code)
 
-| Fact                                                                                                                                                                                                 | Where                                                                                                                  | Consequence                                                                                                                                       |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Extensions receive `ClassInfo` (typed constructor params, methods with params and return types, properties) and the `Project` (`lookupIdentity`, `resolveType`, `evaluate`, `heritageOf`, `getFile`) | `packages/compiler/src/extensions/api.ts`                                                                              | Resolver signatures are fully available. Types reached from them must be walked by the extension                                                  |
-| `TypeInfo` expands type aliases and makes object literal, mapped and recursive types opaque. Interfaces and enums stay references, without members                                                   | `packages/compiler/src/project/types.ts`, `type-resolver.ts:329`, architecture §4.4                                    | `type BookPage = Page<Book>` loses its name, `type Sort = 'a' \| 'b'` loses its name, interface members are not modelled: prerequisites C1 and C2 |
-| The parser keeps comments (`SourceFile.comments`)                                                                                                                                                    | `packages/compiler/src/project/source-file.ts:26`                                                                      | Descriptions and `@deprecated` can come from JSDoc                                                                                                |
-| There are no per-extension compiler options, but an explicit `extensions` entry wins over the discovered extension of the same name                                                                  | `packages/compiler/src/options.ts:60`, architecture §6.5                                                               | The extension is configured with `graphql.configure({ ... })` in `znight.config.ts`, no compiler change needed                                    |
-| `HttpPlugin` registers only the routes of `extensions.http.controllers`                                                                                                                              | `packages/http/src/plugin.ts:485-494` (`httpMetadata`, `buildRegistrations`)                                           | Another plugin cannot add a route today: prerequisite H1                                                                                          |
-| A handler may return a Web `Response`; a stream body is tracked and the request scope lasts until it is read or cancelled                                                                            | `packages/http/src/serialize.ts:63`, `pipeline.ts:291`                                                                 | SSE subscriptions fit the existing pipeline: the scope, the in-flight count and the drain cover them                                              |
-| HTTP decorators on a class without `@Controller` are ZNIGHT005; a class owned by another extension gets a dedicated hint                                                                             | `packages/http/src/compiler/analyze.ts:153`                                                                            | GraphQL needs its own `@UseGuard` / `@Ctx`, like `@znight/messaging` has its own `@Headers` / `@Ctx`                                              |
-| Extension edges count for ZNIGHT003: "a singleton controller using a request-scoped guard is reported"                                                                                               | architecture §6.5 (**Impl.**), `packages/compiler/src/validation/scopes.ts:3`                                          | A request-scoped loader used by a singleton resolver would be a false ZNIGHT003: prerequisite C3                                                  |
-| `TestApp` boots only the closure of controllers and consumers, read structurally                                                                                                                     | `packages/testing/src/extensions.ts:80-94`                                                                             | Resolvers would be created on demand (async dependencies fail): add `extensions.graphql`                                                          |
-| Hook event types live in `@znight/core` so that observers do not depend on producers                                                                                                                 | `packages/core/src/hooks.ts:18-30`                                                                                     | `graphql:operation` and its event go into core                                                                                                    |
-| ZNIGHT022 is the last code; RFC 0001 takes ZNIGHT023. RFC 0003 (websocket) and RFC 0004 (schedule), written in parallel, **both** claim ZNIGHT030–039                                                | `packages/core/src/errors.ts:49`, `rfcs/0001-security.md` §5.7, `rfcs/0003-websocket.md` §6.3, `rfcs/0004-schedule.md` | Blocks are allocated by RFC number: 0003 → 030–039, 0004 → 040–049, this RFC → **ZNIGHT050–059** (§6.6)                                           |
-| RFC 0003 widens `RouteDecorator.get()` to any `RouteMetaCarrier` (`{ route?: { meta } }`) and makes `readRouteMeta` / `requiredRouteGroups` public in `@znight/http/compiler`                        | `rfcs/0003-websocket.md` §6.4, §8.2.4                                                                                  | Resolvers reuse route decorators and RFC 0001 groups instead of a GraphQL-only factory                                                            |
-| RFC 0006 adds `HttpResponse.sse()` on any method, `ctx.signal` on every route, a graceful SSE shutdown, `EventChannel` and `injectSse()`, and lists what a GraphQL-over-SSE transport needs from it  | `rfcs/0006-http-cookies-sse.md` §4.6–4.12, §8                                                                          | The SSE transport is a thin layer over `HttpResponse.sse()`; the in-memory PubSub is an `EventChannel` per subscriber                             |
+| Fact                                                                                                                                                                                                                                                                                                                | Where                                                                                                                      | Consequence                                                                                                                                                                                                                  |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Extensions receive `ClassInfo` (typed constructor params, methods with params and return types, properties) and the `Project` (`lookupIdentity`, `resolveType`, `evaluate`, `heritageOf`, `getFile`)                                                                                                                | `packages/compiler/src/extensions/api.ts`                                                                                  | Resolver signatures are fully available. Types reached from them must be walked by the extension                                                                                                                             |
+| `TypeInfo` expands type aliases and makes object literal, mapped and recursive types opaque. The type shapes API (`ctx.types.shape()`, RFC 0002) walks classes, interfaces, aliases, enums and generic instances, keeps aliases as named shapes and reads JSDoc                                                     | `packages/compiler/src/extensions/api.ts`, `packages/compiler/src/shapes/resolver.ts`, architecture §4.4                   | The extension reads types through shapes, never through `TypeInfo`, so aliases keep their names without alias provenance. Shapes lack getters, enum member names, literal order and scalar type identities: the C1 additions |
+| The parser keeps comments (`SourceFile.comments`)                                                                                                                                                                                                                                                                   | `packages/compiler/src/project/source-file.ts:26`                                                                          | Descriptions and `@deprecated` can come from JSDoc                                                                                                                                                                           |
+| There are no per-extension compiler options, but an explicit `extensions` entry wins over the discovered extension of the same name                                                                                                                                                                                 | `packages/compiler/src/options.ts:60`, architecture §6.5                                                                   | The extension is configured with `graphql.configure({ ... })` in `znight.config.ts`, no compiler change needed                                                                                                               |
+| `HttpPlugin` serves routes contributed by other plugins (RFC 0002 H1): `PluginHttpRoutes.httpRoutes({ prefix, container })` returns `PluginRoute`s (one `method`, `path`, `name`, `handler`, `meta: RouteMetaEntry[]`, `guards`), run through the controller pipeline without interceptors and without body parsing | `packages/http/src/plugin-routes.ts`, `packages/http/src/plugin.ts` (`collectPluginRoutes`, route registration)            | The endpoint is two plugin routes (`GET` and `POST`); H1 only adds `PluginRoute.bodyLimit`                                                                                                                                   |
+| A handler may return a Web `Response`; a stream body is tracked and the request scope lasts until it is read or cancelled                                                                                                                                                                                           | `packages/http/src/serialize.ts:63`, `pipeline.ts:291`                                                                     | SSE subscriptions fit the existing pipeline: the scope, the in-flight count and the drain cover them                                                                                                                         |
+| HTTP decorators on a class without `@Controller` are ZNIGHT005; a class owned by another extension gets a dedicated hint                                                                                                                                                                                            | `packages/http/src/compiler/analyze.ts:153`                                                                                | GraphQL needs its own `@UseGuard` / `@Ctx`, like `@znight/messaging` has its own `@Headers` / `@Ctx`                                                                                                                         |
+| Extension edges count for ZNIGHT003: "a singleton controller using a request-scoped guard is reported"                                                                                                                                                                                                              | architecture §6.5 (**Impl.**), `packages/compiler/src/validation/scopes.ts:3`                                              | A request-scoped loader used by a singleton resolver would be a false ZNIGHT003: prerequisite C3                                                                                                                             |
+| `TestApp` boots only the closure of controllers and consumers, read structurally                                                                                                                                                                                                                                    | `packages/testing/src/extensions.ts:80-94`                                                                                 | Resolvers would be created on demand (async dependencies fail): add `extensions.graphql`                                                                                                                                     |
+| Hook event types live in `@znight/core` so that observers do not depend on producers                                                                                                                                                                                                                                | `packages/core/src/hooks.ts:18-30`                                                                                         | `graphql:operation` and its event go into core                                                                                                                                                                               |
+| Error codes are allocated in blocks of ten per feature package: openapi ZNIGHT030–039, schedule ZNIGHT040–049, websocket ZNIGHT050–059 (reserved), graphql ZNIGHT060–069                                                                                                                                            | `rfcs/README.md`, `packages/core/src/errors.ts`, architecture §4.8                                                         | This RFC uses **ZNIGHT060–066** (§6.6)                                                                                                                                                                                       |
+| `RouteDecorator.get()` takes an `HttpContext`, and `@znight/http/compiler` keeps its route metadata readers internal. RFC 0003 (deferred to v0.2) designed `RouteMetaCarrier` (`{ route?: { meta } }`) and public `readRouteMeta` / `requiredRouteGroups`                                                           | `packages/http/src/decorators.ts`, `packages/http/src/compiler/route-decorators.ts`, `rfcs/0003-websocket.md` §6.4, §8.2.4 | This RFC makes them (H3), so resolvers reuse route decorators and RFC 0001 groups instead of a GraphQL-only factory                                                                                                          |
+| RFC 0006 (implemented) provides `HttpResponse.sse()` on any method, `ctx.signal` on every route, a graceful SSE shutdown, `EventChannel` and `injectSse()`                                                                                                                                                          | `packages/http/src/response.ts`, `sse.ts`, `event-channel.ts`, `inject-sse.ts`                                             | The SSE transport is a thin layer over `HttpResponse.sse()`; the in-memory PubSub is an `EventChannel` per subscriber                                                                                                        |
 
 Ecosystem, October 2026. Versions marked (cache) were read from the local Bun install cache
 (`~/.bun/install/cache`) on 2026-10-26; nothing GraphQL-related is installed in this repository.
@@ -125,7 +130,7 @@ Versions marked (knowledge) come from my knowledge and must be checked before pi
 | D3  | Znight's own GraphQL-over-HTTP transport, mounted as a route of `HttpPlugin`                                                                                                       | Every adapter and runtime at once, one pipeline (scopes, hooks, guards, CORS, limits, drain), no second plugin system, two runtime dependencies. Yoga stays possible with `http: false` (§11 Q2)                                            |
 | D4  | Subscriptions over SSE (GraphQL over SSE, distinct connections mode) in v0.1, written with RFC 0006's `HttpResponse.sse()`                                                         | Plain HTTP: works through the same route, adapters, proxies and HTTP/2, needs no WebSocket server. Heartbeats, `ctx.signal`, backpressure and graceful shutdown come from RFC 0006. `graphql-ws` comes in v0.2 on RFC 0003's upgrade routes |
 | D5  | Batching with DataLoader, one cache per **execution** (per operation, per subscription event), loaders are providers injected with `@Loader()`                                     | Correct caching for subscriptions (no stale cache across events), compile-time binding of loaders, loader classes testable with mocks                                                                                                       |
-| D6  | Field access control reuses `createRouteDecorator` (RFC 0001 groups, RFC 0003 `RouteMetaCarrier`) and GraphQL guards (`GraphQLGuard.canResolve`, `@UseGuard`, `static enforces`)   | One vocabulary and one guard class for controllers, gateways and resolvers (`canActivate`, `canHandle`, `canResolve` side by side, like RFC 0003's `WsGuard`). The endpoint itself keeps the HTTP guards                                    |
+| D6  | Field access control reuses `createRouteDecorator` (RFC 0001 groups, `RouteMetaCarrier` of H3) and GraphQL guards (`GraphQLGuard.canResolve`, `@UseGuard`, `static enforces`)      | One vocabulary and one guard class for controllers, gateways and resolvers (`canActivate`, `canHandle`, `canResolve` side by side, like RFC 0003's `WsGuard`). The endpoint itself keeps the HTTP guards                                    |
 | D7  | The TypeScript annotation is the GraphQL type; a Standard Schema validates and transforms argument **values**                                                                      | Schemas are runtime values the compiler never executes; zod-inferred types are opaque. GraphQL already validates shapes, so ZNIGHT017 does not apply                                                                                        |
 | D8  | Mapping rules are explicit, no renaming magic: TS names are GraphQL names, a type used as input and output is an error with a fix-it, anonymous object types and unions are errors | Predictable schemas, reviewable diffs. Relaxing an error later is not a breaking change                                                                                                                                                     |
 
@@ -166,7 +171,7 @@ const app = await Application.create({
     })),
     GraphQLPlugin.configure(c => ({
       guards: [AccessGuard], // the same guard decides per GraphQL field
-      http: { meta: { [Public.key]: true } }, // the endpoint itself is open
+      http: { meta: [Public.meta()] }, // the endpoint itself is open
       errorMappers: [CatalogErrorMapper],
       exposeErrors: c.get(ServerConfig).exposeErrors,
     })),
@@ -228,7 +233,7 @@ export type BookSort = 'title' | 'newest'
 
 `ID`, `Int`, `Float` and `JSONValue` are plain aliases exported by `@znight/graphql`
 (`type ID = string`, `type Int = number`...): values need no cast, and the compiler recognises
-the alias (prerequisite C2). Nothing in this file imports a decorator.
+the alias (shapes keep aliases as named shapes, §6.8). Nothing in this file imports a decorator.
 
 ### 5.3 Resolvers
 
@@ -314,8 +319,8 @@ export class BookResolver {
   provider of one extension: `@Resolver` and `@Controller` on the same class is ZNIGHT005.
 - Root field names default to the method name (`@Query('allBooks')` renames). Field resolvers add
   or replace a field of the type of their `@Parent()` parameter, which is mandatory.
-- Methods are not inherited: decorated methods of a base class are ZNIGHT052 (like HTTP routes).
-- Explicit return types are required (ZNIGHT050 otherwise): the compiler does not infer.
+- Methods are not inherited: decorated methods of a base class are ZNIGHT062 (like HTTP routes).
+- Explicit return types are required (ZNIGHT060 otherwise): the compiler does not infer.
 
 ### 5.4 Arguments and validation
 
@@ -407,7 +412,7 @@ export class AuthorsById implements BatchLoad<ID, Author> {
   operation (or for one subscription event), then dropped. Loaders may be request-scoped.
 - `GraphQLContext.loader(AuthorsById)` gives the same instance to services called by a resolver.
 - The compiler binds `AuthorsById` like a constructor dependency (ZNIGHT001 when it is not a
-  provider) and checks that it implements `BatchLoad` (ZNIGHT055).
+  provider) and checks that it implements `BatchLoad` (ZNIGHT065).
 
 ### 5.6 Subscriptions
 
@@ -461,7 +466,7 @@ search(@Args('text') text: string): Promise<readonly SearchResult[]> {
 
 The compiler picks the runtime discriminator: `instanceof` when every member is a class, otherwise a
 property whose literal type differs in every member (`kind` here, or `__typename`). Neither is
-ZNIGHT054.
+ZNIGHT064.
 
 Generic object types are named after their type arguments: `Page<Book>` is `BookPage`,
 `Page<Edge<Book>>` is `BookEdgePage`. A named alias wins: `export type BookList = Page<Book>`
@@ -603,7 +608,7 @@ export class AccessGuard implements CanActivate, GraphQLGuard {
 HttpPlugin.configure({ guards: [AuthenticationGuard, AccessGuard] })
 GraphQLPlugin.configure({
   guards: [AccessGuard],
-  http: { meta: { [Public.key]: true } }, // the endpoint is open: decisions are taken per field
+  http: { meta: [Public.meta()] }, // the endpoint is open: decisions are taken per field
 })
 ```
 
@@ -614,7 +619,7 @@ GraphQLPlugin.configure({
   method's decision replaces the class's, a `required` group must be decided on every **root field**
   (ZNIGHT023 at build time), and every decided group must be enforced by a guard of the field's
   chain (`static enforces`, checked at boot).
-- `ResolverContext` satisfies RFC 0003's `RouteMetaCarrier`: `route: { meta, coordinate }` (effective
+- `ResolverContext` satisfies `RouteMetaCarrier` (H3): `route: { meta, coordinate }` (effective
   metadata, schema coordinate `Query.books`), plus `operation` (`GraphQLContext`), `parentType`,
   `field`, `args`, `parent`, `info` and `http`.
 - Guards run in order: global (`GraphQLPlugin.configure({ guards })`), class `@UseGuard`, method
@@ -662,7 +667,7 @@ once, on first need (§8.2).
 | Option          | Default                                                                | Description                                                                                                                                                                                                            |
 | --------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `path`          | `'/graphql'`                                                           | Route path, joined with the `HttpPlugin` prefix                                                                                                                                                                        |
-| `http`          | `{}`                                                                   | `false`: no HTTP transport (schema and `execute()` only). Object: `{ meta?, guards?, bodyLimit = '100kb', get = true }` (route metadata and guards, body limit, queries over GET)                                      |
+| `http`          | `{}`                                                                   | `false`: no HTTP transport (schema and `execute()` only). Object: `{ meta?, guards?, bodyLimit = '100kb', get = true }` (route metadata entries such as `[Public.meta()]`, guards, body limit, queries over GET)       |
 | `guards`        | `[]`                                                                   | Global GraphQL guards (classes or instances)                                                                                                                                                                           |
 | `errorMappers`  | `[]`                                                                   | `GraphQLErrorMapper` classes or instances, tried in order                                                                                                                                                              |
 | `exposeErrors`  | `false`                                                                | Unmasked messages for unexpected errors (development)                                                                                                                                                                  |
@@ -675,7 +680,8 @@ once, on first need (§8.2).
 
 The instance exposes `schema` (`GraphQLSchema`, after bootstrap), `printSchema()`,
 `execute(request)`, `subscribe(request)`, `activeSubscriptions`, `initRoots()` (classes of the
-global guards and mappers: the `PluginInitRoots` contract) and `httpRoutes()` (H1).
+global guards and mappers: the `PluginInitRoots` contract) and `httpRoutes()` (the `PluginHttpRoutes`
+contract of `@znight/http`).
 
 ### 5.12 Testing
 
@@ -733,7 +739,7 @@ export function createTestApp(options: Partial<TestAppOptions> = {}): Promise<Te
       HttpPlugin.configure({ port: 0, guards: [AuthenticationGuard, AccessGuard] }),
       GraphQLPlugin.configure({
         guards: [AccessGuard],
-        http: { meta: { [Public.key]: true } },
+        http: { meta: [Public.meta()] },
         errorMappers: [CatalogErrorMapper],
       }),
     ],
@@ -917,21 +923,21 @@ type Subscription {
 `static` = statically evaluable, `value` = evaluable or a reference to an exported binding
 (architecture §4.6).
 
-| Export                                                                                   | Kind                            | Arguments / notes                                                                              |
-| ---------------------------------------------------------------------------------------- | ------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `@Resolver(opts?)`                                                                       | class decorator                 | static `{ scope? }`                                                                            |
-| `@Query(name?)` `@Mutation(name?)` `@Subscription(name?)`                                | method decorators               | static name; one root field per decorator                                                      |
-| `@ResolveField(name?)`                                                                   | method decorator                | static name; needs a `@Parent()` parameter                                                     |
-| `@Args(nameOrSchema?, schema?)`                                                          | parameter decorator             | value, value (like `@Param` of `@znight/http`)                                                 |
-| `@Parent()` `@Ctx()` `@Info()` `@Loader()`                                               | parameter decorators            | parent object, `GraphQLContext`, `GraphQLResolveInfo`, the DataLoader of `Loader<L>`           |
-| `@UseGuard(...guards)`                                                                   | class / method decorator        | rest value (guard classes)                                                                     |
-| `createRouteDecorator` decorators of `@znight/http`                                      | class / method of a `@Resolver` | RFC 0001 groups; read with `Decorator.get(ctx: ResolverContext)` (RFC 0003 `RouteMetaCarrier`) |
-| `scalar<T>(name, definition)`                                                            | function                        | `T` read by the compiler, `name` static, `definition` value; the `const` must be exported      |
-| `ID` `Int` `Float` `JSONValue`                                                           | type aliases                    | recognised by identity                                                                         |
-| `Loader<L>` `BatchLoad<K, V>` `LoaderOptions`                                            | types                           | `Loader<L>` is a `DataLoader<K, V>` view                                                       |
-| `GraphQLContext` `ResolverContext` `GraphQLGuard` `GraphQLErrorMapper`                   | types                           | `GraphQLGuard.canResolve(ctx)`, `GraphQLErrorMapper.map(error, ctx)`                           |
-| `GraphQLPlugin` `GraphQLTokens` `GraphQLException` `PubSub` `MemoryPubSub` `orderByKeys` | values                          | `PubSub` is an abstract class, injectable                                                      |
-| `@znight/graphql/testing`: `executeOperation` `subscribeOperation` `fakeLoader`          | test helpers                    |                                                                                                |
+| Export                                                                                   | Kind                            | Arguments / notes                                                                         |
+| ---------------------------------------------------------------------------------------- | ------------------------------- | ----------------------------------------------------------------------------------------- |
+| `@Resolver(opts?)`                                                                       | class decorator                 | static `{ scope? }`                                                                       |
+| `@Query(name?)` `@Mutation(name?)` `@Subscription(name?)`                                | method decorators               | static name; one root field per decorator                                                 |
+| `@ResolveField(name?)`                                                                   | method decorator                | static name; needs a `@Parent()` parameter                                                |
+| `@Args(nameOrSchema?, schema?)`                                                          | parameter decorator             | value, value (like `@Param` of `@znight/http`)                                            |
+| `@Parent()` `@Ctx()` `@Info()` `@Loader()`                                               | parameter decorators            | parent object, `GraphQLContext`, `GraphQLResolveInfo`, the DataLoader of `Loader<L>`      |
+| `@UseGuard(...guards)`                                                                   | class / method decorator        | rest value (guard classes)                                                                |
+| `createRouteDecorator` decorators of `@znight/http`                                      | class / method of a `@Resolver` | RFC 0001 groups; read with `Decorator.get(ctx: ResolverContext)` (`RouteMetaCarrier`, H3) |
+| `scalar<T>(name, definition)`                                                            | function                        | `T` read by the compiler, `name` static, `definition` value; the `const` must be exported |
+| `ID` `Int` `Float` `JSONValue`                                                           | type aliases                    | recognised by identity                                                                    |
+| `Loader<L>` `BatchLoad<K, V>` `LoaderOptions`                                            | types                           | `Loader<L>` is a `DataLoader<K, V>` view                                                  |
+| `GraphQLContext` `ResolverContext` `GraphQLGuard` `GraphQLErrorMapper`                   | types                           | `GraphQLGuard.canResolve(ctx)`, `GraphQLErrorMapper.map(error, ctx)`                      |
+| `GraphQLPlugin` `GraphQLTokens` `GraphQLException` `PubSub` `MemoryPubSub` `orderByKeys` | values                          | `PubSub` is an abstract class, injectable                                                 |
+| `@znight/graphql/testing`: `executeOperation` `subscribeOperation` `fakeLoader`          | test helpers                    |                                                                                           |
 
 JSDoc vocabulary, read on classes, interfaces, aliases, enums, their members and on resolver
 methods:
@@ -941,7 +947,7 @@ methods:
 | Comment text         | type, property, enum member, resolver method     | `description`                                                              |
 | `@param name text`   | resolver method                                  | description of the argument `name`                                         |
 | `@deprecated reason` | property, enum member, resolver method, argument | `@deprecated(reason:)` (on arguments and input fields: only when nullable) |
-| `@default value`     | property of an args or input type                | default value (a JSON literal checked against the type, ZNIGHT053)         |
+| `@default value`     | property of an args or input type                | default value (a JSON literal checked against the type, ZNIGHT063)         |
 | `@gqlHidden`         | property, getter                                 | not part of the GraphQL type                                               |
 | `@gqlName Name`      | type declaration                                 | GraphQL name of the type (P1)                                              |
 
@@ -958,14 +964,16 @@ import the runtime-free `@znight/http/compiler` for route metadata:
    (public, non-static, non-generic, non-computed, explicit return type), reads its parameters,
    binds `@UseGuard` classes (`resolveClassRef(..., { from: cls, role: 'guard' })`) and `Loader<L>`
    parameters (`bindInjection({ type: L }, { from: cls })`, a lazy edge with C3), reads route
-   decorators with `readRouteMeta` exported by `@znight/http/compiler` (RFC 0003 §6.4), and stores the
-   resolver data. Root and return types are kept as `TypeInfo` with their alias provenance (C2).
+   decorators with `readRouteMeta` exported by `@znight/http/compiler` (H3), and stores the resolver
+   data. Types are read through the type shapes API, which keeps aliases as named shapes: the
+   stored data holds identities and locations, never a `TypeInfo`.
 2. **`validate`**: builds the **schema model** globally, starting from the root fields and walking
-   every reachable type through the shapes API (C1); assigns names, detects conflicts, decides
-   input versus output use, discriminators of unions, scalars; checks the access groups; reports
-   every diagnostic of §6.6 with the path from a root field as related information. The model is
-   memoised per compile (keyed by the compile's `graph` object, shared by `validate` and
-   `generate`).
+   every reachable type through the shapes API (`ctx.types.shape()` with the C1 additions);
+   assigns names, detects conflicts, decides input versus output use, discriminators of unions,
+   scalars; checks the access groups; reports every diagnostic of §6.6 with the path from a root
+   field as related information. The model is
+   memoised per compile, keyed by `graph.extensions` (the array `validate` and `generate` share:
+   their `graph` objects differ).
 3. **`generate`**: emits `metadata.extensions.graphql` (§7) from the model, with the builders only
    (no raw strings), and the SDL artifact when configured (C4).
 
@@ -997,10 +1005,10 @@ fields of input types. `T` below is the type after `Promise<T>` is unwrapped (re
 | `Set<T>` `ReadonlySet<T>` `Iterable<T>`                                                       | `[T]`                                                                                  | output                      |
 | `AsyncIterable<T>` `AsyncGenerator<T>` `AsyncIterableIterator<T>` (also inside `Promise`)     | the field type `T`                                                                     | `@Subscription` return only |
 | `T \| null`, `T \| undefined`, optional property or parameter                                 | nullable `T`                                                                           | both                        |
-| anything else                                                                                 | **ZNIGHT050**                                                                          |                             |
+| anything else                                                                                 | **ZNIGHT060**                                                                          |                             |
 
 Non-null is the default: a type without `null`/`undefined`/`?` is `T!`, and list items follow the
-same rule (`readonly (Book | null)[]` is `[Book]!`). Rejected with ZNIGHT050, each with a hint:
+same rule (`readonly (Book | null)[]` is `[Book]!`). Rejected with ZNIGHT060, each with a hint:
 `any`, `unknown`, `object`, `{}`, `never`, `void` (mutations must return something: a payload type
 or `boolean`), `symbol`, functions, tuples, `Map`, `Record` and index signatures (hint `JSONValue`),
 `Uint8Array`/`Blob`/`File` (hint: a URL, or a `scalar<Uint8Array>('Base64', ...)`), unions mixing
@@ -1015,33 +1023,33 @@ outside `@Subscription`.
   declaration order (base members first). Methods, function-typed properties, `#private`,
   `private`/`protected`, symbol and computed keys and `@gqlHidden` members are left out. A
   `@ResolveField` with the same name replaces the property field (it must map to the same GraphQL
-  type, otherwise ZNIGHT051); other field resolvers are appended, ordered by resolver token then
+  type, otherwise ZNIGHT061); other field resolvers are appended, ordered by resolver token then
   source order.
-- **Input types** take the same members except getters (a getter in an input is ZNIGHT053). Input
+- **Input types** take the same members except getters (a getter in an input is ZNIGHT063). Input
   types cannot contain unions, sets or async iterables; a cycle of non-null input fields is
-  ZNIGHT053 (GraphQL forbids it).
-- **Input or output, not both.** A declaration reached in both positions is ZNIGHT053 with the fix
+  ZNIGHT063 (GraphQL forbids it).
+- **Input or output, not both.** A declaration reached in both positions is ZNIGHT063 with the fix
   "declare `interface MoneyInput extends Money {}` for the input". Generic instances count per
   instance.
 - **Args objects** (`@Args() filter: BookFilter`) are not GraphQL types: their properties become
-  arguments of the field. Mixing `@Args()` and `@Args('x')` is allowed when names differ (ZNIGHT051).
+  arguments of the field. Mixing `@Args()` and `@Args('x')` is allowed when names differ (ZNIGHT061).
 - **Defaults**: `@default` tags and statically evaluable parameter defaults, checked against the
-  argument type (ZNIGHT053). They appear in the SDL and graphql-js applies them.
+  argument type (ZNIGHT063). They appear in the SDL and graphql-js applies them.
 - **Reachability**: only types reachable from root fields are emitted. A `@ResolveField` whose
-  parent type is not reachable is a ZNIGHT052 warning. An application with resolvers but no
-  `@Query` is ZNIGHT052 (GraphQL requires a query root).
+  parent type is not reachable is a ZNIGHT062 warning. An application with resolvers but no
+  `@Query` is ZNIGHT062 (GraphQL requires a query root).
 
 ### 6.4 Naming (normative)
 
 - A type's GraphQL name is its declaration name, or the name of the alias the annotation goes
   through, or `@gqlName`. Generic instances without alias: the names of the type arguments
-  (themselves named by these rules; `[T]` arguments are ZNIGHT050) followed by the declaration
+  (themselves named by these rules; `[T]` arguments are ZNIGHT060) followed by the declaration
   name.
 - Root types are `Query`, `Mutation`, `Subscription`. User types with these names, names starting
   with `__`, and names that are not GraphQL names (`/^[_A-Za-z][_0-9A-Za-z]*$/`, enum values `true`,
-  `false`, `null`) are ZNIGHT051.
-- Two declarations (different identities) with one GraphQL name are ZNIGHT051, both locations shown.
-  Two root fields with one name across resolver classes are ZNIGHT051.
+  `false`, `null`) are ZNIGHT061.
+- Two declarations (different identities) with one GraphQL name are ZNIGHT061, both locations shown.
+  Two root fields with one name across resolver classes are ZNIGHT061.
 - No case conversion happens anywhere: enum member names, literal values and property names are
   used as written.
 
@@ -1051,38 +1059,37 @@ outside `@Subscription`.
   decorated with `@znight/http`'s `Ctx`/`Query` (look-alikes), is ZNIGHT005 with the import to use.
 - `@Parent()`: field resolvers only, exactly one, its type must map to an object type (the parent).
 - `@Loader()`: the type must be `Loader<L>` with `L` bound to a provider implementing
-  `BatchLoad<K, V>` (ZNIGHT055, ZNIGHT001). When the parameter type is written `Loader<L>`, the
+  `BatchLoad<K, V>` (ZNIGHT065, ZNIGHT001). When the parameter type is written `Loader<L>`, the
   generated code passes the loader with a cast, and TypeScript checks the resolver's use of it.
-- `@Subscription` methods return an async iterable (ZNIGHT052 otherwise).
+- `@Subscription` methods return an async iterable (ZNIGHT062 otherwise).
 - Route decorators (`createRouteDecorator` consts of `@znight/http`) on a `@Resolver` class or on a
-  resolver method are read with `readRouteMeta` (RFC 0003 §6.4), so the rules are exactly HTTP's:
+  resolver method are read with `readRouteMeta` (H3), so the rules are exactly HTTP's:
   RFC 0001 §5.1 (one decision per group per target, consistent options, the method's decision
   replaces the class's). A root field without a decision of a group returned by
-  `requiredRouteGroups` is **ZNIGHT023**, the code HTTP routes and gateways use. If RFC 0001 is not
-  accepted, decisions are plain keys and there is no required check; if RFC 0003 is not accepted,
-  this RFC makes the same two `@znight/http/compiler` exports (H3).
-- A resolver class in a compiled provider library (`library: true`) is ZNIGHT052: publish it as a
+  `requiredRouteGroups` is **ZNIGHT023**, the code HTTP routes use. RFC 0003 is deferred, so this
+  RFC makes the two `@znight/http/compiler` exports it designed (H3).
+- A resolver class in a compiled provider library (`library: true`) is ZNIGHT062: publish it as a
   source library (the schema needs the sources).
 
 ### 6.6 Diagnostics
 
 **Code range.** Codes ZNIGHT001–ZNIGHT029 stay framework-wide (core, compiler, http, messaging,
-config; RFC 0001 takes ZNIGHT023, RFC 0006 adds none). From ZNIGHT030 on, each new feature package
-receives a **block of ten consecutive codes**, recorded in architecture §4.8 and in `ErrorCode`.
-RFCs 0003 and 0004 were written at the same time and both claim ZNIGHT030–039, so blocks are
-allocated **in RFC number order**: `@znight/websocket` (RFC 0003) ZNIGHT030–039, `@znight/schedule`
-(RFC 0004) ZNIGHT040–049, **`@znight/graphql` (this RFC) ZNIGHT050–059** (050–056 used, 057–059
-reserved). Only RFC 0004 has to renumber; the owner confirms the rule when accepting these RFCs.
+config; RFC 0001 takes ZNIGHT023, RFC 0006 adds none). From ZNIGHT030 on, each feature package
+receives a **block of ten consecutive codes**, allocated in `rfcs/README.md` and recorded in
+architecture §4.8 and in `ErrorCode`: `@znight/openapi` ZNIGHT030–039, `@znight/schedule`
+ZNIGHT040–049, `@znight/websocket` ZNIGHT050–059 (reserved), **`@znight/graphql` (this RFC)
+ZNIGHT060–069** (060–066 used, 067–069 free). The draft of this RFC numbered its codes 050–056:
+they were renumbered when it was accepted.
 
 | Code      | Name (`ErrorCode`)         | Meaning                                                                                                                                                                                                                          | Severity        | When           |
 | --------- | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------- | -------------- |
-| ZNIGHT050 | `InvalidGraphQLType`       | A TypeScript type cannot be mapped to a GraphQL type (§6.2), or a resolver lacks the annotation it needs                                                                                                                         | error           | build          |
-| ZNIGHT051 | `GraphQLNameConflict`      | Two declarations or root fields share a GraphQL name, an invalid or reserved name, a field resolver conflicting with a property field, duplicate argument names                                                                  | error           | build, startup |
-| ZNIGHT052 | `InvalidResolver`          | Resolver structure: `@ResolveField` without `@Parent()`, subscription not returning an async iterable, no `@Query` in the application, inherited handlers, resolvers in compiled libraries; unreachable field resolver (warning) | error / warning | build          |
-| ZNIGHT053 | `InvalidGraphQLInput`      | Input position: a type used as input and output, getters, unions, non-null input cycles, defaults not matching their type                                                                                                        | error           | build          |
-| ZNIGHT054 | `UnresolvableAbstractType` | Members of a union cannot be told apart at runtime (no class, no literal discriminant, no `__typename`)                                                                                                                          | error           | build          |
-| ZNIGHT055 | `InvalidLoader`            | `@Loader()` on a type that is not `Loader<L>`, `L` not implementing `BatchLoad`, a batch function returning a different number of values than keys (runtime)                                                                     | error           | build, runtime |
-| ZNIGHT056 | `InvalidGraphQLSetup`      | Boot: malformed or version-skewed `extensions.graphql`, graphql-js `assertValidSchema` failure, invalid `GraphQLPlugin` options, missing `HttpPlugin` with the HTTP transport, scalar name mismatch                              | error           | startup        |
+| ZNIGHT060 | `InvalidGraphQLType`       | A TypeScript type cannot be mapped to a GraphQL type (§6.2), or a resolver lacks the annotation it needs                                                                                                                         | error           | build          |
+| ZNIGHT061 | `GraphQLNameConflict`      | Two declarations or root fields share a GraphQL name, an invalid or reserved name, a field resolver conflicting with a property field, duplicate argument names                                                                  | error           | build, startup |
+| ZNIGHT062 | `InvalidResolver`          | Resolver structure: `@ResolveField` without `@Parent()`, subscription not returning an async iterable, no `@Query` in the application, inherited handlers, resolvers in compiled libraries; unreachable field resolver (warning) | error / warning | build          |
+| ZNIGHT063 | `InvalidGraphQLInput`      | Input position: a type used as input and output, getters, unions, non-null input cycles, defaults not matching their type                                                                                                        | error           | build          |
+| ZNIGHT064 | `UnresolvableAbstractType` | Members of a union cannot be told apart at runtime (no class, no literal discriminant, no `__typename`)                                                                                                                          | error           | build          |
+| ZNIGHT065 | `InvalidLoader`            | `@Loader()` on a type that is not `Loader<L>`, `L` not implementing `BatchLoad`, a batch function returning a different number of values than keys (runtime)                                                                     | error           | build, runtime |
+| ZNIGHT066 | `InvalidGraphQLSetup`      | Boot: malformed or version-skewed `extensions.graphql`, graphql-js `assertValidSchema` failure, invalid `GraphQLPlugin` options, missing `HttpPlugin` with the HTTP transport, scalar name mismatch                              | error           | startup        |
 
 Reused codes: ZNIGHT001 (resolver dependency, guard or loader without provider), ZNIGHT003 (a
 singleton resolver depending on a request-scoped provider; hint `Lazy<T>`), ZNIGHT005 (decorator
@@ -1097,7 +1104,7 @@ shapes.
 Examples (formatted like every compiler diagnostic):
 
 ```text
-✗ ZNIGHT050: Cannot map 'Uint8Array' to a GraphQL type (Book.cover)
+✗ ZNIGHT060: Cannot map 'Uint8Array' to a GraphQL type (Book.cover)
   --> src/catalog/book.ts:18:19
    |
 18 |   readonly cover: Uint8Array | null
@@ -1107,19 +1114,19 @@ Examples (formatted like every compiler diagnostic):
 ```
 
 ```text
-✗ ZNIGHT053: 'Money' is used as an output type (Book.price) and as an input type (Mutation.addBook(input.price))
+✗ ZNIGHT063: 'Money' is used as an output type (Book.price) and as an input type (Mutation.addBook(input.price))
   --> src/shared/money.ts:3:18
    = hint: GraphQL needs two types: declare `export interface MoneyInput extends Money {}` and use it in NewBookInput
 ```
 
 ```text
-✗ ZNIGHT054: The members of union SearchResult cannot be told apart at runtime: Book and Author are interfaces without a common literal property
+✗ ZNIGHT064: The members of union SearchResult cannot be told apart at runtime: Book and Author are interfaces without a common literal property
   --> src/search/search.ts:4:13
    = hint: Add a literal property to each member (readonly kind: 'book' / readonly kind: 'author'), or make the members classes
 ```
 
 ```text
-✗ ZNIGHT052: @ResolveField BookResolver.author has no @Parent() parameter
+✗ ZNIGHT062: @ResolveField BookResolver.author has no @Parent() parameter
   --> src/catalog/book.resolver.ts:44:3
    = hint: Declare the parent object first: author(@Parent() book: Book, ...)
 ```
@@ -1158,18 +1165,18 @@ All are additive: the extension API stays `apiVersion: 1` (new optional members 
 and the release-line check (ZNIGHT018) guarantees that `@znight/graphql` runs with a compiler that
 has them.
 
-| #   | Change                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | Priority |
-| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
-| C1  | **Type shapes API** on the analyze, validate and generate contexts: `ctx.shapes.of(type)` returns the named declaration behind a `TypeInfo` (class, interface, object-literal alias, intersection, enum, literal-union alias) with its members (name, `TypeInfo` with type arguments substituted, optional, readonly, kind property/getter/method, visibility, static, declaring identity, location), enum members with values, inherited members merged, and its documentation (`docs: { text, tags: { name, text }[] }`, the JSDoc block attached to the declaration or member). Also `ctx.shapes.docsOf(method)`. Files read are tracked for `watchFiles`. OpenAPI generation will need the same service | P0       |
-| C2  | **Alias provenance**: a `TypeInfo` produced by expanding a named alias (including recursive aliases made opaque and `Partial`/`Pick`...) carries `alias?: { identity, name, typeArgs }`. Non-normative: ignored by `serialize`, `equals` and binding, so DI identities and generated containers do not change (golden tests prove it)                                                                                                                                                                                                                                                                                                                                                                       | P0       |
-| C3  | **Lazy extension edges**: `DependencyDetails.lazy` / `{ from, lazy: true }` declares an edge resolved at call time in the current scope (like `Lazy<T>`): it counts for ZNIGHT019 and `prune`, not for ZNIGHT003. Used for loaders and GraphQL guards (and fixes the documented HTTP guard limitation later)                                                                                                                                                                                                                                                                                                                                                                                                | P1       |
-| C4  | **Extra outputs**: `GenerateContext.emitFile(relativePath, content)` writes an additional file with the generated module (same rules: only when changed and the compile is ok, atomic writes), listed in `staleFiles` by `generate --check` and ignored by the watchers like the outFile                                                                                                                                                                                                                                                                                                                                                                                                                    | P1       |
+| #   | Change                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | Priority |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| C1  | **Type shapes additions.** `ctx.types.shape()` (RFC 0002) already returns, on the analyze, validate and generate contexts, the shape of a type with its named declarations (classes, interfaces, aliases kept as named shapes, enums, generic instances with their type arguments), JSDoc and `watchFiles`. Phase 1 adds, all optional so that OpenAPI output does not change: `ShapeOptions.members: 'instance'` (getters with their annotated type, `toJSON` ignored, `protected` excluded) with `ShapeProperty.kind` / `visibility` / `declaredBy`; `NamedShape.enumMembers` (name, value, doc and location of each member, in declaration order); literal-union aliases in source order; `DefinitionInfo.typeArgIdentities` (the identity behind each type argument of a call such as `scalar<T>()`) | P0       |
+| C2  | **Not needed.** The draft asked for alias provenance on `TypeInfo`. Shapes keep aliases as named shapes (`declaration: 'alias'`), so `TypeInfo` does not change and the extension never shapes a `{ type }` target (which expands aliases)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | —        |
+| C3  | **Lazy extension edges**: `DependencyDetails.lazy` / `{ from, lazy: true }` declares an edge resolved at call time in the current scope (like `Lazy<T>`): it counts for ZNIGHT019 and `prune`, not for ZNIGHT003. Used for loaders and GraphQL guards (and fixes the documented HTTP guard limitation later)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | P1       |
+| C4  | **Extra outputs**: `GenerateContext.emitFile(relativePath, content)` writes an additional file with the generated module (same rules: only when changed and the compile is ok, atomic writes), listed in `staleFiles` by `generate --check` and ignored by the watchers like the outFile                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | P1       |
 
-Fallback if C1/C2 slip: the extension walks the oxc AST itself through the `Project` it already
-receives (`lookupIdentity`, `resolveIdentifier`, `resolveType`, `bindTypeArguments`, `getFile`).
-The algorithm is the same; the code then moves into the compiler for v0.2. Without C3, a singleton
-resolver may not use request-scoped loaders or guards (ZNIGHT003, documented). Without C4, the SDL
-is available through `plugin.printSchema()` and a snapshot test.
+Fallback if C1 slips: the extension reads the missing facts from the oxc AST through the `Project`
+it already receives (`lookupIdentity`, `resolveIdentifier`, `getFile`, `evaluate`), and the code
+moves into the compiler later. Without C3, a singleton resolver may not use request-scoped loaders
+or guards (ZNIGHT003, documented). Without C4, the SDL is available through `plugin.printSchema()`
+and a snapshot test.
 
 ## 7. Generated metadata and runtime contract
 
@@ -1178,7 +1185,7 @@ is available through `plugin.printSchema()` and a snapshot test.
 ```ts
 // @znight/graphql (declared in src/metadata.ts, augments ZnightExtensionsMetadata)
 interface GraphQLMetadata {
-  version: 1 // format of this section (ZNIGHT056 when unsupported)
+  version: 1 // format of this section (ZNIGHT066 when unsupported)
   schemaHash: string // first 16 hex characters of the SHA-256 of the SDL: logs, caches, v0.2 trusted documents
   roots: { query: string; mutation?: string; subscription?: string }
   types: GraphQLTypeDefinition[] // sorted by name
@@ -1339,7 +1346,7 @@ import { EmailAddressScalar } from '../shared/scalars.js'
   by the extension's own printer (`src/sdl.ts`, import-free, shared with the runtime).
 - **Validation at boot**: the plugin checks the section structurally (version, roots, unique names,
   type references resolvable), builds the schema and runs `assertValidSchema`; any failure is one
-  ZNIGHT056 error listing every problem. Hand-written metadata (`defineTestMetadata`) is accepted.
+  ZNIGHT066 error listing every problem. Hand-written metadata (`defineTestMetadata`) is accepted.
 - The section is omitted when the application has no resolver.
 
 ### 7.4 Manifest
@@ -1388,44 +1395,52 @@ runtime entry, and of `@znight/http` only `@znight/http/compiler` (as RFC 0003 a
 
 ### 8.2 Plugin lifecycle
 
-| Hook                   | Work                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `register`             | Refuses a second application while one runs (ZNIGHT004, like `HttpPlugin`). Declares `GraphQLContext` (request external), registers `PubSub` (value: the configured implementation) and the plugin itself. Checks that a plugin named `http` exists unless `http: false` (ZNIGHT056)                                                                                                                                      |
-| `httpRoutes(ctx)` (H1) | Called by `HttpPlugin.onBootstrap`, whatever the plugin order: resolves the options (memoised) and returns the GraphQL route (`GET`, `POST` on `path`, with `http.meta`, `http.guards`, `http.bodyLimit`). The handler reads the runtime lazily: requests only arrive after `start()`                                                                                                                                     |
-| `onBootstrap`          | Resolves the options (memoised), validates them, builds the schema from `extensions.graphql` (ZNIGHT056 on failure), resolves singleton resolvers, guards and mappers (`Resolvable`s, like HTTP), runs the RFC 0001 `enforces` check on the guard chain of every root field (ZNIGHT023, `enforcement: 'error' \| 'warn'` like HTTP), creates the document cache                                                           |
-| `onStart` / `onReady`  | Logs `GraphQL endpoint ready` with the path, the number of types and the schema hash. Nothing listens: `HttpPlugin` does                                                                                                                                                                                                                                                                                                  |
-| `onStop`               | Aborts the subscriptions started with `plugin.subscribe()` (direct transport). Everything that came over HTTP is stopped by `HttpPlugin.onStop` (RFC 0006 §4.7): queries and mutations drain, SSE streams get their `ctx.signal` aborted (`'shutdown'`), `shutdownGraceMs` to finish, then end with a jittered `retry` and **without** `complete`, so clients reconnect to another instance. Plugin order does not matter |
-| `onDispose`            | Closes the `PubSub` it created (not a user-supplied one), clears the document cache, releases the schema                                                                                                                                                                                                                                                                                                                  |
+| Hook                  | Work                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `register`            | Refuses a second application while one runs (ZNIGHT004, like `HttpPlugin`). Declares `GraphQLContext` (request external), registers `PubSub` (value: the configured implementation) and the plugin itself. Checks that a plugin named `http` exists unless `http: false` (ZNIGHT066)                                                                                                                                      |
+| `httpRoutes(context)` | The `PluginHttpRoutes` contract, called by `HttpPlugin.onBootstrap` with `{ prefix, container }`, whatever the plugin order: resolves the options (memoised) and returns two routes on `path`, `GET` (unless `http.get` is `false`) and `POST`, named `handle`, with `http.meta`, `http.guards` and `http.bodyLimit`; `[]` with `http: false`. The handler reads the runtime lazily: requests only arrive after `start()` |
+| `onBootstrap`         | Resolves the options (memoised), validates them, builds the schema from `extensions.graphql` (ZNIGHT066 on failure), resolves singleton resolvers, guards and mappers (`Resolvable`s, like HTTP), runs the RFC 0001 `enforces` check on the guard chain of every root field (ZNIGHT023, `enforcement: 'error' \| 'warn'` like HTTP), creates the document cache                                                           |
+| `onStart` / `onReady` | Logs `GraphQL endpoint ready` with the path, the number of types and the schema hash. Nothing listens: `HttpPlugin` does                                                                                                                                                                                                                                                                                                  |
+| `onStop`              | Aborts the subscriptions started with `plugin.subscribe()` (direct transport). Everything that came over HTTP is stopped by `HttpPlugin.onStop` (RFC 0006 §4.7): queries and mutations drain, SSE streams get their `ctx.signal` aborted (`'shutdown'`), `shutdownGraceMs` to finish, then end with a jittered `retry` and **without** `complete`, so clients reconnect to another instance. Plugin order does not matter |
+| `onDispose`           | Closes the `PubSub` it created (not a user-supplied one), clears the document cache, releases the schema                                                                                                                                                                                                                                                                                                                  |
 
 ### 8.3 HTTP integration
 
-**H1, routes contributed by plugins (prerequisite in `@znight/http`, P0).** A duck-typed contract,
-like `PluginInitRoots`:
+**H1, routes contributed by plugins (exists since RFC 0002; phase 1 adds `bodyLimit`).**
+`@znight/http` serves the routes of other plugins through a duck-typed contract:
 
 ```ts
-// @znight/http
-export interface HttpRouteProvider {
-  /** Called once by HttpPlugin.onBootstrap, after container.init(), for every plugin that has it. */
-  httpRoutes(ctx: PluginContext): readonly PluginRoute[]
+// @znight/http (packages/http/src/plugin-routes.ts)
+export interface PluginHttpRoutes {
+  /** Called once by HttpPlugin.onBootstrap, after container.init(), whatever the plugin order. */
+  httpRoutes(context: PluginHttpRoutesContext): readonly PluginRoute[]
+}
+export interface PluginHttpRoutesContext {
+  readonly prefix: string // already applied to the paths of the routes
+  readonly container: Container
 }
 export interface PluginRoute {
-  readonly methods: readonly Exclude<HttpMethod, 'ALL'>[]
-  readonly path: string // route grammar, joined with the plugin prefix
-  readonly name: string // summaries and errors: 'GraphQLPlugin.handle'
+  readonly method: HttpMethod // one method per route; GET also answers HEAD
+  readonly path: string // controller grammar, relative to the prefix
+  readonly name: string // HttpPlugin.routes, logs and errors: 'handle'
   readonly handler: (ctx: HttpContext) => unknown // result serialised like a controller handler's
-  readonly meta?: Readonly<Record<string, unknown>>
+  readonly meta?: readonly RouteMetaEntry[] // [Public.meta()]: one entry per group
   readonly guards?: readonly GuardRef[] // after the global guards
-  readonly interceptors?: readonly InterceptorRef[]
-  readonly bodyLimit?: ByteSize
+  readonly bodyLimit?: ByteSize // added by phase 1; default: the HttpPlugin bodyLimit
 }
 ```
 
-Plugin routes go through the whole pipeline (request scope with `HttpContext`/`RequestId`,
-`http:request` hooks, global then route guards, interceptors, exception mappers, CORS and security
-headers of RFC 0001, drain). `ctx.route.controller` is `plugin:<name>`. They appear in `routes`
-(`controller: 'GraphQLPlugin'`), take part in the RFC 0001 boot check, and a collision with a
-controller route is ZNIGHT007 at boot. Bodies are read by the handler (`ctx.parseBody()`), so that
-malformed requests get GraphQL-shaped errors.
+`GraphQLPlugin` returns two routes on `path`, `GET` and `POST`. Plugin routes go through the
+controller pipeline (request scope with `HttpContext`/`RequestId`, `http:request` hooks, global
+then route guards, exception mappers, CORS and security headers of RFC 0001, drain) **without
+interceptors**: `PluginRoute` has none and global interceptors do not wrap plugin routes (an
+envelope would break the response). `ctx.route.controller` is the plugin name, `'graphql'`, which
+is also the `controller` and `source` of the routes in `HttpPlugin.routes`. They take part in the
+RFC 0001 boot check (the groups of their `meta`), and a path breaking the grammar or colliding with
+another route is ZNIGHT007 at boot, naming the plugin. Plugin routes do not parse bodies: the
+handler checks the media type and reads `ctx.rawBody()` itself, so that malformed requests get
+GraphQL-shaped errors. A `POST` route answers 201 by default, so the handler always returns an
+`HttpResponse` with an explicit status (200 for every well-formed request, see below).
 
 **GraphQL over HTTP (normative, per the GraphQL-over-HTTP specification draft):**
 
@@ -1454,10 +1469,6 @@ backpressure, the request scope and in-flight count held until the stream ends, 
 shutdown or `maxDuration`. The GraphQL package only negotiates `accept: text/event-stream` and
 maps results to events.
 
-If RFC 0006 is not accepted, the package carries its own writer (a Web `Response` over a pull-based
-`ReadableStream`, which the pipeline already tracks: `serialize.ts:63`, `pipeline.ts:291`), about
-150 lines, with the same behaviour minus `ctx.signal` for non-SSE requests.
-
 **Adapters.** Nothing adapter-specific in `@znight/graphql`:
 
 | Adapter            | Notes                                                                                                                                        |
@@ -1476,7 +1487,7 @@ query whose client went away stops resolving (pending resolvers see `GraphQLCont
 ```text
 adapter → HttpPlugin pipeline
   runInScope({ HttpContext, RequestId })
-  → hooks.run('http:request') → global HTTP guards → http.guards → interceptors
+  → hooks.run('http:request') → global HTTP guards → http.guards (no interceptors)
   → GraphQL handler
       negotiate (method, content type, accept) → read body (≤ http.bodyLimit)
       → document cache: parse (maxTokens) + validate (specified rules + limits [+ no introspection]) once per query text
@@ -1516,7 +1527,7 @@ interceptors.
   the loader provider in the current scope, wraps `instance.load(keys)` in a `DataLoader` with its
   `options` (`maxBatchSize`, `cache`, `cacheKeyFn`; `batchScheduleFn` is not exposed), and caches it
   for the execution. `GraphQLContext.loader(Class)` maps the class with `container.tokenOf`.
-- A batch function returning an array of the wrong length is a ZNIGHT055 error for every key of the
+- A batch function returning an array of the wrong length is a ZNIGHT065 error for every key of the
   batch; returned `Error`s fail their key only.
 - `orderByKeys(keys, values, keyOf, { missing: 'error' | 'null' })` reorders rows; `'error'`
   (default) gives a `NOT_FOUND` `GraphQLException` for missing keys.
@@ -1572,8 +1583,10 @@ export abstract class PubSub<Events extends object = Record<string, unknown>> {
 
 ### 8.10 Hooks and observability
 
-**Core prerequisite (P0):** `'graphql:operation': GraphQLOperationEvent` in `ZnightHooks`, defined
-in `@znight/core` like the other events.
+**Core prerequisite K1 (P0, done in phase 1):** `'graphql:operation': GraphQLOperationEvent` in
+`ZnightHooks`, defined in `@znight/core` like the other events, and exported with
+`GraphQLOperationType`, `GraphQLOperationTransport`, `GraphQLOperationOutcome` and
+`GraphQLOperationError` (architecture §8.3).
 
 ```ts
 export interface GraphQLOperationEvent {
@@ -1633,35 +1646,35 @@ Plugin order does not matter: neither plugin waits for the other.
 
 ## 9. Dependencies
 
-| Package                              | Kind                    | Range         | Why                                                                                                                                                   |
-| ------------------------------------ | ----------------------- | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@znight/core`                       | dependency              | `workspace:*` | Container, plugins, hooks                                                                                                                             |
-| `@znight/http`                       | dependency              | `workspace:*` | Transport (H1), `HttpContext` types, `HttpException` mapping, Standard Schema helpers. It has no third-party dependency (adapters are optional peers) |
-| `graphql`                            | **peer** (required)     | `^17.0.2`     | Execution engine. A peer so that the application, codegen and libraries share one copy (`instanceof` checks of graphql-js)                            |
-| `dataloader`                         | dependency              | `^2.2.3`      | Batching; tiny, zero dependencies, an implementation detail behind `Loader<L>`                                                                        |
-| `@znight/compiler`                   | optional peer           | `workspace:^` | Compiler extension types                                                                                                                              |
-| `graphql-scalars`                    | none (user choice)      | —             | Works through `scalar<T>(name, GraphQLURL)`                                                                                                           |
-| `graphql-http`, `graphql-sse`, `zod` | devDependencies (exact) | —             | Conformance audits, SSE client in tests, schema examples                                                                                              |
+| Package                              | Kind                    | Range         | Why                                                                                                                                                                                                                                   |
+| ------------------------------------ | ----------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@znight/core`                       | dependency              | `workspace:*` | Container, plugins, hooks                                                                                                                                                                                                             |
+| `@znight/http`                       | **peer** (required)     | `workspace:^` | Transport (plugin routes), `HttpContext` types, `HttpException` mapping, Standard Schema helpers; a `workspace:*` devDependency for the tests, like `@znight/openapi`. It has no third-party dependency (adapters are optional peers) |
+| `graphql`                            | **peer** (required)     | `^17.0.2`     | Execution engine. A peer so that the application, codegen and libraries share one copy (`instanceof` checks of graphql-js)                                                                                                            |
+| `dataloader`                         | dependency              | `^2.2.3`      | Batching; tiny, zero dependencies, an implementation detail behind `Loader<L>`                                                                                                                                                        |
+| `@znight/compiler`                   | optional peer           | `workspace:^` | Compiler extension types                                                                                                                                                                                                              |
+| `graphql-scalars`                    | none (user choice)      | —             | Works through `scalar<T>(name, GraphQLURL)`                                                                                                                                                                                           |
+| `graphql-http`, `graphql-sse`, `zod` | devDependencies (exact) | —             | Conformance audits, SSE client in tests, schema examples                                                                                                                                                                              |
 
 Not used: `graphql-yoga`, `@envelop/core`, `@apollo/server`, `@graphql-tools/*` (a second plugin
 system, more dependencies, conversions to WHATWG requests on Node), `reflect-metadata`.
 
 ## 10. Changes to other packages
 
-| #   | Package                           | Change                                                                                                                                                          | Priority          |
-| --- | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- |
-| C1  | `@znight/compiler`                | Type shapes API (§6.8)                                                                                                                                          | P0                |
-| C2  | `@znight/compiler`                | Alias provenance on `TypeInfo` (§6.8)                                                                                                                           | P0                |
-| C3  | `@znight/compiler`                | Lazy extension edges (§6.8)                                                                                                                                     | P1                |
-| C4  | `@znight/compiler`, `@znight/cli` | Extra outputs, `generate --check` staleness (§6.8)                                                                                                              | P1                |
-| H1  | `@znight/http`                    | `HttpRouteProvider` / `PluginRoute` (§8.3)                                                                                                                      | P0                |
-| H2  | `@znight/http`                    | RFC 0006: `HttpResponse.sse()`, `ctx.signal`, `EventChannel`, `injectSse()` (subscriptions build on it; fallback in §8.3)                                       | P0 (via RFC 0006) |
-| H3  | `@znight/http`                    | RFC 0003 §8.2.4 and §6.4: `RouteMetaCarrier`, `readRouteMeta`, `requiredRouteGroups` (made by whichever of RFC 0003 / this RFC lands first)                     | P0                |
-| K1  | `@znight/core`                    | `graphql:operation` hook and event; `ErrorCode` / `ERROR_DESCRIPTIONS` ZNIGHT050–056                                                                            | P0                |
-| T1  | `@znight/testing`                 | Default `TestApp` closure adds `extensions.graphql` resolver tokens, their guard and loader tokens (structural reader `readGraphQLRoots`)                       | P0                |
-| O1  | `@znight/observability`           | `graphql:operation` wrapper: span, metrics, optional log (§8.10)                                                                                                | P1                |
-| L1  | `@znight/cli`                     | `znight g resolver <name>` and `znight g loader <name>`; `znight new --features graphql` (P2)                                                                   | P1                |
-| D1  | docs                              | `packages/graphql/README.md`, `docs/packages/graphql.md`, a GraphQL guide, decorators reference, error codes, architecture §4.8 (ranges), §5, §7, new §9.5, §10 | P0                |
+| #   | Package                           | Change                                                                                                                                                                                                                          | Priority |
+| --- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| C1  | `@znight/compiler`                | Type shapes additions (§6.8): instance members, enum members, literal order, `typeArgIdentities`                                                                                                                                | P0       |
+| C2  | `@znight/compiler`                | Not needed: shapes keep aliases as named shapes (§6.8)                                                                                                                                                                          | —        |
+| C3  | `@znight/compiler`                | Lazy extension edges (§6.8)                                                                                                                                                                                                     | P1       |
+| C4  | `@znight/compiler`, `@znight/cli` | Extra outputs, `generate --check` staleness (§6.8)                                                                                                                                                                              | P1       |
+| H1  | `@znight/http`                    | Exists (`PluginHttpRoutes` / `PluginRoute`, RFC 0002); adds `PluginRoute.bodyLimit` (§8.3)                                                                                                                                      | P0       |
+| H2  | `@znight/http`                    | Implemented by RFC 0006: `HttpResponse.sse()`, `ctx.signal`, `EventChannel`, `injectSse()` (subscriptions build on it)                                                                                                          | Done     |
+| H3  | `@znight/http`                    | `RouteMetaCarrier` (`RouteDecorator.get()` widened to it), `readRouteMeta` and `requiredRouteGroups` exported from `@znight/http/compiler`: the design of RFC 0003 §6.4 and §8.2.4, made by this RFC since RFC 0003 is deferred | P0       |
+| K1  | `@znight/core`                    | `graphql:operation` hook and event; `ErrorCode` / `ERROR_DESCRIPTIONS` ZNIGHT060–066 (done in phase 1)                                                                                                                          | P0       |
+| T1  | `@znight/testing`                 | Default `TestApp` closure adds `extensions.graphql` resolver tokens, their guard and loader tokens (structural reader `readGraphQLRoots`)                                                                                       | P0       |
+| O1  | `@znight/observability`           | `graphql:operation` wrapper: span, metrics, optional log (§8.10)                                                                                                                                                                | P1       |
+| L1  | `@znight/cli`                     | `znight g resolver <name>` and `znight g loader <name>`; `znight new --features graphql` (P2)                                                                                                                                   | P1       |
+| D1  | docs                              | `packages/graphql/README.md`, `docs/packages/graphql.md`, a GraphQL guide, decorators reference, error codes, architecture §4.8 (ranges), §5, §7, new §9.7, §10                                                                 | P0       |
 
 ## 11. Open questions (with recommended answers)
 
@@ -1669,17 +1682,17 @@ system, more dependencies, conversions to WHATWG requests on Node), `reflect-met
 | --- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Q1  | graphql-js 16, 17, or both?                                                                               | **17 only.** Abort signals, `hideSuggestions` and `executeSubscriptionEvent` simplify the runtime; tracing channels and incremental delivery are the v0.2 roadmap. Revisit only if users report a hard 16 dependency                                                                                                                                                                                               |
 | Q2  | Own transport or graphql-yoga?                                                                            | **Own transport**, about 600 lines, conformance-tested with `graphql-http`'s audits. Document "Use Yoga instead": `http: false`, then a controller route returning `yoga.fetch(...)` with `plugin.schema`. Reconsider if the transport grows beyond the spec (persisted documents, multipart)                                                                                                                      |
-| Q3  | Expose every reachable type implicitly, or require an opt-in marker (`@ObjectType`, `/** @gqlType */`)?   | **Implicit**, it is the point of D1. The declared return type is the contract, introspection and the committed SDL make every exposed field visible, `@gqlHidden` hides. Add a ZNIGHT050 **warning** for fields named like secrets (`password`, `secret`, `token`, `hash`, `apiKey`) in output types (P2)                                                                                                          |
+| Q3  | Expose every reachable type implicitly, or require an opt-in marker (`@ObjectType`, `/** @gqlType */`)?   | **Implicit**, it is the point of D1. The declared return type is the contract, introspection and the committed SDL make every exposed field visible, `@gqlHidden` hides. Add a ZNIGHT060 **warning** for fields named like secrets (`password`, `secret`, `token`, `hash`, `apiKey`) in output types (P2)                                                                                                          |
 | Q4  | `number`: `Float` or `Int`?                                                                               | **`Float`** (always correct on the wire), with `Int` / `ID` aliases and the `number: 'Int'` extension option                                                                                                                                                                                                                                                                                                       |
 | Q5  | Same type as input and output: error or automatic `XInput`?                                               | **Error with a fix-it** in v0.1 (predictable names). An automatic suffix can be added later without breaking anyone                                                                                                                                                                                                                                                                                                |
 | Q6  | Which subscription transports?                                                                            | **SSE distinct connections** in v0.1 (RFC 0006). Apollo's `multipart/mixed` subscriptions (same stream, different framing) P2 if Apollo Client users ask. `graphql-ws` in v0.2 as an upgrade provider on RFC 0003's upgrade routes (`http.addUpgradeProvider()`, graphql-ws `makeServer()`), so handshakes keep the HTTP guards. Recommend HTTP/2 in production (browsers allow 6 HTTP/1.1 connections per origin) |
-| Q7  | One access vocabulary for every transport, or a GraphQL-only `createFieldDecorator`?                      | **Reuse `createRouteDecorator`** (RFC 0003 widened `get()` to `RouteMetaCarrier` and exported the compiler readers for gateways). `@Roles` and one guard class then cover routes, gateways and fields, with one ZNIGHT023 check. A transport-neutral `createMetaDecorator` in `@znight/core` can replace it later without changing user code (same `get()`)                                                        |
+| Q7  | One access vocabulary for every transport, or a GraphQL-only `createFieldDecorator`?                      | **Reuse `createRouteDecorator`** (H3 widens `get()` to `RouteMetaCarrier` and exports the compiler readers, as RFC 0003 designed them for gateways). `@Roles` and one guard class then cover routes, gateways and fields, with one ZNIGHT023 check. A transport-neutral `createMetaDecorator` in `@znight/core` can replace it later without changing user code (same `get()`)                                     |
 | Q8  | GraphQL interfaces in v0.1?                                                                               | **No.** They need a project-wide index of implementations and `implements` emission; unions cover polymorphic results. v0.2, same discriminators                                                                                                                                                                                                                                                                   |
 | Q9  | Should the GraphQL context carry user data (`context.user`)?                                              | **No.** Request-scoped providers already do it, with compile-time scope checks. `GraphQLContext.state` exists for odd cases                                                                                                                                                                                                                                                                                        |
 | Q10 | Run global guards on every field resolver?                                                                | **No**: root fields and field resolvers with their own metadata only (§5.9). Running guards on every nested resolver multiplies the cost by the list sizes for no new decision                                                                                                                                                                                                                                     |
 | Q11 | Where does the SDL go?                                                                                    | **Opt-in file** (`sdl` option, committed, `--check` in CI), never by default: the compiler does not create files users did not ask for                                                                                                                                                                                                                                                                             |
 | Q12 | JSDoc tag names                                                                                           | `@gqlHidden` and `@gqlName` (TSDoc-compatible names; the `gql` prefix is the one Grats uses), plus the standard `@deprecated`, `@default`, `@param`                                                                                                                                                                                                                                                                |
-| Q13 | Error code allocation                                                                                     | Blocks of ten per feature package from ZNIGHT030, **in RFC number order** because RFCs 0003 and 0004 both claimed 030–039: websocket 030–039, schedule 040–049, GraphQL 050–059 (§6.6). The owner confirms it when accepting the RFCs                                                                                                                                                                              |
+| Q13 | Error code allocation                                                                                     | **The repository allocation** (`rfcs/README.md`): a block of ten per feature package, openapi 030–039, schedule 040–049, websocket 050–059, GraphQL 060–069 (§6.6). Settled when this RFC was accepted                                                                                                                                                                                                             |
 | Q14 | Plugin routes: pull (`httpRoutes()`) or push (`http.addRoute()`, like RFC 0003's `addUpgradeProvider()`)? | **Pull.** Ordinary routes share one table built in `HttpPlugin.onBootstrap`, and a plugin instance may serve several applications in turn: a pull contract is order-independent and needs no per-application reset. Upgrade routes have their own table, which is why RFC 0003 can push                                                                                                                            |
 
 ## 12. Alternatives considered
@@ -1696,26 +1709,26 @@ system, more dependencies, conversions to WHATWG requests on Node), `reflect-met
 | WebSocket subscriptions in v0.1                                                                      | Rejected: needs a WebSocket server per adapter and runtime; SSE gets subscriptions shipped on the existing transport                                            |
 | Generating graphql-js constructor code in the generated module                                       | Rejected: the module would import graphql-js, grow, and be harder to validate. Data + `invoke` mirrors `@znight/http` and allows hand-written metadata in tests |
 | Request-scoped DataLoader providers (`@Injectable({ scope: 'request' }) class X extends DataLoader`) | Rejected: stale caches across subscription events, every resolver needs `Lazy<>`, user code depends on `dataloader` directly                                    |
-| A GraphQL-only `createFieldDecorator` with the same semantics as route decorators                    | Rejected (Q7): a second vocabulary for the same decisions; route decorators already work outside controllers since RFC 0003                                     |
+| A GraphQL-only `createFieldDecorator` with the same semantics as route decorators                    | Rejected (Q7): a second vocabulary for the same decisions; route decorators work outside controllers with H3                                                    |
 
 ## 13. Implementation plan and tests
 
 ### 13.1 Milestones (one developer, days)
 
-| #   | Milestone                                                                                                                                                                                  | Contents                                                             | Days     |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------- | -------- |
-| M0  | Prerequisites                                                                                                                                                                              | K1, T1, H1, H3 (P0); C1, C2 (P0); C3, C4 (P1). H2 is RFC 0006's work | 8        |
-| M1  | Compiler extension: decorators, resolver analysis, type mapping (scalars, enums, objects, inputs, args, lists, nullability, JSDoc), naming, ZNIGHT050–053 and 055, generation, SDL printer | P0 schema derivation                                                 | 8        |
-| M2  | Runtime core: schema from metadata, resolver pipeline, null handling, `validateArgs`, guards and route metadata, errors and mappers, limits, document cache, `execute()`                   | P0 runtime                                                           | 5        |
-| M3  | HTTP transport: GraphQL over HTTP, negotiation, status codes, GraphiQL (P1), `graphql-http` audits on every adapter                                                                        | P0 transport                                                         | 3        |
-| M4  | Loaders and subscriptions: per-execution registry, `orderByKeys`, SSE on `HttpResponse.sse()`, `MemoryPubSub` on `EventChannel`, per-event execution, shutdown                             | P0                                                                   | 3        |
-| M5  | P1 features: unions (ZNIGHT054), generics, utility types, custom and built-in scalars, `@default`, `@gqlName`, groups and `enforces`, observability wrapper (O1), CLI schematics (L1)      | P1                                                                   | 5        |
-| M6  | Testing helpers, README, docs, error-code pages                                                                                                                                            | P0                                                                   | 3        |
-| M7  | Wave 7: `examples/graphql-api` (§14)                                                                                                                                                       | P0                                                                   | 3        |
-|     | **Total** (P0 ≈ 31)                                                                                                                                                                        |                                                                      | **≈ 38** |
+| #   | Milestone                                                                                                                                                                                  | Contents                                                                                           | Days     |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------- | -------- |
+| M0  | Prerequisites                                                                                                                                                                              | K1, T1, H1 `bodyLimit`, H3, C1 additions (P0); C3, C4 (P1). H2 exists (RFC 0006); C2 is not needed | 8        |
+| M1  | Compiler extension: decorators, resolver analysis, type mapping (scalars, enums, objects, inputs, args, lists, nullability, JSDoc), naming, ZNIGHT060–063 and 065, generation, SDL printer | P0 schema derivation                                                                               | 8        |
+| M2  | Runtime core: schema from metadata, resolver pipeline, null handling, `validateArgs`, guards and route metadata, errors and mappers, limits, document cache, `execute()`                   | P0 runtime                                                                                         | 5        |
+| M3  | HTTP transport: GraphQL over HTTP, negotiation, status codes, GraphiQL (P1), `graphql-http` audits on every adapter                                                                        | P0 transport                                                                                       | 3        |
+| M4  | Loaders and subscriptions: per-execution registry, `orderByKeys`, SSE on `HttpResponse.sse()`, `MemoryPubSub` on `EventChannel`, per-event execution, shutdown                             | P0                                                                                                 | 3        |
+| M5  | P1 features: unions (ZNIGHT064), generics, utility types, custom and built-in scalars, `@default`, `@gqlName`, groups and `enforces`, observability wrapper (O1), CLI schematics (L1)      | P1                                                                                                 | 5        |
+| M6  | Testing helpers, README, docs, error-code pages                                                                                                                                            | P0                                                                                                 | 3        |
+| M7  | Wave 7: `examples/graphql-api` (§14)                                                                                                                                                       | P0                                                                                                 | 3        |
+|     | **Total** (P0 ≈ 31)                                                                                                                                                                        |                                                                                                    | **≈ 38** |
 
-Order: K1 and T1, then C1/C2 with M1 (one pull request per prerequisite, the extension behind
-them), H1 with M3, then M2, M4, M5, M6, M7. M1 is the risk: start with the mapping table tests.
+Order: K1 and T1, then C1 with M1 (one pull request per prerequisite, the extension behind
+them), H1 (`bodyLimit`) and H3 with M3, then M2, M4, M5, M6, M7. M1 is the risk: start with the mapping table tests.
 
 ### 13.2 Test plan
 
@@ -1727,21 +1740,21 @@ them), H1 with M3, then M2, M4, M5, M6, M7. M1 is the risk: start with the mappi
   - naming: generic instances, alias names, `@gqlName`, collisions across files and packages, root
     names, invalid enum values;
   - inputs: dual use, getters, non-null cycles, defaults (`@default`, parameter defaults, mismatches);
-  - unions: classes, literal discriminants, `__typename`, ambiguity (ZNIGHT054);
+  - unions: classes, literal discriminants, `__typename`, ambiguity (ZNIGHT064);
   - JSDoc: descriptions, `@param`, `@deprecated`, `@gqlHidden`;
-  - resolvers: every ZNIGHT052 and ZNIGHT005 case, http look-alikes, `@Resolver` + `@Controller`,
+  - resolvers: every ZNIGHT062 and ZNIGHT005 case, http look-alikes, `@Resolver` + `@Controller`,
     compiled libraries;
-  - loaders: binding, ZNIGHT001, ZNIGHT055, lazy edges (no ZNIGHT003 with C3);
+  - loaders: binding, ZNIGHT001, ZNIGHT065, lazy edges (no ZNIGHT003 with C3);
   - route decorators on resolvers (groups, nearest decision wins) and ZNIGHT023;
   - every diagnostic: location, related "reached from" path, hints (formatted snapshots).
 - **Generation**: snapshot of `extensions.graphql` and of the SDL; the SDL printed by the extension
   equals graphql-js `printSchema(schemaFromMetadata(...))`; determinism (full versus incremental
   compiles, `build` versus `serve`, byte-identical); the generated module type-checks under the
-  strict settings of architecture §3.3; DI output unchanged by C2 (existing golden tests).
+  strict settings of architecture §3.3; DI and OpenAPI output unchanged by C1 (existing golden tests).
 - **Compiler end-to-end**: compile a fixture application with `compile()`, import the generated
   module, boot it, run operations (pattern of `packages/http/test/compiler/e2e.test.ts`).
 - **Runtime unit tests** with hand-written metadata (`defineTestMetadata`): schema building and
-  ZNIGHT056 cases, guard order and applicability (§5.9), `enforces` check, null normalisation,
+  ZNIGHT066 cases, guard order and applicability (§5.9), `enforces` check, null normalisation,
   Standard Schema validation (Zod and Valibot), error masking, mappers and `HttpException` mapping,
   limits and the document cache, introspection and suggestions, loaders per execution and per
   subscription event, `orderByKeys`, `MemoryPubSub` overflow, abort on disconnect, shutdown
@@ -1803,7 +1816,7 @@ examples/graphql-api/
 ├─ schema.graphql                committed, checked by `znight generate --check`
 ├─ znight.config.ts              extensions: [graphql.configure({ sdl: 'schema.graphql' })]
 ├─ test/                         see below
-└─ README.md                     "What it shows", "Try breaking it" (Uint8Array field → ZNIGHT050, union without kind → ZNIGHT054)
+└─ README.md                     "What it shows", "Try breaking it" (Uint8Array field → ZNIGHT060, union without kind → ZNIGHT064)
 ```
 
 **Tests** (`bun test`, end-to-end gated by `ZNIGHT_E2E`):
@@ -1820,7 +1833,7 @@ examples/graphql-api/
   POST 415, `graphql-response+json` statuses, introspection off with `NODE_ENV=production`, limits).
 - `schema.test.ts`: `plugin.printSchema()` equals the committed `schema.graphql`.
 - `build-check.test.ts`: compiles a fixture with an unmappable field and an ambiguous union
-  through `compile()` and asserts ZNIGHT050 and ZNIGHT054 with their locations (keeps the README's
+  through `compile()` and asserts ZNIGHT060 and ZNIGHT064 with their locations (keeps the README's
   "Try breaking it" honest).
 - `e2e.test.ts`: builds, then runs the bundle on Node.js and on Bun: a query, a mutation with an
   API key, and a subscription receiving the added book.
