@@ -1,5 +1,13 @@
 # @znight/testing
 
+## 0.1.4
+
+### Patch Changes
+
+- c21ef01: `TestApp` boots GraphQL resolvers, their guards and loaders by default.
+- Updated dependencies [c21ef01]
+  - @znight/core@0.1.4
+
 ## 0.1.3
 
 ### Patch Changes
