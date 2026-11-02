@@ -1655,16 +1655,22 @@ body (a file or `Blob` included) has been fully read or cancelled by the adapter
 read in the async context of the handler (request-scoped providers and tracing keep working).
 **Impl.** fast lane: when CORS is off, a route other than `@All` without guards, interceptors,
 `@Sse`, `@Res()` or `@Header` (and not a trailing-slash redirect) gets a specialised handler
-(`Pipeline.handler`). A request of the route's method takes it when no `http:request` wrapper or
-listener is registered and the server is not draining: the request scope is opened with
-`openScope`, the handler runs in it synchronously and a plain object or array result is serialised
-as JSON (`undefined`: no body) with the headers built in their final order from a template computed
-at boot, with no promise until something is asynchronous (a body to read, a thenable result, both
-awaited in the lane). With a bodyless status (`@HttpCode(204)`, `304`) or on an explicit `@Head`
-route, only an `undefined` result is answered there. Anything else (a malformed or unmatched path
-before the request starts; a thrown error or rejection, any other result, headers or cookies set
-on the context) continues in the general pipeline in the same scope; replies are identical byte
-for byte, header order included.
+(`Pipeline.handler`). A request of the route's method takes it when the server is not draining: the
+request scope is opened with `openScope`, the handler runs in it synchronously and a plain object
+or array result is serialised as JSON (`undefined`: no body) with the headers built in their final
+order from a template computed at boot, with no promise until something is asynchronous (a body to
+read, a thenable result, both awaited in the lane). With a bodyless status (`@HttpCode(204)`,
+`304`) or on an explicit `@Head` route, only an `undefined` result is answered there. Anything else
+(a malformed or unmatched path before the request starts; a thrown error or rejection, any other
+result, headers or cookies set on the context) continues in the general pipeline in the same
+scope; replies are identical byte for byte, header order included. The lane keeps the `http:request`
+hooks: with listeners, the event is created when the request starts and emitted once the reply is
+ready, the lane staying synchronous; with wrappers (checked when the request starts), the handler
+runs inside `hooks.run('http:request')` in the request scope, the event is the one of the general
+pipeline (fields, `status` and `error` set before `next()` resolves), and a JSON or empty reply gets
+the headers of the template unless the wrappers added `event.responseHeaders` or a cookie, in which
+case it is completed and checked like any reply of the general pipeline. A wrapper that fails or does
+not call `next()` gets the same reply as in the general pipeline.
 
 - Path grammar: static segments, `:name` params, trailing `*` wildcard (`ctx.params['*']`); anything
   else ZNIGHT007 (at build time, and at boot for hand-written metadata). Routing happens on the
@@ -2354,8 +2360,12 @@ before the job is `failed`. Inside a run, the logger adds
 `job` and `runId` (from the request-scoped `@znight/schedule#JobContext`; `logging.jobContext`).
 Each part can be turned off: `metrics: false`, `tracing: false`, `logging.requests` /
 `logging.messages` / `logging.jobs: false`, and per hook (`tracing.http`, `metrics.messaging`,
-`metrics.schedule`, `tracing.schedule`...). `@znight/schedule` is not a dependency: the hook events
-are typed by core (§8.3).
+`metrics.schedule`, `tracing.schedule`...). **Impl.** A hook whose parts are all off is not
+registered (a registered `http:request` wrapper costs every request, see the fast lane of §9.1): with
+object options, `register` registers only the needed hooks; options given as a function are not
+known yet, so every hook is registered (keeping its position among plugins) and those of disabled
+parts are removed in `onBootstrap`. `@znight/schedule` is not a dependency: the hook events are
+typed by core (§8.3).
 `onStart`/`onStop` start and stop the `/metrics` server (`node:http`, default port 9464, only when
 metrics are enabled; `metrics.server: false` disables it); `onDispose` removes the wrappers, closes
 the server, flushes the tracer provider and the logger, then switches the logger to flushing every

@@ -1,10 +1,12 @@
 /**
  * The fast lane of the pipeline (`Pipeline.handler`): routes without guards, interceptors, `@Sse`,
  * `@Res()` nor `@Header` are served without the general machinery while the handler stays
- * synchronous. Every reply must be the one of the general pipeline, which a request takes when an
- * `http:request` listener is registered: each case is sent through both and compared, byte for byte
- * (the request id aside), header order included.
+ * synchronous. Every reply must be the one of the general pipeline, which every request of an
+ * application with a global guard takes: each case is sent to both applications and compared, byte
+ * for byte (the request id aside), header order included, without hooks, with an `http:request`
+ * listener, and through `http:request` wrappers (what the hooks see of the request included).
  */
+import type { HookWrapper, HttpRequestEvent } from '@znight/core'
 import type {
   AdapterHandler,
   AdapterReply,
@@ -16,6 +18,7 @@ import type {
 } from '../src/index.ts'
 import type { TestApp } from './helpers.ts'
 
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { CoreTokens } from '@znight/core'
 
 import { BadRequestException, HttpResponse, HttpTokens, NotFoundException } from '../src/index.ts'
@@ -137,6 +140,9 @@ class PerRequest {
 
 const seen: Record<string, unknown> = {}
 
+/** Set by the wrappers of the hooked cases, read by the `/als` route. */
+const als = new AsyncLocalStorage<string>()
+
 // biome-ignore lint/suspicious/noExplicitAny: the controller of hand-written routes
 type Any = any
 
@@ -244,6 +250,20 @@ const ROUTES = [
     c.container.get(t('Exploding'))
     return { exploding: true }
   }),
+  route('als', '/als', () => ({ store: als.getStore() ?? null })),
+  // the stream is read after the handler returned: in the async context of the handler
+  route('alsStream', '/als-stream', () =>
+    HttpResponse.stream(
+      (async function* () {
+        await Promise.resolve()
+        yield `store: ${als.getStore() ?? 'none'}`
+      })(),
+    ),
+  ),
+  route('clock', '/clock', () => {
+    seen['invokedAt'] = performance.now()
+    return { clock: true }
+  }),
   route('listen', '/listen', (c: Any) => {
     // a listener registered while the handler runs sees this request (as with the general pipeline)
     const off = c.hooks.on('http:request', (event: { status?: number; path: string }) => {
@@ -282,34 +302,113 @@ const mapper = {
   map: (error: unknown) => (error instanceof Gone ? new HttpResponse({ mapped: true }, { status: 410 }) : undefined),
 }
 
+/** A guard letting every request through: the routes of an application with it take the general pipeline. */
+const ALLOW = { canActivate: () => true }
+
+/** Installs `http:request` hooks on an application, recording what they see; returns their removal. */
+type Install = (app: TestApp, log: unknown[]) => () => void
+
+/** What an `http:request` hook sees of a request (request id and start time normalised). */
+function snapshot(stage: string, event: HttpRequestEvent): unknown {
+  return {
+    stage,
+    keys: Object.keys(event),
+    method: event.method,
+    path: event.path,
+    route: event.route,
+    requestId: ID.test(event.requestId) ? '<id>' : event.requestId,
+    headers: event.headers,
+    context: (event.context as HttpContext).path,
+    startTime: typeof event.startTime === 'number' && event.startTime <= performance.now(),
+    status: event.status,
+    error: event.error === undefined ? undefined : String(event.error),
+    responseHeaders: { ...event.responseHeaders },
+  }
+}
+
+/** A listener only: the fast lane stays synchronous. */
+const LISTENER: Install = (app, log) => app.app.hooks.on('http:request', event => log.push(snapshot('listener', event)))
+
+/** Recording wrappers (one of them running the request in an async context) and a listener. */
+const WRAPPED: Install = (app, log) => {
+  const container = app.app.container
+  const inScope = (event: HttpRequestEvent): boolean =>
+    container.currentScope()?.get(HttpTokens.RequestId) === event.requestId
+  const offs = [
+    app.app.hooks.wrap('http:request', async (event, next) => {
+      log.push(snapshot('outer', event), { scope: inScope(event) })
+      try {
+        return await als.run('wrapped', next)
+      } finally {
+        log.push(snapshot('outer after', event), { scope: inScope(event), store: als.getStore() ?? null })
+      }
+    }),
+    app.app.hooks.wrap('http:request', (event, next) => {
+      log.push(snapshot('inner', event), { store: als.getStore() ?? null })
+      return next()
+    }),
+    LISTENER(app, log),
+  ]
+  return () => {
+    for (const off of offs) off()
+  }
+}
+
+/** A wrapper adding a response header (like the tracing of `@znight/observability`). */
+const DECORATED: Install = app =>
+  app.app.hooks.wrap('http:request', async (event, next) => {
+    event.responseHeaders['x-wrapped'] = 'yes'
+    await next()
+  })
+
 describe('fast lane', () => {
   let app: TestApp
   let adapter: RecordingAdapter
+  /** The same routes, taking the general pipeline (a global guard). */
+  let reference: TestApp
+  let referenceAdapter: RecordingAdapter
 
   beforeAll(async () => {
     adapter = new RecordingAdapter()
     app = await createApp(META, { adapter, exceptionMappers: [mapper] }, { start: false })
+    referenceAdapter = new RecordingAdapter()
+    reference = await createApp(
+      META,
+      { adapter: referenceAdapter, exceptionMappers: [mapper], guards: [ALLOW] },
+      { start: false },
+    )
   })
 
-  afterAll(() => app.stop())
+  afterAll(async () => {
+    await app.stop()
+    await reference.stop()
+  })
 
-  /** The reply of the fast lane and the one of the general pipeline (a listener registered). */
-  async function both(sent: Sent, path: string): Promise<{ fast: unknown; general: unknown; sync: boolean }> {
-    const handler = adapter.handler(sent.method ?? 'GET', path)
-    const pending = handler(request(sent))
-    // only the synchronous fast lane is over before the reply is awaited
-    const sync = app.http.inflight === 0
-    const fast = await wire(await pending)
-    await sleep(10)
-    expect(app.http.inflight).toBe(0)
-    const off = app.app.hooks.on('http:request', () => undefined)
+  /**
+   * The reply of the fast lane and the one of the general pipeline, with the hooks of `install`
+   * registered on both applications, and what the hooks saw on each.
+   */
+  async function both(
+    sent: Sent,
+    path: string,
+    install?: Install,
+  ): Promise<{ fast: unknown; general: unknown; sync: boolean; seenFast: unknown[]; seenGeneral: unknown[] }> {
+    const seenFast: unknown[] = []
+    const seenGeneral: unknown[] = []
+    const offs = install === undefined ? [] : [install(app, seenFast), install(reference, seenGeneral)]
     try {
-      const general = await wire(await handler(request(sent)))
+      const pending = adapter.handler(sent.method ?? 'GET', path)(request(sent))
+      // only the synchronous fast lane is over before the reply is awaited
+      const sync = app.http.inflight === 0
+      const fast = await wire(await pending)
       await sleep(10)
       expect(app.http.inflight).toBe(0)
-      return { fast, general, sync }
+      const general = await wire(await referenceAdapter.handler(sent.method ?? 'GET', path)(request(sent)))
+      await sleep(10)
+      expect(reference.http.inflight).toBe(0)
+      return { fast, general, sync, seenFast, seenGeneral }
     } finally {
-      off()
+      for (const off of offs) off()
     }
   }
 
@@ -393,13 +492,171 @@ describe('fast lane', () => {
       '/validated',
       false,
     ],
+    ['a handler reading the async context', { url: '/als' }, '/als', true],
+    ['a stream reading the async context', { url: '/als-stream' }, '/als-stream', false],
   ]
 
-  for (const [label, sent, path, sync] of CASES) {
-    it(`answers ${label} like the general pipeline`, async () => {
-      const result = await both(sent, path)
-      expect(result.fast).toEqual(result.general)
-      expect(result.sync).toBe(sync)
+  const MODES: readonly (readonly [string, Install | undefined])[] = [
+    ['', undefined],
+    [' with an http:request listener', LISTENER],
+    [' through http:request wrappers', WRAPPED],
+    [' with a wrapper adding a response header', DECORATED],
+  ]
+
+  for (const [mode, install] of MODES) {
+    for (const [label, sent, path, sync] of CASES) {
+      it(`answers ${label} like the general pipeline${mode}`, async () => {
+        const result = await both(sent, path, install)
+        expect(result.fast).toEqual(result.general)
+        expect(result.seenFast).toEqual(result.seenGeneral)
+        // wrappers are asynchronous: only a listener keeps the lane synchronous
+        if (install === undefined || install === LISTENER) expect(result.sync).toBe(sync)
+      })
+    }
+  }
+
+  it('runs the wrappers in the request scope, and the handler in their async context', async () => {
+    const result = await both({ url: '/als' }, '/als', WRAPPED)
+    expect(result.fast).toEqual(result.general)
+    expect((result.fast as { body: string }).body).toBe('{"store":"wrapped"}')
+    expect(result.seenFast).toContainEqual({ scope: true })
+    expect(result.seenFast).toContainEqual({ store: 'wrapped' })
+    expect(result.seenFast).toContainEqual({ scope: true, store: null })
+    expect(result.seenFast).toEqual(result.seenGeneral)
+    const streamed = await both({ url: '/als-stream' }, '/als-stream', WRAPPED)
+    expect(streamed.fast).toEqual(streamed.general)
+    expect((streamed.fast as { body: string }).body).toBe('store: wrapped')
+  })
+
+  it('reads a streamed body in the async context of the wrappers on Node.js', async () => {
+    // Bun runs these reads in that context whatever the pipeline captures: check on Node.js
+    const core = import.meta.resolve('@znight/core')
+    const http = new URL('../src/index.ts', import.meta.url).href
+    const script = `
+      import { AsyncLocalStorage } from 'node:async_hooks'
+      const { Application } = await import(${JSON.stringify(core)})
+      const { HttpPlugin, HttpResponse } = await import(${JSON.stringify(http)})
+      const als = new AsyncLocalStorage()
+      class Api {}
+      const routes = []
+      const adapter = { name: 'recording', registerRoute: route => routes.push(route), setFallbackHandler() {},
+        listen: async () => ({}), close: async () => {}, inject: async () => { throw new Error('no') } }
+      const route = { method: 'GET', path: '/s', fullPath: '/s', handler: 's', meta: {}, guards: [], interceptors: [],
+        params: [], invoke: () => HttpResponse.stream((async function* () { yield String(als.getStore()) })()) }
+      const metadata = { version: 1, compiler: '0.1.0', resolutionOrder: ['src/app.ts#Api'],
+        providers: { 'src/app.ts#Api': { scope: 'singleton', class: Api, deps: [], factory: () => new Api() } },
+        externals: [{ token: '@znight/http#HttpContext', scope: 'request', providedBy: 'HttpPlugin' },
+          { token: '@znight/http#RequestId', scope: 'request', providedBy: 'HttpPlugin' }],
+        extensions: { http: { controllers: [{ token: 'src/app.ts#Api', basePath: '/', guards: [], interceptors: [],
+          meta: {}, routes: [route] }] } } }
+      const app = await Application.create({ metadata, plugins: [HttpPlugin.configure({ adapter })], shutdown: { signals: false } })
+      app.hooks.wrap('http:request', (_event, next) => als.run('wrapped', next))
+      const reply = await routes[0].handler({ method: 'GET', url: '/s', headers: {},
+        readBody: async () => new Uint8Array(0), hasBody: () => false })
+      console.log(await new Response(reply.body).text())
+      await app.stop()
+    `
+    const child = Bun.spawn(['node', '--conditions=@znight/source', '--input-type=module', '-e', script], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    const [stdout, stderr, code] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+      child.exited,
+    ])
+    expect({ code, stderr }).toEqual({ code: 0, stderr: '' })
+    expect(stdout.trim()).toBe('wrapped')
+  })
+
+  it('gives the listeners the start time of the request', async () => {
+    const result = await both({ url: '/clock' }, '/clock', (target, log) =>
+      target.app.hooks.on('http:request', event => log.push(event.startTime < (seen['invokedAt'] as number))),
+    )
+    expect(result.sync).toBe(true)
+    expect(result.seenFast).toEqual([true])
+    expect(result.seenGeneral).toEqual([true])
+  })
+
+  it('gives the hooks the event of the general pipeline', async () => {
+    const result = await both({ url: '/users/7?x=1', headers: { 'x-request-id': 'abc-123' } }, '/users/:id', WRAPPED)
+    expect(result.seenFast).toEqual(result.seenGeneral)
+    expect(result.seenFast.at(-1)).toEqual({
+      stage: 'listener',
+      keys: ['method', 'path', 'route', 'requestId', 'headers', 'context', 'startTime', 'responseHeaders', 'status'],
+      method: 'GET',
+      path: '/users/7',
+      route: '/users/:id',
+      requestId: 'abc-123',
+      headers: { host: 'localhost', 'x-request-id': 'abc-123' },
+      context: '/users/7',
+      startTime: true,
+      status: 200,
+      error: undefined,
+      responseHeaders: {},
+    })
+  })
+
+  const BEHAVIOURS: readonly (readonly [string, HookWrapper<'http:request'>])[] = [
+    [
+      'throws before next()',
+      () => {
+        throw new Error('wrapper failed')
+      },
+    ],
+    ['rejects before next()', () => Promise.reject(new Error('wrapper rejected'))],
+    ['does not call next()', async () => undefined],
+    [
+      'throws after next()',
+      async (_event, next) => {
+        await next()
+        throw new Error('wrapper failed late')
+      },
+    ],
+    [
+      'adds an invalid response header',
+      async (event, next) => {
+        event.responseHeaders['x-bad'] = 'a\r\nb'
+        await next()
+      },
+    ],
+    ['returns next() synchronously', (_event, next) => next()],
+    [
+      'sets a cookie after next()',
+      async (event, next) => {
+        await next()
+        ;(event.context as HttpContext).setCookie('wrapped', '1')
+      },
+    ],
+  ]
+
+  const HOOKED: readonly (readonly [Sent, string])[] = [
+    [{ url: '/object' }, '/object'],
+    [{ url: '/undefined' }, '/undefined'],
+    [{ url: '/unexpected' }, '/unexpected'],
+    [{ url: '/promise' }, '/promise'],
+    [{ url: '/stream' }, '/stream'],
+    [{ url: '/set-cookie' }, '/set-cookie'],
+    [{ method: 'POST', url: '/create', headers: { 'content-type': 'application/json' }, body: '{"a":1}' }, '/create'],
+  ]
+
+  for (const [behaviour, wrapper] of BEHAVIOURS) {
+    it(`answers like the general pipeline when an http:request wrapper ${behaviour}`, async () => {
+      const install: Install = (target, log) => {
+        const offs = [target.app.hooks.wrap('http:request', wrapper), LISTENER(target, log)]
+        return () => {
+          for (const off of offs) off()
+        }
+      }
+      for (const [sent, path] of HOOKED) {
+        const logged = [app.logger.entries.length, reference.logger.entries.length]
+        const result = await both(sent, path, install)
+        expect({ path, reply: result.fast }).toEqual({ path, reply: result.general })
+        expect(result.seenFast).toEqual(result.seenGeneral)
+        const messages = (target: TestApp, from: number): string[] =>
+          target.logger.entries.slice(from).map(entry => entry.message)
+        expect(messages(app, logged[0] as number)).toEqual(messages(reference, logged[1] as number))
+      }
     })
   }
 
@@ -441,8 +698,12 @@ describe('fast lane', () => {
   it('logs a disposal failure without failing the reply', async () => {
     const result = await both({ url: '/failed-dispose' }, '/failed-dispose')
     expect(result.fast).toEqual(result.general)
-    const failures = app.logger.entries.filter(entry => entry.message === 'Failed to dispose request-scoped providers')
-    expect(failures).toHaveLength(2)
+    for (const target of [app, reference]) {
+      const failures = target.logger.entries.filter(
+        entry => entry.message === 'Failed to dispose request-scoped providers',
+      )
+      expect(failures).toHaveLength(1)
+    }
   })
 
   it('emits the event to a listener registered while the handler runs', async () => {
