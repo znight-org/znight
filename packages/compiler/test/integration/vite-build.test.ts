@@ -3,6 +3,8 @@
  * generated module, decorator stripping, source maps, build errors, warnings, the plugin API,
  * several server environments, and Vite running on Node.js. Built bundles run on Node.js and Bun.
  */
+import type { UserConfig } from 'vite'
+import type { CompilerExtension } from '../../src/index.ts'
 import type { ZnightPluginApi } from '../../src/vite.ts'
 
 import fs from 'node:fs'
@@ -369,6 +371,46 @@ export default {
         const built = await run(['node', 'dist/main.js'], app.root)
         expect(report(built.stdout)).toEqual({ greeting: 'Hello Ada @42', providers: PROVIDERS })
         expect(applicationCode(fs.readFileSync(`${app.root}/dist/main.js`, 'utf8'))).not.toContain('Injectable')
+      } finally {
+        app.cleanup()
+      }
+    },
+    TIMEOUT,
+  )
+})
+
+describe('extra files of compiler extensions', () => {
+  it(
+    'are written with the disk copy and ignored by the dev server watcher',
+    async () => {
+      const app = integrationApp('app')
+      const sdl = 'type Query {\n  greeting: String!\n}\n'
+      try {
+        const extension: CompilerExtension = {
+          apiVersion: 1,
+          name: 'sdl',
+          decorators: {},
+          generate(ctx) {
+            ctx.emitFile('schema.graphql', sdl)
+            return undefined
+          },
+        }
+        const plugin = znight({ extensions: [extension] })
+        const configure = plugin.config as (config: UserConfig) => UserConfig
+        const ignored = configure({ root: app.root }).server?.watch?.ignored as ((file: string) => boolean)[]
+        const ignore = ignored[0]
+        const schema = `${app.root}/schema.graphql`
+        // unknown before the first compile
+        expect(ignore?.(schema)).toBe(false)
+        await build(viteConfig(app.root, recordingLogger(), { plugins: [plugin] }))
+        expect(fs.readFileSync(schema, 'utf8')).toBe(sdl)
+        expect((plugin.api as ZnightPluginApi).result?.extraFiles.map(extra => extra.file)).toEqual([schema])
+        expect(ignore?.(schema)).toBe(true)
+        expect(ignore?.(`${schema}.123.4.tmp`)).toBe(true)
+        expect(ignore?.(`${app.root}/${DEFAULT_OUT_FILE}`)).toBe(true)
+        expect(ignore?.(`${app.root}/src/clock.ts`)).toBe(false)
+        const check = await generate({ root: app.root, extensions: [extension], check: true })
+        expect(check).toMatchObject({ ok: true, stale: false, staleFiles: [] })
       } finally {
         app.cleanup()
       }

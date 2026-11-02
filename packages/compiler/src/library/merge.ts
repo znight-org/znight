@@ -135,8 +135,9 @@ function mergeLibrary(input: MergeInput, library: CompiledLibrary): void {
       expectShape(
         isRecord(binding) &&
           typeof binding.id === 'number' &&
-          (binding.from === undefined || typeof binding.from === 'string'),
-        'an object { id, from?, type, label }',
+          (binding.from === undefined || typeof binding.from === 'string') &&
+          (binding.lazy === undefined || typeof binding.lazy === 'boolean'),
+        'an object { id, from?, lazy?, type, label }',
       )
       const request = decodeInjection(binding, input)
       const id = input.state.nextBindingId++
@@ -144,6 +145,7 @@ function mergeLibrary(input: MergeInput, library: CompiledLibrary): void {
       input.state.bindings.push({
         id,
         from: binding.from,
+        ...(binding.lazy === true ? { lazy: true } : {}),
         site: {
           owner: binding.from === undefined ? name : displayNameOf(binding.from),
           label: binding.label,
@@ -213,10 +215,17 @@ function mergeLibrary(input: MergeInput, library: CompiledLibrary): void {
         isRecord(edge) &&
           typeof edge.from === 'string' &&
           typeof edge.to === 'string' &&
-          typeof edge.reason === 'string',
-        'an object { from, to, reason } of strings',
+          typeof edge.reason === 'string' &&
+          (edge.lazy === undefined || typeof edge.lazy === 'boolean'),
+        'an object { from, to, reason } of strings, lazy?: boolean',
       )
-      input.state.edges.push({ from: edge.from, to: edge.to, location: fileLocation, reason: edge.reason })
+      input.state.edges.push({
+        from: edge.from,
+        to: edge.to,
+        location: fileLocation,
+        reason: edge.reason,
+        ...(edge.lazy === true ? { lazy: true } : {}),
+      })
     })
   }
 

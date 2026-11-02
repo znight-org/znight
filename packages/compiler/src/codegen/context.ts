@@ -8,6 +8,7 @@ import type { GenBuilders, GenerateContext, GenImport, GenInput, GenNode } from 
 import type { ApplicationGraph, ProviderNode } from '../graph/types.ts'
 import type { ResolvedOptions } from '../options.ts'
 import type { Diagnostic } from '../project/index.ts'
+import type { ExtraFiles } from './extra-files.ts'
 import type { ModuleBuilder, Owner } from './module.ts'
 
 import { createGenBuilders, freeze, isBuiltNode } from '../extensions/generate.ts'
@@ -62,6 +63,7 @@ export class ExtensionGenerateContext implements GenerateContext<unknown> {
   readonly #index: GraphIndex
   readonly #owner: () => Owner
   readonly #report: (diagnostic: Diagnostic) => void
+  readonly #files: ExtraFiles
 
   constructor(input: {
     readonly extension: string
@@ -73,6 +75,8 @@ export class ExtensionGenerateContext implements GenerateContext<unknown> {
     readonly report: (diagnostic: Diagnostic) => void
     /** Type helpers of the analysis (shapes computed during validation are reused). */
     readonly types: TypeHelpers
+    /** Extra outputs of this rendering (`emitFile`). */
+    readonly files: ExtraFiles
   }) {
     const builders = createGenBuilders()
     this.lit = builders.lit
@@ -94,6 +98,7 @@ export class ExtensionGenerateContext implements GenerateContext<unknown> {
     this.#index = input.index
     this.#owner = input.owner
     this.#report = input.report
+    this.#files = input.files
   }
 
   binding(handle: BindingHandle): DependencyRef | undefined {
@@ -152,6 +157,10 @@ export class ExtensionGenerateContext implements GenerateContext<unknown> {
         type: type === undefined ? undefined : this.#module.print(type, owner),
       })),
     )
+  }
+
+  emitFile(relativePath: string, content: string): void {
+    this.#files.emit(this.extension, relativePath, content)
   }
 
   report(diagnostic: Diagnostic): void {

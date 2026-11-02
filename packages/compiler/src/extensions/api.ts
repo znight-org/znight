@@ -640,6 +640,13 @@ export interface DependencyDetails {
   readonly location?: Location
   /** `"guard"`, `"interceptor"`... used in messages. */
   readonly reason?: string
+  /**
+   * A **lazy edge**: the plugin resolves the dependency when it is used, in the scope of that call
+   * (like `Lazy<T>`), not when `from` is created. It counts for ZNIGHT019 and `prune`, never for
+   * ZNIGHT003 (a singleton may use a request-scoped provider this way), ZNIGHT002 nor
+   * `resolutionOrder`. Default `false`.
+   */
+  readonly lazy?: boolean
 }
 
 /** Options of {@link AnalyzeContext.resolveClassRef}. */
@@ -648,6 +655,19 @@ export interface ClassRefOptions {
   readonly from?: ClassInfo | Token
   /** Role of the class in messages (`"guard"`). Default `"class"`. */
   readonly role?: string
+  /** With `from`: the edge is lazy ({@link DependencyDetails.lazy}). Default `false`. */
+  readonly lazy?: boolean
+}
+
+/** Options of {@link AnalyzeContext.bindInjection}. */
+export interface BindInjectionOptions {
+  /** Provider that uses the binding: adds a validation edge (ZNIGHT003, ZNIGHT019). */
+  readonly from?: ClassInfo | Token
+  /**
+   * With `from`: the edge is lazy ({@link DependencyDetails.lazy}): the plugin resolves the binding
+   * at call time in the current scope. The binding result itself is unchanged. Default `false`.
+   */
+  readonly lazy?: boolean
 }
 
 /** Details of {@link AnalyzeContext.addRoot}. */
@@ -716,11 +736,14 @@ export interface AnalyzeContext<TData = unknown> {
   /**
    * Binds an injection request with §4.7; the result is available in {@link ValidateContext.binding}
    * and `GenerateContext.binding`. With `from`, the dependency also takes part in validation
-   * (ZNIGHT003, ZNIGHT019). Such dependencies are resolved by the extension's plugin at runtime:
-   * they never take part in the instantiation order (and in ZNIGHT002).
+   * (ZNIGHT003, ZNIGHT019; with `lazy`, ZNIGHT019 only). Such dependencies are resolved by the
+   * extension's plugin at runtime: they never take part in the instantiation order (and in ZNIGHT002).
    */
-  bindInjection(request: InjectionRequest, options?: { readonly from?: ClassInfo | Token }): BindingHandle
-  /** Declares that `from` uses the provider `to` at runtime (validation edge: ZNIGHT003, ZNIGHT019). */
+  bindInjection(request: InjectionRequest, options?: BindInjectionOptions): BindingHandle
+  /**
+   * Declares that `from` uses the provider `to` at runtime (validation edge: ZNIGHT003, ZNIGHT019;
+   * with `lazy`, ZNIGHT019 only).
+   */
   addDependency(from: ClassInfo | Token, to: Token | ClassRef, details?: DependencyDetails): void
   /** Analysis of another class (by identity), built on demand. */
   classInfo(identity: string): ClassInfo | undefined

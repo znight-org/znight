@@ -1,7 +1,7 @@
 /**
- * `znight generate`: writes the DI container module (`src/.znight/container.generated.ts`) with the
- * compiler, checks that it is up to date (`--check`, for CI) or keeps it up to date (`--watch`, for
- * `tsc --watch` and editors).
+ * `znight generate`: writes the DI container module (`src/.znight/container.generated.ts`), and the
+ * files compiler extensions emit with it, with the compiler, checks that they are up to date
+ * (`--check`, for CI) or keeps them up to date (`--watch`, for `tsc --watch` and editors).
  */
 import type { Command } from '../command.ts'
 import type { CliContext } from '../context.ts'
@@ -200,6 +200,16 @@ function staleFilesOf(result: CheckResultLike): string[] {
   return [...stale].sort((a, b) => Number(b === result.outFile) - Number(a === result.outFile))
 }
 
+/**
+ * The hint of a missing generated file: the module, an extra file of the compiler extensions (an SDL
+ * schema...) or the library manifest (`dist/znight.providers.json`).
+ */
+function missingHint(path: string, outFile: string, extraFiles: ReadonlySet<string>): string {
+  if (path === outFile) return 'run "znight generate" (it is git-ignored: generate it before tsc and tests)'
+  if (extraFiles.has(path)) return 'run "znight generate" (a compiler extension generates it from the sources)'
+  return 'run "znight generate" after the build: a build cleaning dist/ (tsdown, tsc --build --clean...) deletes it'
+}
+
 async function check(cli: CliContext, compiler: CompilerApi, options: ZnightOptions): Promise<number> {
   const root = options.root ?? cli.cwd
   const started = performance.now()
@@ -211,15 +221,11 @@ async function check(cli: CliContext, compiler: CompilerApi, options: ZnightOpti
   }
   const file = displayPath(result.outFile, cli.cwd)
   const stale = staleFilesOf(result)
+  const extraFiles = new Set(result.extraFiles?.map(extra => extra.file))
   for (const path of stale) {
     const shown = displayPath(path, cli.cwd)
-    // the other generated file is the library manifest (`dist/znight.providers.json`)
-    const hint =
-      path === result.outFile
-        ? 'run "znight generate" (it is git-ignored: generate it before tsc and tests)'
-        : 'run "znight generate" after the build: a build cleaning dist/ (tsdown, tsc --build --clean...) deletes it'
     if (existsSync(path)) cli.reporter.error(`${shown} is out of date`, ['run "znight generate"'])
-    else cli.reporter.error(`${shown} is missing`, [hint])
+    else cli.reporter.error(`${shown} is missing`, [missingHint(path, result.outFile, extraFiles)])
   }
   if (stale.length > 0) return 1
   cli.reporter.success(

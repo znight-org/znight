@@ -597,6 +597,73 @@ describe('compiled provider libraries', () => {
     }
   })
 
+  it('keeps lazy extension edges and bindings lazy across the fragment', async () => {
+    const lazyMarks = {
+      ...marks,
+      analyzeClass(cls, ctx) {
+        const decorator = cls.decorators.find(d => d.identity === '@acme/marks#Mark')
+        if (!decorator) return
+        ctx.addDependency(cls, '@acme/marks#Tool', { reason: 'tool', lazy: true })
+        ctx.store({
+          cls,
+          label: String(decorator.args[0]?.value),
+          handle: ctx.bindInjection({ type: '@acme/marks#Tool' }, { from: cls, lazy: true }),
+          ref: decorator.args[1]?.ref,
+          location: decorator.location,
+          values: null,
+        })
+      },
+    } satisfies CompilerExtension<Mark>
+    const emitted = await compile({
+      root: library.root,
+      library: true,
+      conditions: ['acme-source'],
+      extensions: [lazyMarks],
+    })
+    const data = emitted.library?.data
+    expect(data?.bindings.map(binding => [binding.from, binding.lazy])).toEqual([['@acme/auth#JwtService', true]])
+    expect(data?.edges).toEqual([
+      {
+        from: '@acme/auth#JwtService',
+        to: '@acme/marks#Tool',
+        reason: "injection of 'Tool' (extension 'marks')",
+        lazy: true,
+      },
+      { from: '@acme/auth#JwtService', to: '@acme/marks#Tool', reason: 'tool', lazy: true },
+    ])
+    const file = `${library.root}/dist/znight.providers.json`
+    const original = fs.readFileSync(file, 'utf8')
+    try {
+      fs.writeFileSync(file, emitted.library?.content ?? '')
+      const result = await compile({ root: app.root, extensions: [lazyMarks] })
+      expect(
+        render(
+          app.root,
+          result.diagnostics.filter(d => d.severity === 'error'),
+        ),
+      ).toBe('')
+      expect(
+        result.graph.edges
+          .filter(edge => edge.from === '@acme/auth#JwtService' && edge.to === '@acme/marks#Tool')
+          .map(edge => [edge.kind, edge.extension, edge.label]),
+      ).toEqual([
+        // the edge of the fragment, and the one of the binding bound again by the application
+        ['lazy', true, "injection of 'Tool' (extension 'marks')"],
+        ['lazy', true, "injection of 'Tool' (extension 'marks')"],
+        ['lazy', true, 'tool'],
+      ])
+      // a malformed flag is reported like any malformed entry
+      fs.writeFileSync(
+        file,
+        JSON.stringify({ ...data, edges: [{ ...data?.edges[0], lazy: 'yes' }], bindings: [] }, null, 2),
+      )
+      const malformed = await compile({ root: app.root, extensions: [lazyMarks] })
+      expect(render(app.root, malformed.diagnostics)).toContain('malformed edge #0')
+    } finally {
+      fs.writeFileSync(file, original)
+    }
+  })
+
   it('rejects non-exported providers and custom factories in library mode', async () => {
     library.write('src/hidden.ts', "import { Injectable } from '@znight/core'\n@Injectable()\nexport class Hidden {}\n")
     try {

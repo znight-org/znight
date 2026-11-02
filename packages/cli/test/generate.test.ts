@@ -53,6 +53,8 @@ class FakeCompiler implements CompilerApi {
   watchFiles: string[] | undefined
   /** `staleFiles` of `check()` (`undefined`: not reported). */
   staleFiles: string[] | undefined
+  /** `extraFiles` of the results (`undefined`: not reported). */
+  extraFiles: { file: string; content: string }[] | undefined
   /** `includeRoots()` of the incremental compiler (`undefined`: `<root>/src`, like the default `include`). */
   includeRoots: string[] | undefined
   /** `isRelevantChange()` of the incremental compiler (default: everything but the outFile and `.md` files). */
@@ -79,6 +81,7 @@ class FakeCompiler implements CompilerApi {
       diagnostics: this.diagnostics,
       stats: { files: 5, providers: 3, durationMs: 12 },
       watchFiles: this.watchFiles,
+      ...(this.extraFiles === undefined ? {} : { extraFiles: this.extraFiles }),
     }
   }
 
@@ -225,6 +228,21 @@ describe('znight generate', () => {
       expect(stale.stderr).toMatch(
         /✗ src\/\.znight\/container\.generated\.ts is out of date[\s\S]*✗ dist\/znight\.providers\.json is out of date/,
       )
+    })
+
+    it('names the stale extra files of the compiler extensions', async () => {
+      await generate()
+      const schema = join(project.path, 'schema.graphql')
+      compiler.extraFiles = [{ file: schema, content: 'type Query\n' }]
+      compiler.staleFiles = [schema]
+      const missing = await generate(['--check'])
+      expect(missing.code).toBe(1)
+      expect(missing.stderr).toContain('✗ schema.graphql is missing')
+      expect(missing.stderr).toContain('a compiler extension generates it from the sources')
+      expect(missing.stderr).not.toContain('after the build')
+      writeFileSync(schema, 'type Old\n')
+      const stale = await generate(['--check'])
+      expect(stale.stderr).toContain('✗ schema.graphql is out of date')
     })
 
     it('fails on compilation errors', async () => {
@@ -684,6 +702,30 @@ describe('compiler adapter', () => {
     // never stale with errors
     const broken = adaptCompilerModule({ compile: () => Promise.resolve(result('throw', [diagnostic('error', 'x')])) })
     expect(await broken.check({})).toMatchObject({ stale: false, staleFiles: [] })
+  })
+
+  it('compares and writes the extra files of the compiler extensions', async () => {
+    const schema = join(directory.path, 'schema.graphql')
+    const extraFiles = [{ file: schema, content: 'type Query\n' }]
+    writeIfChanged(outFile, 'x')
+    // the compiler only says `stale`: the CLI compares each output with the disk
+    const api = adaptCompilerModule({
+      generate: options =>
+        Promise.resolve({ ...result(), extraFiles, ...(options?.check === true ? { stale: true } : {}) }),
+    })
+    expect(await api.check({ root: directory.path })).toMatchObject({ stale: true, staleFiles: [schema] })
+    // a compiler without generate(): the CLI writes them like the module
+    const emulated = adaptCompilerModule({ compile: () => Promise.resolve({ ...result(), extraFiles }) })
+    expect((await emulated.generate({ root: directory.path })).written).toBe(true)
+    expect(readFileSync(schema, 'utf8')).toBe('type Query\n')
+    expect((await emulated.generate({ root: directory.path })).written).toBe(false)
+    expect(await emulated.check({ root: directory.path })).toMatchObject({ stale: false, staleFiles: [] })
+    const broken = adaptCompilerModule({
+      compile: () => Promise.resolve({ ...result('throw', [diagnostic('error', 'x')]), extraFiles }),
+    })
+    writeFileSync(schema, 'old')
+    expect((await broken.generate({ root: directory.path })).written).toBe(false)
+    expect(readFileSync(schema, 'utf8')).toBe('old')
   })
 
   it('builds everything on compile() when generate() is missing', async () => {

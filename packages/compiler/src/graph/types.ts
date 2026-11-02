@@ -60,6 +60,8 @@ export interface BindingRequestNode {
   /** Provider using the binding (validation edges), when given. */
   readonly from: Token | undefined
   readonly label: string
+  /** `true` when the edge from `from` is lazy (`{ from, lazy: true }`); absent otherwise. */
+  readonly lazy?: true
 }
 
 /** One interceptor of a method chain (first = outermost). */
@@ -142,7 +144,11 @@ export interface AliasNode {
   readonly token: Token
 }
 
-/** Kind of a graph edge (used by validation). */
+/**
+ * Kind of a graph edge (used by validation). `lazy` edges (a `Lazy<T>` parameter, or an extension
+ * edge declared with `{ lazy: true }`) count for ZNIGHT019 and `prune` only; `extension` edges for
+ * ZNIGHT003, ZNIGHT019 and `prune`; the others for every validation and the resolution order.
+ */
 export type EdgeKind = 'dependency' | 'multi' | 'optional' | 'lazy' | 'interceptor' | 'factory' | 'extension'
 
 /** A dependency edge between a provider and a provider or external. */
@@ -152,6 +158,12 @@ export interface GraphEdge {
   readonly kind: EdgeKind
   readonly label: string
   readonly location: Location | undefined
+  /**
+   * `true` on a `lazy` edge declared by a compiler extension or a compiled library (`{ lazy: true }`
+   * of `addDependency`, `resolveClassRef` or `bindInjection`), to tell it from a `Lazy<T>` parameter.
+   * Absent otherwise (`extension` edges are always declared by extensions).
+   */
+  readonly extension?: true
 }
 
 /** Extension data and the results of `bindInjection`. */

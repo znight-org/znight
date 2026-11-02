@@ -8,6 +8,7 @@
  * Only parsing and per-file facts survive between compiles; everything else is recomputed.
  */
 import type { CompileMode } from './codegen/container.ts'
+import type { ExtraFile } from './codegen/extra-files.ts'
 import type { DecoratorRanges } from './decorator-ranges.ts'
 import type { ExtensionLoadResult } from './extensions/loader.ts'
 import type { ApplicationGraph } from './graph/types.ts'
@@ -32,6 +33,7 @@ import { DiagnosticBag, Project, resolvePath } from './project/index.ts'
 import { COMPILER_VERSION, checkVersionSkew } from './version.ts'
 
 export type { CompileMode } from './codegen/container.ts'
+export type { ExtraFile } from './codegen/extra-files.ts'
 
 /** Options of {@link compile} / {@link createCompiler}: the compiler options plus their environment. */
 export interface CompileOptions extends ZnightOptions {
@@ -85,9 +87,15 @@ export interface CompileResult {
   /** Library mode: the `znight.providers.json` fragment (`undefined` otherwise, or on errors). */
   readonly library: LibraryOutput | undefined
   /**
+   * Extra outputs of compiler extensions (`GenerateContext.emitFile`), sorted by path: written with
+   * the generated module (only when their content changed), compared by check mode. Empty on errors.
+   * Like `diskCode`, they come from the `serve` rendering in every mode.
+   */
+  readonly extraFiles: readonly ExtraFile[]
+  /**
    * Files the result depends on: scanned sources, the other files read by the analysis outside
    * `node_modules` (constants and types imported from outside the `include` globs, workspace
-   * packages), package manifests, compiled libraries. Sorted; never the outFile.
+   * packages), package manifests, compiled libraries. Sorted; never the outFile nor the extra files.
    */
   readonly watchFiles: readonly string[]
   /**
@@ -108,13 +116,17 @@ export interface GenerateOptions {
 
 /** Result of {@link generate}. */
 export interface GenerateResult extends CompileResult {
-  /** Files written by this call (only when their content changed and there is no error): `diskCode` to `outFile`. */
+  /**
+   * Files written by this call (only when their content changed and there is no error): `diskCode`
+   * to `outFile`, the extra files, `znight.providers.json` in library mode.
+   */
   readonly written: readonly string[]
   /** Check mode: the generated files on disk are missing or out of date. */
   readonly stale: boolean
   /**
-   * Check mode: the generated files that are missing or out of date, the module first (then
-   * `znight.providers.json` in library mode). Empty when `stale` is `false`, and outside check mode.
+   * Check mode: the generated files that are missing or out of date, the module first (then the
+   * extra files, then `znight.providers.json` in library mode). Empty when `stale` is `false`, and
+   * outside check mode.
    */
   readonly staleFiles: readonly string[]
 }
@@ -136,6 +148,11 @@ export interface ZnightCompiler {
   generate(changes?: ProjectChanges, options?: GenerateOptions): Promise<GenerateResult>
   /** `true` for the generated module (watchers must ignore it). */
   isOutFile(file: string): boolean
+  /**
+   * `true` for a file the compiler writes: the generated module or an extra file of the latest
+   * result (`extraFiles`). Watchers must ignore them.
+   */
+  isGeneratedFile(file: string): boolean
   /** Forgets the loaded compiler extensions (reloaded by the next compile). */
   reloadExtensions(): void
 }
@@ -235,10 +252,15 @@ class IncrementalCompiler implements ZnightCompiler {
     return resolvePath(file, this.options.root) === this.options.outFile
   }
 
-  /** Watchers report the generated module itself: it is never a source. */
+  isGeneratedFile(file: string): boolean {
+    const resolved = resolvePath(file, this.options.root)
+    return resolved === this.options.outFile || (this.#last?.extraFiles.some(extra => extra.file === resolved) ?? false)
+  }
+
+  /** Watchers report the generated files themselves: they are never sources. */
   #withoutOutFile(changes: ProjectChanges): ProjectChanges {
     const keep = (paths: Iterable<string> | undefined): string[] =>
-      [...(paths ?? [])].filter(path => !this.isOutFile(path))
+      [...(paths ?? [])].filter(path => !this.isGeneratedFile(path))
     return { changed: keep(changes.changed), added: keep(changes.added), removed: keep(changes.removed) }
   }
 
@@ -291,6 +313,7 @@ class IncrementalCompiler implements ZnightCompiler {
     let code = ''
     let diskCode = ''
     let library: LibraryOutput | undefined
+    let extraFiles: readonly ExtraFile[] = []
     if (!hasErrors) {
       const render = (mode: CompileMode): ReturnType<typeof generateContainer> =>
         generateContainer({
@@ -304,8 +327,11 @@ class IncrementalCompiler implements ZnightCompiler {
       const container = render(this.mode)
       bag.addAll(container.diagnostics)
       code = container.code
-      // The disk copy is the `serve` rendering whatever the mode (only `source` locations differ).
-      diskCode = this.mode === 'build' && project.options.sourceLocations === 'dev' ? render('serve').code : code
+      // The disk copy is the `serve` rendering whatever the mode (only `source` locations differ),
+      // and so are the extra files.
+      const disk = this.mode === 'build' && project.options.sourceLocations === 'dev' ? render('serve') : container
+      diskCode = disk.code
+      extraFiles = disk.files
       if (this.options.library) {
         const emitted = emitLibrary({ project, analysis, version: COMPILER_VERSION })
         bag.addAll(emitted.diagnostics)
@@ -321,6 +347,7 @@ class IncrementalCompiler implements ZnightCompiler {
       })
       diskCode = code
       library = undefined
+      extraFiles = []
     }
     return {
       code,
@@ -336,7 +363,8 @@ class IncrementalCompiler implements ZnightCompiler {
         parsed: refresh.parsed,
       },
       library,
-      watchFiles: this.#watchFiles(),
+      extraFiles,
+      watchFiles: this.#watchFiles(extraFiles),
       decorators: collectDecoratorRanges(project, analysis.classes),
     }
   }
@@ -354,14 +382,18 @@ class IncrementalCompiler implements ZnightCompiler {
   /**
    * Files the result depends on: the scanned files, every other file the compile read outside
    * `node_modules` (a constant imported from `shared/`, a type of `src/types.d.ts`, a workspace
-   * package...), the package manifests and the compiled libraries. Never the outFile.
+   * package...), the package manifests and the compiled libraries. Never the outFile nor the extra
+   * files (`extraFiles`).
    */
-  #watchFiles(): string[] {
+  #watchFiles(extraFiles: readonly ExtraFile[]): string[] {
     const files = new Set(this.project.scannedFiles())
     for (const file of this.project.loadedFiles()) {
       if (!file.includes('/node_modules/') && !this.isOutFile(file)) {
         files.add(file)
       }
+    }
+    for (const extra of extraFiles) {
+      files.delete(extra.file)
     }
     const root = this.project.rootPackage
     if (root) {
@@ -416,14 +448,18 @@ function readText(file: string): string | undefined {
 }
 
 /**
- * The files written for a result: `diskCode` to `outFile` and, in library mode,
- * `znight.providers.json`. None when the result has errors. Internal (shared with the Bun preload).
+ * The files written for a result: `diskCode` to `outFile`, the extra files of the extensions and, in
+ * library mode, `znight.providers.json`. None when the result has errors. Internal (shared with the
+ * Bun preload).
  */
 export function generatedFiles(result: CompileResult): { readonly file: string; readonly content: string }[] {
   if (!result.ok) {
     return []
   }
   const outputs = [{ file: result.outFile, content: result.diskCode }]
+  for (const extra of result.extraFiles) {
+    outputs.push({ file: extra.file, content: extra.content })
+  }
   if (result.library) {
     outputs.push({ file: result.library.file, content: result.library.content })
   }

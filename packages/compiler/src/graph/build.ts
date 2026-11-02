@@ -32,6 +32,8 @@ export interface ExtensionEdge {
   readonly to: Token
   readonly location: Location | undefined
   readonly reason: string
+  /** Resolved at call time in the current scope (`{ lazy: true }`): a `lazy` graph edge. */
+  readonly lazy?: boolean
 }
 
 /** An extension injection request (`bindInjection`). */
@@ -39,6 +41,8 @@ export interface ExtensionBinding {
   readonly id: number
   readonly site: BindSite
   readonly from: Token | undefined
+  /** With `from`: the edge is `lazy` (`{ lazy: true }`). */
+  readonly lazy?: boolean
 }
 
 /** Output of {@link buildGraph}. */
@@ -68,6 +72,20 @@ export function buildGraph(input: {
 
   const addEdge = (from: Token, to: Token, kind: EdgeKind, label: string, location: Location | undefined): void => {
     edges.push({ from, to, kind, label, location })
+  }
+  /** An edge declared by an extension: `extension`, or `lazy` (marked, to tell it from a `Lazy<T>` parameter). */
+  const addExtensionEdge = (
+    from: Token,
+    to: Token,
+    lazy: boolean | undefined,
+    label: string,
+    location: Location | undefined,
+  ): void => {
+    if (lazy === true) {
+      edges.push({ from, to, kind: 'lazy', label, location, extension: true })
+    } else {
+      addEdge(from, to, 'extension', label, location)
+    }
   }
 
   for (const draft of registry.all()) {
@@ -161,7 +179,13 @@ export function buildGraph(input: {
       externals.set(external.token, external)
     }
     if (registry.has(edge.to) || external) {
-      addEdge(edge.from, edge.to, 'extension', edge.reason, edge.location ?? registry.get(edge.from)?.registration)
+      addExtensionEdge(
+        edge.from,
+        edge.to,
+        edge.lazy,
+        edge.reason,
+        edge.location ?? registry.get(edge.from)?.registration,
+      )
     }
   }
 
@@ -175,6 +199,7 @@ export function buildGraph(input: {
       request: { type: spec.type, qualifier: spec.qualifier, optional: spec.optional },
       from: request.from,
       label: request.site.label,
+      ...(request.lazy === true && request.from !== undefined ? { lazy: true as const } : {}),
     })
     if (!outcome) {
       continue
@@ -185,7 +210,13 @@ export function buildGraph(input: {
       }
       const from = request.from === undefined ? undefined : registry.get(request.from)
       if (from) {
-        addEdge(from.token, target.token, 'extension', request.site.label, request.site.location ?? from.registration)
+        addExtensionEdge(
+          from.token,
+          target.token,
+          request.lazy,
+          request.site.label,
+          request.site.location ?? from.registration,
+        )
       }
     }
   }
