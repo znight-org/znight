@@ -268,7 +268,7 @@ Affects, Decision) and a row in `rfcs/README.md`. Implement it only once it is a
   `packages/core/src/errors.ts`, shared by compiler diagnostics and runtime `ZnightError`s.
 - Ranges (`rfcs/README.md`): `ZNIGHT001`–`029` core, compiler and the 0.1 features (http, messaging,
   config, observability); `030`–`039` openapi; `040`–`049` schedule; `050`–`059` websocket and
-  `060`–`069` graphql (reserved for v0.2). Codes are allocated in order without gaps inside a block
+  `060`–`069` graphql (`060`–`066` allocated, RFC 0005). Codes are allocated in order without gaps inside a block
   and never change meaning. Reuse a lower code when the meaning is the same (a decorator on the
   wrong target is always ZNIGHT005); one catch-all code per package for invalid usage and options;
   third-party packages get no code.

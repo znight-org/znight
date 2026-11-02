@@ -964,7 +964,8 @@ import the runtime-free `@znight/http/compiler` for route metadata:
    (public, non-static, non-generic, non-computed, explicit return type), reads its parameters,
    binds `@UseGuard` classes (`resolveClassRef(..., { from: cls, role: 'guard' })`) and `Loader<L>`
    parameters (`bindInjection({ type: L }, { from: cls })`, a lazy edge with C3), reads route
-   decorators with `readRouteMeta` exported by `@znight/http/compiler` (H3), and stores the resolver
+   decorators with `readRouteMeta` and merges them with `effectiveRouteMeta`, both exported by
+   `@znight/http/compiler` (H3), and stores the resolver
    data. Types are read through the type shapes API, which keeps aliases as named shapes: the
    stored data holds identities and locations, never a `TypeInfo`.
 2. **`validate`**: builds the **schema model** globally, starting from the root fields and walking
@@ -1669,7 +1670,7 @@ system, more dependencies, conversions to WHATWG requests on Node), `reflect-met
 | C4  | `@znight/compiler`, `@znight/cli` | Extra outputs, `generate --check` staleness (§6.8)                                                                                                                                                                              | P1       |
 | H1  | `@znight/http`                    | Exists (`PluginHttpRoutes` / `PluginRoute`, RFC 0002); adds `PluginRoute.bodyLimit` (§8.3)                                                                                                                                      | P0       |
 | H2  | `@znight/http`                    | Implemented by RFC 0006: `HttpResponse.sse()`, `ctx.signal`, `EventChannel`, `injectSse()` (subscriptions build on it)                                                                                                          | Done     |
-| H3  | `@znight/http`                    | `RouteMetaCarrier` (`RouteDecorator.get()` widened to it), `readRouteMeta` and `requiredRouteGroups` exported from `@znight/http/compiler`: the design of RFC 0003 §6.4 and §8.2.4, made by this RFC since RFC 0003 is deferred | P0       |
+| H3  | `@znight/http`                    | `RouteMetaCarrier` (`RouteDecorator.get()` widened to it), `readRouteMeta(ctx, cls, method?)` (the entries of one target), `effectiveRouteMeta(classMeta, methodMeta)` (method decisions replace the class's) and `requiredRouteGroups(ctx, applied?)` (ordered `RequiredRouteGroup[]` with their suggestions) exported from `@znight/http/compiler`: the design of RFC 0003 §6.4 and §8.2.4, made by this RFC since RFC 0003 is deferred | P0       |
 | K1  | `@znight/core`                    | `graphql:operation` hook and event; `ErrorCode` / `ERROR_DESCRIPTIONS` ZNIGHT060–066 (done in phase 1)                                                                                                                          | P0       |
 | T1  | `@znight/testing`                 | Default `TestApp` closure adds `extensions.graphql` resolver tokens, their guard and loader tokens (structural reader `readGraphQLRoots`)                                                                                       | P0       |
 | O1  | `@znight/observability`           | `graphql:operation` wrapper: span, metrics, optional log (§8.10)                                                                                                                                                                | P1       |

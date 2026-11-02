@@ -249,6 +249,9 @@ export function generationContext(
   const ctx: GenerateContext<MessagingData> = {
     ...builders,
     extension: 'messaging',
+    emitFile: () => {
+      throw new Error('the messaging extension emits no file')
+    },
     options: result.project.options,
     types: NO_TYPES,
     graph,

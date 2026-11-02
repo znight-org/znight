@@ -181,6 +181,9 @@ export function generateSection(result: HttpAnalysis): GeneratedSection {
   const context: GenerateContext<HttpControllerData> = {
     ...createGenBuilders(),
     extension: 'http',
+    emitFile: () => {
+      throw new Error('the http extension emits no file')
+    },
     options: result.project.options,
     types: undefined as never,
     graph: result.graph,
