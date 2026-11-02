@@ -1,5 +1,13 @@
 # @znight/observability
 
+## 0.1.4
+
+### Patch Changes
+
+- b6d42bc: `ObservabilityPlugin` registers only the hooks of the features its options enable: with HTTP logging, metrics and tracing off, no `http:request` wrapper slows requests down.
+- Updated dependencies [c21ef01]
+  - @znight/core@0.1.4
+
 ## 0.1.3
 
 ### Patch Changes

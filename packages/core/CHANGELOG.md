@@ -1,5 +1,11 @@
 # @znight/core
 
+## 0.1.4
+
+### Patch Changes
+
+- c21ef01: GraphQL error codes ZNIGHT060–066 and the `graphql:operation` hook with its `GraphQLOperationEvent` (RFC 0005).
+
 ## 0.1.3
 
 ### Patch Changes

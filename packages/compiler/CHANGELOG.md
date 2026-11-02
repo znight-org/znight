@@ -1,5 +1,13 @@
 # @znight/compiler
 
+## 0.1.4
+
+### Patch Changes
+
+- c21ef01: Type shapes gain instance members (getters, visibility), enum members and literal order; extensions can declare lazy edges and emit extra files, which `znight generate --check` reports when stale.
+- Updated dependencies [c21ef01]
+  - @znight/core@0.1.4
+
 ## 0.1.3
 
 ### Patch Changes

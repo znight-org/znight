@@ -1,5 +1,18 @@
 # @znight/openapi
 
+## 0.1.4
+
+### Patch Changes
+
+- 1fb7b0e: Update development dependencies: @biomejs/biome, tsdown, @aws-sdk/client-secrets-manager, @aws-sdk/client-sqs and @cfworker/json-schema.
+- Updated dependencies [b6d42bc]
+- Updated dependencies [c21ef01]
+- Updated dependencies [c21ef01]
+- Updated dependencies [c21ef01]
+  - @znight/http@0.1.4
+  - @znight/compiler@0.1.4
+  - @znight/core@0.1.4
+
 ## 0.1.3
 
 ### Patch Changes
