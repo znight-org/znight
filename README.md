@@ -326,6 +326,7 @@ amqplib, prom-client...) are optional peer dependencies loaded from subpath expo
 | [`@znight/observability`](./packages/observability) | Pino logging, Prometheus metrics, OpenTelemetry tracing                              | dependency    |
 | [`@znight/openapi`](./packages/openapi)             | OpenAPI 3.1 document built at compile time, served with Scalar or Swagger UI         | dependency    |
 | [`@znight/schedule`](./packages/schedule)           | Cron, interval and timeout jobs checked at build time, locks across instances        | dependency    |
+| [`@znight/graphql`](./packages/graphql)             | In progress: code-first GraphQL, schema derived from TypeScript types at build time  | dependency    |
 | [`@znight/testing`](./packages/testing)             | `TestBed` with auto-mocks, `TestApp` for in-memory end-to-end tests                  | devDependency |
 | [`@znight/cli`](./packages/cli)                     | `znight new`, generators, `generate`, `dev`, `build`, `start`, `openapi`             | devDependency |
 

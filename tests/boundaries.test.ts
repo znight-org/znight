@@ -112,6 +112,7 @@ describe('repository boundaries (architecture §2)', () => {
     expect(packages.map(pkg => pkg.manifest.name)).toContain('@znight/core')
     expect(compilerEntries.map(({ pkg }) => pkg.manifest.name).sort()).toEqual([
       '@znight/config',
+      '@znight/graphql',
       '@znight/http',
       '@znight/messaging',
       '@znight/openapi',
@@ -154,6 +155,20 @@ describe('repository boundaries (architecture §2)', () => {
       })
     },
   )
+
+  it('@znight/graphql/compiler never loads graphql-js, dataloader nor the HTTP runtime (RFC 0005 §8.1)', () => {
+    const graphql = compilerEntries.find(({ pkg }) => pkg.manifest.name === '@znight/graphql')
+    expect(graphql).toBeDefined()
+    const { bare } = closure(graphql?.file ?? '')
+    const forbidden = bare.filter(
+      ({ specifier }) =>
+        specifier === 'graphql' ||
+        specifier.startsWith('graphql/') ||
+        specifier === 'dataloader' ||
+        (specifier.startsWith('@znight/http') && specifier !== '@znight/http/compiler'),
+    )
+    expect(forbidden.map(({ specifier, chain }) => `${specifier} (${show(chain)})`)).toEqual([])
+  })
 
   it.each(runtimeEntries.map(({ pkg, subpath, file }) => [`${pkg.manifest.name} ${subpath}`, pkg, file] as const))(
     '%s never imports ./compiler',

@@ -62,6 +62,7 @@ Every change must keep these. A change that bends one starts with an RFC (see [R
 | `@znight/openapi`       | OpenAPI 3.1 document built at compile time, served with Scalar or Swagger UI, emitted by `znight openapi` (RFC 0002)                                                             |
 | `@znight/messaging`     | Consumers, retries, dead letters; `/memory`, `/rabbitmq`, `/sqs`, `/kafka` drivers                                                                                               |
 | `@znight/schedule`      | `@Cron`, `@Interval`, `@Timeout`, `SchedulerRegistry`, lock stores, virtual clock for tests (RFC 0004)                                                                           |
+| `@znight/graphql`       | In progress (RFC 0005): code-first GraphQL, schema derived from TypeScript types at build time; resolvers, loaders, SSE subscriptions on graphql-js 17                           |
 | `@znight/config`        | Typed config classes loaded from env, `.env`, JSON/YAML, Vault, AWS Secrets Manager                                                                                              |
 | `@znight/observability` | Pino logger, Prometheus metrics (prom-client), OpenTelemetry tracing, `@Logged`, `@Traced`, `@Metric`                                                                            |
 | `@znight/testing`       | `TestBed` (auto-mocked dependencies), `TestApp` (in-memory end-to-end tests), mocks and spies                                                                                    |

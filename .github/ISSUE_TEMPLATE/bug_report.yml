@@ -59,6 +59,7 @@ body:
         - observability
         - openapi
         - schedule
+        - graphql
         - testing
         - cli
         - docs
