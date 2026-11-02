@@ -8,7 +8,7 @@
  */
 import type { Container, ScopeContext, Token } from '@znight/core'
 import type { HttpContext } from '@znight/http'
-import type { DocumentNode } from 'graphql'
+import type { DocumentNode, OperationDefinitionNode } from 'graphql'
 import type { LoaderFactory } from './loaders.ts'
 import type {
   BatchLoad,
@@ -33,51 +33,73 @@ export interface ContextRuntime {
   readonly signal: AbortSignal
 }
 
-/** What the operation context of one execution is built from. */
-export interface OperationInit {
-  readonly transport: GraphQLTransport
-  readonly operationType: GraphQLOperationKind
-  readonly operationName: string | undefined
-  readonly document: DocumentNode
-  readonly variables: Readonly<Record<string, unknown>> | undefined
-  readonly http: HttpContext | undefined
-  readonly signal: AbortSignal | undefined
-  readonly requestId: string | undefined
-  /** The request scope active when the operation started (an HTTP request), if any. */
-  readonly scope: ScopeContext | undefined
+/** What a request carries that the context exposes (a `GraphQLRequest`). */
+export interface ContextRequest {
+  readonly variables?: Readonly<Record<string, unknown>> | null | undefined
+}
+
+/** How the request reached the executor (`ExecuteOptions`). */
+export interface ContextOptions {
+  readonly transport?: GraphQLTransport
+  readonly http?: HttpContext
+  readonly signal?: AbortSignal
+  readonly requestId?: string
 }
 
 const NO_VARIABLES: Readonly<Record<string, unknown>> = Object.freeze({})
 
-/** The `GraphQLContext` of one operation. */
+/**
+ * The `GraphQLContext` of one operation. Built from references the executor already holds (the
+ * operation node, the request, the options, the enclosing scope): one allocation per operation,
+ * every field read on demand.
+ */
 export class OperationContext implements GraphQLContext {
-  readonly transport: GraphQLTransport
-  readonly operationType: GraphQLOperationKind
-  readonly operationName: string | undefined
   readonly document: DocumentNode
   readonly #runtime: ContextRuntime
-  readonly #init: OperationInit
+  readonly #operation: OperationDefinitionNode
+  readonly #request: ContextRequest
+  readonly #options: ContextOptions
+  readonly #scope: ScopeContext | undefined
   #requestId: string | undefined
   #http: HttpContext | null | undefined
   #signal: AbortSignal | undefined
   #state: Map<string | symbol, unknown> | undefined
   #loaders: Map<Token, BatchLoader<unknown, unknown>> | undefined
 
-  constructor(runtime: ContextRuntime, init: OperationInit) {
+  constructor(
+    runtime: ContextRuntime,
+    document: DocumentNode,
+    operation: OperationDefinitionNode,
+    request: ContextRequest,
+    options: ContextOptions,
+    scope: ScopeContext | undefined,
+  ) {
     this.#runtime = runtime
-    this.#init = init
-    this.transport = init.transport
-    this.operationType = init.operationType
-    this.operationName = init.operationName
-    this.document = init.document
-    this.#requestId = init.requestId
+    this.document = document
+    this.#operation = operation
+    this.#request = request
+    this.#options = options
+    this.#scope = scope
+    this.#requestId = options.requestId
+  }
+
+  get transport(): GraphQLTransport {
+    return this.#options.transport ?? 'direct'
+  }
+
+  get operationType(): GraphQLOperationKind {
+    return this.#operation.operation
+  }
+
+  get operationName(): string | undefined {
+    return this.#operation.name?.value
   }
 
   get requestId(): string {
     let id = this.#requestId
     if (id === undefined) {
       const http = this.http
-      const scoped = http === undefined ? this.#init.scope?.get(HttpTokens.RequestId) : undefined
+      const scoped = http === undefined ? this.#scope?.get(HttpTokens.RequestId) : undefined
       id = http?.requestId ?? (typeof scoped === 'string' ? scoped : randomUUID())
       this.#requestId = id
     }
@@ -88,19 +110,19 @@ export class OperationContext implements GraphQLContext {
     let http = this.#http
     if (http === undefined) {
       // a controller calling plugin.execute(): the HTTP request of the enclosing scope
-      http = this.#init.http ?? this.#init.scope?.get(HttpTokens.Context) ?? null
+      http = this.#options.http ?? this.#scope?.get(HttpTokens.Context) ?? null
       this.#http = http
     }
     return http ?? undefined
   }
 
   get variables(): Readonly<Record<string, unknown>> {
-    return this.#init.variables ?? NO_VARIABLES
+    return this.#request.variables ?? NO_VARIABLES
   }
 
   get signal(): AbortSignal {
     // HttpContext.signal is created on first read: only read it when someone asks
-    this.#signal ??= this.#init.signal ?? this.http?.signal ?? this.#runtime.signal
+    this.#signal ??= this.#options.signal ?? this.http?.signal ?? this.#runtime.signal
     return this.#signal
   }
 

@@ -46,3 +46,19 @@ The compiler extension generates `metadata.extensions.graphql` (`GraphQLMetadata
 `invoke` function per resolver method. Type references are strings in graphql-js' canonical form
 (`'[Book!]!'`), and `schemaHash` is the first 16 hexadecimal characters of the SHA-256 of the SDL
 printed by `src/sdl.ts`, byte-identical to graphql-js `printSchema()` of the schema the plugin builds.
+
+The generated `invoke` functions call two runtime helpers, kept stable:
+
+- `validateArgs(schema, value, label)`, exported from `@znight/graphql`: validates an argument with
+  a Standard Schema and returns its output, synchronously when the schema validates synchronously
+  (a promise otherwise, which the `async` invoker awaits); a failure is a `GraphQLException`
+  `BAD_USER_INPUT` whose `extensions.issues` lists `{ path, message }`. `label` is the argument
+  name, or `'arguments'` for `@Args(Schema)` without name.
+- `GraphQLContext.loader(token)`: the DataLoader of the current execution (one operation, or one
+  subscription event) for a loader provider token.
+
+Everything else in the section is data the plugin interprets at boot: it checks the section
+structurally (version, roots, names, type references, bindings, discriminators, scalars, groups),
+builds the schema with graphql-js constructors and fails with one ZNIGHT066 error listing every
+problem. Null handling (`nullAsUndefined`) is applied before `invoke`, by normalisers built at boot
+only for the fields that need one; a field without guards nor normaliser calls `invoke` directly.

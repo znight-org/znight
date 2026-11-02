@@ -478,17 +478,7 @@ export class GraphQLExecutor {
     options: ExecuteOptions,
     scope: ScopeContext | undefined,
   ): OperationContext {
-    return new OperationContext(this.#runtime, {
-      transport: options.transport ?? 'direct',
-      operationType: prepared.operation.operation,
-      operationName: prepared.operation.name?.value,
-      document: prepared.entry.document,
-      variables: request.variables ?? undefined,
-      http: options.http,
-      signal: options.signal,
-      requestId: options.requestId,
-      scope,
-    })
+    return new OperationContext(this.#runtime, prepared.entry.document, prepared.operation, request, options, scope)
   }
 
   // ------------------------------------------------------------------------------------------------
@@ -547,8 +537,8 @@ export class GraphQLExecutor {
         operationName: request.operationName,
         variableValues: request.variables,
         contextValue: ctx,
-        // an abort listener per execution in graphql-js: only with a signal to follow
-        ...(options.signal === undefined ? {} : { abortSignal: options.signal }),
+        // undefined: no abort listener in graphql-js (one per execution otherwise)
+        abortSignal: options.signal,
         hideSuggestions: this.#hideSuggestions,
       })
     } catch (error) {
@@ -606,7 +596,7 @@ export class GraphQLExecutor {
       operationName: request.operationName,
       variableValues: request.variables,
       contextValue: ctx,
-      ...(options.signal === undefined ? {} : { abortSignal: options.signal }),
+      abortSignal: options.signal,
       hideSuggestions: this.#hideSuggestions,
     })
     if (!('schema' in validated)) {
