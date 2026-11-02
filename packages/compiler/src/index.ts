@@ -70,6 +70,7 @@ export type {
   RootDetails,
   RootNode,
   Shape,
+  ShapeEnumMember,
   ShapeIssue,
   ShapeKeyword,
   ShapeOpaqueReason,

@@ -1063,8 +1063,10 @@ interface DecoratorSpec {
   declarations of the scanned files (application and source libraries) initialised with a call to
   the function of canonical identity `callee` (`'@znight/http#createRouteDecorator'`), applied
   anywhere or not, sorted by identity: `{ identity, name, displayName, file, location, call, args,
-  typeArgs, doc, exported }` (`args` evaluated as `value` arguments, nothing reported). Computed once
-  per compile and callee. **Impl.** compiled libraries and constants inside namespaces are not seen.
+  typeArgs, typeArgIdentities, doc, exported }` (`args` evaluated as `value` arguments, nothing
+  reported; `typeArgIdentities[i]` is the canonical identity named by the type argument `i` when it
+  is a type reference without type arguments, aliases not expanded, else `undefined`, so that it can
+  be passed to the `keep` option of type shapes). Computed once per compile and callee. **Impl.** compiled libraries and constants inside namespaces are not seen.
 - **Extension edges** (`addDependency`, `resolveClassRef({ from })`, `bindInjection({ from })`)
   count for ZNIGHT003 and ZNIGHT019/`prune`, never for ZNIGHT002 nor `resolutionOrder`: the plugin
   resolves them at runtime. **Impl.** consequence: a singleton controller using a request-scoped
@@ -1090,7 +1092,8 @@ interface DecoratorSpec {
     expanded, with its `typeArgs` and `explicitTypeArgs`) and `opaque` (`{ text, reason }`).
   - Interfaces are flattened with their `extends` and merged declarations; classes are their
     serialised fields (parameter properties first; no methods, accessors, static, `#private` nor
-    TypeScript `private` members; a `toJSON()` method gives the shape of its annotated return type);
+    TypeScript `private` members; a `toJSON()` method gives the shape of its annotated return type)
+    with `members: 'json'` (the default);
     generics, the usual utility types (`Partial`, `Required`, `Readonly`, `Pick`, `Omit`, `Record`,
     `NonNullable`, `Exclude`, `Extract`, `Awaited`), `keyof`, indexed access and mapped types over
     literal keys are applied structurally.
@@ -1106,7 +1109,25 @@ interface DecoratorSpec {
     `Kind.Cat` opaque (`unresolved`).
   - Options: `schemaAliases` (identity → `'input' | 'output'`, matched before alias expansion, also
     through aliases of them), `schemaMembers` (members meaning the type of a schema value, ArkType
-    `typeof S.infer`), `keep` (identities kept as `reference`), `jsdoc` (default `true`).
+    `typeof S.infer`), `keep` (identities kept as `reference`), `jsdoc` (default `true`), `members`
+    (`'json'` by default, or `'instance'`).
+  - `members: 'instance'` describes what reading an instance gives instead of what `JSON.stringify`
+    produces (GraphQL object types): `toJSON()` is ignored; a class is its public instance fields,
+    parameter properties and auto-accessors and its getters (`get x(): T`: the annotated return
+    type, `readonly` without a setter; without annotation, `opaque` with reason
+    `missing-annotation`), inherited ones first, in declaration order (parameter properties first);
+    `protected`, `private`, `#private` and static members, methods and setters are left out. An
+    interface also lists its getter signatures. Every property then carries `kind` (`'field'` or
+    `'getter'`) and `declaredBy` (the identity of the class, interface or alias whose source declares
+    it, kept through utility types, mapped types and intersections; `undefined` for a member written
+    in the target's own annotation). Function-typed properties are `opaque` (reason `function`) in
+    both modes: the extension skips them. With `'json'`, properties have neither `kind` nor
+    `declaredBy`, and every shape is the same as without the option.
+  - `NamedShape.enumMembers` (enums): `{ name, value, doc, location }` per member, in declaration
+    order (merged declarations included, no reverse mapping of numeric members). `NamedShape.literals`
+    (aliases of a union of literal types, `type Sort = 'title' | 'newest'`): the literals in source
+    order, de-duplicated (`shape` is the normalised, sorted union); set only when every member is
+    written as a literal type and the union keeps them all (`true | false` is `boolean`: not set).
   - `ShapeResult`: `root`, `named` (every named shape reached, transitively, by key, sorted; a
     declaration only used structurally is not listed) and `issues` (every `opaque` part and every
     `bigint`, with a path, the key of the named shape declaring it and a location). Results are

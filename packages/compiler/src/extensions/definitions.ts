@@ -6,7 +6,7 @@
  * It lets an extension know every definition of the application, including the ones that are
  * applied nowhere (RFC 0001: a required route decision group whose decorators are not used yet).
  */
-import type { Expression, VariableDeclarator } from 'oxc-parser'
+import type { Expression, TSType, VariableDeclarator } from 'oxc-parser'
 import type { Project, ScopeRef, TypeInfo } from '../project/index.ts'
 import type { DefinitionInfo } from './api.ts'
 
@@ -56,7 +56,9 @@ export class DefinitionIndex {
           }
           const identity = project.identities.identityOfDeclaration(declaration)
           const route = project.importRoute(declaration)
-          const typeArgs: TypeInfo[] = (call.typeArguments?.params ?? []).map(node => project.resolveType(scope, node))
+          const typeArgNodes = call.typeArguments?.params ?? []
+          const typeArgs: TypeInfo[] = typeArgNodes.map(node => project.resolveType(scope, node))
+          const typeArgIdentities = typeArgNodes.map(node => referenceIdentity(project, scope, node))
           found.push({
             identity: identity.identity,
             name: declaration.name,
@@ -66,6 +68,7 @@ export class DefinitionIndex {
             call: file.location(call),
             args: evaluateArguments(project, scope, call.arguments, VALUE_ARGUMENTS, declaration.name, IGNORE),
             typeArgs,
+            typeArgIdentities,
             doc: docAt(file, declarator.start),
             exported: route.ok && !route.route.typeOnly,
           })
@@ -74,6 +77,18 @@ export class DefinitionIndex {
     }
     return found.sort((a, b) => compareStrings(a.identity, b.identity))
   }
+}
+
+/** Identity of a plain type reference without type arguments (`EmailAddress`, `ns.Email`), aliases not expanded. */
+function referenceIdentity(project: Project, scope: ScopeRef, node: TSType): string | undefined {
+  let current = node
+  while (current.type === 'TSParenthesizedType') {
+    current = current.typeAnnotation
+  }
+  if (current.type !== 'TSTypeReference' || current.typeArguments || current.typeName.type === 'ThisExpression') {
+    return undefined
+  }
+  return project.resolveIdentifier(scope, current.typeName, 'type').identity?.identity
 }
 
 const VALUE_ARGUMENTS = { params: [], rest: 'value' } as const
