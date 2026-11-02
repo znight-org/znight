@@ -8,11 +8,13 @@ import type { HttpContext } from './context.ts'
 import type { RouteMetaEntry } from './decorators.ts'
 import type { HttpMethod } from './metadata.ts'
 import type { GuardRef } from './plugin.ts'
+import type { ByteSize } from './size.ts'
 
 import { ErrorCode, ZnightError } from '@znight/core'
 
 import { isGroupOf } from './decorators.ts'
 import { joinPaths, normalizePath, parseRoutePath, type RoutePath, RoutePathError } from './path.ts'
+import { parseByteSize } from './size.ts'
 
 /**
  * A route served by `HttpPlugin` on behalf of another plugin. It runs through the same pipeline as
@@ -35,6 +37,13 @@ export interface PluginRoute {
   readonly meta?: readonly RouteMetaEntry[]
   /** Guards of the route (provider classes or instances), run after the global guards. */
   readonly guards?: readonly GuardRef[]
+  /**
+   * Maximum body size of this route (`'100kb'`, `1048576`, `Infinity`), with the grammar of the
+   * `HttpPlugin` option `bodyLimit`, which it replaces for this route only (lower or higher, like
+   * `@BodyLimit` on a controller route). Past it, reading the body answers 413. Default: the
+   * `HttpPlugin` option.
+   */
+  readonly bodyLimit?: ByteSize
 }
 
 /** What {@link PluginHttpRoutes.httpRoutes} receives. */
@@ -78,6 +87,8 @@ export interface CollectedPluginRoute {
   readonly handler: (ctx: HttpContext) => unknown
   readonly meta: readonly NormalizedMetaEntry[]
   readonly guards: readonly unknown[]
+  /** Parsed `bodyLimit` in bytes, `undefined`: the plugin limit. */
+  readonly bodyLimit: number | undefined
 }
 
 /** A plugin route metadata entry with its group (internal). */
@@ -147,6 +158,13 @@ function validateRoute(instance: object, plugin: string, value: unknown, prefix:
   }
   const guards = route.guards ?? []
   if (!Array.isArray(guards)) throw invalid(plugin, `the guards of the route ${where} must be an array`)
+  const bodyLimit = route.bodyLimit === undefined ? undefined : parseByteSize(route.bodyLimit)
+  if (route.bodyLimit !== undefined && bodyLimit === undefined) {
+    throw invalid(
+      plugin,
+      `invalid bodyLimit ${describe(route.bodyLimit)} of the route ${where}: expected a size in bytes (1048576, '100kb', Infinity)`,
+    )
+  }
   return {
     plugin,
     instance,
@@ -157,6 +175,7 @@ function validateRoute(instance: object, plugin: string, value: unknown, prefix:
     handler: route.handler,
     meta: entries,
     guards,
+    bodyLimit,
   }
 }
 

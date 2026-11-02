@@ -31,7 +31,7 @@ import { joinPaths, normalizePath } from '../path.ts'
 import { parseByteSize } from '../size.ts'
 import { acceptsUndefined, isRaw, parameterType, planCoercion } from './coercion.ts'
 import { Codes, HTTP_PACKAGE, Ids, PARAM_SOURCES, ROUTE_METHODS } from './model.ts'
-import { isRouteMetaDecorator, isValueRef, routeMeta } from './route-decorators.ts'
+import { isRouteMetaDecorator, isValueRef, readRouteMeta } from './route-decorators.ts'
 
 /** Name of the extension (owner of the decorators in `DecoratorInfo.owner`). */
 export const EXTENSION_NAME = 'http'
@@ -96,7 +96,7 @@ export function analyzeHttpClass(cls: ClassInfo, ctx: Context): void {
   const basePath = normalizePath(options.path)
   const guards = classRefs(ctx, cls, cls.decorators, Ids.UseGuard, 'guard')
   const interceptors = classRefs(ctx, cls, cls.decorators, Ids.UseInterceptor, 'interceptor')
-  const meta = routeMeta(ctx, cls, cls.decorators, cls.displayName)
+  const meta = readRouteMeta(ctx, cls)
   const bodyLimit = bodyLimitOf(ctx, cls.decorators)
   const routes: HttpRouteData[] = []
   for (const method of cls.methods) {
@@ -328,7 +328,7 @@ function analyzeMethod(
   let headers = responseHeaders(ctx, decorators)
   const guards = classRefs(ctx, cls, decorators, Ids.UseGuard, 'guard')
   const interceptors = classRefs(ctx, cls, decorators, Ids.UseInterceptor, 'interceptor')
-  const meta = routeMeta(ctx, cls, decorators, where)
+  const meta = readRouteMeta(ctx, cls, method)
   const bodySchema =
     bodyValidation !== undefined && !params.some(param => param.source === 'body') ? bodyValidation.schema : undefined
   let rawResponse = params.some(param => param.source === 'response')

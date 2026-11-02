@@ -10,6 +10,9 @@
  * - `generate`: `metadata.extensions.http` with one `invoke` function per route (README,
  *   "Compiler contract").
  *
+ * It also exports the route decorator readers of other extensions: `readRouteMeta`,
+ * `effectiveRouteMeta` and `requiredRouteGroups`.
+ *
  * This entry only `import type`s from `@znight/compiler` and never loads the HTTP runtime.
  */
 import type { CompilerExtension, DecoratorSpec } from '@znight/compiler'
@@ -31,6 +34,16 @@ export type {
   SseRouteData,
   UploadData,
 } from './model.ts'
+export type { RequiredRouteGroup, RouteGroupMember } from './route-groups.ts'
+
+/**
+ * Route decorators for other extensions (RFC 0003 §6.4, RFC 0005 H3): read `createRouteDecorator`
+ * metadata on any class or method, and the required groups of the application, with the exact
+ * rules of controllers and routes. Stable API, see the README ("Route metadata in other
+ * extensions").
+ */
+export { effectiveRouteMeta, readRouteMeta } from './route-decorators.ts'
+export { requiredRouteGroups } from './route-groups.ts'
 
 const ROUTE: DecoratorSpec = { targets: ['method'], params: ['static'] }
 const NAME_OR_SCHEMA: DecoratorSpec = { targets: ['parameter'], params: ['value', 'value'] }

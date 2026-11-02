@@ -6,6 +6,10 @@
  * (the options) are statically evaluable. Its argument is evaluated like a `value` decorator
  * argument (literals, `const` references, references to exported bindings); without argument the
  * value is `true`. Decorators of one group are alternatives: one per controller or route.
+ *
+ * Every helper takes the analysis context of **any** extension: other extensions read route
+ * decorators on their own targets (gateways, resolvers) with {@link readRouteMeta}, exported by
+ * `@znight/http/compiler`.
  */
 import type {
   AnalyzeContext,
@@ -13,15 +17,16 @@ import type {
   DecoratorInfo,
   Diagnostic,
   Location,
+  MethodInfo,
   StaticValue,
   ValueRef,
 } from '@znight/compiler'
-import type { HttpControllerData, MetaEntry } from './model.ts'
+import type { MetaEntry } from './model.ts'
 
 import { type AstNode, child, children, isNode, unwrap } from './ast.ts'
 import { Codes, GROUP_NAME, Ids } from './model.ts'
 
-type Context = AnalyzeContext<HttpControllerData>
+type Context = AnalyzeContext<unknown>
 type Project = Context['project']
 type ScopeInput = Parameters<Project['evaluate']>[0]
 type ExpressionInput = Parameters<Project['evaluate']>[1]
@@ -293,6 +298,44 @@ export function routeMeta(
     })
   }
   return entries
+}
+
+/**
+ * The route metadata entries of a class (`method` omitted) or of one of its methods: the route
+ * decorators (`createRouteDecorator` consts) applied to that target, in source order, read exactly
+ * as the http extension reads controllers and routes (keys, statically evaluated values, groups,
+ * `required`). Problems are reported as ZNIGHT005 through `ctx`, once per call: read each target
+ * once. Decorators that are not route decorators are ignored.
+ *
+ * Works with the analysis context of any extension. The entries of a target are its own: combine a
+ * class and a method with {@link effectiveRouteMeta}.
+ *
+ * ```ts
+ * analyzeClass(cls, ctx) {
+ *   const classMeta = readRouteMeta(ctx, cls)
+ *   for (const method of cls.methods) {
+ *     const meta = effectiveRouteMeta(classMeta, readRouteMeta(ctx, cls, method))
+ *   }
+ * }
+ * ```
+ */
+export function readRouteMeta(ctx: AnalyzeContext<unknown>, cls: ClassInfo, method?: MethodInfo): MetaEntry[] {
+  return method === undefined
+    ? routeMeta(ctx, cls, cls.decorators, cls.displayName)
+    : routeMeta(ctx, cls, method.decorators, `${cls.displayName}.${method.name}`)
+}
+
+/**
+ * The effective metadata of a method from the entries of its class and its own (RFC 0001 §5.1):
+ * the class entries, except those of a group the method decides itself, then the method entries.
+ * The same rule as `ctx.route.meta` at runtime.
+ */
+export function effectiveRouteMeta(classMeta: readonly MetaEntry[], methodMeta: readonly MetaEntry[]): MetaEntry[] {
+  if (methodMeta.length === 0) {
+    return [...classMeta]
+  }
+  const decided = new Set(methodMeta.map(entry => entry.group))
+  return [...classMeta.filter(entry => !decided.has(entry.group)), ...methodMeta]
 }
 
 /** `true` when the decorator is a route metadata decorator. */

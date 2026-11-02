@@ -398,14 +398,30 @@ export interface RouteMetaEntry<T = unknown> {
   readonly required?: boolean
 }
 
+/**
+ * Anything that carries effective route metadata: the {@link HttpContext} of a request, and the
+ * contexts of other transports that reuse route decorators (a GraphQL resolver context, a WebSocket
+ * gateway context). {@link RouteDecorator.get} reads `route.meta[key]`; nothing else is required.
+ *
+ * ```ts
+ * const carrier: RouteMetaCarrier = { route: { meta: { roles: ['admin'] } } }
+ * Roles.get(carrier) // ['admin']
+ * ```
+ */
+export interface RouteMetaCarrier {
+  /** The matched route (or field, or handler), `undefined` when there is none. */
+  readonly route?: { readonly meta: Readonly<Record<string, unknown>> } | undefined
+}
+
 /** A user-defined route metadata decorator created with {@link createRouteDecorator}. */
 export interface RouteDecorator<T> extends RouteDecoratorInfo {
   (...args: RouteDecoratorArgs<T>): ClassMarker & MethodMarker
   /**
    * The value of the current route, if set. Reads the effective metadata: the route's decision of
-   * a group wins over the controller's.
+   * a group wins over the controller's. Accepts any {@link RouteMetaCarrier}: an
+   * {@link HttpContext}, or the context of another transport exposing `route.meta`.
    */
-  get(ctx: HttpContext): T | undefined
+  get(ctx: RouteMetaCarrier): T | undefined
   /**
    * The same metadata as data (`{ key, value, group, required }`), for routes that are not compiled
    * controllers (plugin routes: `OpenApiPlugin.configure({ meta: [Public.meta()] })`). The value is
@@ -479,7 +495,7 @@ export function createRouteDecorator<T = true>(key: string, options?: RouteDecor
     key,
     group,
     required,
-    get: (ctx: HttpContext): T | undefined => ctx.route?.meta[key] as T | undefined,
+    get: (ctx: RouteMetaCarrier): T | undefined => ctx.route?.meta[key] as T | undefined,
     meta: (...args: RouteDecoratorArgs<T>): RouteMetaEntry<T> =>
       Object.freeze({ key, value: (args.length === 0 ? true : args[0]) as T, group, required }),
   })
