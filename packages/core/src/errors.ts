@@ -7,7 +7,7 @@
  *   messaging, config, observability).
  * - From `ZNIGHT030`, each first-party package reserves a block of ten: `ZNIGHT030`–`039`
  *   `@znight/openapi`, `ZNIGHT040`–`049` `@znight/schedule`, `ZNIGHT050`–`059` `@znight/websocket`
- *   (reserved), `ZNIGHT060`–`069` `@znight/graphql` (reserved).
+ *   (reserved), `ZNIGHT060`–`069` `@znight/graphql`.
  *
  * Within a range, codes are allocated in order without gaps. A package uses its block for its own
  * failure modes, with one catch-all code for invalid usage and options, and reuses a lower code
@@ -100,6 +100,34 @@ export const ErrorCode = {
   MissingLockStore: 'ZNIGHT043',
   /** A scheduled run was aborted (`ctx.signal.reason`, `JobAbortedError`); never thrown by the framework. */
   JobAborted: 'ZNIGHT044',
+
+  // ZNIGHT060–069: @znight/graphql (RFC 0005)
+  /** A TypeScript type cannot be mapped to a GraphQL type, or a resolver lacks the annotation it needs. */
+  InvalidGraphQLType: 'ZNIGHT060',
+  /** Two declarations or root fields share a GraphQL name, or a name is invalid or reserved. */
+  GraphQLNameConflict: 'ZNIGHT061',
+  /**
+   * Invalid resolver structure: `@ResolveField` without `@Parent()`, a subscription not returning an
+   * async iterable, no `@Query`, inherited handlers, resolvers in a compiled library.
+   */
+  InvalidResolver: 'ZNIGHT062',
+  /**
+   * Invalid input position: a type used as input and output, a getter, a union, a cycle of non-null
+   * input fields, a default value not matching its type.
+   */
+  InvalidGraphQLInput: 'ZNIGHT063',
+  /** The members of a GraphQL union cannot be told apart at runtime. */
+  UnresolvableAbstractType: 'ZNIGHT064',
+  /**
+   * Invalid loader: `@Loader()` on a type that is not `Loader<L>`, `L` not a `BatchLoad`; at runtime,
+   * a batch function returning another number of values than keys.
+   */
+  InvalidLoader: 'ZNIGHT065',
+  /**
+   * Invalid GraphQL setup at boot: malformed or version-skewed metadata, invalid schema, invalid
+   * `GraphQLPlugin` options, missing `HttpPlugin`, scalar name mismatch.
+   */
+  InvalidGraphQLSetup: 'ZNIGHT066',
 } as const
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode]
@@ -142,6 +170,13 @@ export const ERROR_DESCRIPTIONS: Readonly<Record<ErrorCode, string>> = {
   ZNIGHT042: 'Unknown job: no job has this name',
   ZNIGHT043: 'Missing lock store: a job requires a lock but SchedulePlugin has no store',
   ZNIGHT044: 'Job aborted: a scheduled run was aborted (timeout, lost lock, removal or shutdown)',
+  ZNIGHT060: 'Invalid GraphQL type: a TypeScript type cannot be mapped to a GraphQL type',
+  ZNIGHT061: 'GraphQL name conflict: two types or root fields share a name, or a name is invalid or reserved',
+  ZNIGHT062: 'Invalid resolver: the structure of a GraphQL resolver is invalid',
+  ZNIGHT063: 'Invalid GraphQL input: a type cannot be used in an input position',
+  ZNIGHT064: 'Unresolvable abstract type: the members of a GraphQL union cannot be told apart at runtime',
+  ZNIGHT065: 'Invalid loader: not a Loader of a BatchLoad provider, or a batch returning the wrong number of values',
+  ZNIGHT066: 'Invalid GraphQL setup: metadata, schema, GraphQLPlugin options or HttpPlugin missing',
 }
 
 export interface ZnightErrorOptions extends ErrorOptions {
