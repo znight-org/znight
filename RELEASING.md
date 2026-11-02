@@ -321,16 +321,23 @@ GitHub (repository `znight-org/znight`, public):
   `gh api -X POST repos/znight-org/znight/pages -f build_type=workflow`. The site appears at
   `https://znight-org.github.io/znight/` after the first deployment.
 - [ ] **Dependabot changesets** ([`dependabot-changesets.yml`](.github/workflows/dependabot-changesets.yml)):
-  a deploy key with write access, because a push with it starts CI where one with the default
-  `GITHUB_TOKEN` does not, and its private key as the **Dependabot** secret `DEPLOY_KEY` (a run
-  started by Dependabot reads no Actions secret). Deploy keys must be allowed for the organization.
+  a GitHub App, because a push with its token starts CI where one with the default `GITHUB_TOKEN`
+  does not, and its credentials as **Dependabot** secrets (a run started by Dependabot reads no
+  Actions secret).
+  1. Create the App in the organization (Settings → Developer settings → GitHub Apps → New GitHub
+     App), or open the link below, which fills the form: no webhook, _Only on this account_, and one
+     repository permission, _Contents_: read and write. Nothing else is needed: the workflow only
+     pushes.
+     `https://github.com/organizations/znight-org/settings/apps/new?name=znight-dependabot-changesets&url=https://github.com/znight-org/znight&public=false&webhook_active=false&contents=write`
+  2. Generate a private key (a `.pem` file) and install the App on `znight-org/znight` only.
+  3. Store the _Client ID_ of the App (`Iv...`, not the numeric App ID) and the key, then delete the
+     file:
 
-  ```sh
-  ssh-keygen -t ed25519 -N "" -C dependabot-changesets -f dependabot-changesets-key
-  gh repo deploy-key add dependabot-changesets-key.pub --repo znight-org/znight --title dependabot-changesets --allow-write
-  gh secret set DEPLOY_KEY --app dependabot --repo znight-org/znight < dependabot-changesets-key
-  rm dependabot-changesets-key dependabot-changesets-key.pub
-  ```
+     ```sh
+     gh secret set DEPENDABOT_APP_CLIENT_ID --app dependabot --repo znight-org/znight
+     gh secret set DEPENDABOT_APP_PRIVATE_KEY --app dependabot --repo znight-org/znight < the-key.pem
+     rm the-key.pem
+     ```
 
 - [ ] **Private vulnerability reporting**: Settings → Code security → Private vulnerability
   reporting → Enable (used by [SECURITY.md](SECURITY.md) and the issue template), or
@@ -357,13 +364,12 @@ npm (organization `@znight`):
   wait for that, see [How a release goes](#how-a-release-goes)). Without the banner, close and
   reopen the pull request: that starts its CI. Runs started by hand (**Run workflow** on the
   `changeset-release/main` branch) do not count for the ruleset.
-- **The Dependabot changesets job fails with "No deploy key"**: the Dependabot secret `DEPLOY_KEY` is
-  missing, or the run was not started by Dependabot (a run started by someone else, after a push to
-  the branch for example, reads the Actions secrets instead). Add the secret
-  ([checklist](#owner-setup-checklist)), then run it again with `@dependabot rebase`.
-- **`gh repo deploy-key add` fails with "Deploy keys are disabled for this repository"** (HTTP 422):
-  the organization disables them (`deploy_keys_enabled_for_repositories` in
-  `gh api orgs/znight-org`); allow them in the organization settings first.
+- **The Dependabot changesets job fails on "Create the GitHub App token"**: the Dependabot secrets
+  `DEPENDABOT_APP_CLIENT_ID` and `DEPENDABOT_APP_PRIVATE_KEY` are missing or come from different
+  Apps, the App is not installed on the repository, or the run was not started by Dependabot (a run
+  started by someone else, after a push to the branch for example, reads the Actions secrets
+  instead). Fix them ([checklist](#owner-setup-checklist)), then run it again with
+  `@dependabot rebase`.
 - **The version pull request is not opened**: enable _Allow GitHub Actions to create and approve
   pull requests_ ([checklist](#owner-setup-checklist)).
 - **The publish job refuses to start ("no required reviewers")**: add reviewers to the `npm`
