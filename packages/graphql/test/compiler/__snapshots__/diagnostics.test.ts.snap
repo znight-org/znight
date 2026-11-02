@@ -1,0 +1,73 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`formatted diagnostics (RFC 0005 §6.6) ZNIGHT060: an unmappable type, with the path from the root field 1`] = `
+"✗ ZNIGHT060: Cannot map binary data to a GraphQL type (Book.cover)
+  --> src/catalog/book.ts:14:19
+   |
+14 |   readonly cover: Uint8Array | null
+   |                   ^^^^^^^^^^^^^^^^^
+   |
+  ::: src/catalog/book.resolver.ts:13:3
+   |
+13 |   book(@Args('id') id: ID): Promise<Book | null> {
+   |   ---- reached from Query.book → Book
+   = hint: Expose a URL (coverUrl: string), hide the property with /** @gqlHidden */, or declare a scalar: export const Base64 = scalar<Uint8Array>('Base64', { ... })"
+`;
+
+exports[`formatted diagnostics (RFC 0005 §6.6) ZNIGHT063: a declaration used as output and as input 1`] = `
+"✗ ZNIGHT063: 'Money' is used as an output type (Book.price) and as an input type (NewBookInput.price)
+  --> src/shared/money.ts:3:18
+   |
+ 3 | export interface Money {
+   |                  ^^^^^
+   |
+  ::: src/catalog/book.ts:5:19
+   |
+ 5 |   readonly price: Money
+   |                   ----- used as output: Book.price
+   |
+  ::: src/catalog/book.ts:10:19
+   |
+10 |   readonly price: Money
+   |                   ----- used as input: NewBookInput.price
+   = hint: GraphQL needs two types: declare \`export interface MoneyInput extends Money {}\` and use it in NewBookInput"
+`;
+
+exports[`formatted diagnostics (RFC 0005 §6.6) ZNIGHT064: union members that cannot be told apart 1`] = `
+"✗ ZNIGHT064: The members of union SearchResult cannot be told apart at runtime: Author and Book have no common literal property
+  --> src/catalog/book.ts:43:13
+   |
+43 | export type SearchResult = Book | Author
+   |             ^^^^^^^^^^^^
+   = hint: Add a literal property to each member (readonly kind: 'author' / readonly kind: 'book'), or make the members classes"
+`;
+
+exports[`formatted diagnostics (RFC 0005 §6.6) ZNIGHT062: a field resolver without @Parent(), a subscription without async iterable 1`] = `
+"✗ ZNIGHT062: @ResolveField BookResolver.author has no @Parent() parameter
+  --> src/catalog/book.resolver.ts:17:3
+   |
+17 |   @ResolveField()
+   |   ^^^^^^^^^^^^^^^
+   = hint: Declare the parent object first: author(@Parent() parent: ParentType, ...)
+
+✗ ZNIGHT062: @Subscription BookResolver.bookAdded must return an async iterable, not Book
+  --> src/catalog/book.resolver.ts:23:3
+   |
+23 |   bookAdded(): Promise<Book> {
+   |   ^^^^^^^^^
+   = hint: Declare it as an async generator (async *bookAdded(): AsyncGenerator<Event>) or return pubsub.subscribe(...) (AsyncIterable<Event>)"
+`;
+
+exports[`formatted diagnostics (RFC 0005 §6.6) ZNIGHT023: a root field without access decision 1`] = `
+"✗ ZNIGHT023: Root field Mutation.deleteBook (BookResolver.deleteBook) has no "access" decision
+  --> src/catalog/book.resolver.ts:18:3
+   |
+18 |   deleteBook(@Args('id') id: ID): boolean {
+   |   ^^^^^^^^^^
+   |
+  ::: src/auth/access.ts:5:14
+   |
+ 5 | export const Public = createRouteDecorator('public', { group: 'access', required: true })
+   |              ------ The "access" group is required
+   = hint: Add @Public(), @Authenticated() or @Roles(...) to the method or to BookResolver"
+`;

@@ -39,6 +39,52 @@ export class BookResolver {
 }
 ```
 
+## Compiler extension
+
+`@znight/graphql/compiler` is discovered as soon as the application imports `@znight/graphql`. It
+derives the schema from the root fields (`@Query`, `@Mutation`, `@Subscription`) and every type
+they reach, with the mapping of RFC 0005 §6.2: `string`, `number` (`Float`), `boolean`, the `ID`,
+`Int`, `Float` and `JSONValue` aliases, `Date` (`DateTime`), `bigint` (`BigInt`), `scalar<T>()`
+types, enums and named unions of string literals, classes, interfaces and named object aliases
+(object types in output position, input types in input position), generic instances (`Page<Book>`
+is `BookPage`, unless an alias names it), named unions of object types, arrays, `Set` and
+`Iterable` (output only), and nullability from `null`, `undefined` and `?`. Descriptions,
+`@param`, `@deprecated`, `@default`, `@gqlHidden` and `@gqlName` come from JSDoc.
+
+Options are given in `znight.config.ts`; the configured copy replaces the discovered extension:
+
+```ts
+import graphql from '@znight/graphql/compiler'
+import type { ZnightOptions } from '@znight/compiler'
+
+export default {
+  extensions: [graphql.configure({ sdl: 'schema.graphql' })],
+} satisfies ZnightOptions
+```
+
+| Option   | Default   | Description                                                                                                         |
+| -------- | --------- | ------------------------------------------------------------------------------------------------------------------- |
+| `sdl`    | `false`   | Path of the SDL artifact, relative to the root, written with the generated module and checked by `generate --check` |
+| `number` | `'Float'` | GraphQL type of `number` (`'Int'` suits counts and identifiers)                                                     |
+
+Build-time diagnostics, each with a location, a hint and, for types, the path from the root field
+(`reached from Query.book → Book`):
+
+| Code      | When                                                                                                                                                                                                                                           |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ZNIGHT005 | Method shape (static, private, accessor, generic), parameters without or with several GraphQL decorators, `@znight/http` look-alikes (`Ctx`, `Query`), `@Resolver` on a controller, unexported scalars                                         |
+| ZNIGHT023 | A root field without a decision of a required route decorator group (RFC 0001)                                                                                                                                                                 |
+| ZNIGHT060 | A type without GraphQL mapping (`any`, `Map`, `Uint8Array`, tuples, anonymous objects and unions, `Promise` or async iterables out of place), a missing return type                                                                            |
+| ZNIGHT061 | Two declarations or root fields with one name, reserved or invalid names, a field resolver changing the type of the property it replaces, duplicate arguments                                                                                  |
+| ZNIGHT062 | `@ResolveField` without `@Parent()`, a subscription not returning an async iterable, no `@Query`, field methods outside a `@Resolver` (not inherited), resolvers in compiled libraries; a field resolver whose parent is unreachable (warning) |
+| ZNIGHT063 | A declaration used as input and output (with the `extends` fix-it), getters, unions and sets in inputs, cycles of non-null input fields, defaults not matching their type, required deprecated arguments                                       |
+| ZNIGHT064 | Union members that cannot be told apart (no exported classes, no `__typename`, no literal property with a distinct value per member)                                                                                                           |
+| ZNIGHT065 | A `@Loader()` parameter not typed `Loader<L>`, `L` not implementing `BatchLoad<K, V>`                                                                                                                                                          |
+
+Guards (`@UseGuard`) and loaders (`Loader<L>`) are bound with lazy edges: they are resolved per call
+in the current scope, so a singleton resolver may use request-scoped ones (no ZNIGHT003). A collision
+between the GraphQL path and an HTTP route is checked when `HttpPlugin` registers its routes.
+
 ## Compiler contract
 
 The compiler extension generates `metadata.extensions.graphql` (`GraphQLMetadata`, declared in
@@ -46,3 +92,25 @@ The compiler extension generates `metadata.extensions.graphql` (`GraphQLMetadata
 `invoke` function per resolver method. Type references are strings in graphql-js' canonical form
 (`'[Book!]!'`), and `schemaHash` is the first 16 hexadecimal characters of the SHA-256 of the SDL
 printed by `src/sdl.ts`, byte-identical to graphql-js `printSchema()` of the schema the plugin builds.
+The section is omitted when the application has no resolver.
+
+`invoke` maps the graphql-js arguments to the method parameters: `@Args('x')` → `a['x']`,
+`@Args()` → `a`, `@Parent()` → `p`, `@Ctx()` → `c`, `@Info()` → `i`, `@Loader()` →
+`c.loader(token)`. Unused middle parameters are `_`-prefixed and trailing ones omitted. An argument
+validated with a Standard Schema (`@Args('input', Schema)`) goes through `validateArgs(Schema, value,
+label)`, exported by the runtime entry: it returns the output synchronously when the schema validates
+synchronously, a promise otherwise, so the generated code calls the method directly and resumes in an
+`async` arrow only when `isThenable()` (of `@znight/http`) says so:
+
+```ts
+// generated
+;(r: BookResolver, _p: unknown, a: GraphQLArgs) => {
+  const v0 = validateArgs(NewBookInput, a['input'], 'input')
+  if (isThenable(v0)) return (async () => r.addBook((await v0) as never))()
+  return r.addBook(v0 as never)
+}
+```
+
+`nullAsUndefined: true` marks the arguments and input fields whose TypeScript type does not accept
+`null`; `defaultValue` holds external values (enum values by name); `groups` lists the route
+decorator groups the runtime needs, like `extensions.http.groups`.

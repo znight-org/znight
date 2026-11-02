@@ -1,0 +1,211 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`the catalog (RFC 0005 §5) generates the section of §7.1 1`] = `
+"    ['graphql']: {
+      ['version']: 1,
+      ['schemaHash']: '2d539ba15a1d1d47',
+      ['roots']: { ['query']: 'Query', ['mutation']: 'Mutation', ['subscription']: 'Subscription' },
+      ['types']: [
+        {
+          ['kind']: 'object',
+          ['name']: 'Author',
+          ['fields']: [
+            { ['name']: 'kind', ['type']: 'String!' },
+            { ['name']: 'id', ['type']: 'ID!' },
+            { ['name']: 'name', ['type']: 'String!' },
+            { ['name']: 'born', ['type']: 'Int' },
+          ],
+        },
+        {
+          ['kind']: 'object',
+          ['name']: 'Book',
+          ['description']: 'A book of the catalog.',
+          ['fields']: [
+            { ['name']: 'kind', ['type']: 'String!' },
+            { ['name']: 'id', ['type']: 'ID!' },
+            { ['name']: 'title', ['type']: 'String!' },
+            { ['name']: 'isbn', ['type']: 'String!' },
+            {
+              ['name']: 'publishedYear',
+              ['type']: 'Int',
+              ['description']: 'Year of first publication, \`null\` when unknown.',
+            },
+            { ['name']: 'genre', ['type']: 'Genre!' },
+            { ['name']: 'tags', ['type']: '[String!]!' },
+            { ['name']: 'createdAt', ['type']: 'DateTime!' },
+            { ['name']: 'category', ['type']: 'String', ['deprecationReason']: 'Use \`tags\`.' },
+            {
+              ['name']: 'author',
+              ['type']: 'Author!',
+              ['description']: 'Who wrote the book. Batched: one repository call per execution, whatever the number of books.',
+              ['resolver']: {
+                ['token']: 'src/catalog/book.resolver.ts#BookResolver',
+                ['method']: 'author',
+                ['operation']: 'field',
+                ['guards']: [],
+                ['meta']: { ['public']: true },
+                ['loaders']: ['src/catalog/authors-by-id.loader.ts#AuthorsById'],
+                ['invoke']: (r: BookResolver, p: unknown, _a: GraphQLArgs, c: GraphQLContext) =>
+                  r.author(p as never, c.loader('src/catalog/authors-by-id.loader.ts#AuthorsById') as never),
+              },
+            },
+          ],
+        },
+        {
+          ['kind']: 'object',
+          ['name']: 'BookPage',
+          ['description']: 'A page of results.',
+          ['fields']: [
+            { ['name']: 'items', ['type']: '[Book!]!' },
+            { ['name']: 'total', ['type']: 'Int!' },
+            { ['name']: 'hasMore', ['type']: 'Boolean!' },
+          ],
+        },
+        {
+          ['kind']: 'enum',
+          ['name']: 'BookSort',
+          ['description']: 'Sort orders of the book list.',
+          ['values']: [{ ['name']: 'title', ['value']: 'title' }, { ['name']: 'newest', ['value']: 'newest' }],
+        },
+        { ['kind']: 'scalar', ['name']: 'DateTime', ['builtin']: true },
+        {
+          ['kind']: 'enum',
+          ['name']: 'Genre',
+          ['description']: 'Literary genres.',
+          ['values']: [
+            { ['name']: 'Fantasy', ['value']: 'fantasy' },
+            { ['name']: 'ScienceFiction', ['value']: 'science-fiction' },
+            { ['name']: 'Mystery', ['value']: 'mystery' },
+          ],
+        },
+        {
+          ['kind']: 'object',
+          ['name']: 'Mutation',
+          ['fields']: [
+            {
+              ['name']: 'addBook',
+              ['type']: 'Book!',
+              ['description']: 'Adds a book to the catalog.',
+              ['args']: [{ ['name']: 'input', ['type']: 'NewBookInput!' }],
+              ['resolver']: {
+                ['token']: 'src/catalog/book.resolver.ts#BookResolver',
+                ['method']: 'addBook',
+                ['operation']: 'mutation',
+                ['guards']: [],
+                ['meta']: { ['roles']: ['editor'] },
+                ['invoke']: (r: BookResolver, _p: unknown, a: GraphQLArgs) => {
+                  const v0 = validateArgs(NewBookInput, a['input'], 'input')
+                  if (isThenable(v0)) return (async () => r.addBook(await v0 as never))()
+                  return r.addBook(v0 as never)
+                },
+              },
+            },
+          ],
+        },
+        {
+          ['kind']: 'input',
+          ['name']: 'NewBookInput',
+          ['description']: 'A new book. The interface is the GraphQL input type, the schema of the same name validates it.',
+          ['fields']: [
+            { ['name']: 'title', ['type']: 'String!' },
+            { ['name']: 'isbn', ['type']: 'String!' },
+            { ['name']: 'authorId', ['type']: 'String!' },
+            { ['name']: 'genre', ['type']: 'Genre!' },
+            { ['name']: 'publishedYear', ['type']: 'Int' },
+            { ['name']: 'tags', ['type']: '[String!]', ['nullAsUndefined']: true },
+          ],
+        },
+        {
+          ['kind']: 'object',
+          ['name']: 'Query',
+          ['fields']: [
+            {
+              ['name']: 'books',
+              ['type']: 'BookPage!',
+              ['description']: 'Books of the catalog, filtered and paginated.',
+              ['args']: [
+                {
+                  ['name']: 'search',
+                  ['type']: 'String',
+                  ['description']: 'Case-insensitive search in titles.',
+                  ['nullAsUndefined']: true,
+                },
+                { ['name']: 'genre', ['type']: 'Genre', ['nullAsUndefined']: true },
+                { ['name']: 'sort', ['type']: 'BookSort', ['defaultValue']: 'title', ['nullAsUndefined']: true },
+                { ['name']: 'limit', ['type']: 'Int', ['defaultValue']: 20, ['nullAsUndefined']: true },
+                { ['name']: 'offset', ['type']: 'Int', ['defaultValue']: 0, ['nullAsUndefined']: true },
+              ],
+              ['resolver']: {
+                ['token']: 'src/catalog/book.resolver.ts#BookResolver',
+                ['method']: 'books',
+                ['operation']: 'query',
+                ['guards']: [],
+                ['meta']: { ['public']: true },
+                ['invoke']: (r: BookResolver, _p: unknown, a: GraphQLArgs) => r.books(a as never),
+              },
+            },
+            {
+              ['name']: 'book',
+              ['type']: 'Book',
+              ['description']: 'One book.',
+              ['args']: [{ ['name']: 'id', ['type']: 'ID!', ['description']: 'The id of the book.' }],
+              ['resolver']: {
+                ['token']: 'src/catalog/book.resolver.ts#BookResolver',
+                ['method']: 'book',
+                ['operation']: 'query',
+                ['guards']: [],
+                ['meta']: { ['public']: true },
+                ['invoke']: (r: BookResolver, _p: unknown, a: GraphQLArgs) => r.book(a['id'] as never),
+              },
+            },
+            {
+              ['name']: 'search',
+              ['type']: '[SearchResult!]!',
+              ['args']: [{ ['name']: 'text', ['type']: 'String!' }],
+              ['resolver']: {
+                ['token']: 'src/catalog/book.resolver.ts#BookResolver',
+                ['method']: 'search',
+                ['operation']: 'query',
+                ['guards']: [],
+                ['meta']: { ['public']: true },
+                ['invoke']: (r: BookResolver, _p: unknown, a: GraphQLArgs) => r.search(a['text'] as never),
+              },
+            },
+          ],
+        },
+        {
+          ['kind']: 'union',
+          ['name']: 'SearchResult',
+          ['description']: 'A search hit: told apart at runtime by \`kind\`, found by the compiler.',
+          ['members']: ['Author', 'Book'],
+          ['discriminator']: {
+            ['by']: 'property',
+            ['property']: 'kind',
+            ['values']: { ['author']: 'Author', ['book']: 'Book' },
+          },
+        },
+        {
+          ['kind']: 'object',
+          ['name']: 'Subscription',
+          ['fields']: [
+            {
+              ['name']: 'bookAdded',
+              ['type']: 'Book!',
+              ['description']: 'Books added from now on, optionally of one genre.',
+              ['args']: [{ ['name']: 'genre', ['type']: 'Genre', ['nullAsUndefined']: true }],
+              ['resolver']: {
+                ['token']: 'src/catalog/book.resolver.ts#BookResolver',
+                ['method']: 'bookAdded',
+                ['operation']: 'subscription',
+                ['guards']: [],
+                ['meta']: { ['public']: true },
+                ['invoke']: (r: BookResolver, _p: unknown, a: GraphQLArgs, c: GraphQLContext) =>
+                  r.bookAdded(a['genre'] as never, c),
+              },
+            },
+          ],
+        },
+      ],
+      ['groups']: { ['access']: { ['keys']: ['public', 'roles'], ['required']: true } },
+    },"
+`;
