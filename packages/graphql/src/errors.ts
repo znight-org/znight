@@ -30,6 +30,8 @@ export const GraphQLErrorCode: {
   readonly BadRequest: 'BAD_REQUEST'
   /** A subscriber fell behind its buffer: its stream ends with this error. */
   readonly SubscriptionOverflow: 'SUBSCRIPTION_OVERFLOW'
+  /** Too many active subscriptions (`subscriptions.maxActive`), HTTP 503. */
+  readonly ServiceUnavailable: 'SERVICE_UNAVAILABLE'
   /** An unexpected error, masked (`Unexpected error.`) unless `exposeErrors`. */
   readonly InternalServerError: 'INTERNAL_SERVER_ERROR'
 } = Object.freeze({
@@ -44,6 +46,7 @@ export const GraphQLErrorCode: {
   TooManyRequests: 'TOO_MANY_REQUESTS',
   BadRequest: 'BAD_REQUEST',
   SubscriptionOverflow: 'SUBSCRIPTION_OVERFLOW',
+  ServiceUnavailable: 'SERVICE_UNAVAILABLE',
   InternalServerError: 'INTERNAL_SERVER_ERROR',
 })
 

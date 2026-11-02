@@ -21,7 +21,7 @@ const manifest = JSON.parse(readFileSync(join(import.meta.dir, '..', 'package.js
  * Manifest exports implemented with the plugin runtime. Remove an entry when its export lands: the
  * test below then requires it to be a runtime value of the entry.
  */
-const PENDING_RUNTIME_EXPORTS: ReadonlySet<string> = new Set(['GraphQLPlugin'])
+const PENDING_RUNTIME_EXPORTS: ReadonlySet<string> = new Set()
 
 /** Type-only exports of `src/index.ts` (read from the source: types do not exist at runtime). */
 function typeExports(): Set<string> {
@@ -47,8 +47,11 @@ it('exports the public runtime API', () => {
     'GRAPHQL_METADATA_VERSION',
     'GraphQLErrorCode',
     'GraphQLException',
+    'GraphQLPlugin',
+    'GraphQLTokens',
     'Info',
     'Loader',
+    'MemoryPubSub',
     'Mutation',
     'Parent',
     'PubSub',
@@ -57,7 +60,9 @@ it('exports the public runtime API', () => {
     'Resolver',
     'Subscription',
     'UseGuard',
+    'orderByKeys',
     'scalar',
+    'validateArgs',
   ])
 })
 
