@@ -136,8 +136,9 @@ my-service/
 
 ## `znight generate`
 
-Runs the compiler and writes `src/.znight/container.generated.ts` when its content changed. Compiler
-diagnostics are printed with code frames; any error exits with code 1 (and nothing is written).
+Runs the compiler and writes `src/.znight/container.generated.ts` when its content changed, with the
+extra files compiler extensions emit next to it (an SDL schema...). Compiler diagnostics are printed
+with code frames; any error exits with code 1 (and nothing is written).
 
 ```sh
 znight generate            # ✓ Generated src/.znight/container.generated.ts (12 providers, 30 files, 48ms)
@@ -196,8 +197,9 @@ npx tsc --noEmit
 npx znight build
 ```
 
-`--check` names every generated file that is missing or out of date: the module and, in library
-mode (`library: true`), `dist/znight.providers.json`. A build that cleans `dist/` (tsdown, `tsc --build
+`--check` names every generated file that is missing or out of date: the module, the extra files of
+the compiler extensions (`extraFiles`) and, in library mode (`library: true`),
+`dist/znight.providers.json`. A build that cleans `dist/` (tsdown, `tsc --build
 --clean`...) deletes that manifest, which `package.json` points to: run `znight generate` after such a
 build (the Vite plugin writes it itself at the end of `vite build`).
 
@@ -457,16 +459,16 @@ and the schematics are exported too.
 The CLI drives the project's `@znight/compiler` through its programmatic API (spec §6.2) and only
 relies on these shapes (each is optional; missing pieces are emulated):
 
-| Export                                                           | Used for                                                                                                        |
-| ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `generate(options)`                                              | `znight generate`; `written: string[]` tells whether the file changed                                           |
-| `generate({ ...options, check })`                                | `znight generate --check`; `stale: boolean`, `staleFiles: string[]` (else compared with `diskCode` / `library`) |
-| `createCompiler(options)`                                        | `znight generate --watch`: `generate(changes)` (`{ changed, added, removed }`), `isOutFile(file)`, `watchFiles` |
-| `includeRoots(compiler)`                                         | `--watch`: the directories to watch recursively (else the whole project)                                        |
-| `isRelevantChange(compiler, kind, file, watched, roots)`         | `--watch`: the file events that trigger a compile (else every event but the generated module)                   |
-| `compile(options)`                                               | fallback of the above (writes `diskCode`, else `code`)                                                          |
-| `formatDiagnostics(diagnostics, { color, cwd, summary: false })` | diagnostics output (a plain formatter otherwise)                                                                |
-| `loadZnightConfig(root)`                                         | `znight generate`: `{ file, options }` of `znight.config.*` / `ZNIGHT_CONFIG`                                   |
+| Export                                                           | Used for                                                                                                                       |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `generate(options)`                                              | `znight generate`; `written: string[]` tells whether the file changed                                                          |
+| `generate({ ...options, check })`                                | `znight generate --check`; `stale: boolean`, `staleFiles: string[]` (else compared with `diskCode` / `extraFiles` / `library`) |
+| `createCompiler(options)`                                        | `znight generate --watch`: `generate(changes)` (`{ changed, added, removed }`), `isOutFile(file)`, `watchFiles`                |
+| `includeRoots(compiler)`                                         | `--watch`: the directories to watch recursively (else the whole project)                                                       |
+| `isRelevantChange(compiler, kind, file, watched, roots)`         | `--watch`: the file events that trigger a compile (else every event but the generated module)                                  |
+| `compile(options)`                                               | fallback of the above (writes `diskCode`, else `code`, and `extraFiles`)                                                       |
+| `formatDiagnostics(diagnostics, { color, cwd, summary: false })` | diagnostics output (a plain formatter otherwise)                                                                               |
+| `loadZnightConfig(root)`                                         | `znight generate`: `{ file, options }` of `znight.config.*` / `ZNIGHT_CONFIG`                                                  |
 
 `znight build` and `znight dev` use the `znight()` Vite plugin of the project's Vite config, found by
 its name (`znight`) among the plugins of the config:

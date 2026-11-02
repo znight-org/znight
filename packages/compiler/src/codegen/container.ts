@@ -26,6 +26,7 @@ import type { LoadedExtension } from '../extensions/loader.ts'
 import type { ApplicationGraph, InterceptedMethodNode, ProviderNode } from '../graph/types.ts'
 import type { Diagnostic, Project } from '../project/index.ts'
 import type { Doc } from './doc.ts'
+import type { ExtraFile } from './extra-files.ts'
 import type { Owner } from './module.ts'
 
 import { ErrorCode, METADATA_VERSION } from '@znight/core'
@@ -36,6 +37,7 @@ import { createGenBuilders } from '../extensions/generate.ts'
 import { DiagnosticBag, relativePath } from '../project/index.ts'
 import { ExtensionGenerateContext, GraphIndex, importNode } from './context.ts'
 import { hardline, list, marked } from './doc.ts'
+import { ExtraFiles } from './extra-files.ts'
 import { primitiveLiteral } from './literal.ts'
 import {
   arrowBody,
@@ -82,6 +84,8 @@ export interface ContainerOutput {
   readonly code: string
   /** Problems found while generating (extension failures, import routes, syntax check). */
   readonly diagnostics: readonly Diagnostic[]
+  /** Files emitted by extensions (`emitFile`), sorted by path. */
+  readonly files: readonly ExtraFile[]
 }
 
 /** Generates the container module. */
@@ -95,6 +99,7 @@ export function generateContainer(input: ContainerInput): ContainerOutput {
   const index = new GraphIndex(graph)
   const stored = new Map(graph.extensions.map(entry => [entry.name, entry.stored]))
   const types = input.types ?? createTypeHelpers(project)
+  const files = new ExtraFiles(project, report)
 
   // One context per extension, shared by its custom factories and its section (constants dedupe).
   let currentOwner: Owner = CORE_OWNER
@@ -110,6 +115,7 @@ export function generateContainer(input: ContainerInput): ContainerOutput {
         owner: () => currentOwner,
         report,
         types,
+        files,
       })
       contexts.set(extension, context)
     }
@@ -249,7 +255,7 @@ export function generateContainer(input: ContainerInput): ContainerOutput {
   ]
   const rendered = module.render(generatedHeader(input.version), body)
   checkSyntax(rendered.text, rendered.marks, report)
-  return { code: rendered.text, diagnostics: bag.toArray() }
+  return { code: rendered.text, diagnostics: bag.toArray(), files: files.list() }
 }
 
 /**

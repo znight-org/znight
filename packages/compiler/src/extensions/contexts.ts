@@ -13,6 +13,7 @@ import type { Diagnostic, Project, TypeInfo, ValueRef } from '../project/index.t
 import type {
   AnalyzeContext,
   ArgInfo,
+  BindInjectionOptions,
   BindingHandle,
   ClassInfo,
   ClassRef,
@@ -132,12 +133,18 @@ export class ExtensionAnalyzeContext implements AnalyzeContext<unknown> {
     const role = options.role ?? 'class'
     const ref = this.#state.builder.classRef(arg, role, undefined)
     if (ref && options.from !== undefined) {
-      this.#state.edges.push({ from: tokenOf(options.from), to: ref.token, location: ref.location, reason: role })
+      this.#state.edges.push({
+        from: tokenOf(options.from),
+        to: ref.token,
+        location: ref.location,
+        reason: role,
+        ...(options.lazy === true ? { lazy: true } : {}),
+      })
     }
     return ref
   }
 
-  bindInjection(request: InjectionRequest, options: { readonly from?: ClassInfo | Token } = {}): BindingHandle {
+  bindInjection(request: InjectionRequest, options: BindInjectionOptions = {}): BindingHandle {
     const id = this.#state.nextBindingId++
     const from = options.from === undefined ? undefined : tokenOf(options.from)
     const type: TypeInfo =
@@ -146,6 +153,7 @@ export class ExtensionAnalyzeContext implements AnalyzeContext<unknown> {
     this.#state.bindings.push({
       id,
       from,
+      ...(options.lazy === true ? { lazy: true } : {}),
       site: {
         owner: from === undefined ? `extension '${this.extension}'` : displayNameOf(from),
         label,
@@ -166,6 +174,7 @@ export class ExtensionAnalyzeContext implements AnalyzeContext<unknown> {
       to: typeof to === 'string' ? to : to.token,
       location: details.location ?? (typeof to === 'string' ? undefined : to.location),
       reason: details.reason ?? `dependency (extension '${this.extension}')`,
+      ...(details.lazy === true ? { lazy: true } : {}),
     })
   }
 

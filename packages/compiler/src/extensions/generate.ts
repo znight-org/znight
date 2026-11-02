@@ -211,6 +211,18 @@ export interface GenerateContext<TData = unknown> extends GenBuilders {
    * Declaring the same `name` again returns the same reference (the first value wins).
    */
   constant(name: string, value: GenInput, options?: { readonly type?: GenNode }): GenNode
+  /**
+   * Declares an **extra output**: a file written next to the generated module (an SDL schema, a
+   * JSON document...), with the same rules: written only when the compile has no error and the
+   * content changed (atomically), compared by `znight generate --check` (`staleFiles`), ignored by
+   * the watchers, listed in `CompileResult.extraFiles`. `relativePath` is relative to the project
+   * root and must stay inside it; it cannot be the generated module, `dist/znight.providers.json`,
+   * a path under `node_modules`, a file emitted by another call, nor a source file the compiler
+   * would scan (a `.ts`/`.js`... file is accepted under a dot-directory only, e.g.
+   * `src/.znight/`). An invalid path is a ZNIGHT018 error naming the extension. The content must be
+   * deterministic (no timestamps, no absolute paths).
+   */
+  emitFile(relativePath: string, content: string): void
   report(diagnostic: Diagnostic): void
 }
 

@@ -95,12 +95,16 @@ export interface LibraryEdge {
   readonly from: string
   readonly to: string
   readonly reason: string
+  /** A lazy extension edge (`{ lazy: true }`); absent otherwise. */
+  readonly lazy?: true
 }
 
 /** A `bindInjection` request, re-bound by the application. */
 export interface LibraryBinding extends LibraryInjection {
   readonly id: number
   readonly from?: string
+  /** The edge from `from` is lazy (`{ from, lazy: true }`); absent otherwise. */
+  readonly lazy?: true
 }
 
 /** The whole fragment. */

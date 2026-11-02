@@ -54,7 +54,7 @@ scan order gives a byte-identical graph (`test/analysis/determinism.test.ts`).
 | `externals`       | `ExternalNode[]` referenced by at least one binding / interceptor / extension edge                                                                    |
 | `aliases`         | `AliasNode[]` (`{ key, token }`), sorted by key → `metadata.aliases`                                                                                  |
 | `resolutionOrder` | every provider token, dependencies first → `metadata.resolutionOrder`                                                                                 |
-| `edges`           | every dependency edge (validation, prune), typed by `EdgeKind`                                                                                        |
+| `edges`           | every dependency edge (validation, prune), typed by `EdgeKind`; lazy extension edges (`{ lazy: true }`) are `lazy` edges with `extension: true`       |
 | `extensions`      | `{ name, stored }[]`: data each extension stored with `ctx.store()`, in extension order                                                               |
 | `bindings`        | results of `AnalyzeContext.bindInjection` by handle id (`undefined` when it failed)                                                                   |
 | `bindingRequests` | the requests of `AnalyzeContext.bindInjection` by handle id (library mode)                                                                            |

@@ -48,6 +48,13 @@ export interface ZnightOptions {
   readonly [option: string]: unknown
 }
 
+/** A file emitted by a compiler extension next to the generated module (`CompileResult.extraFiles`, §6.2). */
+export interface ExtraFileLike {
+  /** Absolute path. */
+  readonly file: string
+  readonly content: string
+}
+
 /** What the CLI reads from a compile result (`CompileResult`, §6.2). */
 export interface CompileResultLike {
   /** Content of the generated module (with errors: a module throwing them, or empty). */
@@ -58,6 +65,8 @@ export interface CompileResultLike {
   readonly stats?: { readonly files?: number; readonly providers?: number; readonly durationMs?: number } | undefined
   /** Files the result depends on (`createCompiler()` results). */
   readonly watchFiles?: readonly string[] | undefined
+  /** Files emitted by compiler extensions (an SDL schema...), absent from compilers without them. */
+  readonly extraFiles?: readonly ExtraFileLike[] | undefined
 }
 
 /** Result of {@link CompilerApi.generate}. */
@@ -71,9 +80,9 @@ export interface CheckResultLike extends CompileResultLike {
   /** The generated files on disk are missing or differ from what would be generated. */
   readonly stale: boolean
   /**
-   * The generated files that are missing or out of date (the module, and `znight.providers.json` in
-   * library mode). Empty when `stale` is `false`; empty or absent with `stale` when the compiler
-   * does not say which file is stale.
+   * The generated files that are missing or out of date (the module, the extra files of the
+   * extensions, and `znight.providers.json` in library mode). Empty when `stale` is `false`; empty or
+   * absent with `stale` when the compiler does not say which file is stale.
    */
   readonly staleFiles?: readonly string[] | undefined
 }
@@ -240,7 +249,10 @@ export function adaptCompilerModule(module: CompilerModule): CompilerApi {
       return written(await generate(options), before)
     }
     const result = await compileOnly(options)
-    const changed = !hasErrors(result.diagnostics) && writeIfChanged(result.outFile, result.diskCode ?? result.code)
+    let changed = false
+    if (!hasErrors(result.diagnostics)) {
+      for (const output of outputsOf(result, false)) changed = writeIfChanged(output.file, output.content) || changed
+    }
     return { ...result, written: changed }
   }
 
@@ -285,17 +297,30 @@ export function adaptCompilerModule(module: CompilerModule): CompilerApi {
 }
 
 /**
- * The generated files of a compile result that differ from the disk: the module, and
- * `znight.providers.json` in library mode. None with errors (nothing would be written).
+ * The generated files of a compile result: the module, the extra files of the extensions and, with
+ * `library`, `znight.providers.json` in library mode (`generate()` of the compiler writes the module
+ * and the extra files; library mode is a compiler feature).
  */
-function staleOutputs(result: ModuleResult): string[] {
-  if (hasErrors(result.diagnostics)) return []
+function outputsOf(result: ModuleResult, library: boolean): { file: string; content: string }[] {
   const outputs: { file: string; content: string }[] = [
     { file: result.outFile, content: result.diskCode ?? result.code },
   ]
+  for (const extra of result.extraFiles ?? []) outputs.push({ file: extra.file, content: extra.content })
   const { file, content } = result.library ?? {}
-  if (typeof file === 'string' && typeof content === 'string') outputs.push({ file, content })
-  return outputs.filter(output => readText(output.file) !== output.content).map(output => output.file)
+  if (library && typeof file === 'string' && typeof content === 'string') outputs.push({ file, content })
+  return outputs
+}
+
+/**
+ * The generated files of a compile result that differ from the disk: the module, the extra files of
+ * the extensions and `znight.providers.json` in library mode. None with errors (nothing would be
+ * written).
+ */
+function staleOutputs(result: ModuleResult): string[] {
+  if (hasErrors(result.diagnostics)) return []
+  return outputsOf(result, true)
+    .filter(output => readText(output.file) !== output.content)
+    .map(output => output.file)
 }
 
 /** Default `outFile` of the compiler (§6.2). */
