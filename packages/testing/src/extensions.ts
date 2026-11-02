@@ -1,7 +1,7 @@
 /**
  * Structural readers of the feature metadata (`metadata.extensions`). `@znight/testing` depends on
- * no feature package: it reads the documented shapes (architecture §9) defensively and ignores
- * malformed entries.
+ * no feature package: it reads the documented shapes (architecture §9, RFC 0005 §7.1 for
+ * `extensions.graphql`) defensively and ignores malformed entries.
  */
 import type { Token, ZnightMetadata } from '@znight/core'
 
@@ -104,6 +104,25 @@ export function readScheduleRoots(metadata: ZnightMetadata): Token[] {
   const roots: Token[] = []
   for (const job of arrayOf(extension(metadata, 'schedule')?.['jobs'])) {
     if (isRecord(job) && typeof job['token'] === 'string') roots.push(job['token'])
+  }
+  return roots
+}
+
+/**
+ * Tokens a GraphQL application needs at boot (`extensions.graphql`, RFC 0005 §7.1): for every field
+ * of an object type bound to a resolver (`types[kind: 'object'].fields[].resolver`), the resolver
+ * token, its guard tokens and the loader tokens its method injects.
+ */
+export function readGraphQLRoots(metadata: ZnightMetadata): Token[] {
+  const roots: Token[] = []
+  for (const type of arrayOf(extension(metadata, 'graphql')?.['types'])) {
+    if (!isRecord(type) || type['kind'] !== 'object') continue
+    for (const field of arrayOf(type['fields'])) {
+      const resolver = isRecord(field) ? field['resolver'] : undefined
+      if (!isRecord(resolver)) continue
+      if (typeof resolver['token'] === 'string') roots.push(resolver['token'])
+      roots.push(...tokensOf(resolver['guards']), ...tokensOf(resolver['loaders']))
+    }
   }
   return roots
 }

@@ -69,11 +69,12 @@ download.bytes // Uint8Array: the raw body
   runs `Application.create()` then `start()` (unless `start: false`); signal handlers are disabled.
 - `overrides` are applied last (highest precedence).
 - Only the dependency closure of controllers (with their guards and interceptors), consumers, the
-  hosts of scheduled jobs, overridden providers and the providers plugins resolve at bootstrap
-  (`HttpPlugin`'s global guards, interceptors and exception mappers, listed by the plugin's
-  [`initRoots(context)`](/packages/core#plugins)) is instantiated by default (`only: 'all'` or a
-  list of keys otherwise). The job hosts are read from `metadata.extensions.schedule`; without any
-  controller, consumer or job, every provider is created.
+  hosts of scheduled jobs, GraphQL resolvers (with their guards and loaders), overridden providers
+  and the providers plugins resolve at bootstrap (`HttpPlugin`'s global guards, interceptors and
+  exception mappers, listed by the plugin's [`initRoots(context)`](/packages/core#plugins)) is
+  instantiated by default (`only: 'all'` or a list of keys otherwise). The job hosts are read from `metadata.extensions.schedule`, the
+  resolvers from `metadata.extensions.graphql`; without any controller, consumer, job or resolver,
+  every provider is created.
 - `inject({ method?, url, headers?, body?, query?, cookies?, signedCookies? })` goes through the
   HTTP plugin in memory (no network call) and resolves with
   `{ status, headers, body, bytes, cookies, json() }`. Bodies: objects as JSON, strings and bytes as
