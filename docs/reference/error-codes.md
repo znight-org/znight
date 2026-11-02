@@ -1,5 +1,5 @@
 ---
-description: Every Znight error code (ZNIGHT001 to ZNIGHT044) with its meaning, an example that triggers it and how to fix it.
+description: Every Znight error code (ZNIGHT001 to ZNIGHT066) with its meaning, an example that triggers it and how to fix it.
 outline: [ 2, 2 ]
 ---
 
@@ -11,8 +11,9 @@ and the runtime (`ZnightError`). Messages link here: each code has its own ancho
 
 Codes `ZNIGHT001` to `ZNIGHT029` belong to the core, the compiler and the features of the first
 release (HTTP, messaging, configuration, observability). From `ZNIGHT030`, each package owns a block
-of ten: `ZNIGHT030`–`039` for `@znight/openapi`, `ZNIGHT040`–`049` for `@znight/schedule`. Codes are
-allocated in order inside a block, so the numbering has gaps between blocks.
+of ten: `ZNIGHT030`–`039` for `@znight/openapi`, `ZNIGHT040`–`049` for `@znight/schedule`,
+`ZNIGHT060`–`069` for `@znight/graphql` (planned for v0.2, [RFC 0005](../../rfcs/0005-graphql.md)).
+Codes are allocated in order inside a block, so the numbering has gaps between blocks.
 
 | Code                    | Meaning                                             | Severity                                             | Reported                   |
 | ----------------------- | --------------------------------------------------- | ---------------------------------------------------- | -------------------------- |
@@ -52,6 +53,13 @@ allocated in order inside a block, so the numbering has gaps between blocks.
 | [ZNIGHT042](#znight042) | Unknown job                                         | error                                                | startup, runtime           |
 | [ZNIGHT043](#znight043) | Missing lock store                                  | error                                                | startup, runtime           |
 | [ZNIGHT044](#znight044) | Job aborted                                         | error value (never thrown)                           | runtime                    |
+| [ZNIGHT060](#znight060) | Invalid GraphQL type                                | error                                                | build                      |
+| [ZNIGHT061](#znight061) | GraphQL name conflict                               | error                                                | build, startup             |
+| [ZNIGHT062](#znight062) | Invalid resolver                                    | error / warning                                      | build                      |
+| [ZNIGHT063](#znight063) | Invalid GraphQL input                               | error                                                | build                      |
+| [ZNIGHT064](#znight064) | Unresolvable abstract type                          | error                                                | build                      |
+| [ZNIGHT065](#znight065) | Invalid loader                                      | error                                                | build, runtime             |
+| [ZNIGHT066](#znight066) | Invalid GraphQL setup                               | error                                                | startup                    |
 
 ## Reading an error
 
@@ -1116,3 +1124,235 @@ async flush(ctx: JobContext): Promise<void> {
 **How to fix**: nothing is wrong with the scheduler. Check `ctx.signal` between steps and pass it to
 the APIs that accept one, so an aborted run stops quickly; raise `maxDuration` if runs are
 legitimately slower; keep the lock `ttl` comfortably above the time a heartbeat may be delayed.
+
+## ZNIGHT060: Invalid GraphQL type {#znight060}
+
+<!-- TODO(api): verify against implementation (@znight/graphql, RFC 0005) -->
+
+`@znight/graphql` derives the schema from the TypeScript types reachable from the resolvers. A type
+it cannot map to a GraphQL type is reported where it is written, with the path from the root field
+that reaches it.
+
+| Situation                                                                           | Example message                                                                 |
+| ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| Bytes: `Uint8Array`, `Blob`, `File`                                                 | `Cannot map 'Uint8Array' to a GraphQL type (Book.cover)`                        |
+| `Map`, `Record` or an index signature (hint: `JSONValue`)                           | `Cannot map 'Record<string, number>' to a GraphQL type (Book.ratings)`          |
+| `any`, `unknown`, `object`, `{}`, `never`, `symbol`, a function, a tuple            | `Cannot map 'unknown' to a GraphQL type (Query.debug)`                          |
+| `void` returned by a mutation (hint: return a payload type or `boolean`)            | `Mutation.deleteBook returns void: a GraphQL field needs a type`                |
+| A union mixing scalars, or scalars and objects                                      | `Cannot map 'string \| number' to a GraphQL type (Book.isbn)`                   |
+| An anonymous object type or union (hint: name it with an interface or a type alias) | `The type of Query.stats is an anonymous object type: name it`                  |
+| A resolver without an explicit return type                                          | `BookResolver.books has no return type annotation: the compiler does not infer` |
+| `Promise` outside a return type, an async iterable outside a `@Subscription`        | `Cannot map 'AsyncIterable<Book>' to a GraphQL type outside a @Subscription`    |
+
+```ts
+export interface Book {
+  readonly id: ID
+  readonly title: string
+  readonly cover: Uint8Array | null // ✗ ZNIGHT060, as soon as a resolver returns a Book
+}
+```
+
+```txt
+✗ ZNIGHT060: Cannot map 'Uint8Array' to a GraphQL type (Book.cover)
+  --> src/catalog/book.ts:18:19
+   |
+18 |   readonly cover: Uint8Array | null
+   |                   ^^^^^^^^^^
+   = hint: Expose a URL (coverUrl: string), hide the property with /** @gqlHidden */, or declare a scalar: export const Base64 = scalar<Uint8Array>('Base64', { ... })
+   ::: src/catalog/book.resolver.ts:27:3 reached from Query.book → Book
+```
+
+**How to fix**: follow the hint. Hide what clients must not see with `/** @gqlHidden */`, name
+anonymous types, use `Int` / `Float` / `ID` / `JSONValue` from `@znight/graphql` where a plain
+TypeScript type is not precise enough, declare a `scalar<T>()` for a type with its own wire format,
+and annotate the return type of every resolver method.
+
+## ZNIGHT061: GraphQL name conflict {#znight061}
+
+<!-- TODO(api): verify against implementation (@znight/graphql, RFC 0005) -->
+
+GraphQL names are global. Two declarations (two different identities) mapped to one GraphQL name,
+two root fields with one name across resolver classes, a field resolver that replaces a property
+field with another type, two arguments with one name, or a name GraphQL forbids or reserves
+(`Query`, `Mutation`, `Subscription` for a user type, a name starting with `__`, an enum value
+`true`, `false` or `null`, characters outside `[_A-Za-z0-9]`) are reported with every location.
+
+```ts
+// src/catalog/review.ts
+export interface Review {
+  readonly rating: Int
+}
+
+// src/shop/review.ts
+// ✗ ZNIGHT061 when both are reachable from the schema
+export interface Review {
+  readonly stars: Int
+}
+```
+
+```txt
+✗ ZNIGHT061: Two types are named 'Review' in the GraphQL schema
+  --> src/shop/review.ts:2:18
+   = hint: Rename one of them, or give it another GraphQL name with /** @gqlName ShopReview */
+   ::: src/catalog/review.ts:2:18 the other 'Review'
+```
+
+**At startup**, `GraphQLPlugin` reports with the same code a name clash in metadata the compiler
+did not produce (hand-written metadata in tests).
+
+**How to fix**: rename one of the declarations or root fields, or set its GraphQL name with the
+`@gqlName` JSDoc tag. Names are never converted: they are used as written.
+
+## ZNIGHT062: Invalid resolver {#znight062}
+
+<!-- TODO(api): verify against implementation (@znight/graphql, RFC 0005) -->
+
+A resolver class or method is structured in a way GraphQL cannot serve.
+
+| Situation                                                                  | Example message                                                                 |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| A `@ResolveField` without `@Parent()` parameter                            | `@ResolveField BookResolver.author has no @Parent() parameter`                  |
+| A `@Subscription` that does not return an async iterable                   | `@Subscription BookResolver.bookAdded must return an AsyncIterable`             |
+| Resolvers, but no `@Query` in the application (GraphQL needs a query root) | `The GraphQL schema has no Query field: add a @Query to a resolver`             |
+| Decorated methods inherited from a base class (methods are not inherited)  | `BookResolver inherits @Query books from BaseResolver: declare it on the class` |
+| A resolver in a compiled provider library (the schema needs the sources)   | `BookResolver is in a compiled library: publish it as a source library`         |
+| A field resolver whose parent type is not reachable (warning)              | `@ResolveField ReviewResolver.book is unreachable: no field returns a Review`   |
+
+```ts
+@Resolver()
+export class BookResolver {
+  @ResolveField() // ✗ ZNIGHT062: the parent object comes first
+  author(@Loader() authors: Loader<AuthorsById>): Promise<Author> {
+    // ...
+  }
+}
+```
+
+```txt
+✗ ZNIGHT062: @ResolveField BookResolver.author has no @Parent() parameter
+  --> src/catalog/book.resolver.ts:44:3
+   = hint: Declare the parent object first: author(@Parent() book: Book, ...)
+```
+
+**How to fix**: follow the message. A field resolver declares the object it extends with
+`@Parent()`, a subscription is an `async *` generator or returns `pubsub.subscribe(...)`, and every
+decorated method is declared on the resolver class itself.
+
+## ZNIGHT063: Invalid GraphQL input {#znight063}
+
+<!-- TODO(api): verify against implementation (@znight/graphql, RFC 0005) -->
+
+Arguments and the fields of input types follow stricter rules than outputs. A declaration used both
+as an output type and as an input type, a getter, a union, a set or an async iterable in an input
+type, a cycle of non-null input fields (GraphQL forbids it), or a default value (`@default` tag,
+parameter default) that does not match its type is reported.
+
+```ts
+export interface Money {
+  readonly amount: Int
+  readonly currency: string
+}
+
+export interface Book {
+  readonly price: Money // output
+}
+
+export interface NewBookInput {
+  readonly price: Money // ✗ ZNIGHT063: Money is already an output type
+}
+```
+
+```txt
+✗ ZNIGHT063: 'Money' is used as an output type (Book.price) and as an input type (Mutation.addBook(input.price))
+  --> src/shared/money.ts:3:18
+   = hint: GraphQL needs two types: declare `export interface MoneyInput extends Money {}` and use it in NewBookInput
+```
+
+**How to fix**: declare a separate input type (`interface MoneyInput extends Money {}` keeps the
+fields in one place), keep inputs to plain data (no getters, no unions), make one field of a cycle
+nullable, and write defaults of the argument's type.
+
+## ZNIGHT064: Unresolvable abstract type {#znight064}
+
+<!-- TODO(api): verify against implementation (@znight/graphql, RFC 0005) -->
+
+A union's members must be told apart at runtime to answer `__typename`. The compiler uses
+`instanceof` when every member is a class, otherwise a property whose literal type differs in every
+member (`kind`, or `__typename`). When neither exists, the union is reported.
+
+```ts
+export interface Book {
+  readonly title: string
+}
+
+export interface Author {
+  readonly name: string
+}
+
+export type SearchResult = Book | Author // ✗ ZNIGHT064
+```
+
+```txt
+✗ ZNIGHT064: The members of union SearchResult cannot be told apart at runtime: Book and Author are interfaces without a common literal property
+  --> src/search/search.ts:4:13
+   = hint: Add a literal property to each member (readonly kind: 'book' / readonly kind: 'author'), or make the members classes
+```
+
+**How to fix**: add a discriminant property with a different literal type in each member
+(`readonly kind: 'book'`), or make every member a class.
+
+## ZNIGHT065: Invalid loader {#znight065}
+
+<!-- TODO(api): verify against implementation (@znight/graphql, RFC 0005) -->
+
+A `@Loader()` parameter is typed `Loader<L>`, where `L` is a provider implementing
+`BatchLoad<K, V>`. **At build time**, another parameter type, or an `L` that does not implement
+`BatchLoad`, is reported (an `L` that is not a provider is ZNIGHT001).
+
+```ts
+@ResolveField()
+author(@Parent() book: Book, @Loader() authors: AuthorsById): Promise<Author> {
+  // ✗ ZNIGHT065: the parameter is the loader of AuthorsById, typed Loader<AuthorsById>
+  return authors.load(book.authorId)
+}
+```
+
+```txt
+✗ ZNIGHT065: @Loader() parameter 'authors' of BookResolver.author must be typed Loader<L>
+  --> src/catalog/book.resolver.ts:45:42
+   = hint: Write authors: Loader<AuthorsById>
+```
+
+**At runtime**, a batch function that returns another number of values than it received keys fails
+every key of that batch with this code (an `Error` returned for one key fails that key only):
+
+```txt
+ZNIGHT065: AuthorsById.load returned 2 values for 3 keys
+  hint: Return one value or Error per key, in the order of the keys: orderByKeys(keys, rows, row => row.id)
+```
+
+**How to fix**: type the parameter `Loader<L>`, implement `BatchLoad<K, V>` on the loader class, and
+return one value (or one `Error`) per key, in the order of the keys (`orderByKeys` does it).
+
+## ZNIGHT066: Invalid GraphQL setup {#znight066}
+
+<!-- TODO(api): verify against implementation (@znight/graphql, RFC 0005) -->
+
+The catch-all code of `@znight/graphql` at startup: `GraphQLPlugin` cannot build or serve the
+schema.
+
+| Situation                                                                       | Example message                                                                    |
+| ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| No `HttpPlugin` while the HTTP transport is on                                  | `GraphQLPlugin serves its endpoint with HttpPlugin, which is not registered`       |
+| Invalid `GraphQLPlugin` options                                                 | `GraphQLPlugin option 'limits.maxDepth' must be a positive integer or false`       |
+| Missing, malformed or version-skewed `extensions.graphql`                       | `The metadata has no GraphQL schema: was the application compiled with resolvers?` |
+| The schema built from the metadata fails graphql-js validation                  | `Invalid GraphQL schema: Union type SearchResult must define one or more members`  |
+| A scalar definition whose name differs from the name given to `scalar<T>(name)` | `Scalar 'EmailAddress' is defined with the name 'Email'`                           |
+
+```txt
+ZNIGHT066: GraphQLPlugin serves its endpoint with HttpPlugin, which is not registered
+  hint: Add HttpPlugin.configure() to the plugins, or GraphQLPlugin.configure({ http: false }) to use execute() only
+```
+
+**How to fix**: follow the message. Register `HttpPlugin` (or set `http: false`), fix the option it
+names, and regenerate the container module after upgrading `@znight/*` packages.

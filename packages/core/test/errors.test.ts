@@ -7,7 +7,7 @@ const RANGES: readonly (readonly [owner: string, first: number, last: number])[]
   ['@znight/openapi', 30, 39],
   ['@znight/schedule', 40, 49],
   ['@znight/websocket (reserved)', 50, 59],
-  ['@znight/graphql (reserved)', 60, 69],
+  ['@znight/graphql', 60, 69],
 ]
 
 const numberOf = (code: string): number => Number(code.slice('ZNIGHT'.length))
@@ -35,7 +35,7 @@ describe('ErrorCode', () => {
     for (const code of codes) expect(ERROR_DESCRIPTIONS[code].length).toBeGreaterThan(10)
   })
 
-  it('has the codes of the security, openapi and schedule RFCs', () => {
+  it('has the codes of the security, openapi, schedule and graphql RFCs', () => {
     expect(ErrorCode).toMatchObject({
       MissingRouteDecision: 'ZNIGHT023',
       InvalidOpenApiDefinition: 'ZNIGHT030',
@@ -51,6 +51,13 @@ describe('ErrorCode', () => {
       UnknownJob: 'ZNIGHT042',
       MissingLockStore: 'ZNIGHT043',
       JobAborted: 'ZNIGHT044',
+      InvalidGraphQLType: 'ZNIGHT060',
+      GraphQLNameConflict: 'ZNIGHT061',
+      InvalidResolver: 'ZNIGHT062',
+      InvalidGraphQLInput: 'ZNIGHT063',
+      UnresolvableAbstractType: 'ZNIGHT064',
+      InvalidLoader: 'ZNIGHT065',
+      InvalidGraphQLSetup: 'ZNIGHT066',
     })
   })
 

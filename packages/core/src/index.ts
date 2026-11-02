@@ -38,6 +38,11 @@ export {
 export { isProviderDefinition } from './definition.ts'
 export * from './errors.ts'
 export {
+  type GraphQLOperationError,
+  type GraphQLOperationEvent,
+  type GraphQLOperationOutcome,
+  type GraphQLOperationTransport,
+  type GraphQLOperationType,
   type HookEvent,
   type HookListener,
   type HookName,

@@ -1,4 +1,9 @@
 import {
+  type GraphQLOperationError,
+  type GraphQLOperationEvent,
+  type GraphQLOperationOutcome,
+  type GraphQLOperationTransport,
+  type GraphQLOperationType,
   type HookEvent,
   Hooks,
   type ScheduledRunAbortReason,
@@ -300,5 +305,79 @@ describe('schedule:run', () => {
     }
     expect([reasons.length, triggers.length, outcomes.length]).toEqual([4, 4, 4])
     expect(event.aborted).toBe('lock-lost')
+  })
+})
+
+describe('graphql:operation', () => {
+  /** What @znight/graphql does for one operation: wrappers only when some exist, then listeners. */
+  async function operate(
+    hooks: Hooks,
+    execute: (event: GraphQLOperationEvent) => void,
+  ): Promise<GraphQLOperationEvent> {
+    const event: GraphQLOperationEvent = {
+      operationType: 'query',
+      operationName: 'Books',
+      documentId: 'f3a1c0',
+      transport: 'http',
+      requestId: 'req-1',
+      context: { requestId: 'req-1' },
+      startTime: performance.now(),
+    }
+    const run = () => Promise.resolve(execute(event))
+    await (hooks.hasWrappers('graphql:operation') ? hooks.run('graphql:operation', event, run) : run())
+    if (hooks.hasListeners('graphql:operation')) hooks.emit('graphql:operation', event)
+    return event
+  }
+
+  it('is a declared hook: wrappers see the operation, listeners its outcome and errors', async () => {
+    const hooks = new Hooks()
+    const wrapped: string[] = []
+    const settled: (GraphQLOperationOutcome | undefined)[] = []
+    hooks.wrap('graphql:operation', async (event, next) => {
+      wrapped.push(`${event.operationType} ${event.operationName} over ${event.transport}`)
+      await next()
+      wrapped.push(`→ ${event.outcome}`)
+    })
+    hooks.on('graphql:operation', event => settled.push(event.outcome))
+    await operate(hooks, event => {
+      event.outcome = 'success'
+    })
+    const partial = await operate(hooks, event => {
+      event.outcome = 'partial'
+      event.errors = [{ message: 'Forbidden', code: 'FORBIDDEN', path: ['books', 0, 'author'] }]
+    })
+    expect(wrapped).toEqual(['query Books over http', '→ success', 'query Books over http', '→ partial'])
+    expect(settled).toEqual(['success', 'partial'])
+    expect(partial.errors).toEqual([{ message: 'Forbidden', code: 'FORBIDDEN', path: ['books', 0, 'author'] }])
+  })
+
+  it('runs the operation directly without wrappers nor listeners', async () => {
+    const hooks = new Hooks()
+    let executed = 0
+    const event = await operate(hooks, () => {
+      executed++
+    })
+    expect(executed).toBe(1)
+    expect(event.outcome).toBeUndefined()
+  })
+
+  it('types the operation types, transports, outcomes and errors', () => {
+    const types: readonly GraphQLOperationType[] = ['query', 'mutation', 'subscription']
+    const transports: readonly GraphQLOperationTransport[] = ['http', 'sse', 'direct']
+    const outcomes: readonly GraphQLOperationOutcome[] = ['success', 'partial', 'error', 'rejected']
+    const error: GraphQLOperationError = { message: 'Syntax Error: Expected Name', code: 'GRAPHQL_PARSE_FAILED' }
+    const rejected: HookEvent<'graphql:operation'> = {
+      operationType: undefined, // rejected before an operation was selected
+      operationName: undefined,
+      documentId: undefined,
+      transport: 'direct',
+      requestId: 'req-2',
+      context: undefined,
+      startTime: 0,
+      outcome: 'rejected',
+      errors: [error],
+    }
+    expect([types.length, transports.length, outcomes.length]).toEqual([3, 3, 4])
+    expect(rejected.errors?.[0]?.path).toBeUndefined()
   })
 })

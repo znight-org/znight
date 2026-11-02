@@ -15,7 +15,7 @@ may change APIs.
 | [0002](https://github.com/znight-org/znight/blob/main/rfcs/0002-openapi.md)          | `@znight/openapi`                         | Accepted (v0.1)  |
 | [0003](https://github.com/znight-org/znight/blob/main/rfcs/0003-websocket.md)        | `@znight/websocket`                       | Deferred to v0.2 |
 | [0004](https://github.com/znight-org/znight/blob/main/rfcs/0004-schedule.md)         | `@znight/schedule`                        | Accepted (v0.1)  |
-| [0005](https://github.com/znight-org/znight/blob/main/rfcs/0005-graphql.md)          | `@znight/graphql`                         | Deferred to v0.2 |
+| [0005](https://github.com/znight-org/znight/blob/main/rfcs/0005-graphql.md)          | `@znight/graphql`                         | Accepted (v0.2)  |
 | [0006](https://github.com/znight-org/znight/blob/main/rfcs/0006-http-cookies-sse.md) | HTTP cookies and Server-Sent Events       | Accepted (v0.1)  |
 
 ## v0.1: the first release {#v0-1}
@@ -65,13 +65,17 @@ Until then, [Server-Sent Events](/packages/http#server-sent-events) cover server
 
 ### `@znight/graphql`
 
+**In progress.** The RFC is accepted and the package is being implemented for v0.2.
+
 Code-first GraphQL ([RFC 0005](https://github.com/znight-org/znight/blob/main/rfcs/0005-graphql.md)):
 the TypeScript types are the schema. Resolvers are providers marked with `@Resolver`, `@Query`,
 `@Mutation`, `@Subscription` and `@ResolveField`; the compiler derives the schema from their
 signatures at build time, with descriptions from JSDoc, and reports schema mistakes as diagnostics.
 It runs on graphql-js, served over HTTP by `HttpPlugin`, with subscriptions over Server-Sent Events,
-batching with loaders, and access control with the same route decorators and guards as HTTP. Error
-codes `ZNIGHT060`–`ZNIGHT069` are reserved for it.
+batching with loaders, and access control with the same route decorators and guards as HTTP. Its
+error codes, `ZNIGHT060`–`ZNIGHT066`, are already in the
+[error reference](/reference/error-codes#znight060), and the `graphql:operation` hook is declared
+in `@znight/core`.
 
 ## Planned, without a date {#planned}
 

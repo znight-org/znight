@@ -160,12 +160,13 @@ implement the `XxxPlugin.configure(container => options)` convention. See
 `run(name, event, fn)`, `hasListeners(name)`, `hasWrappers(name)`. The events of the feature
 packages are defined in core so producers and observers share one type:
 
-| Hook                | Event                  | Produced by                                                           |
-| ------------------- | ---------------------- | --------------------------------------------------------------------- |
-| `http:request`      | `HttpRequestEvent`     | `@znight/http` (one request)                                          |
-| `messaging:message` | `MessageDeliveryEvent` | `@znight/messaging` (one delivery)                                    |
-| `messaging:publish` | `MessagePublishEvent`  | `@znight/messaging` (one publish)                                     |
-| `schedule:run`      | `ScheduledRunEvent`    | `@znight/schedule` (one occurrence of a job: trigger, outcome, error) |
+| Hook                | Event                   | Produced by                                                                     |
+| ------------------- | ----------------------- | ------------------------------------------------------------------------------- |
+| `http:request`      | `HttpRequestEvent`      | `@znight/http` (one request)                                                    |
+| `messaging:message` | `MessageDeliveryEvent`  | `@znight/messaging` (one delivery)                                              |
+| `messaging:publish` | `MessagePublishEvent`   | `@znight/messaging` (one publish)                                               |
+| `schedule:run`      | `ScheduledRunEvent`     | `@znight/schedule` (one occurrence of a job: trigger, outcome, error)           |
+| `graphql:operation` | `GraphQLOperationEvent` | `@znight/graphql`, planned (one GraphQL operation: type, name, outcome, errors) |
 
 Augment `ZnightHooks` to declare your own. See [Plugins & hooks](/guide/plugins#hooks).
 
@@ -174,8 +175,9 @@ Augment `ZnightHooks` to declare your own. See [Plugins & hooks](/guide/plugins#
 `ZNIGHT001` to `ZNIGHT029` belong to the core, the compiler and the features of 0.1 (http, messaging,
 config, observability). From `ZNIGHT030`, each first-party package owns a block of ten:
 `ZNIGHT030`–`039` [`@znight/openapi`](/packages/openapi), `ZNIGHT040`–`049`
-[`@znight/schedule`](/packages/schedule) (`050`–`069` are reserved). Third-party packages get no
-`ZNIGHT` code. Every code is in the [error reference](/reference/error-codes).
+[`@znight/schedule`](/packages/schedule), `ZNIGHT060`–`069` `@znight/graphql` (planned for
+[v0.2](/roadmap#v0-2); `050`–`059` are reserved). Third-party packages get no `ZNIGHT` code.
+Every code is in the [error reference](/reference/error-codes).
 
 ## AOP
 
