@@ -597,6 +597,9 @@ too:
   library (`dist/znight.providers.json` of another version): the entry is skipped and the compile
   goes on;
 - a compiler extension that fails to load, throws or produces invalid code (the message names it);
+- an extra file emitted by an extension (`ctx.emitFile()`) at a refused path: outside the project
+  root, the generated module, `dist/znight.providers.json`, `node_modules`, a source file, or a path
+  emitted twice;
 - a third-party compiler extension that is not listed in `trustedExtensions` (a warning: the
   extension is not loaded).
 

@@ -90,8 +90,8 @@ Respect them; do not reopen them in passing.
   (entities, columns, repositories, queries) are explicitly **not** on the roadmap.
 - **Built-in sessions and server-side MVC** (a session store, templates, views) are out of scope.
   Signed cookies are built in, and `examples/secure-api` shows a cookie-session recipe.
-- **WebSocket and GraphQL** are deferred to v0.2 (RFC 0003, RFC 0005); their error code blocks are
-  reserved.
+- **WebSocket** is deferred to v0.2 (RFC 0003); its error code block is reserved. **GraphQL** (RFC
+  0005) is accepted for v0.2 and in progress (`@znight/graphql`).
 
 ### Roadmap
 

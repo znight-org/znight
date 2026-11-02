@@ -129,6 +129,12 @@ export enum Keys {
   'two words' = 'tw',
   B = 2,
 }
+export enum Merged {
+  A = 'a',
+}
+export enum Merged {
+  B = 'b',
+}
 export type Sort = 'title' | 'newest' | ('author' | 'newest')
 export type Numbers = 3 | 1 | -2
 export type One = 'only'
@@ -141,7 +147,7 @@ export type Ref = Sort | 'other'
 const ROUTES = `
 import { Mark } from '@acme/mark'
 import type { Remote } from '@acme/lib'
-import type { Base, Book, BookPatch, Flag, Keys, Level, MaybeSort, Numbers, One, Person, Ref, Sort, Status, Tagged, Wide } from './model.ts'
+import type { Base, Book, BookPatch, Flag, Keys, Level, MaybeSort, Merged, Numbers, One, Person, Ref, Sort, Status, Tagged, Wide } from './model.ts'
 
 @Mark()
 export class Routes {
@@ -170,6 +176,9 @@ export class Routes {
     return null!
   }
   keys(): Keys {
+    return null!
+  }
+  merged(): Merged {
     return null!
   }
   sort(): Sort {
@@ -369,6 +378,13 @@ describe('TypeHelpers.shape() with members', () => {
     ).toEqual([
       ['two words', 'tw'],
       ['B', 2],
+    ])
+    // merged declarations: the members of every declaration, in declaration order
+    expect(
+      namedOf(shapeOf('merged'), 'src/model.ts#Merged').enumMembers?.map(member => [member.name, member.value]),
+    ).toEqual([
+      ['A', 'a'],
+      ['B', 'b'],
     ])
     expect(namedOf(shapeOf('status', { jsdoc: false }), 'src/model.ts#Status').enumMembers?.[0]?.doc).toBeUndefined()
     expect(namedOf(shapeOf('sort'), 'src/model.ts#Sort').enumMembers).toBeUndefined()

@@ -1385,7 +1385,12 @@ export class ShapeResolver {
       }
       for (const member of (current.node as TSEnumDeclaration).body.members) {
         const name = enumMemberName(member.id)
-        const value = name === undefined || !Object.hasOwn(values, name) ? undefined : values[name]
+        // the evaluator follows one declaration: a member of another declaration of a merged enum is
+        // read from its initializer (TypeScript requires one on the first member of every later declaration)
+        let value: unknown
+        if (name !== undefined) {
+          value = Object.hasOwn(values, name) ? values[name] : this.#memberInitializer(current, member)
+        }
         if (name === undefined || seen.has(name) || (typeof value !== 'string' && typeof value !== 'number')) {
           continue
         }
@@ -1401,6 +1406,18 @@ export class ShapeResolver {
       }
     }
     return Object.freeze(found)
+  }
+
+  /** The value of an enum member's initializer, evaluated in the scope of its declaration. */
+  #memberInitializer(declaration: Declaration, member: TSEnumDeclaration['body']['members'][number]): unknown {
+    const file = this.#project.getFile(declaration.file)
+    if (!file || !member.initializer) {
+      return undefined
+    }
+    const evaluation = this.#project.evaluate({ file, namespace: declaration.namespace }, member.initializer, {
+      refs: 'none',
+    })
+    return evaluation.kind === 'value' ? evaluation.value : undefined
   }
 
   /** The members of an enum declaration, evaluated in its scope (`undefined` when not evaluable). */
