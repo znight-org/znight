@@ -42,6 +42,14 @@ Versions and changelogs are managed with [Changesets](https://changesets.dev)
 - **Bumps**: until 1.0, a breaking change is a `minor` bump and everything else a `patch`.
 - **No changeset** for docs-, tests-, examples- or CI-only changes. CI posts a warning (never a
   failure) on a pull request that changes packages without a changeset, as a reminder.
+- **Dependabot**: [`dependabot-changesets.yml`](.github/workflows/dependabot-changesets.yml) runs
+  [`scripts/release/dependabot-changeset.ts`](scripts/release/dependabot-changeset.ts) on every
+  Dependabot pull request. When a `dependencies`, `peerDependencies` or `optionalDependencies` range
+  of a published package changed (what its users install), it commits
+  `.changeset/dependabot-<pull request>.md`: a patch bump of those packages and one changelog line
+  ("Update left from ^1.0.0 to ^1.1.0"). Dev dependencies, the lockfile, the examples, the docs site
+  and the updates of GitHub Actions change nothing for users and get none. The file is rewritten on
+  every run and removed when nothing is left to announce.
 - **Checked**: `bun run release:status` (the _Build & pack_ job) reads every changeset with
   Changesets' own parser and fails the pull request when one cannot be read (front matter, YAML,
   version type) or bumps a package that is not published, before it breaks the release workflow on
@@ -312,6 +320,25 @@ GitHub (repository `znight-org/znight`, public):
   manual runs of Docs both run on `main`). Or:
   `gh api -X POST repos/znight-org/znight/pages -f build_type=workflow`. The site appears at
   `https://znight-org.github.io/znight/` after the first deployment.
+- [ ] **Dependabot changesets** ([`dependabot-changesets.yml`](.github/workflows/dependabot-changesets.yml)):
+  a GitHub App, because a push with its token starts CI where one with the default `GITHUB_TOKEN`
+  does not, and its credentials as **Dependabot** secrets (a run started by Dependabot reads no
+  Actions secret).
+  1. Create the App in the organization (Settings → Developer settings → GitHub Apps → New GitHub
+     App), or open the link below, which fills the form: no webhook, _Only on this account_, and one
+     repository permission, _Contents_: read and write. Nothing else is needed: the workflow only
+     pushes.
+     `https://github.com/organizations/znight-org/settings/apps/new?name=znight-dependabot-changesets&url=https://github.com/znight-org/znight&public=false&webhook_active=false&contents=write`
+  2. Generate a private key (a `.pem` file) and install the App on `znight-org/znight` only.
+  3. Store the _Client ID_ of the App (`Iv...`, not the numeric App ID) and the key, then delete the
+     file:
+
+     ```sh
+     gh secret set DEPENDABOT_APP_CLIENT_ID --app dependabot --repo znight-org/znight
+     gh secret set DEPENDABOT_APP_PRIVATE_KEY --app dependabot --repo znight-org/znight < the-key.pem
+     rm the-key.pem
+     ```
+
 - [ ] **Private vulnerability reporting**: Settings → Code security → Private vulnerability
   reporting → Enable (used by [SECURITY.md](SECURITY.md) and the issue template), or
   `gh api -X PUT repos/znight-org/znight/private-vulnerability-reporting`. Also enable
@@ -337,6 +364,12 @@ npm (organization `@znight`):
   wait for that, see [How a release goes](#how-a-release-goes)). Without the banner, close and
   reopen the pull request: that starts its CI. Runs started by hand (**Run workflow** on the
   `changeset-release/main` branch) do not count for the ruleset.
+- **The Dependabot changesets job fails on "Create the GitHub App token"**: the Dependabot secrets
+  `DEPENDABOT_APP_CLIENT_ID` and `DEPENDABOT_APP_PRIVATE_KEY` are missing or come from different
+  Apps, the App is not installed on the repository, or the run was not started by Dependabot (a run
+  started by someone else, after a push to the branch for example, reads the Actions secrets
+  instead). Fix them ([checklist](#owner-setup-checklist)), then run it again with
+  `@dependabot rebase`.
 - **The version pull request is not opened**: enable _Allow GitHub Actions to create and approve
   pull requests_ ([checklist](#owner-setup-checklist)).
 - **The publish job refuses to start ("no required reviewers")**: add reviewers to the `npm`

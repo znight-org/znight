@@ -43,9 +43,9 @@ import {
 } from './serialize.ts'
 import { isSseBody, isSseSource, type SseOptions, SseSession, type SseSource } from './sse.ts'
 import { isBodylessStatus } from './status.ts'
-import { type ContextRunner, captureContext, discardStream, trackStream } from './stream.ts'
+import { type ContextRunner, captureContext, discardStream, type TrackedStream, trackStream } from './stream.ts'
 import { HttpTokens } from './tokens.ts'
-import { emptyRecord, errorMessage, isBun, isThenable } from './utils.ts'
+import { emptyRecord, errorMessage, fastRecord, isBun, isThenable } from './utils.ts'
 
 /** A dependency of the pipeline: an instance resolved at bootstrap, or a token resolved per request. */
 export type Resolvable<T> = { readonly instance: T } | { readonly token: Token }
@@ -339,27 +339,24 @@ export class Pipeline {
 
   /**
    * The fast lane: what {@link handle} does for a route of {@link #fastRoute}, decided once instead
-   * of per request, without promises while the route stays synchronous. A request takes it when no
-   * `http:request` wrapper nor listener is registered, the server is not draining and its method
-   * is the route's (not a `HEAD` served by a `GET` route); a plain object or array returned by the
-   * handler is serialised as JSON, and `undefined` answered without body, with the headers in their
-   * final order (a template precomputed at boot).
+   * of per request, without promises while the route stays synchronous. A request takes it when the
+   * server is not draining and its method is the route's (not a `HEAD` served by a `GET` route); a
+   * plain object or array returned by the handler is serialised as JSON, and `undefined` answered
+   * without body, with the headers in their final order (a template precomputed at boot).
    * A thenable result is awaited in the lane (see {@link #fastAsync}). Anything else — a malformed
    * path (before the request starts), a thrown error or a rejection, an `HttpResponse`, a `Response`
    * or any other result, headers or cookies set through the context — continues in the general
    * pipeline, in the same request scope, with the same outcome.
+   * With `http:request` wrappers, the handler runs inside them (see {@link #fastWrapped}); listeners
+   * get the event once the reply is ready, as in the general pipeline.
    */
   #fast(route: FastRoute, request: AdapterRequest): Promise<AdapterReply> {
     const plan = route.plan
+    if (this.draining || request.method !== route.method) return this.handle(plan, request)
     const hooks = this.#hooks
-    if (
-      this.draining ||
-      request.method !== route.method ||
-      hooks.hasWrappers('http:request') ||
-      hooks.hasListeners('http:request')
-    ) {
-      return this.handle(plan, request)
-    }
+    const wrapped = hooks.hasWrappers('http:request')
+    // a hooked request starts now (see handle): its event is created with the exchange
+    const startTime = wrapped || hooks.hasListeners('http:request') ? performance.now() : undefined
     const url = request.url
     const mark = url.indexOf('?')
     const path = mark === -1 ? url : url.slice(0, mark)
@@ -379,16 +376,13 @@ export class Pipeline {
       [HttpTokens.Context, ctx],
       [HttpTokens.RequestId, ctx.requestId],
     ])
-    const done = scope.run(this.#fastRun, route, request, ctx)
-    if (done instanceof Exchange) {
-      ;(done.done as Promise<void>).then(
-        () => this.#end(done, scope, undefined),
-        (error: unknown) => this.#end(done, scope, error),
-      )
-      if (!hooks.hasListeners('http:request')) return done.replied
-      done.tracked = true
-      return this.#emitted(done)
+    if (wrapped) {
+      const x = new Exchange(request, ctx, ctx.requestId, route.target, startTime)
+      x.done = scope.run(this.#fastWrapped, x, route)
+      return this.#fastExchange(x, scope)
     }
+    const done = scope.run(this.#fastRun, route, request, ctx, startTime)
+    if (done instanceof Exchange) return this.#fastExchange(done, scope)
     const closing = scope.close()
     if (closing === undefined) {
       ctx.complete()
@@ -401,9 +395,9 @@ export class Pipeline {
         (error: unknown) => this.#disposalFailed(x, error),
       )
     }
-    // a listener registered while the handler ran (listeners are checked once the scope callback paused)
+    // listeners are checked once the scope callback paused (one may have been registered by the handler)
     if (!hooks.hasListeners('http:request')) return Promise.resolve(done)
-    const event = requestEvent(request, ctx, performance.now())
+    const event = requestEvent(request, ctx, startTime ?? performance.now())
     event.status = done.status
     return Promise.resolve(done).then(reply => {
       hooks.emit('http:request', event)
@@ -412,20 +406,40 @@ export class Pipeline {
   }
 
   /**
+   * The reply of a fast-lane request whose asynchronous part runs in `x.done`: the request ends once
+   * it settled (see {@link #end}); listeners get the event once the reply is ready.
+   */
+  #fastExchange(x: Exchange, scope: OpenedScope): Promise<AdapterReply> {
+    ;(x.done as Promise<void>).then(
+      () => this.#end(x, scope, undefined),
+      (error: unknown) => this.#end(x, scope, error),
+    )
+    if (!this.#hooks.hasListeners('http:request')) return x.replied
+    x.tracked = true
+    return this.#emitted(x)
+  }
+
+  /**
    * The fast lane in the request scope: the reply when the handler answered synchronously with a
    * plain JSON value or `undefined`, otherwise the exchange finishing the request (see {@link #fast}).
+   * `startTime`: the request has `http:request` listeners, its event starts with the exchange.
    */
-  readonly #fastRun = (route: FastRoute, request: AdapterRequest, ctx: RequestContext): AdapterReply | Exchange => {
+  readonly #fastRun = (
+    route: FastRoute,
+    request: AdapterRequest,
+    ctx: RequestContext,
+    startTime: number | undefined,
+  ): AdapterReply | Exchange => {
     const plan = route.plan
-    if (plan.parseBody) return this.#fastLater(route, request, ctx, NO_RESULT)
+    if (plan.parseBody) return this.#fastLater(route, request, ctx, NO_RESULT, startTime)
     let result: unknown
     let reply: AdapterReply | undefined
     try {
       result = plan.definition.invoke(this.#resolve(plan.controller), ctx)
-      if (isThenable(result)) return this.#fastLater(route, request, ctx, result)
+      if (isThenable(result)) return this.#fastLater(route, request, ctx, result, startTime)
       reply = this.#fastReply(route, ctx, result)
     } catch (error) {
-      const x = new Exchange(request, ctx, ctx.requestId, route.target)
+      const x = new Exchange(request, ctx, ctx.requestId, route.target, startTime)
       x.done = this.#respond(x, () => this.#failed(error, ctx, x.event))
       return x
     }
@@ -434,14 +448,20 @@ export class Pipeline {
       ctx.releaseBody()
       return reply
     }
-    const x = new Exchange(request, ctx, ctx.requestId, route.target)
+    const x = new Exchange(request, ctx, ctx.requestId, route.target, startTime)
     x.done = this.#respond(x, () => this.#settle(ctx, plan, x.event, result))
     return x
   }
 
   /** The fast lane of a route with a body to read or a handler that returned a thenable. */
-  #fastLater(route: FastRoute, request: AdapterRequest, ctx: RequestContext, result: unknown): Exchange {
-    const x = new Exchange(request, ctx, ctx.requestId, route.target)
+  #fastLater(
+    route: FastRoute,
+    request: AdapterRequest,
+    ctx: RequestContext,
+    result: unknown,
+    startTime: number | undefined,
+  ): Exchange {
+    const x = new Exchange(request, ctx, ctx.requestId, route.target, startTime)
     x.done = this.#fastAsync(x, route, result)
     return x
   }
@@ -492,22 +512,171 @@ export class Pipeline {
     const requestId = ctx.requestId
     // a custom generator's id that cannot be sent is left out (see #frameworkHeaders)
     if (!this.#validIds && !isHeaderValue(requestId)) return undefined
-    if (result === undefined) {
+    if (result === undefined) return this.#templateReply(status, null, undefined, requestId)
+    if (!isPlainJson(result)) return undefined
+    const json = JSON.stringify(result)
+    if (json === undefined) throw new TypeError(`Cannot serialise a ${typeof result} as a response body`)
+    // encoded once, its length from the bytes (see serialize.ts encodeText)
+    return this.#templateReply(status, utf8(json), json, requestId)
+  }
+
+  /**
+   * The reply of a JSON body (`text` set) or of no body, its headers copied from the template of
+   * the fast lane (see {@link #jsonHeaders}), completed with the length and the request id (one that
+   * can be sent).
+   */
+  #templateReply(
+    status: number,
+    body: Uint8Array | null,
+    text: string | undefined,
+    requestId: RequestId,
+  ): AdapterReply {
+    if (text === undefined) {
       const headers: Record<string, HeaderValue> = { ...this.#emptyHeaders }
       const idHeader = this.#emptyIdHeader
       if (idHeader !== undefined) headers[idHeader] = requestId
       return { status, headers, body: null }
     }
-    if (!isPlainJson(result)) return undefined
-    const json = JSON.stringify(result)
-    if (json === undefined) throw new TypeError(`Cannot serialise a ${typeof result} as a response body`)
     const headers: Record<string, HeaderValue> = { ...this.#jsonHeaders }
-    // encoded once, its length from the bytes (see serialize.ts encodeText)
-    const body = utf8(json)
-    headers['content-length'] = String(body.byteLength)
+    headers['content-length'] = String((body as Uint8Array).byteLength)
     const idHeader = this.#jsonIdHeader
     if (idHeader !== undefined) headers[idHeader] = requestId
-    return { status, headers, body, text: json }
+    return { status, headers, body, text }
+  }
+
+  /**
+   * The fast lane through the `http:request` wrappers (registered when the request started), in the
+   * request scope: what {@link #respond} does for the route, the handler run inside `next()` like
+   * {@link #fastRun}. A JSON value or `undefined` is serialised there as `serializeResult` does, and
+   * the reply completed from the template of the fast lane when the wrappers added no response header
+   * (`event.responseHeaders`) nor cookie (see {@link #fastDeliver}). Never rejects.
+   */
+  readonly #fastWrapped = (x: Exchange, route: FastRoute): Promise<void> =>
+    this.#hooks
+      .run('http:request', x.event, () => this.#fastOperation(x, route))
+      .then(
+        () => this.#fastDeliver(x, false, undefined),
+        (error: unknown) => this.#fastDeliver(x, true, error),
+      )
+
+  /** The operation wrapped by the `http:request` wrappers in the fast lane: the route run, its outcome checked. */
+  #fastOperation(x: Exchange, route: FastRoute): Promise<Outcome> {
+    const ctx = x.ctx
+    const plan = route.plan
+    if (plan.parseBody) return this.#fastOperationLater(x, route, NO_RESULT)
+    let result: unknown
+    try {
+      result = plan.definition.invoke(this.#resolve(plan.controller), ctx)
+    } catch (error) {
+      return this.#fastChecked(x, this.#failed(error, ctx, x.event))
+    }
+    if (isThenable(result)) return this.#fastOperationLater(x, route, result)
+    return this.#fastChecked(x, this.#fastOutcome(x, route, result))
+  }
+
+  /** {@link #fastOperation} with a body to read (`pending` is {@link NO_RESULT}) or a thenable result. */
+  async #fastOperationLater(x: Exchange, route: FastRoute, pending: unknown): Promise<Outcome> {
+    const ctx = x.ctx
+    const plan = route.plan
+    let result = pending
+    try {
+      if (result === NO_RESULT) {
+        const controller = this.#resolve(plan.controller)
+        await ctx.parseBody()
+        result = plan.definition.invoke(controller, ctx)
+      }
+      if (isThenable(result)) result = await result
+    } catch (error) {
+      return await this.#fastChecked(x, this.#failed(error, ctx, x.event))
+    }
+    return await this.#fastChecked(x, this.#fastOutcome(x, route, result))
+  }
+
+  /**
+   * The outcome of a handler result in {@link #fastOperation}: for a plain JSON value or `undefined`,
+   * the reply of `serializeResult` built directly (`x.fast` set); anything else as in the general
+   * pipeline (see {@link #settle}). Never throws nor rejects (errors are mapped).
+   */
+  #fastOutcome(x: Exchange, route: FastRoute, result: unknown): Outcome | Promise<Outcome> {
+    const ctx = x.ctx
+    const event = x.event
+    const status = result === undefined ? route.emptyStatus : route.jsonStatus
+    if (status === undefined || ctx.hasResponseHeaders || (result !== undefined && !isPlainJson(result))) {
+      return this.#settle(ctx, route.plan, event, result)
+    }
+    let reply: SerializedReply
+    if (result === undefined) {
+      reply = { status, headers: fastRecord<HeaderValue>(), body: null }
+    } else {
+      let json: string | undefined
+      try {
+        json = JSON.stringify(result)
+        if (json === undefined) throw new TypeError(`Cannot serialise a ${typeof result} as a response body`)
+      } catch (error) {
+        return this.#failed(error, ctx, event)
+      }
+      const headers = fastRecord<HeaderValue>()
+      headers['content-type'] = ContentType.json
+      const body = utf8(json)
+      headers['content-length'] = String(body.byteLength)
+      reply = { status, headers, body, text: json, ownHeaders: true }
+    }
+    event.status = status
+    x.fast = true
+    return reply
+  }
+
+  /**
+   * What the general pipeline does with an outcome inside the wrappers (see {@link #respond}): its
+   * headers and cookies checked, the async context of a streamed body captured; kept in `x.outcome`.
+   */
+  #fastChecked(x: Exchange, pending: Outcome | Promise<Outcome>): Promise<Outcome> {
+    if (pending instanceof Promise) return pending.then(outcome => this.#fastKeep(x, outcome))
+    return Promise.resolve(this.#fastKeep(x, pending))
+  }
+
+  #fastKeep(x: Exchange, outcome: Outcome): Outcome {
+    // a reply of #fastOutcome is valid by construction (what #checked returns for it)
+    const checked = x.fast ? outcome : this.#checked(outcome, x.ctx, x.event)
+    if (checked !== RAW && isStreamed(checked.body)) x.run = captureContext()
+    x.outcome = checked
+    return checked
+  }
+
+  /**
+   * Answers a fast-lane request once its wrappers settled: a reply of {@link #fastOutcome} gets the
+   * headers of the template when nothing was added to it (no response header from the wrappers, no
+   * cookie, not draining, a request id that can be sent), which is what {@link #complete} gives;
+   * anything else is completed by {@link #deliver}. Never rejects.
+   */
+  #fastDeliver(x: Exchange, failed: boolean, hookError: unknown): Promise<void> | undefined {
+    const outcome = x.outcome
+    const ctx = x.ctx
+    if (outcome === undefined) return this.#fastUnhandled(x, failed ? hookError : NOT_CALLED)
+    if (failed) this.#wrapperFailed(x, hookError)
+    else if (
+      x.fast &&
+      outcome !== RAW &&
+      !hasOwnKeys(x.event.responseHeaders) &&
+      !ctx.hasCookies &&
+      !this.draining &&
+      (this.#validIds || isHeaderValue(x.requestId))
+    ) {
+      const reply = this.#templateReply(outcome.status, outcome.body as Uint8Array | null, outcome.text, x.requestId)
+      ctx.commit()
+      ctx.releaseBody()
+      x.answer(reply)
+      return undefined
+    }
+    const streaming = this.#send(x, outcome, true, x.run)
+    if (streaming === undefined) return undefined
+    return streaming.tracked.done.then(failure => this.#streamed(x, streaming, failure))
+  }
+
+  /** {@link #fastDeliver} when a wrapper failed before the request was handled or did not call `next()`. */
+  async #fastUnhandled(x: Exchange, failure: unknown): Promise<void> {
+    const streaming = this.#send(x, await this.#unhandled(x, failure), true, undefined)
+    if (streaming !== undefined) this.#streamed(x, streaming, await streaming.tracked.done)
   }
 
   /** Ends a fast-lane request once its asynchronous part settled: its scope is closed, then it is over. */
@@ -752,35 +921,61 @@ export class Pipeline {
       hookError = error
     }
     if (outcome === undefined) {
-      // a wrapper failed before the request was handled, or did not call next(): answer anyway
-      const error = failed ? hookError : new Error('An "http:request" hook wrapper did not call next()')
-      event.error ??= error
-      // the same checks as a handled reply: an exception mapper's HttpResponse may carry cookies
-      const fallback = await this.#errorReply(error, ctx)
-      outcome = this.#checkCookies(this.#checkHeaders(fallback, ctx, event), ctx, event)
-      event.status = outcome.status
+      outcome = await this.#unhandled(x, failed ? hookError : NOT_CALLED)
       recheck = true
     } else if (failed) {
-      this.#logger.error('An "http:request" hook wrapper failed after the request was handled', {
-        err: hookError,
-        requestId,
-      })
+      this.#wrapperFailed(x, hookError)
     }
+    const streaming = this.#send(x, outcome, recheck, run)
+    if (streaming !== undefined) this.#streamed(x, streaming, await streaming.tracked.done)
+  }
+
+  /**
+   * The reply of a request whose `http:request` wrapper failed before it was handled (`error`), or
+   * did not call `next()` ({@link NOT_CALLED}): the error mapped and checked like a handled reply (an
+   * exception mapper's `HttpResponse` may carry cookies). Never rejects.
+   */
+  async #unhandled(x: Exchange, failure: unknown): Promise<CheckedReply> {
+    const ctx = x.ctx
+    const event = x.event
+    const error = failure === NOT_CALLED ? new Error('An "http:request" hook wrapper did not call next()') : failure
+    event.error ??= error
+    const fallback = await this.#errorReply(error, ctx)
+    const reply = this.#checkCookies(this.#checkHeaders(fallback, ctx, event), ctx, event)
+    event.status = reply.status
+    return reply
+  }
+
+  #wrapperFailed(x: Exchange, error: unknown): void {
+    this.#logger.error('An "http:request" hook wrapper failed after the request was handled', {
+      err: error,
+      requestId: x.requestId,
+    })
+  }
+
+  /**
+   * Completes the outcome of a request (`recheck`: wrappers ran) and hands its reply to the adapter.
+   * Returns the tracking of a streamed body (read in `run`, the context of the handler, when it was
+   * captured), whose end {@link #streamed} records.
+   */
+  #send(x: Exchange, outcome: Outcome, recheck: boolean, run: ContextRunner | undefined): Streaming | undefined {
+    const ctx = x.ctx
+    const event = x.event
     if (outcome === RAW) {
       ctx.commit()
       const status = x.request.rawStatus?.() ?? 200
       event.status ??= status
       x.answer({ status, headers: {}, body: null, raw: true })
-      return
+      return undefined
     }
-    const serialized = this.#complete(outcome, ctx, event, requestId, x.cors, x.preflight, recheck)
+    const serialized = this.#complete(outcome, ctx, event, x.requestId, x.cors, x.preflight, recheck)
     const body = serialized.body
     if (!isStreamed(body)) {
       const reply = adapterReply(serialized, body)
       ctx.commit()
       ctx.releaseBody()
       x.answer(reply)
-      return
+      return undefined
     }
     // files too: a file-backed Blob is read lazily, after the handler returned
     const tracked = trackStream(body, run ?? captureContext(), () => ctx.abort('client'))
@@ -792,10 +987,15 @@ export class Pipeline {
     }
     ctx.commit()
     x.answer(reply)
-    const failure = await tracked.done
-    if (session !== undefined) this.#streams.delete(session)
+    return { tracked, session }
+  }
+
+  /** A streamed body was sent or abandoned (`failure`: the stream failed). */
+  #streamed(x: Exchange, streaming: Streaming, failure: unknown): void {
+    const ctx = x.ctx
+    if (streaming.session !== undefined) this.#streams.delete(streaming.session)
     if (failure !== undefined) {
-      this.#logger.error('The response stream failed', { err: failure, requestId, path: ctx.path })
+      this.#logger.error('The response stream failed', { err: failure, requestId: x.requestId, path: ctx.path })
     }
     ctx.releaseBody()
   }
@@ -1276,6 +1476,15 @@ interface FastRoute {
 /** `#fastAsync` reads the body and runs the handler. */
 const NO_RESULT: unique symbol = Symbol('no result')
 
+/** An `http:request` wrapper returned without calling `next()` (see `Pipeline.#unhandled`). */
+const NOT_CALLED: unique symbol = Symbol('next() not called')
+
+/** A streamed body handed to the adapter, until it was sent or abandoned (see `Pipeline.#send`). */
+interface Streaming {
+  readonly tracked: TrackedStream
+  readonly session: SseSession | undefined
+}
+
 /** A request being answered (internal): its context, its target and the promise of its reply. */
 class Exchange {
   readonly request: AdapterRequest
@@ -1290,6 +1499,12 @@ class Exchange {
   tracked = false
   /** The asynchronous part of a fast-lane request (never rejects). */
   done: Promise<void> | undefined = undefined
+  /** Fast lane with wrappers: the outcome of the route once checked (see `Pipeline.#fastKeep`). */
+  outcome: Outcome | undefined = undefined
+  /** Fast lane with wrappers: `outcome` is a JSON reply or a reply without body built by the lane. */
+  fast = false
+  /** Fast lane with wrappers: the async context of the handler, for a streamed body. */
+  run: ContextRunner | undefined = undefined
   readonly #resolve: (reply: AdapterReply) => void
   readonly #reject: (error: unknown) => void
   #event: HttpRequestEvent | undefined
@@ -1343,6 +1558,12 @@ function requestEvent(request: AdapterRequest, ctx: RequestContext, startTime: n
     startTime,
     responseHeaders: {},
   }
+}
+
+/** Whether a record has an own enumerable property (`event.responseHeaders` was written to). */
+function hasOwnKeys(record: object): boolean {
+  for (const key in record) if (Object.hasOwn(record, key)) return true
+  return false
 }
 
 /**

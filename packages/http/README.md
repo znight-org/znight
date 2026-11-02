@@ -1503,13 +1503,15 @@ app.hooks.wrap('http:request', async (event, next) => {
 stream, `run` resolves when the stream opens (`status: 200`): durations measure the time to open.
 A stream-lifetime hook is not provided.
 
-When no `http:request` wrapper or listener is registered (and CORS is off), routes (other than
-`@All`) without guards, interceptors, `@Sse`, `@Res()` or `@Header` take a fast lane: the plugin
-decides at boot what the pipeline would do for them, runs a synchronous handler without creating a
-promise and builds the headers of a JSON reply from a template. The replies are the same as through
-the full pipeline (a thrown error, an `HttpResponse` or anything unusual continues there, in the
-same request scope; a promise is awaited first); registering a hook simply sends every request
-through the full pipeline again.
+When CORS is off, routes (other than `@All`) without guards, interceptors, `@Sse`, `@Res()` or
+`@Header` take a fast lane: the plugin decides at boot what the pipeline would do for them, runs a
+synchronous handler without creating a promise and builds the headers of a JSON reply from a
+template. The replies are the same as through the full pipeline (a thrown error, an `HttpResponse`
+or anything unusual continues there, in the same request scope; a promise is awaited first). The
+lane runs the `http:request` hooks too: listeners keep it synchronous, and wrappers (such as those of
+`@znight/observability`) see the same event, in the same request scope and async context, as with
+the full pipeline; a reply whose wrappers added response headers or cookies is completed like any
+other.
 
 ## Plugin options
 

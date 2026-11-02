@@ -16,7 +16,7 @@ import type {
 } from '../src/index.ts'
 
 import { EventEmitter } from 'node:events'
-import { SpanKind } from '@opentelemetry/api'
+import { SpanKind, trace } from '@opentelemetry/api'
 import { Application, ErrorCode, InstantiationError, ZnightError } from '@znight/core'
 
 import {
@@ -343,6 +343,78 @@ describe('ObservabilityPlugin', () => {
     const metrics = app.get(Tokens.MetricsRegistry)
     expect(await metrics.metrics()).not.toContain('http_server')
     expect(app.get(Tokens.Tracer)).toBeInstanceOf(Tracer)
+    await app.stop()
+  })
+
+  it('registers the hooks of the enabled features only', async () => {
+    const { stream } = capture()
+    // the http:request wrapper of a plugin sends every request out of the fast lane of @znight/http
+    const hooks = (app: Application): Record<string, boolean> => ({
+      http: app.hooks.hasWrappers('http:request'),
+      messaging: app.hooks.hasWrappers('messaging:message'),
+      publish: app.hooks.hasWrappers('messaging:publish'),
+      schedule: app.hooks.hasWrappers('schedule:run'),
+      scheduleListener: app.hooks.hasListeners('schedule:run'),
+    })
+    const all = { http: true, messaging: true, publish: true, schedule: true, scheduleListener: true }
+    const none = { http: false, messaging: false, publish: false, schedule: false, scheduleListener: false }
+    const httpOff: ObservabilityOptions = {
+      logging: { destination: stream, requests: false },
+      metrics: { server: false, http: false },
+      tracing: { tracerProvider: provider, http: false },
+    }
+    const allOff: ObservabilityOptions = {
+      logging: { destination: stream, requests: false, messages: false, jobs: false },
+      metrics: { server: false, http: false, messaging: false, schedule: false },
+      tracing: { tracerProvider: provider, http: false, messaging: false, publish: false, schedule: false },
+    }
+    for (const [options, expected] of [
+      [{ logging: { destination: stream }, metrics: { server: false }, tracing: { tracerProvider: provider } }, all],
+      [httpOff, { ...all, http: false }],
+      [allOff, none],
+      // options given as a function: every hook until they are evaluated (onBootstrap at the latest)
+      [() => httpOff, { ...all, http: false }],
+      [() => allOff, none],
+      // logs only (the producer spans of messaging:publish are tracing)
+      [
+        { logging: { destination: stream, requests: { level: 'debug' } }, metrics: false, tracing: false },
+        { ...all, publish: false },
+      ],
+    ] as const) {
+      const { app } = await create(options as PluginOptions<ObservabilityOptions>)
+      expect(hooks(app)).toEqual(expected)
+      await app.stop()
+      expect(hooks(app)).toEqual(none)
+    }
+  })
+
+  it('keeps its hooks outermost among plugins when its options are a function', async () => {
+    const { stream, entries } = capture()
+    const traced: boolean[] = []
+    const inner: Plugin = {
+      name: 'inner',
+      register: ctx => {
+        ctx.hooks.wrap('http:request', async (_event, next) => {
+          traced.push(trace.getActiveSpan() !== undefined)
+          await next()
+        })
+      },
+    }
+    const plugin = ObservabilityPlugin.configure(() => ({
+      logging: { destination: stream },
+      metrics: false,
+      tracing: { tracerProvider: provider, messaging: false, publish: false },
+    }))
+    const app = await Application.create({
+      metadata: appMetadata(),
+      plugins: [plugin, inner],
+      shutdown: { signals: false },
+    })
+    expect(app.hooks.hasWrappers('messaging:publish')).toBe(false)
+    await app.hooks.run('http:request', httpEvent({ status: 200 }), async () => undefined)
+    // the span of the observability wrapper is active in the wrapper of the later plugin
+    expect(traced).toEqual([true])
+    expect(byMessage(entries, 'request completed')).toMatchObject({ status: 200 })
     await app.stop()
   })
 
