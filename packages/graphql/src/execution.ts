@@ -29,7 +29,8 @@ import type { ErrorFormatter } from './format.ts'
 import type { DocumentLimits } from './limits.ts'
 import type { GraphQLOperationKind, GraphQLTransport } from './types.ts'
 
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
+import { HttpTokens } from '@znight/http'
 import {
   AbortedGraphQLExecutionError,
   createSourceEventStream,
@@ -651,7 +652,7 @@ export class GraphQLExecutor {
         rejection.operationName ?? (typeof request?.operationName === 'string' ? request.operationName : undefined),
       documentId: rejection.documentId,
       transport: options.transport ?? 'direct',
-      requestId: options.requestId ?? options.http?.requestId ?? '',
+      requestId: options.requestId ?? options.http?.requestId ?? this.#scopedRequestId(),
       context: undefined,
       startTime: performance.now(),
       outcome: 'rejected',
@@ -756,6 +757,12 @@ export class GraphQLExecutor {
         if (hooks.hasListeners(OPERATION_HOOK)) hooks.emit(OPERATION_HOOK, event)
       },
     }
+  }
+
+  /** The request id of the enclosing scope (a controller calling GraphQL), or a new one. */
+  #scopedRequestId(): string {
+    const id = this.#container.currentScope()?.get(HttpTokens.RequestId)
+    return typeof id === 'string' ? id : randomUUID()
   }
 
   #runtimeLogError(message: string, error: unknown): void {

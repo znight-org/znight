@@ -111,7 +111,6 @@ function fieldFunctions(
       throw new GraphQLException(`Not allowed to resolve ${coordinate}`, { code: GraphQLErrorCode.Forbidden })
     }
     resolve = (p, a, c, i) => {
-      if (normalize !== undefined) normalize(a)
       const operation = c as OperationContext
       const args = a as GraphQLArgs
       const allowed = runGuards(
@@ -119,7 +118,11 @@ function fieldFunctions(
         guards,
         new FieldContext(route, operation, parentType, fieldName, args, p, i),
       )
-      const call = (): unknown => invoke(resolveIn(container, target), p, args, operation, i)
+      // §8.5: guards (they see the coerced arguments), then null handling, then invoke
+      const call = (): unknown => {
+        if (normalize !== undefined) normalize(args)
+        return invoke(resolveIn(container, target), p, args, operation, i)
+      }
       if (allowed === true) return call()
       if (allowed === false) return forbidden()
       return allowed.then(ok => (ok ? call() : forbidden()))
