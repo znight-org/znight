@@ -2574,8 +2574,8 @@ res.json()
   regenerate the module before the tests import it (§6.3); other runners run `znight generate`
   first.
   `@znight/testing` itself never compiles: it reads the metadata structurally (providers, aliases,
-  externals, `extensions.config` / `http` / `messaging` / `schedule`) and does not depend on the
-  feature packages.
+  externals, `extensions.config` / `http` / `messaging` / `schedule` / `graphql`) and does not
+  depend on the feature packages.
 - `TestBed.create(target, { metadata, provide?, overrides?, config?, mockFn?, deep?, aop? })` →
   `{ instance, mocks, container }`. The target (class, token, `TypedToken`, alias or unique display
   name) is built with its real generated factory (async factories awaited; factory errors →
@@ -2605,11 +2605,14 @@ res.json()
   runs `Application.create` with signal handlers disabled, applies `overrides` last and, by default,
   instantiates only the closure of the HTTP controllers (with their guards and interceptors), the
   message consumers, the hosts of scheduled jobs (`extensions.schedule.jobs[].token`, disabled jobs
-  included: they can be triggered), the override keys and the **plugin roots** (everything when
-  there is no controller, consumer nor job; `only: 'all' | keys`, keys to which the override keys
-  and plugin roots are added; `'all'` ignores plugin roots). Plugin roots are the providers a plugin
-  resolves in `onBootstrap` although the metadata does not reference them (`HttpPlugin`'s global
-  `guards`, `interceptors`, `exceptionMappers`): the optional `Plugin.initRoots(context: { metadata })`
+  included: they can be triggered), the GraphQL resolvers with their guards and loaders (for every
+  field of an object type bound to a resolver, `extensions.graphql.types[].fields[].resolver.token`,
+  `guards` and `loaders`; RFC 0005 §7.1), the override keys and the **plugin roots** (everything
+  when there is no controller, consumer, job nor resolver; `only: 'all' | keys`, keys to which the
+  override keys and plugin roots are added; `'all'` ignores plugin roots). Plugin roots are the
+  providers a plugin resolves in `onBootstrap` although the metadata does not reference them
+  (`HttpPlugin`'s global `guards`, `interceptors`, `exceptionMappers`): the optional
+  `Plugin.initRoots(context: { metadata })`
   of core (§8.2; `PluginInitRoots` in testing), called once per `TestApp.create()` before
   `Application.create` (it SHOULD NOT throw: invalid options are reported by `onBootstrap`; a
   non-array result is a `TypeError` naming the plugin); keys that designate providers of the

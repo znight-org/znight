@@ -258,6 +258,74 @@ describe('TestApp: instantiated providers', () => {
     await app.close()
   })
 
+  it('GraphQL resolvers, their guards and loaders are roots, async dependencies included', async () => {
+    const app = await TestApp.create({ metadata: graphqlMetadata(), logger: quiet() })
+    const created = app.container.instances().map(instance => instance.token)
+    expect(created).toEqual(expect.arrayContaining([Q.Pool, Q.BookResolver, Q.AuthorResolver, Q.RoleGuard, Q.Loader]))
+    expect(created).toHaveLength(5)
+    // the async pool was awaited at boot: the resolver reads it synchronously
+    expect(app.get<BookResolver>(Q.BookResolver).pool).toEqual({ ready: true })
+    // unrelated providers stay lazy: the broken one is never created, the others on first use
+    expect(created).not.toContain(T.BrokenService)
+    expect(created).not.toContain(T.Database)
+    expect(app.get(Database)).toBeInstanceOf(Database)
+    await app.close()
+  })
+
+  it('GraphQL roots join the controllers', async () => {
+    const both = defineTestMetadata({
+      providers: [
+        { token: T.Database, class: Database },
+        { token: T.AuditService, class: AuditService },
+        { token: T.BrokenService, class: BrokenService },
+      ],
+      extensions: {
+        http: { controllers: [{ token: T.Database, guards: [], interceptors: [], routes: [] }] },
+        graphql: {
+          version: 1,
+          roots: { query: 'Query' },
+          types: [{ kind: 'object', name: 'Query', fields: [{ name: 'audit', resolver: { token: T.AuditService } }] }],
+        },
+      },
+    })
+    const app = await TestApp.create({ metadata: both, logger: quiet() })
+    const created = app.container.instances().map(instance => instance.token)
+    expect(created).toEqual(expect.arrayContaining([T.Database, T.AuditService]))
+    expect(created).toHaveLength(2)
+    await app.close()
+  })
+
+  it('a malformed GraphQL section adds no root', async () => {
+    for (const graphql of [
+      'junk',
+      { types: 'x' },
+      {
+        version: 1,
+        types: [
+          null,
+          'junk',
+          { kind: 'object', fields: 'x' },
+          { kind: 'input', fields: [{ resolver: { token: T.AuditService, guards: [], loaders: [] } }] },
+          {
+            kind: 'object',
+            fields: [
+              null,
+              { name: 'a' },
+              { resolver: null },
+              { resolver: { token: 42, guards: 'x', loaders: [1, null] } },
+              { resolver: { token: 'src/gone.ts#Gone', guards: ['src/x.ts#X'], loaders: ['src/y.ts#Y'] } },
+            ],
+          },
+        ],
+      },
+    ]) {
+      const odd = defineTestMetadata({ providers: [Database, AuditService], extensions: { graphql } })
+      const app = await TestApp.create({ metadata: odd, logger: quiet() })
+      expect(app.container.instances()).toHaveLength(2)
+      await app.close()
+    }
+  })
+
   it('overridden providers are part of the instantiated closure', async () => {
     const factory = mock(() => new AuditService())
     const app = await TestApp.create({
@@ -292,6 +360,78 @@ class HelloController {
 
 /** Not a provider of the metadata. */
 class NotAProvider {}
+
+const Q = {
+  Pool: 'src/db/pool.ts#Pool',
+  BookResolver: 'src/catalog/book.resolver.ts#BookResolver',
+  AuthorResolver: 'src/catalog/author.resolver.ts#AuthorResolver',
+  RoleGuard: 'src/auth/role.guard.ts#RoleGuard',
+  Loader: 'src/catalog/authors-by-id.loader.ts#AuthorsById',
+} as const
+
+class BookResolver {
+  constructor(readonly pool: unknown) {}
+}
+
+/**
+ * The `extensions.graphql` section of an application with two resolvers (one depending on an async
+ * provider), a method guard and a loader, next to a broken provider and an unrelated one.
+ */
+function graphqlMetadata(): ZnightMetadata {
+  const resolver = (token: string, method: string, extra: Record<string, unknown> = {}) => ({
+    token,
+    method,
+    operation: 'query',
+    guards: [],
+    meta: {},
+    invoke: () => undefined,
+    ...extra,
+  })
+  return defineTestMetadata({
+    providers: [
+      { token: Q.Pool, async: true, factory: () => Promise.resolve({ ready: true }) },
+      { token: Q.BookResolver, class: BookResolver, deps: [Q.Pool] },
+      { token: Q.AuthorResolver, factory: () => ({}) },
+      { token: Q.RoleGuard, factory: () => ({ canActivate: () => true }) },
+      { token: Q.Loader, factory: () => ({ load: () => undefined }) },
+      { token: T.Database, class: Database },
+      { token: T.BrokenService, class: BrokenService },
+    ],
+    extensions: {
+      graphql: {
+        version: 1,
+        schemaHash: '0000000000000000',
+        roots: { query: 'Query' },
+        types: [
+          {
+            kind: 'object',
+            name: 'Book',
+            fields: [
+              { name: 'id', type: 'ID!' },
+              {
+                name: 'author',
+                type: 'Author!',
+                resolver: resolver(Q.AuthorResolver, 'author', { operation: 'field', loaders: [Q.Loader] }),
+              },
+            ],
+          },
+          { kind: 'enum', name: 'Genre', values: [{ name: 'NOVEL', value: 'NOVEL' }] },
+          {
+            kind: 'object',
+            name: 'Query',
+            fields: [
+              {
+                name: 'books',
+                type: '[Book!]!',
+                resolver: resolver(Q.BookResolver, 'books', { guards: [Q.RoleGuard] }),
+              },
+            ],
+          },
+        ],
+      },
+    },
+  })
+}
 
 const G = {
   Store: 'src/auth.ts#StoreFactory.store',
