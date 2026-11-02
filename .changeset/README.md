@@ -9,6 +9,11 @@ change.
 - Examples (`@znight-examples/*`) and the docs site (`@znight/docs`) are private and ignored.
 - While on `0.x`, use `minor` for breaking changes and `patch` for everything else.
 - Docs-, tests-, examples- or CI-only changes need no changeset (CI only reminds you).
+- Dependabot pull requests get theirs from a workflow
+  ([`dependabot-changesets.yml`](../.github/workflows/dependabot-changesets.yml)), only when a
+  runtime dependency range of a published package changes (`dependabot-<pull request>.md`, rewritten
+  on every run: do not edit it by hand). Updates of dev dependencies, the examples and GitHub
+  Actions need none.
 - CI reads every changeset as `changeset version` does and fails on one it cannot read (a broken
   front matter, an unknown version type, a package that is not published).
 

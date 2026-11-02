@@ -1,0 +1,79 @@
+# Adds the changeset of a Dependabot pull request, when its dependency updates reach the users of a
+# published package: `scripts/release/dependabot-changeset.ts` compares the `dependencies`,
+# `peerDependencies` and `optionalDependencies` of `packages/*` with the base branch and writes
+# `.changeset/dependabot-<pull request>.md`; a pull request that only touches dev dependencies, the
+# lockfile, the examples or the GitHub Actions gets none. The file is rewritten on every run (a
+# rebase, a recreate) and removed when nothing is left to announce. See RELEASING.md.
+#
+# `pull_request` and not `pull_request_target`: a run started by Dependabot reads the Dependabot
+# secrets, a fork reads none. The pull request branch runs code (`bun install`, the script), so the
+# credentials, the only secrets, are used after it, by steps that run no code of the pull request:
+# the token of a GitHub App is created, then git pushes with it. A commit pushed with the default
+# GITHUB_TOKEN would start no workflow, a push with the token of an App does: that is why the push
+# uses one (Dependabot secrets DEPENDABOT_APP_CLIENT_ID and DEPENDABOT_APP_PRIVATE_KEY, an App with
+# the Contents permission only, installed on this repository).
+name: Dependabot changesets
+
+on: pull_request
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependabot-changesets-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  changeset:
+    name: Update the changeset
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          # the script compares with the merge base of the pull request and its base branch
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Write the changeset
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PULL_REQUEST: ${{ github.event.pull_request.number }}
+        run: bun scripts/release/dependabot-changeset.ts --pr "$PULL_REQUEST" --base "origin/$BASE_REF"
+      - name: Commit the changeset
+        id: commit
+        run: |
+          git add --all .changeset
+          if git diff --cached --quiet; then
+            echo "The changeset is up to date."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git config user.name "dependabot[bot]"
+          git config user.email "49699333+dependabot[bot]@users.noreply.github.com"
+          # `bun install` pointed core.hooksPath at the husky hooks of the pull request: not for these commands
+          git -c core.hooksPath=/dev/null commit --message "chore(deps): update the changeset"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+      # nothing to push when the changeset is up to date, as in the run that the push itself starts
+      # (it is not a run of Dependabot: it reads no Dependabot secret)
+      - name: Create the GitHub App token
+        id: app-token
+        if: steps.commit.outputs.changed == 'true'
+        # an exact tag, not `v3`: actionlint 1.7.12 does not know the `client-id` input of v3 and rejects it
+        uses: actions/create-github-app-token@v3.3.0
+        with:
+          client-id: ${{ secrets.DEPENDABOT_APP_CLIENT_ID }}
+          private-key: ${{ secrets.DEPENDABOT_APP_PRIVATE_KEY }}
+          permission-contents: write
+      - name: Push the changeset
+        if: steps.commit.outputs.changed == 'true'
+        env:
+          TOKEN: ${{ steps.app-token.outputs.token }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          auth=$(printf 'x-access-token:%s' "$TOKEN" | base64 --wrap=0)
+          echo "::add-mask::$auth"
+          git -c core.hooksPath=/dev/null -c "http.https://github.com/.extraheader=Authorization: basic $auth" \
+            push "https://github.com/$GITHUB_REPOSITORY.git" "HEAD:refs/heads/$HEAD_REF"
