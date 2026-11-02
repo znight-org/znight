@@ -72,6 +72,12 @@ export interface ExecuteOptions {
    * transport passes `ctx.signal`.
    */
   readonly signal?: AbortSignal
+  /**
+   * Passed to graphql-js as `abortSignal` instead of {@link signal} (which stays the signal of
+   * `GraphQLContext.signal`). The HTTP transport passes a stand-in that reads `ctx.signal` only when
+   * an execution turns asynchronous (see `transport/abort.ts`).
+   */
+  readonly abortSignal?: AbortSignal
   /** Default: the HTTP request id, the request id of the enclosing scope, or a UUID (on first read). */
   readonly requestId?: string
   /** GET: queries only, other operations are rejected with 405 and `allow: POST`. */
@@ -539,7 +545,7 @@ export class GraphQLExecutor {
         variableValues: request.variables,
         contextValue: ctx,
         // undefined: no abort listener in graphql-js (one per execution otherwise)
-        abortSignal: options.signal,
+        abortSignal: options.abortSignal ?? options.signal,
         hideSuggestions: this.#hideSuggestions,
       })
     } catch (error) {
@@ -790,7 +796,8 @@ function variableError(error: GraphQLError): GraphQLFormattedError {
 
 /** graphql-js rejects with `AbortedGraphQLExecutionError`: callers get the reason of their signal. */
 function abortReason(error: unknown, options: ExecuteOptions): unknown {
-  if (error instanceof AbortedGraphQLExecutionError && options.signal?.aborted === true) return options.signal.reason
+  const signal = options.abortSignal ?? options.signal
+  if (error instanceof AbortedGraphQLExecutionError && signal?.aborted === true) return signal.reason
   return error
 }
 

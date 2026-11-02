@@ -52,10 +52,14 @@
   "peerDependencies": {
     "@znight/http": "workspace:^",
     "@znight/compiler": "workspace:^",
+    "@znight/testing": "workspace:^",
     "graphql": "^17.0.2"
   },
   "peerDependenciesMeta": {
     "@znight/compiler": {
+      "optional": true
+    },
+    "@znight/testing": {
       "optional": true
     }
   },

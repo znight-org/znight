@@ -162,7 +162,12 @@ describe('GraphQLPlugin lifecycle', () => {
     await expect(create({})).rejects.toMatchObject({ code: ErrorCode.InvalidGraphQLSetup })
     await expect(create(() => ({}))).rejects.toMatchObject({ code: ErrorCode.InvalidGraphQLSetup })
     const app = await create({}, [HttpPlugin.configure({ port: 0 })])
-    expect(app.getPlugin<GraphQLPlugin>('graphql')?.httpRoutes({ prefix: '', container: app.container })).toEqual([])
+    const routes = app.getPlugin<GraphQLPlugin>('graphql')?.httpRoutes({ prefix: '', container: app.container }) ?? []
+    expect(routes.map(route => ({ method: route.method, path: route.path, name: route.name }))).toEqual([
+      { method: 'GET', path: '/graphql', name: 'handle' },
+      { method: 'POST', path: '/graphql', name: 'handle' },
+    ])
+    expect(routes[1]?.bodyLimit).toBe('100kb')
     await app.stop()
   })
 

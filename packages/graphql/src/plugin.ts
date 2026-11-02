@@ -15,7 +15,7 @@ import type {
   Token,
   ZnightMetadata,
 } from '@znight/core'
-import type { PluginHttpRoutes, PluginHttpRoutesContext, PluginRoute } from '@znight/http'
+import type { PluginHttpRoutes, PluginHttpRoutesContext, PluginRoute, SseOptions } from '@znight/http'
 import type { FormattedExecutionResult, GraphQLSchema } from 'graphql'
 import type { CheckedField } from './decisions.ts'
 import type { ExecuteOptions, GraphQLRequest, GraphQLResultStream } from './execution.ts'
@@ -37,6 +37,7 @@ import { globalGuardsApply, pipelineFactory } from './pipeline.ts'
 import { PubSub } from './pubsub.ts'
 import { buildGraphQLSchema, graphqlSection } from './schema.ts'
 import { GraphQLTokens } from './tokens.ts'
+import { checkSseOptions, HttpTransport } from './transport/http.ts'
 
 /** Options of {@link GraphQLPlugin.execute} and {@link GraphQLPlugin.subscribe}. */
 export interface DirectExecuteOptions {
@@ -54,6 +55,7 @@ interface Runtime {
 }
 
 let readExecutor: (plugin: GraphQLPlugin) => GraphQLExecutor
+let readEndpoint: (plugin: GraphQLPlugin) => string | undefined
 
 /**
  * The executor of a bootstrapped plugin: the internal API of the transports (statuses, streams).
@@ -61,6 +63,15 @@ let readExecutor: (plugin: GraphQLPlugin) => GraphQLExecutor
  */
 export function executorOf(plugin: GraphQLPlugin): GraphQLExecutor {
   return readExecutor(plugin)
+}
+
+/**
+ * The absolute path of the GraphQL-over-HTTP endpoint (prefix included), `undefined` without HTTP
+ * transport (`http: false`, or before `HttpPlugin` collected the routes). Not exported from the
+ * package entry: `@znight/graphql/testing` sends its requests there.
+ */
+export function endpointOf(plugin: GraphQLPlugin): string | undefined {
+  return readEndpoint(plugin)
 }
 
 /** A value of type `T` or a promise of it. */
@@ -88,6 +99,7 @@ export class GraphQLPlugin implements Plugin, PluginHttpRoutes {
   #ownPubSub: MemoryPubSub | undefined
   #runtime: Runtime | undefined
   #stop: AbortController | undefined
+  #endpoint: string | undefined
   #active = false
 
   private constructor(options: PluginOptions<GraphQLPluginOptions>) {
@@ -96,6 +108,7 @@ export class GraphQLPlugin implements Plugin, PluginHttpRoutes {
 
   static {
     readExecutor = plugin => plugin.#ready().executor
+    readEndpoint = plugin => plugin.#endpoint
   }
 
   /**
@@ -149,6 +162,7 @@ export class GraphQLPlugin implements Plugin, PluginHttpRoutes {
     this.#resolved = undefined
     this.#runtime = undefined
     this.#ownPubSub = undefined
+    this.#endpoint = undefined
     this.#container = ctx.container
     this.#metadata = ctx.metadata
     this.#logger = ctx.logger
@@ -174,15 +188,35 @@ export class GraphQLPlugin implements Plugin, PluginHttpRoutes {
   httpRoutes(context: PluginHttpRoutesContext): readonly PluginRoute[] {
     this.#container ??= context.container
     const options = this.#resolve()
-    if (options.http === false) return []
-    // the GraphQL-over-HTTP transport lands with the HTTP integration (RFC 0005 §8.3)
-    return []
+    const http = options.http
+    if (http === false) return []
+    const endpoint = endpointPath(context.prefix, options.path)
+    const transport = new HttpTransport({
+      // called on the first request: the routes are collected before or after this plugin's onBootstrap
+      executor: () => this.#ready().executor,
+      endpoint,
+      get: http.get,
+      graphiql: options.graphiql,
+      sse: sseOptions(options),
+    })
+    this.#endpoint = endpoint
+    const common = {
+      name: 'handle',
+      path: options.path,
+      ...(http.meta.length === 0 ? {} : { meta: http.meta }),
+      ...(http.guards.length === 0 ? {} : { guards: http.guards }),
+    }
+    const routes: PluginRoute[] = [{ ...common, method: 'POST', handler: transport.post, bodyLimit: http.bodyLimit }]
+    // GET serves queries (`http.get`) and GraphiQL; without either, the router answers 405
+    if (http.get || options.graphiql) routes.unshift({ ...common, method: 'GET', handler: transport.get })
+    return routes
   }
 
   onBootstrap(ctx: PluginContext): void {
     this.#container = ctx.container
     const options = this.#resolve()
     if (typeof this.#options === 'function') this.#checkHttp(ctx, options)
+    this.#checkSse(options)
     this.#runtime = this.#build(ctx, options)
   }
 
@@ -285,6 +319,14 @@ export class GraphQLPlugin implements Plugin, PluginHttpRoutes {
     return this.#resolved
   }
 
+  /** The SSE options are those of `HttpResponse.sse()` (heartbeat and maxDuration from 1 000 ms): checked at boot. */
+  #checkSse(options: ResolvedGraphQLOptions): void {
+    const sse = sseOptions(options)
+    if (sse === false) return
+    const problem = checkSseOptions(sse)
+    if (problem !== undefined) throw invalidOption('subscriptions', `valid event stream options (${problem})`, sse)
+  }
+
   #checkHttp(ctx: PluginContext, options: ResolvedGraphQLOptions): void {
     if (options.http !== false && ctx.getPlugin('http') === undefined) {
       throw new ZnightError(
@@ -379,6 +421,22 @@ function direct(options: DirectExecuteOptions | undefined): ExecuteOptions {
 }
 
 const DIRECT: ExecuteOptions = Object.freeze({ transport: 'direct' })
+
+/** `prefix` (`''`, `/api`) joined with `path` (`/graphql`), without trailing slash: `/api/graphql`. */
+function endpointPath(prefix: string, path: string): string {
+  const joined = `${prefix.replace(/\/+$/, '')}/${path.replace(/^\/+|\/+$/g, '')}`
+  return joined.length > 1 && joined.endsWith('/') ? joined.slice(0, -1) : joined
+}
+
+/** The `HttpResponse.sse()` options of GraphQL over SSE (`subscriptions`), `false` when disabled. */
+function sseOptions(options: ResolvedGraphQLOptions): SseOptions | false {
+  const subscriptions = options.subscriptions
+  if (subscriptions === false) return false
+  return Object.freeze({
+    ...(subscriptions.heartbeat === undefined ? {} : { heartbeat: subscriptions.heartbeat }),
+    ...(subscriptions.maxDuration === undefined ? {} : { maxDuration: subscriptions.maxDuration }),
+  })
+}
 
 function isPromise<T>(value: T | Promise<T>): value is Promise<T> {
   return typeof (value as { then?: unknown } | null)?.then === 'function'
