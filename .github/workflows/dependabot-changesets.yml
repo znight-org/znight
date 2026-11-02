@@ -1,0 +1,68 @@
+# Adds the changeset of a Dependabot pull request, when its dependency updates reach the users of a
+# published package: `scripts/release/dependabot-changeset.ts` compares the `dependencies`,
+# `peerDependencies` and `optionalDependencies` of `packages/*` with the base branch and writes
+# `.changeset/dependabot-<pull request>.md`; a pull request that only touches dev dependencies, the
+# lockfile, the examples or the GitHub Actions gets none. The file is rewritten on every run (a
+# rebase, a recreate) and removed when nothing is left to announce. See RELEASING.md.
+#
+# `pull_request` and not `pull_request_target`: a run started by Dependabot reads the Dependabot
+# secrets, a fork reads none. The pull request branch runs code (`bun install`, the script), so the
+# deploy key, the only secret, is written to disk in the last step, which only runs git: nothing of
+# the pull request runs while the key exists. A commit pushed with the default GITHUB_TOKEN would
+# start no workflow, a push with a deploy key does: that is why the push uses one (Dependabot secret
+# DEPLOY_KEY, a deploy key with write access).
+name: Dependabot changesets
+
+on: pull_request
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependabot-changesets-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  changeset:
+    name: Update the changeset
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          # the script compares with the merge base of the pull request and its base branch
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Write the changeset
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PULL_REQUEST: ${{ github.event.pull_request.number }}
+        run: bun scripts/release/dependabot-changeset.ts --pr "$PULL_REQUEST" --base "origin/$BASE_REF"
+      - name: Push the changeset
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          git add --all .changeset
+          if git diff --cached --quiet; then
+            echo "The changeset is up to date."
+            exit 0
+          fi
+          if [ -z "$DEPLOY_KEY" ]; then
+            echo "::error title=No deploy key::The Dependabot secret DEPLOY_KEY is not set (see RELEASING.md)."
+            exit 1
+          fi
+          git config user.name "dependabot[bot]"
+          git config user.email "49699333+dependabot[bot]@users.noreply.github.com"
+          # `bun install` pointed core.hooksPath at the husky hooks of the pull request: not for these commands
+          git -c core.hooksPath=/dev/null commit --message "chore(deps): update the changeset"
+          umask 077
+          trap 'rm -f "$RUNNER_TEMP/deploy_key"' EXIT
+          printf '%s\n' "$DEPLOY_KEY" > "$RUNNER_TEMP/deploy_key"
+          # the host keys of GitHub, from the API (no trust on first use)
+          curl --fail --silent --show-error https://api.github.com/meta | jq -r '.ssh_keys[] | "github.com " + .' > "$RUNNER_TEMP/known_hosts"
+          GIT_SSH_COMMAND="ssh -i $RUNNER_TEMP/deploy_key -o IdentitiesOnly=yes -o UserKnownHostsFile=$RUNNER_TEMP/known_hosts -o StrictHostKeyChecking=yes" \
+            git -c core.hooksPath=/dev/null push "git@github.com:$GITHUB_REPOSITORY.git" "HEAD:refs/heads/$HEAD_REF"

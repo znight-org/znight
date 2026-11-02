@@ -42,6 +42,14 @@ Versions and changelogs are managed with [Changesets](https://changesets.dev)
 - **Bumps**: until 1.0, a breaking change is a `minor` bump and everything else a `patch`.
 - **No changeset** for docs-, tests-, examples- or CI-only changes. CI posts a warning (never a
   failure) on a pull request that changes packages without a changeset, as a reminder.
+- **Dependabot**: [`dependabot-changesets.yml`](.github/workflows/dependabot-changesets.yml) runs
+  [`scripts/release/dependabot-changeset.ts`](scripts/release/dependabot-changeset.ts) on every
+  Dependabot pull request. When a `dependencies`, `peerDependencies` or `optionalDependencies` range
+  of a published package changed (what its users install), it commits
+  `.changeset/dependabot-<pull request>.md`: a patch bump of those packages and one changelog line
+  ("Update left from ^1.0.0 to ^1.1.0"). Dev dependencies, the lockfile, the examples, the docs site
+  and the updates of GitHub Actions change nothing for users and get none. The file is rewritten on
+  every run and removed when nothing is left to announce.
 - **Checked**: `bun run release:status` (the _Build & pack_ job) reads every changeset with
   Changesets' own parser and fails the pull request when one cannot be read (front matter, YAML,
   version type) or bumps a package that is not published, before it breaks the release workflow on
@@ -312,6 +320,18 @@ GitHub (repository `znight-org/znight`, public):
   manual runs of Docs both run on `main`). Or:
   `gh api -X POST repos/znight-org/znight/pages -f build_type=workflow`. The site appears at
   `https://znight-org.github.io/znight/` after the first deployment.
+- [ ] **Dependabot changesets** ([`dependabot-changesets.yml`](.github/workflows/dependabot-changesets.yml)):
+  a deploy key with write access, because a push with it starts CI where one with the default
+  `GITHUB_TOKEN` does not, and its private key as the **Dependabot** secret `DEPLOY_KEY` (a run
+  started by Dependabot reads no Actions secret). Deploy keys must be allowed for the organization.
+
+  ```sh
+  ssh-keygen -t ed25519 -N "" -C dependabot-changesets -f dependabot-changesets-key
+  gh repo deploy-key add dependabot-changesets-key.pub --repo znight-org/znight --title dependabot-changesets --allow-write
+  gh secret set DEPLOY_KEY --app dependabot --repo znight-org/znight < dependabot-changesets-key
+  rm dependabot-changesets-key dependabot-changesets-key.pub
+  ```
+
 - [ ] **Private vulnerability reporting**: Settings → Code security → Private vulnerability
   reporting → Enable (used by [SECURITY.md](SECURITY.md) and the issue template), or
   `gh api -X PUT repos/znight-org/znight/private-vulnerability-reporting`. Also enable
@@ -337,6 +357,13 @@ npm (organization `@znight`):
   wait for that, see [How a release goes](#how-a-release-goes)). Without the banner, close and
   reopen the pull request: that starts its CI. Runs started by hand (**Run workflow** on the
   `changeset-release/main` branch) do not count for the ruleset.
+- **The Dependabot changesets job fails with "No deploy key"**: the Dependabot secret `DEPLOY_KEY` is
+  missing, or the run was not started by Dependabot (a run started by someone else, after a push to
+  the branch for example, reads the Actions secrets instead). Add the secret
+  ([checklist](#owner-setup-checklist)), then run it again with `@dependabot rebase`.
+- **`gh repo deploy-key add` fails with "Deploy keys are disabled for this repository"** (HTTP 422):
+  the organization disables them (`deploy_keys_enabled_for_repositories` in
+  `gh api orgs/znight-org`); allow them in the organization settings first.
 - **The version pull request is not opened**: enable _Allow GitHub Actions to create and approve
   pull requests_ ([checklist](#owner-setup-checklist)).
 - **The publish job refuses to start ("no required reviewers")**: add reviewers to the `npm`
