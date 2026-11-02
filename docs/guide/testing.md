@@ -213,10 +213,11 @@ it('validates the id', async () => {
 runs `Application.create()` then `app.start()` (unless `start: false`), with signal handlers
 disabled. It applies `overrides` last and by default instantiates only the dependency closure of the
 HTTP controllers (with their guards and interceptors), the message consumers, the hosts of
-[scheduled jobs](/packages/schedule#observability-and-testing), the overridden providers and the
-providers each plugin lists in its [`initRoots(context)`](/packages/core#plugins): the global
-guards, interceptors and exception mappers of `HttpPlugin.configure({ ... })`, the `guards` of
-`OpenApiPlugin`, the job hosts of `SchedulePlugin` (`only: 'all'` or a list of keys to choose;
+[scheduled jobs](/packages/schedule#observability-and-testing), the GraphQL resolvers (with their
+guards and loaders), the overridden providers and the providers each plugin lists in its
+[`initRoots(context)`](/packages/core#plugins): the global guards, interceptors and exception
+mappers of `HttpPlugin.configure({ ... })`, the `guards` of `OpenApiPlugin`, the job hosts of
+`SchedulePlugin` (`only: 'all'` or a list of keys to choose;
 overrides and those plugin roots are added to the list). The default logger only prints warnings and errors.
 `app.get(key)`, `app.container` and `app.app` give access to the running application;
 `await using app = await TestApp.create(...)` closes it automatically.

@@ -425,7 +425,7 @@ Build failed with 2 errors
 | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------- |
 | ZNIGHT001 | a required dependency has no provider (with hints: wrong import, missing `@Injectable`, excluded file, missing `implements`, other type arguments, qualifier)                                                                                              | error           |
 | ZNIGHT002 | circular dependency (constructor, multi, optional, interceptor and factory edges); the cycle is printed                                                                                                                                                    | error           |
-| ZNIGHT003 | a singleton depends on a request-scoped provider or external, directly or through transients, multi, interceptors or extension edges                                                                                                                       | error           |
+| ZNIGHT003 | a singleton depends on a request-scoped provider or external, directly or through transients, multi, interceptors or non-lazy extension edges                                                                                                              | error           |
 | ZNIGHT004 | several providers of the exact same type                                                                                                                                                                                                                   | error           |
 | ZNIGHT005 | invalid decorator usage (target, arguments, unexported reference, abstract/generic/unexported provider (also `export type { X }` only), several provider decorators, `@Provides` misuse, ineffective decorators, composite decorators and `const` aliases) | error / warning |
 | ZNIGHT008 | several candidates for an interface or base type                                                                                                                                                                                                           | error           |
@@ -496,10 +496,11 @@ import { createPreload, loadZnightConfig, znight, znightBunPlugin } from '@znigh
 
 ### `generate(options)`
 
-Compiles and writes the generated module (`diskCode`, the same in every mode) when its content
-changed. Nothing is written when there is an error. With `check: true` nothing is written, `stale`
-tells whether the files on disk are missing or out of date and `staleFiles` lists them, the module
-first (then `znight.providers.json` in library mode) (`znight generate --check`).
+Compiles and writes the generated module (`diskCode`, the same in every mode) and the
+[extra files](#extra-outputs) of the compiler extensions when their content changed. Nothing is
+written when there is an error. With `check: true` nothing is written, `stale` tells whether the
+files on disk are missing or out of date and `staleFiles` lists them, the module first (then the
+extra files, then `znight.providers.json` in library mode) (`znight generate --check`).
 
 ```ts
 const result = await generate({ root: process.cwd() })
@@ -524,7 +525,8 @@ The same, without writing anything: returns
 | `graph`       | the application graph (providers, externals, aliases, edges, extension data)                                                                                                                                                                                         |
 | `stats`       | `{ files, providers, durationMs, parsed }`                                                                                                                                                                                                                           |
 | `library`     | library mode: `{ file, content, data }` of `znight.providers.json`                                                                                                                                                                                                   |
-| `watchFiles`  | files the result depends on (scanned sources, every other file read outside `node_modules`, package manifests, compiled libraries); never the outFile                                                                                                                |
+| `extraFiles`  | the files emitted by compiler extensions (`{ file, content, extension }`, sorted by path; empty on errors), written with the module ([extra outputs](#extra-outputs))                                                                                                |
+| `watchFiles`  | files the result depends on (scanned sources, every other file read outside `node_modules`, package manifests, compiled libraries); never the outFile nor the extra files                                                                                            |
 | `decorators`  | Znight decorators of each analysed file (`path → { hash, ranges, memberStarts }`), removed by `stripDecorators` when the content hash still matches (the first decorator of a class member leaves a `;`, so that a field without semicolon cannot absorb the member) |
 
 ### `createCompiler(options)`
@@ -539,6 +541,7 @@ await compiler.compile({ changed: [file] }) // only `file` is re-read (re-parsed
 await compiler.compile({ added: [file] }) // created / deleted files re-run the globs
 await compiler.generate({ removed: [file] }) // compile + write when changed
 compiler.isOutFile(path) // watchers must ignore the generated module
+compiler.isGeneratedFile(path) // ... and the extra files of the latest result
 compiler.last // latest result
 ```
 
@@ -688,9 +691,9 @@ export default {
 | `analyzeClass(cls, ctx)`                                       | called for every class carrying one of the extension's decorators, in identity order                                                                                                                                         |
 | `ClassInfo`                                                    | identity, import route, decorators (`ArgInfo { value, ref, location, text }`, `typeArgs`), constructor (inherited, substituted), methods, properties, heritage closure, lifecycle, JSDoc ([member details](#member-details)) |
 | `ctx.registerProvider(cls, { scope, name, primary, factory })` | registers a provider; `factory` = custom factory with injected `deps` and a `generate` callback                                                                                                                              |
-| `ctx.resolveClassRef(arg, { from, role })`                     | binds a class reference to a token (auto-registers helper classes)                                                                                                                                                           |
-| `ctx.bindInjection(request, { from })`                         | binds a type with the resolution rules; read the result with `binding(handle)`                                                                                                                                               |
-| `ctx.addDependency(from, to)`                                  | runtime dependency resolved by the plugin (ZNIGHT003, ZNIGHT019)                                                                                                                                                             |
+| `ctx.resolveClassRef(arg, { from, role, lazy })`               | binds a class reference to a token (auto-registers helper classes)                                                                                                                                                           |
+| `ctx.bindInjection(request, { from, lazy })`                   | binds a type with the resolution rules; read the result with `binding(handle)`                                                                                                                                               |
+| `ctx.addDependency(from, to, { reason, location, lazy })`      | runtime dependency resolved by the plugin (ZNIGHT003, ZNIGHT019; with `lazy`, ZNIGHT019 only: [lazy edges](#lazy-extension-edges))                                                                                           |
 | `ctx.addRoot(cls, { reason?, location? })`                     | `cls` is an entry point of the plugin (a job host): a root of ZNIGHT019 and `prune`, auto-registered as a singleton when nothing registers it ([roots](#roots))                                                              |
 | `ctx.definitionsOf(callee)`                                    | top-level `const`s initialised with a call to `callee`, applied or not ([definitions](#definitions)); also in `validate`                                                                                                     |
 | `ctx.types`                                                    | `format`, `serialize`, `equals`, `stripNullish`, `awaited` on `TypeInfo`, and `shape(target, options)` ([type shapes](#type-shapes)); in every context                                                                       |
@@ -712,6 +715,7 @@ Code is generated with **nodes, never strings**, so an extension cannot break th
 | `` code`${a}.params[${'id'}]` ``                        | an expression template: every interpolation is a node, strings become escaped literals                 |
 | `constant('Name$fields', value, { type })`              | a module-level `const Name$fields: Type = value`, referenced from factories and the section            |
 | `tokenOf(cls)`, `binding(handle)`, `provider(token)`    | provider token (aliases resolved), binding result, provider node                                       |
+| `emitFile('schema.graphql', content)`                   | not code: an extra file written next to the generated module ([extra outputs](#extra-outputs))         |
 
 An extension that throws, returns a forged object instead of a node, or produces invalid syntax
 through `code` is reported as ZNIGHT018 naming it; an import that cannot be routed (not exported,
@@ -764,23 +768,24 @@ so it keeps what `TypeInfo` loses: object literal types, and the names of aliase
 
 `ShapeResult` is `{ root, named, issues }`. A `Shape` is one of:
 
-| TypeScript                                                                                                                                         | Shape                                                                                                                                                                 |
-| -------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `string`, `number`, `boolean`, `null`; `undefined` / `void`; `unknown` / `any`; `never`                                                            | `{ kind: 'string' }`... `'undefined'`, `'unknown'`, `'never'`                                                                                                         |
-| literal types, template literals without substitution                                                                                              | `{ kind: 'literal', value }` (other template literals: `string`)                                                                                                      |
-| `Date`, `URL`                                                                                                                                      | `'date'`, `'url'` (their `toJSON()`)                                                                                                                                  |
-| typed arrays, `ArrayBuffer`, `DataView`, `Buffer`, `Blob`, `File`, `ReadableStream`, `Readable`                                                    | `'binary'`                                                                                                                                                            |
-| `bigint`                                                                                                                                           | `'bigint'`, and an issue (`JSON.stringify` throws)                                                                                                                    |
-| `T[]`, `readonly T[]`, `Array<T>`, `ReadonlyArray<T>`; tuples `[A, B?, ...C[]]`                                                                    | `array { items }`; `tuple { items, rest?, minItems }`                                                                                                                 |
-| object literal types, interfaces (`extends` flattened, merged declarations), index signatures, `Record<K, V>`                                      | `object { properties, additional? }`; a property is `{ name, shape, optional, readonly, doc, location }`                                                              |
-| classes                                                                                                                                            | the instance fields and parameter properties, inherited ones first (no methods, accessors, static, `#private` or `private` members); a `toJSON(): X` method gives `X` |
-| unions, intersections                                                                                                                              | normalised like `TypeInfo`; objects intersected are merged, `string & { __brand }` is `string`                                                                        |
-| `Partial`, `Required`, `Readonly`, `Pick`, `Omit`, `NonNullable`, `Exclude`, `Extract`, `Awaited`, `keyof`, `T[K]`, mapped types over literal keys | applied structurally (homomorphic mapped types keep the property order and modifiers)                                                                                 |
-| interfaces, classes, type aliases, enums                                                                                                           | `{ kind: 'named', key }`: the structure is in `named.get(key)` (`NamedShape`), recursion goes through it                                                              |
-| a schema alias (`z.output<typeof S>`), or an alias of one                                                                                          | `{ kind: 'schema', ref, io }` (with `options.schemaAliases`)                                                                                                          |
-| a type in `options.keep`                                                                                                                           | `{ kind: 'reference', identity, name, typeArgs, explicitTypeArgs }`, not expanded                                                                                     |
-| functions, symbols, unbound type parameters, conditional types, `Map`, `Set`, `RegExp`, `Error`, nested `Promise`...                               | `{ kind: 'opaque', text, reason }`, and an issue                                                                                                                      |
-- **Named shapes.** `NamedShape { key, identity, name, declaration, typeArgs, shape, doc, location }`.
+| TypeScript                                                                                                                                         | Shape                                                                                                                                                                                                                                    |
+| -------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `string`, `number`, `boolean`, `null`; `undefined` / `void`; `unknown` / `any`; `never`                                                            | `{ kind: 'string' }`... `'undefined'`, `'unknown'`, `'never'`                                                                                                                                                                            |
+| literal types, template literals without substitution                                                                                              | `{ kind: 'literal', value }` (other template literals: `string`)                                                                                                                                                                         |
+| `Date`, `URL`                                                                                                                                      | `'date'`, `'url'` (their `toJSON()`)                                                                                                                                                                                                     |
+| typed arrays, `ArrayBuffer`, `DataView`, `Buffer`, `Blob`, `File`, `ReadableStream`, `Readable`                                                    | `'binary'`                                                                                                                                                                                                                               |
+| `bigint`                                                                                                                                           | `'bigint'`, and an issue (`JSON.stringify` throws)                                                                                                                                                                                       |
+| `T[]`, `readonly T[]`, `Array<T>`, `ReadonlyArray<T>`; tuples `[A, B?, ...C[]]`                                                                    | `array { items }`; `tuple { items, rest?, minItems }`                                                                                                                                                                                    |
+| object literal types, interfaces (`extends` flattened, merged declarations), index signatures, `Record<K, V>`                                      | `object { properties, additional? }`; a property is `{ name, shape, optional, readonly, doc, location }` (plus `kind` and `declaredBy` with `members: 'instance'`)                                                                       |
+| classes                                                                                                                                            | the instance fields and parameter properties, inherited ones first (no methods, accessors, static, `#private` or `private` members); a `toJSON(): X` method gives `X` (`members: 'json'`, the default; `'instance'`: fields and getters) |
+| unions, intersections                                                                                                                              | normalised like `TypeInfo`; objects intersected are merged, `string & { __brand }` is `string`                                                                                                                                           |
+| `Partial`, `Required`, `Readonly`, `Pick`, `Omit`, `NonNullable`, `Exclude`, `Extract`, `Awaited`, `keyof`, `T[K]`, mapped types over literal keys | applied structurally (homomorphic mapped types keep the property order and modifiers)                                                                                                                                                    |
+| interfaces, classes, type aliases, enums                                                                                                           | `{ kind: 'named', key }`: the structure is in `named.get(key)` (`NamedShape`), recursion goes through it                                                                                                                                 |
+| a schema alias (`z.output<typeof S>`), or an alias of one                                                                                          | `{ kind: 'schema', ref, io }` (with `options.schemaAliases`)                                                                                                                                                                             |
+| a type in `options.keep`                                                                                                                           | `{ kind: 'reference', identity, name, typeArgs, explicitTypeArgs }`, not expanded                                                                                                                                                        |
+| functions, symbols, unbound type parameters, conditional types, `Map`, `Set`, `RegExp`, `Error`, nested `Promise`...                               | `{ kind: 'opaque', text, reason }`, and an issue                                                                                                                                                                                         |
+- **Named shapes.** `NamedShape { key, identity, name, declaration, typeArgs, shape, doc, location,
+  enumMembers?, literals? }`.
   The key is the identity followed by the serialized type arguments, default ones filled in
   (`src/page.ts#Page<src/book.ts#Book>`). `result.named` holds every named shape the root
   references, transitively (structures and type arguments), sorted by key; a declaration only used
@@ -791,6 +796,12 @@ so it keeps what `TypeInfo` loses: object literal types, and the names of aliase
   `Record<Genre, number>` has a required property per member. An alias
   whose structure is a schema or a kept reference is transparent (`type CreateBook = z.output<typeof
   CreateBook>` is the schema itself).
+- **Enum members and literal order.** `enumMembers` (enums only) lists `{ name, value, doc, location }`
+  per member in declaration order, without the reverse mapping of numeric members (`Low = 0` gives
+  one member). `literals` (aliases of a union of literal types only) gives the literals in source
+  order (`type Sort = 'title' | 'newest' | 'author'` → `['title', 'newest', 'author']`), while
+  `shape` is the sorted union; it is not set when a member is not written as a literal type
+  (`'a' | null`, `Other | 'b'`) or when normalisation changes the union (`true | false`).
 - **Issues.** `{ reason, path, named, text, location }` for every `opaque` part and every `bigint`
   the shapes of the result contain (a `typeof S` consumed by a schema alias is not one), where
   `path` is readable (`ShelfStats.total`, `items[]`, `[0]`, `[string]`) and `named` is the key of
@@ -800,7 +811,20 @@ so it keeps what `TypeInfo` loses: object literal types, and the names of aliase
   'zod#infer': 'output', 'zod#input': 'input', 'valibot#InferOutput': 'output', 'valibot#InferInput':
   'input' }` — the identities of the installed libraries), `schemaMembers` (`{ infer: 'output',
   inferIn: 'input' }` for ArkType's `typeof S.infer`), `keep` (identities kept as references, such
-  as `'@znight/http#HttpResponse'` or `'globalThis#AsyncIterable'`) and `jsdoc` (default `true`).
+  as `'@znight/http#HttpResponse'` or `'globalThis#AsyncIterable'`), `jsdoc` (default `true`) and
+  `members` (`'json'` by default, or `'instance'`, below).
+- **Instance members.** `members: 'instance'` describes what reading the members of an instance
+  gives (a GraphQL object type) instead of what `JSON.stringify` produces: `toJSON()` is ignored,
+  classes list their public instance fields, parameter properties, auto-accessors and getters
+  (`get x(): T`; `readonly` without a setter; a getter without return type annotation is `opaque`,
+  reason `missing-annotation`), inherited ones first, without `protected`, `private`, `#private` and
+  static members, methods or setters; interfaces also list their getter signatures. Each property then
+  has `kind: 'field' | 'getter'` and `declaredBy`, the identity of the declaration whose source
+  declares it (`src/base.ts#Entity` for an inherited field, kept through `Partial`, `Pick`, mapped
+  types and intersections; absent for a member written in the target annotation itself).
+  Function-typed properties are `opaque` (reason `function`) in both modes, like in `'json'` mode:
+  skip them, and their issues by `path`. The default `'json'` mode is unchanged: no `kind`, no
+  `declaredBy`, `protected` fields included, `toJSON()` applied.
 - **Cost.** Named shapes are computed once per compile and per options (the same `NamedShape` and
   issue objects are returned to every caller); roots are cheap. The files read are part of
   `watchFiles`, so editing an interface of another file recompiles.
@@ -815,6 +839,54 @@ validate(ctx) {
   for (const issue of issues) if (issue.reason === 'bigint') ctx.report({ ... })
 }
 ```
+
+### Lazy extension edges
+
+`addDependency`, `resolveClassRef({ from })` and `bindInjection({ from })` declare that the host
+`from` uses a provider at runtime. By default such an **extension edge** counts for ZNIGHT003 and
+ZNIGHT019 / `prune`: a singleton controller using a request-scoped guard is a scope mismatch.
+
+With `{ lazy: true }`, the plugin resolves the dependency **when it is used, in the scope of that
+call** (a request, a message), like a `Lazy<T>` parameter, never when `from` is created. The edge
+then counts for ZNIGHT019 and `prune` only (what the host uses lazily stays reachable), never for
+ZNIGHT003, ZNIGHT002 nor the resolution order, so a singleton resolver may use a request-scoped
+data loader:
+
+```ts
+ctx.bindInjection({ type: loaderType, label: `loader of ${cls.displayName}` }, { from: cls, lazy: true })
+ctx.resolveClassRef(guard, { from: cls, role: 'guard', lazy: true })
+ctx.addDependency(cls, '@acme/feature#RequestContext', { reason: 'request context', lazy: true })
+```
+
+The binding result is unchanged (the token); the plugin must resolve it in the current scope
+(outside one, a request-scoped provider fails with ZNIGHT013). In `graph.edges` these are
+`kind: 'lazy'` edges marked `extension: true`, and compiled provider libraries keep them lazy
+(`"lazy": true` in `znight.providers.json`).
+
+### Extra outputs
+
+`ctx.emitFile(relativePath, content)` (in `generate`) declares a file written **next to the
+generated module**: an SDL schema, a JSON document. It follows the rules of the generated module:
+
+- it is in `CompileResult.extraFiles` (`{ file, content, extension }`, sorted by path), empty when
+  the compile has an error;
+- `generate()`, the Vite plugin and the Bun preload write it only when the compile is ok and its
+  content changed (atomic write); `znight generate --check` names it when it is missing or stale;
+- it is never in `watchFiles`, and the watchers ignore it like the outFile
+  (`compiler.isGeneratedFile(path)`);
+- in `build` mode it comes from the `serve` rendering, like `diskCode`: every mode writes the same
+  file. Keep its content deterministic (no timestamps, no absolute paths).
+
+```ts
+// in generate(ctx): <root>/schema.graphql, written with the generated module
+ctx.emitFile('schema.graphql', printSchema(ctx.stored))
+```
+
+The path is relative to the project root and must stay inside it. It cannot be the outFile,
+`dist/znight.providers.json`, a path under `node_modules`, a file already emitted (by this or another
+extension), nor a source the compiler would scan: `.ts`, `.js`... files are accepted under a
+dot-directory only (`src/.znight/`). A refused path is a ZNIGHT018 error naming the extension and
+the path.
 
 ### Roots
 
@@ -837,11 +909,19 @@ canonical identity, whether they are applied or not:
 ```ts
 const groups = ctx.definitionsOf('@znight/http#createRouteDecorator')
 // [{ identity: 'src/auth/access.ts#Public', name, displayName, file, location, call,
-//    args: [ArgInfo('public'), ArgInfo({ group: 'access', required: true })], typeArgs, doc, exported }]
+//    args: [ArgInfo('public'), ArgInfo({ group: 'access', required: true })], typeArgs,
+//    typeArgIdentities, doc, exported }]
 ```
 
 Arguments are evaluated as `value` arguments (spreads of evaluable arrays expanded) without
 reporting anything. The list is sorted by identity and computed once per compile and callee.
+
+`typeArgs` are resolved types, aliases expanded. `typeArgIdentities` keeps what they name: for each
+type argument written as a type reference without type arguments, its canonical identity
+(`scalar<EmailAddress>('Email')` → `'src/email.ts#EmailAddress'`, `scalar<Uint8Array>(...)` →
+`'globalThis#Uint8Array'`), `undefined` otherwise. Passed to the `keep` option of
+[type shapes](#type-shapes), these identities make shapes return a `reference` wherever the type
+is used, so that an extension can match it by alias.
 
 ## Compiler contract
 

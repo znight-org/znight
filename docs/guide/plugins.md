@@ -1,5 +1,5 @@
 ---
-description: Write Znight plugins - lifecycle hooks, supplying runtime values to the container, options computed from the container, HTTP routes served for a plugin, and the typed hooks bus (http:request, messaging:message, schedule:run).
+description: Write Znight plugins - lifecycle hooks, supplying runtime values to the container, options computed from the container, HTTP routes served for a plugin, and the typed hooks bus (http:request, messaging:message, schedule:run, graphql:operation).
 ---
 
 # Plugins & hooks
@@ -239,12 +239,13 @@ Paths are relative to the HTTP `prefix`; `meta` carries the route decisions guar
 `app.hooks` (also `ctx.hooks`) is a small, typed event bus that lets plugins observe and wrap what
 other plugins do, without depending on each other. Feature packages emit:
 
-| Hook                | Event                  | Emitted by          |
-| ------------------- | ---------------------- | ------------------- |
-| `http:request`      | `HttpRequestEvent`     | `@znight/http`      |
-| `messaging:message` | `MessageDeliveryEvent` | `@znight/messaging` |
-| `messaging:publish` | `MessagePublishEvent`  | `@znight/messaging` |
-| `schedule:run`      | `ScheduledRunEvent`    | `@znight/schedule`  |
+| Hook                | Event                   | Emitted by                                            |
+| ------------------- | ----------------------- | ----------------------------------------------------- |
+| `http:request`      | `HttpRequestEvent`      | `@znight/http`                                        |
+| `messaging:message` | `MessageDeliveryEvent`  | `@znight/messaging`                                   |
+| `messaging:publish` | `MessagePublishEvent`   | `@znight/messaging`                                   |
+| `schedule:run`      | `ScheduledRunEvent`     | `@znight/schedule`                                    |
+| `graphql:operation` | `GraphQLOperationEvent` | `@znight/graphql` (planned for [v0.2](/roadmap#v0-2)) |
 
 ### Observe: `on`
 
@@ -319,12 +320,31 @@ interface ScheduledRunEvent {
   error?: unknown
   aborted?: 'timeout' | 'lock-lost' | 'removed' | 'shutdown'
 }
+
+interface GraphQLOperationEvent {
+  readonly operationType: 'query' | 'mutation' | 'subscription' | undefined // undefined: rejected before
+  readonly operationName: string | undefined // undefined: anonymous
+  readonly documentId: string | undefined // SHA-256 (hex) of the query text
+  readonly transport: 'http' | 'sse' | 'direct'
+  readonly requestId: string
+  readonly context: unknown // GraphQLContext
+  readonly startTime: number
+  outcome?: 'success' | 'partial' | 'error' | 'rejected' // set before run() resolves
+  errors?: readonly {
+    readonly message: string
+    readonly code: string | undefined
+    readonly path?: readonly (string | number)[]
+  }[]
+}
 ```
 
 Executed runs go through `hooks.run('schedule:run', ...)`, and every occurrence is then emitted,
 including those that did not run (`skipped` by the overlap policy, `not-acquired` because another
 instance holds the lock). A `schedule:run` wrapper that does not call `next()` vetoes the run
 (outcome `skipped`): a feature flag or a maintenance window.
+
+`graphql:operation` is declared for `@znight/graphql` ([RFC 0005](../../rfcs/0005-graphql.md),
+planned for v0.2): one event per operation, and one for the whole life of a subscription.
 
 ### Declaring your own hooks
 

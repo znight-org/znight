@@ -1035,7 +1035,12 @@ function buildRegistrations(
       invoke: (_plugin: unknown, http: HttpContext): unknown => handler(http),
     })
     const instance: Resolvable<object> = { instance: route.instance }
-    const body = bodyPlan({}, options.bodyLimit, options.uploads)
+    // the route's own limit (`bodyLimit`), otherwise the plugin limit
+    const body = bodyPlan(
+      route.bodyLimit === undefined ? {} : { bodyLimit: route.bodyLimit },
+      options.bodyLimit,
+      options.uploads,
+    )
     const chain = guards.map(guard => guard.resolvable)
     const path = route.path
     declared.push({

@@ -13,12 +13,15 @@
  * - Files are read through the project, so they are part of `watchFiles`.
  */
 import type {
+  AccessorProperty,
   Class,
+  ClassElement,
   Expression,
   MethodDefinition,
   PropertyDefinition,
   PropertyKey,
   TSEnumDeclaration,
+  TSEnumMember,
   TSInterfaceDeclaration,
   TSMappedType,
   TSSignature,
@@ -32,6 +35,7 @@ import type {
   DocComment,
   NamedShape,
   Shape,
+  ShapeEnumMember,
   ShapeIssue,
   ShapeOpaqueReason,
   ShapeOptions,
@@ -57,6 +61,7 @@ import {
   overrideProperties,
   serializeShape,
   union,
+  withOrigin,
   withoutUndefined,
 } from './shape.ts'
 
@@ -156,6 +161,8 @@ const FUNCTION_GLOBALS = new Set(['Function', 'CallableFunction', 'NewableFuncti
 interface Sink {
   /** Key of the named shape (`undefined` for the root). */
   readonly named: string | undefined
+  /** Identity of the named shape (`declaredBy` of its members in `'instance'` mode). */
+  readonly identity: string | undefined
 }
 
 /**
@@ -221,6 +228,8 @@ interface Cache {
   readonly schemaMembers: ReadonlyMap<string, 'input' | 'output'>
   readonly keep: ReadonlySet<string>
   readonly jsdoc: boolean
+  /** {@link ShapeOptions.members}: `true` for `'instance'`. */
+  readonly instance: boolean
 }
 
 /** Values referenced by `typeof X` shapes (schema aliases applied to a type parameter). */
@@ -236,6 +245,8 @@ export class ShapeResolver {
   #current: NamedEntry | undefined
   /** Identities of the declarations met (`identityOfDeclaration` is called for every reference). */
   readonly #identities = new WeakMap<Declaration, { readonly identity: string; readonly displayName: string }>()
+  /** Evaluated enum declarations (`null`: not evaluable), shared by every options key. */
+  readonly #enumValuesOf = new WeakMap<Declaration, Readonly<Record<string, unknown>> | null>()
   #cache: Cache | undefined
 
   constructor(project: Project) {
@@ -247,7 +258,7 @@ export class ShapeResolver {
     const previous = this.#cache
     this.#cache = cache
     try {
-      const sink: Sink = { named: undefined }
+      const sink: Sink = { named: undefined, identity: undefined }
       const root = this.#target(target, sink)
       // the named shapes reached, and the ones they reach, computed iteratively (no deep recursion)
       for (let index = 0; index < cache.pending.length; index++) {
@@ -418,7 +429,12 @@ export class ShapeResolver {
       throw new TypeError('[znight] types.shape(): keep must be an array of identities')
     }
     const jsdoc = options.jsdoc !== false
-    const key = JSON.stringify([schemaAliases, schemaMembers, keep, jsdoc])
+    const members = options.members ?? 'json'
+    if (members !== 'json' && members !== 'instance') {
+      throw new TypeError("[znight] types.shape(): members must be 'json' or 'instance'")
+    }
+    const instance = members === 'instance'
+    const key = JSON.stringify([schemaAliases, schemaMembers, keep, jsdoc, instance])
     let cache = this.#caches.get(key)
     if (!cache) {
       cache = {
@@ -429,6 +445,7 @@ export class ShapeResolver {
         schemaMembers: new Map(schemaMembers),
         keep: new Set(keep),
         jsdoc,
+        instance,
       }
       this.#caches.set(key, cache)
     }
@@ -849,7 +866,7 @@ export class ShapeResolver {
           doc: undefined,
           location: file.location(declaration.span),
         },
-        sink: { named: key },
+        sink: { named: key, identity: identity.identity },
         refs: [],
         issues: [],
         state: 'pending',
@@ -923,11 +940,16 @@ export class ShapeResolver {
         path: entry.display,
         depth: 0,
       }
-      const shape = this.#declarationShape(declaration, entry.named.declaration, inner, entry)
+      const kind = entry.named.declaration
+      const shape = this.#declarationShape(declaration, kind, inner, entry)
+      const enumMembers = kind === 'enum' ? this.#enumMembers(declaration) : undefined
+      const literals = kind === 'alias' ? aliasLiterals(declaration, shape) : undefined
       entry.named = {
         ...entry.named,
         shape,
         doc: cache.jsdoc ? this.#declarationDoc(declaration, file) : undefined,
+        ...(enumMembers === undefined ? {} : { enumMembers }),
+        ...(literals === undefined ? {} : { literals }),
       }
       const found = walkShapes([shape, ...entry.named.typeArgs])
       entry.refs = found.refs
@@ -1059,6 +1081,23 @@ export class ShapeResolver {
         case 'TSCallSignatureDeclaration':
         case 'TSConstructSignatureDeclaration':
           return this.#opaqueAt(member, context, 'function')
+        case 'TSMethodSignature': {
+          // getter signatures are members of an instance, not serialised data
+          const name =
+            this.#options.instance && member.kind === 'get' ? propertyName(member.key, member.computed) : undefined
+          if (name !== undefined) {
+            const settable = members.some(
+              other =>
+                other.type === 'TSMethodSignature' &&
+                other.kind === 'set' &&
+                propertyName(other.key, other.computed) === name,
+            )
+            properties.push(
+              this.#getter(name, member.returnType?.typeAnnotation, !settable, member, member.key, context),
+            )
+          }
+          break
+        }
         default:
           // methods and accessors are not serialised data
           break
@@ -1079,26 +1118,68 @@ export class ShapeResolver {
     const child = at(context, name)
     const converted = annotation ? this.#convert(annotation, child) : this.#opaqueAt(node, child, 'missing-annotation')
     const { shape, undefinable } = withoutUndefined(converted)
-    return {
-      name,
-      shape,
-      optional: optional || undefinable,
-      readonly,
-      doc: this.#options.jsdoc ? docAt(context.scope.file, startWithDecorators(node, node.decorators)) : undefined,
-      location: context.scope.file.location(key),
+    return this.#declared(
+      {
+        name,
+        shape,
+        optional: optional || undefinable,
+        readonly,
+        doc: this.#options.jsdoc ? docAt(context.scope.file, startWithDecorators(node, node.decorators)) : undefined,
+        location: context.scope.file.location(key),
+      },
+      'field',
+      context,
+    )
+  }
+
+  /** A getter (`get x(): T`, or a getter signature), {@link ShapeOptions.members} `'instance'` only. */
+  #getter(
+    name: string,
+    annotation: TSType | undefined,
+    readonly: boolean,
+    node: Span & { readonly decorators?: readonly Span[] | null },
+    key: Span,
+    context: Context,
+  ): ShapeProperty {
+    const child = at(context, name)
+    const converted = annotation ? this.#convert(annotation, child) : this.#opaqueAt(key, child, 'missing-annotation')
+    const { shape, undefinable } = withoutUndefined(converted)
+    return this.#declared(
+      {
+        name,
+        shape,
+        optional: undefinable,
+        readonly,
+        doc: this.#options.jsdoc ? docAt(context.scope.file, startWithDecorators(node, node.decorators)) : undefined,
+        location: context.scope.file.location(key),
+      },
+      'getter',
+      context,
+    )
+  }
+
+  /** `kind` and `declaredBy` of a member in `'instance'` mode (the property unchanged otherwise). */
+  #declared(property: ShapeProperty, kind: 'field' | 'getter', context: Context): ShapeProperty {
+    if (!this.#options.instance) {
+      return property
     }
+    const declaredBy = context.sink.identity
+    return declaredBy === undefined ? { ...property, kind } : { ...property, kind, declaredBy }
   }
 
   #class(declaration: Declaration, context: Context, entry: NamedEntry): Shape {
     const node = declaration.node as Class
-    // `toJSON()` decides what JSON.stringify produces: the fields do not matter then
-    const toJson = node.body.body.find(
-      (member): member is MethodDefinition =>
-        (member.type === 'MethodDefinition' || member.type === 'TSAbstractMethodDefinition') &&
-        !member.static &&
-        member.kind === 'method' &&
-        propertyName(member.key, member.computed) === 'toJSON',
-    )
+    const instance = this.#options.instance
+    // `toJSON()` decides what JSON.stringify produces: the fields do not matter then (not for instances)
+    const toJson = instance
+      ? undefined
+      : node.body.body.find(
+          (member): member is MethodDefinition =>
+            (member.type === 'MethodDefinition' || member.type === 'TSAbstractMethodDefinition') &&
+            !member.static &&
+            member.kind === 'method' &&
+            propertyName(member.key, member.computed) === 'toJSON',
+        )
     if (toJson) {
       entry.toJson = true
       const returnType = toJson.value.returnType?.typeAnnotation
@@ -1130,11 +1211,18 @@ export class ShapeResolver {
     )
     const properties: ShapeProperty[] = ctor ? this.#parameterProperties(ctor, context) : []
     for (const member of node.body.body) {
+      if (instance && member.type !== 'PropertyDefinition' && member.type !== 'TSAbstractPropertyDefinition') {
+        const accessor = this.#instanceAccessor(member, node, context)
+        if (accessor) {
+          properties.push(accessor)
+        }
+        continue
+      }
       if (member.type !== 'PropertyDefinition' && member.type !== 'TSAbstractPropertyDefinition') {
         continue // methods, accessors (auto-accessors included) live on the prototype
       }
       // TypeScript `private` fields are internals, and their types are erased from declaration files
-      if (member.static || member.accessibility === 'private') {
+      if (member.static || member.accessibility === 'private' || (instance && member.accessibility === 'protected')) {
         continue
       }
       const name = propertyName(member.key, member.computed)
@@ -1161,11 +1249,53 @@ export class ShapeResolver {
     return object(overrideProperties(base?.properties ?? [], properties), base?.additional)
   }
 
+  /**
+   * A public instance getter or auto-accessor of a class ({@link ShapeOptions.members} `'instance'`),
+   * `undefined` for any other member (methods, setters, static, non-public).
+   */
+  #instanceAccessor(member: ClassElement, node: Class, context: Context): ShapeProperty | undefined {
+    if (
+      member.type === 'StaticBlock' ||
+      member.type === 'TSIndexSignature' ||
+      member.static ||
+      member.accessibility === 'private' ||
+      member.accessibility === 'protected'
+    ) {
+      return undefined
+    }
+    const name = propertyName(member.key, member.computed)
+    if (name === undefined) {
+      return undefined
+    }
+    if (member.type === 'AccessorProperty' || member.type === 'TSAbstractAccessorProperty') {
+      const annotation = member.typeAnnotation?.typeAnnotation
+      return annotation === undefined && member.value
+        ? this.#inferredProperty(name, member, context)
+        : this.#property(name, annotation, false, false, member, member.key, context)
+    }
+    if ((member.type !== 'MethodDefinition' && member.type !== 'TSAbstractMethodDefinition') || member.kind !== 'get') {
+      return undefined
+    }
+    const settable = node.body.body.some(
+      other =>
+        (other.type === 'MethodDefinition' || other.type === 'TSAbstractMethodDefinition') &&
+        other.kind === 'set' &&
+        !other.static &&
+        propertyName(other.key, other.computed) === name,
+    )
+    return this.#getter(name, member.value.returnType?.typeAnnotation, !settable, member, member.key, context)
+  }
+
   /** `constructor(readonly id: string, private tags: string[])`: own instance fields. */
   #parameterProperties(member: MethodDefinition, context: Context): ShapeProperty[] {
     const found: ShapeProperty[] = []
+    const instance = this.#options.instance
     for (const param of member.value.params) {
-      if (param.type !== 'TSParameterProperty' || param.accessibility === 'private') {
+      if (
+        param.type !== 'TSParameterProperty' ||
+        param.accessibility === 'private' ||
+        (instance && param.accessibility === 'protected')
+      ) {
         continue
       }
       const pattern = param.parameter.type === 'AssignmentPattern' ? param.parameter.left : param.parameter
@@ -1189,7 +1319,7 @@ export class ShapeResolver {
   }
 
   /** A field without annotation: the type of a literal initializer, or `new X()`. */
-  #inferredProperty(name: string, member: PropertyDefinition, context: Context): ShapeProperty {
+  #inferredProperty(name: string, member: PropertyDefinition | AccessorProperty, context: Context): ShapeProperty {
     const value = unwrapExpression(member.value as Expression)
     let shape: Shape | undefined
     if (value.type === 'Literal') {
@@ -1205,14 +1335,20 @@ export class ShapeResolver {
         shape = this.#fromSymbol(symbol, value.typeArguments?.params ?? [], value, at(context, name))
       }
     }
-    return {
-      name,
-      shape: shape ?? this.#opaqueAt(member, at(context, name), 'missing-annotation'),
-      optional: member.optional === true,
-      readonly: member.readonly === true,
-      doc: this.#options.jsdoc ? docAt(context.scope.file, startWithDecorators(member, member.decorators)) : undefined,
-      location: context.scope.file.location(member.key),
-    }
+    return this.#declared(
+      {
+        name,
+        shape: shape ?? this.#opaqueAt(member, at(context, name), 'missing-annotation'),
+        optional: member.optional === true,
+        readonly: member.readonly === true,
+        doc: this.#options.jsdoc
+          ? docAt(context.scope.file, startWithDecorators(member, member.decorators))
+          : undefined,
+        location: context.scope.file.location(member.key),
+      },
+      'field',
+      context,
+    )
   }
 
   #enum(declaration: Declaration, context: Context): Shape {
@@ -1227,8 +1363,75 @@ export class ShapeResolver {
     )
   }
 
+  /**
+   * {@link NamedShape.enumMembers}: the members of every declaration of the enum (merged ones), in
+   * declaration order, with their evaluated values.
+   */
+  #enumMembers(declaration: Declaration): readonly ShapeEnumMember[] | undefined {
+    const values = this.#enumValues(declaration)
+    if (values === undefined) {
+      return undefined
+    }
+    const symbol = this.#project.lookupIdentity(this.#identityOf(declaration).identity)
+    const declarations =
+      symbol.kind === 'declaration' ? symbol.declarations.filter(candidate => candidate.kind === 'enum') : []
+    const jsdoc = this.#options.jsdoc
+    const found: ShapeEnumMember[] = []
+    const seen = new Set<string>()
+    for (const current of declarations.length > 0 ? declarations : [declaration]) {
+      const file = this.#project.getFile(current.file)
+      if (!file) {
+        continue
+      }
+      for (const member of (current.node as TSEnumDeclaration).body.members) {
+        const name = enumMemberName(member.id)
+        // the evaluator follows one declaration: a member of another declaration of a merged enum is
+        // read from its initializer (TypeScript requires one on the first member of every later declaration)
+        let value: unknown
+        if (name !== undefined) {
+          value = Object.hasOwn(values, name) ? values[name] : this.#memberInitializer(current, member)
+        }
+        if (name === undefined || seen.has(name) || (typeof value !== 'string' && typeof value !== 'number')) {
+          continue
+        }
+        seen.add(name)
+        found.push(
+          Object.freeze({
+            name,
+            value,
+            doc: jsdoc ? docAt(file, member.start) : undefined,
+            location: file.location(member.id),
+          }),
+        )
+      }
+    }
+    return Object.freeze(found)
+  }
+
+  /** The value of an enum member's initializer, evaluated in the scope of its declaration. */
+  #memberInitializer(declaration: Declaration, member: TSEnumDeclaration['body']['members'][number]): unknown {
+    const file = this.#project.getFile(declaration.file)
+    if (!file || !member.initializer) {
+      return undefined
+    }
+    const evaluation = this.#project.evaluate({ file, namespace: declaration.namespace }, member.initializer, {
+      refs: 'none',
+    })
+    return evaluation.kind === 'value' ? evaluation.value : undefined
+  }
+
   /** The members of an enum declaration, evaluated in its scope (`undefined` when not evaluable). */
   #enumValues(declaration: Declaration): Readonly<Record<string, unknown>> | undefined {
+    let values = this.#enumValuesOf.get(declaration)
+    if (values === undefined) {
+      values = this.#evaluateEnum(declaration) ?? null
+      this.#enumValuesOf.set(declaration, values)
+    }
+    return values ?? undefined
+  }
+
+  /** {@link #enumValues} without memo. */
+  #evaluateEnum(declaration: Declaration): Readonly<Record<string, unknown>> | undefined {
     const file = this.#project.getFile(declaration.file)
     if (!file) {
       return undefined
@@ -1428,19 +1631,24 @@ export class ShapeResolver {
         const name = String(member.value)
         const original = source?.properties.find(property => property.name === name)
         const { shape, undefinable } = withoutUndefined(valueShape)
-        properties.push({
-          name,
-          shape,
-          optional:
-            node.optional !== '-' &&
-            (node.optional === true || node.optional === '+' || original?.optional === true || undefinable),
-          readonly:
-            node.readonly === '-'
-              ? false
-              : node.readonly === true || node.readonly === '+' || (original?.readonly ?? false),
-          doc: original?.doc,
-          location: original?.location,
-        })
+        properties.push(
+          withOrigin(
+            {
+              name,
+              shape,
+              optional:
+                node.optional !== '-' &&
+                (node.optional === true || node.optional === '+' || original?.optional === true || undefinable),
+              readonly:
+                node.readonly === '-'
+                  ? false
+                  : node.readonly === true || node.readonly === '+' || (original?.readonly ?? false),
+              doc: original?.doc,
+              location: original?.location,
+            },
+            original,
+          ),
+        )
       } else if (member.kind === 'string' || member.kind === 'number') {
         additional = valueShape
       } else if (member.kind !== 'never') {
@@ -1705,6 +1913,88 @@ function namedMap(keys: readonly string[], cache: Cache): ReadonlyMap<string, Na
     }
   }
   return named
+}
+
+/** Name of an enum member (`Draft`, `'two words'`, a template literal without substitution). */
+function enumMemberName(id: TSEnumMember['id']): string | undefined {
+  switch (id.type) {
+    case 'Identifier':
+      return id.name
+    case 'Literal':
+      return typeof id.value === 'string' ? id.value : undefined
+    case 'TemplateLiteral':
+      return id.expressions.length === 0 && id.quasis.length === 1
+        ? (id.quasis[0]?.value.cooked ?? undefined)
+        : undefined
+    default:
+      return undefined
+  }
+}
+
+/**
+ * {@link NamedShape.literals}: the literal types of an alias of a union of literal types, in source
+ * order and de-duplicated, when the (normalised) shape keeps every one of them as a literal.
+ */
+function aliasLiterals(declaration: Declaration, shape: Shape): readonly (string | number | boolean)[] | undefined {
+  const values: (string | number | boolean)[] = []
+  const collect = (node: TSType): boolean => {
+    switch (node.type) {
+      case 'TSParenthesizedType':
+        return collect(node.typeAnnotation)
+      case 'TSUnionType':
+        return node.types.every(collect)
+      case 'TSLiteralType': {
+        const value = literalTypeValue(node)
+        if (value === undefined) {
+          return false
+        }
+        if (!values.includes(value)) {
+          values.push(value)
+        }
+        return true
+      }
+      default:
+        return false
+    }
+  }
+  if (!collect((declaration.node as TSTypeAliasDeclaration).typeAnnotation)) {
+    return undefined
+  }
+  const members = shape.kind === 'union' ? shape.members : [shape]
+  if (
+    members.length !== values.length ||
+    !members.every(member => member.kind === 'literal' && values.includes(member.value))
+  ) {
+    return undefined
+  }
+  return Object.freeze(values)
+}
+
+/** The value of a literal type (`'a'`, `1`, `-1`, `true`, a template literal without substitution). */
+function literalTypeValue(node: Extract<TSType, { type: 'TSLiteralType' }>): string | number | boolean | undefined {
+  const value = node.literal
+  switch (value.type) {
+    case 'Literal':
+      if ('bigint' in value && typeof value.bigint === 'string') {
+        return undefined
+      }
+      return typeof value.value === 'string' || typeof value.value === 'number' || typeof value.value === 'boolean'
+        ? value.value
+        : undefined
+    case 'UnaryExpression':
+      return value.operator === '-' &&
+        value.argument.type === 'Literal' &&
+        !('bigint' in value.argument && typeof value.argument.bigint === 'string') &&
+        typeof value.argument.value === 'number'
+        ? -value.argument.value
+        : undefined
+    case 'TemplateLiteral':
+      return value.expressions.length === 0 && value.quasis.length === 1
+        ? (value.quasis[0]?.value.cooked ?? undefined)
+        : undefined
+    default:
+      return undefined
+  }
 }
 
 /** An alias whose body is a reference or a `typeof` may be a schema or a kept reference (transparent). */

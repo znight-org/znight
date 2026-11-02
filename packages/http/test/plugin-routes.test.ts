@@ -8,7 +8,7 @@ import type { CanActivate, HttpContext, HttpInterceptor, HttpPluginOptions, Plug
 import { Application, ErrorCode, silentLogger, ZnightError, type ZnightMetadata } from '@znight/core'
 
 import { createRouteDecorator, HttpPlugin } from '../src/index.ts'
-import { caught, controller, createApp, metadata, provider, route, t } from './helpers.ts'
+import { ADAPTERS, caught, controller, createApp, metadata, provider, route, t } from './helpers.ts'
 import { describe, expect, it } from 'bun:test'
 
 const Public = createRouteDecorator('public', { group: 'access', required: true })
@@ -78,6 +78,12 @@ describe('plugin routes', () => {
       [{ ...docs, meta: [Public.meta(), Roles.meta(['admin'])] }],
       'two entries of the "access" group (public, roles)',
     ],
+    [
+      'an invalid body limit',
+      [{ ...docs, bodyLimit: '10 parsecs' }],
+      'invalid bodyLimit "10 parsecs" of the route GET /openapi.json (document): expected a size in bytes',
+    ],
+    ['a negative body limit', [{ ...docs, bodyLimit: -1 }], 'invalid bodyLimit -1 of the route GET /openapi.json'],
     [
       'invalid guards',
       [{ ...docs, guards: 'x' }],
@@ -230,6 +236,41 @@ describe('plugin routes', () => {
     } finally {
       await app.stop()
     }
+  })
+})
+
+describe('plugin route body limits', () => {
+  /** Reads the body as text and answers its size. */
+  const echo = async (ctx: HttpContext): Promise<{ size: number }> => ({ size: String(await ctx.parseBody()).length })
+  const plugin = routesPlugin('graphql', [
+    { method: 'POST', path: '/small', name: 'small', handler: echo, meta: [Public.meta()], bodyLimit: '1kb' },
+    { method: 'POST', path: '/large', name: 'large', handler: echo, meta: [Public.meta()], bodyLimit: 8192 },
+    { method: 'POST', path: '/default', name: 'default', handler: echo, meta: [Public.meta()] },
+  ])
+
+  describe.each(ADAPTERS.map(adapter => [adapter.name, adapter] as const))('%s', (_, adapter) => {
+    it('applies the limit of the route, and the plugin limit to the other routes (in-memory inject)', async () => {
+      const app = await createApp(
+        homeMetadata(),
+        { adapter: adapter.create(), guards: [AccessGuard], bodyLimit: '2kb' },
+        { start: false, plugins: [plugin] },
+      )
+      try {
+        const send = (url: string, size: number) =>
+          app.http.inject({ method: 'POST', url, body: 'x'.repeat(size), headers: { 'content-type': 'text/plain' } })
+        expect((await send('/small', 1024)).json()).toEqual({ size: 1024 })
+        const tooLarge = await send('/small', 1025)
+        expect(tooLarge.status).toBe(413)
+        expect(tooLarge.json<{ error: string }>().error).toBe('Payload Too Large')
+        // above the plugin limit (2 KiB), within the route's
+        expect((await send('/large', 4096)).json()).toEqual({ size: 4096 })
+        expect((await send('/large', 8193)).status).toBe(413)
+        expect((await send('/default', 2048)).json()).toEqual({ size: 2048 })
+        expect((await send('/default', 2049)).status).toBe(413)
+      } finally {
+        await app.stop()
+      }
+    })
   })
 })
 

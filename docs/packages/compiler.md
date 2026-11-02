@@ -111,9 +111,9 @@ interface Diagnostic {
 }
 ```
 
-`generate()` writes `diskCode` (never with errors) and returns the same plus `written` (the files
-whose content changed), `stale` and `staleFiles` (check mode: which files are missing or out of
-date). The disk copy is the same in every mode, so a `vite build`, the Bun preload and `znight
+`generate()` writes `diskCode` and the extra files emitted by compiler extensions (`extraFiles`;
+never with errors) and returns the same plus `written` (the files whose content changed), `stale`
+and `staleFiles` (check mode: which files are missing or out of date). The disk copy is the same in every mode, so a `vite build`, the Bun preload and `znight
 generate --check` agree on it; the Vite plugin and the Bun preload serve the module from memory and
 only warn when they cannot write it (read-only image). `createCompiler(options)` keeps the parse
 cache between compiles for watchers (`compile(changes)` / `generate(changes)` with `{ changed,

@@ -1,4 +1,4 @@
-import type { HttpContext } from '../src/index.ts'
+import type { HttpContext, RouteMetaCarrier } from '../src/index.ts'
 
 import { Injectable } from '@znight/core'
 import { z } from 'zod'
@@ -128,6 +128,22 @@ describe('createRouteDecorator', () => {
     expect(Public.get(ctx)).toBe(true)
     expect(Limit.get(ctx)).toBeUndefined()
     expect(Roles.get({ route: undefined } as unknown as HttpContext)).toBeUndefined()
+  })
+
+  it('reads the metadata of any route metadata carrier (RFC 0003 §8.2.4)', () => {
+    // a resolver or gateway context: no cast, only `route.meta` is needed
+    const carrier = { route: { meta: { roles: ['reader'], public: true } }, coordinate: 'Query.books' }
+    expect(Roles.get(carrier)).toEqual(['reader'])
+    expect(Public.get(carrier)).toBe(true)
+    expect(Limit.get(carrier)).toBeUndefined()
+    const typed: RouteMetaCarrier = { route: { meta: { limit: 3 } } }
+    expect(Limit.get(typed)).toBe(3)
+    expect(Roles.get({})).toBeUndefined()
+    expect(Roles.get({ route: undefined })).toBeUndefined()
+    // an HttpContext is a carrier
+    const ctx = { route: { meta: { roles: ['admin'] } } } as unknown as HttpContext
+    const asCarrier: RouteMetaCarrier = ctx
+    expect(Roles.get(asCarrier)).toEqual(['admin'])
   })
 
   it('returns no-op markers', () => {

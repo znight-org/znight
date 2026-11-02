@@ -27,6 +27,12 @@ export interface ZnightHooks {
    * drop, a wrapper that threw first): see `ScheduledRunEvent.outcome`.
    */
   'schedule:run': ScheduledRunEvent
+  /**
+   * One GraphQL operation handled by `@znight/graphql` (RFC 0005): a query or a mutation, or a whole
+   * subscription from its start to its end. Wrapped with `hooks.run` when wrappers exist, then
+   * emitted when listeners exist.
+   */
+  'graphql:operation': GraphQLOperationEvent
 }
 
 /**
@@ -160,6 +166,59 @@ export interface ScheduledRunEvent {
   error?: unknown
   /** Set when the run's signal was aborted. */
   aborted?: ScheduledRunAbortReason
+}
+
+/** Type of a GraphQL operation (`GraphQLOperationEvent.operationType`). */
+export type GraphQLOperationType = 'query' | 'mutation' | 'subscription'
+
+/**
+ * How a GraphQL operation reached the server (`GraphQLOperationEvent.transport`): GraphQL over HTTP,
+ * GraphQL over Server-Sent Events, or a direct call (`execute()` / `subscribe()` of the plugin).
+ */
+export type GraphQLOperationTransport = 'http' | 'sse' | 'direct'
+
+/**
+ * Outcome of a GraphQL operation (`GraphQLOperationEvent.outcome`):
+ *
+ * - `'success'`: executed, no error;
+ * - `'partial'`: executed, with data and field errors;
+ * - `'error'`: executed, without data (a non-null root field failed, or the execution threw);
+ * - `'rejected'`: never executed (parse, validation, variable coercion or limit errors).
+ */
+export type GraphQLOperationOutcome = 'success' | 'partial' | 'error' | 'rejected'
+
+/** One error of a GraphQL response, as sent to the client (masked when it is unexpected). */
+export interface GraphQLOperationError {
+  readonly message: string
+  /** `extensions.code` of the error (`FORBIDDEN`, `GRAPHQL_PARSE_FAILED`...). */
+  readonly code: string | undefined
+  /** Response path of the field that failed; absent for request errors. */
+  readonly path?: readonly (string | number)[]
+}
+
+/**
+ * Instrumentation event of the `graphql:operation` hook, produced by `@znight/graphql` (RFC 0005)
+ * once per operation. For a subscription, it covers its whole life: wrappers see it start, and
+ * `outcome` is set when it ends. Mutable fields are filled in by the producer before `hooks.run`
+ * resolves; listeners see the final values.
+ */
+export interface GraphQLOperationEvent {
+  /** `undefined` when the request was rejected before an operation was selected (parse error...). */
+  readonly operationType: GraphQLOperationType | undefined
+  /** `undefined` for an anonymous operation, or when none was selected. */
+  readonly operationName: string | undefined
+  /** SHA-256 (hex) of the query text, cached with the parsed document; `undefined` without a query. */
+  readonly documentId: string | undefined
+  readonly transport: GraphQLOperationTransport
+  readonly requestId: string
+  /** `GraphQLContext` from `@znight/graphql`. */
+  readonly context: unknown
+  /** `performance.now()` when the operation started. */
+  readonly startTime: number
+  /** Outcome, set before `hooks.run` resolves. */
+  outcome?: GraphQLOperationOutcome
+  /** Errors of the response (field and request errors), set before `hooks.run` resolves. */
+  errors?: readonly GraphQLOperationError[]
 }
 
 /** Name of a declared hook. */

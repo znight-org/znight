@@ -66,11 +66,24 @@ export function isOutFile(compiler: ZnightCompiler, file: string): boolean {
 }
 
 /**
+ * `true` when `file` is written by the compiler: the generated module or an extra file of the last
+ * result (`extraFiles`), also when it is reached through a symbolic link. Watchers must ignore them.
+ */
+export function isGeneratedFile(compiler: ZnightCompiler, file: string): boolean {
+  if (compiler.isGeneratedFile(file)) {
+    return true
+  }
+  const resolved = resolvePath(file)
+  const directory = realPath(path.dirname(resolved))
+  return directory !== undefined && compiler.isGeneratedFile(`${directory}/${path.basename(resolved)}`)
+}
+
+/**
  * Whether a file system event can change the compile result: a change of a file the last result
  * depends on (`watched`: its `watchFiles`) or of a resolution config file (package.json, tsconfig,
  * lockfile), a source created or deleted under an include root (`roots`: {@link includeRoots}), a
- * file created where a relative import of the last compile did not resolve. The generated module
- * and `node_modules` (except the watched files) are ignored.
+ * file created where a relative import of the last compile did not resolve. The generated module,
+ * the extra files of the last result and `node_modules` (except the watched files) are ignored.
  *
  * Watchers that report a moved or deleted directory as one event on the directory alone (`fs.watch`)
  * also get: a directory created under an include root (`added`), and a removed path that contained
@@ -84,7 +97,7 @@ export function isRelevantChange(
   roots: readonly string[],
 ): boolean {
   const resolved = resolvePath(file)
-  if (isOutFile(compiler, resolved)) {
+  if (isGeneratedFile(compiler, resolved)) {
     return false
   }
   const real = kind === 'removed' ? resolved : (realPath(resolved) ?? resolved)

@@ -170,6 +170,9 @@ export function generateContext(
       }
       return declared.node
     },
+    emitFile: () => {
+      throw new Error('the config extension emits no file')
+    },
     report: diagnostic => {
       reports.push(diagnostic)
     },

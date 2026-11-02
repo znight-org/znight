@@ -167,8 +167,13 @@ export function emitLibrary(input: EmitLibraryInput): EmitLibraryResult {
   }
 
   const edges: LibraryEdge[] = analysis.graph.edges
-    .filter(edge => edge.kind === 'extension')
-    .map(edge => ({ from: translator.token(edge.from), to: translator.token(edge.to), reason: edge.label }))
+    .filter(edge => edge.kind === 'extension' || edge.extension === true)
+    .map(edge => ({
+      from: translator.token(edge.from),
+      to: translator.token(edge.to),
+      reason: edge.label,
+      ...(edge.kind === 'lazy' ? { lazy: true as const } : {}),
+    }))
 
   const bindings: LibraryBinding[] = [...analysis.graph.bindingRequests]
     .sort(([a], [b]) => a - b)
@@ -176,6 +181,7 @@ export function emitLibrary(input: EmitLibraryInput): EmitLibraryResult {
       id,
       ...injection(entry.request, entry.label),
       ...(entry.from === undefined ? {} : { from: translator.token(entry.from) }),
+      ...(entry.lazy === true ? { lazy: true as const } : {}),
     }))
 
   const extensions: Record<string, EncodedValue[]> = {}

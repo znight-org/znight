@@ -507,8 +507,8 @@ application provider, e.g. `class AppLogger implements CoreLogger`) nor package-
 | Code      | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | Severity                                       |
 | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
 | ZNIGHT001 | Missing provider for a required dependency (a warning for library dependencies in library mode)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | error                                          |
-| ZNIGHT002 | Circular dependency (over the full edge set except `Lazy` and extension edges, prints the cycle, hints at `Lazy<T>`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | error                                          |
-| ZNIGHT003 | Scope mismatch: a singleton depends (directly, through transients, multi, guards, interceptors, extension edges or externals) on a request-scoped provider                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | error                                          |
+| ZNIGHT002 | Circular dependency (over the full edge set except `Lazy` and extension edges, lazy or not, prints the cycle, hints at `Lazy<T>`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | error                                          |
+| ZNIGHT003 | Scope mismatch: a singleton depends (directly, through transients, multi, guards, interceptors, non-lazy extension edges or externals) on a request-scoped provider                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | error                                          |
 | ZNIGHT004 | Duplicate provider for the exact same type without qualifier/`@Primary`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | error                                          |
 | ZNIGHT005 | Invalid decorator usage (target, arguments, unexported reference, non-public/`#private`/static handler or `@Provides`, abstract or unbound generic provider, provider exported as a type only, class registered by several provider decorators, decorator applied twice, `@Provides` outside `@Factory` or without concrete return type, parameter decorator imported from another feature package; warnings: composite decorator, `const` alias of a decorator; route decorators: two decisions of one group on a target, definitions of a key or of a group that disagree on their options; `@Cookie` / `@SignedCookie`: invalid cookie name, nameless `@SignedCookie`; `@Sse`: invalid options, applied twice or with another route decorator, with `@HttpCode`, `@Header('content-type')` or `@Res()`, a primitive return type, warning for a request body; job decorators: method shape, abstract or generic host, a route that is also a job; at boot: invalid `cookies` (secrets shorter than 32 bytes, duplicates, unknown keys) and `sse` options) | error / warning                                |
 | ZNIGHT006 | Missing or invalid required configuration value, failing config loader (runtime); a route reading `@SignedCookie` without `cookies.secrets` (boot)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | error                                          |
@@ -542,15 +542,23 @@ application provider, e.g. `class AppLogger implements CoreLogger`) nor package-
 | ZNIGHT042 | Unknown job name (`jobs` override, with a did-you-mean hint; `registry.trigger` / `remove`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | error                                          |
 | ZNIGHT043 | Missing lock store: a job requires a lock (`lock: true`) but `SchedulePlugin` has no store (boot; `registry.add*` at runtime)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | error                                          |
 | ZNIGHT044 | Job aborted: the reason of an aborted run's `ctx.signal` (`JobAbortedError`; `reason`: `timeout`, `lock-lost`, `removed`, `shutdown`); never thrown by the framework                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | error (a value)                                |
+| ZNIGHT060 | Invalid GraphQL type: a TypeScript type reached from a resolver cannot be mapped to a GraphQL type (`any`, `unknown`, `object`, `void`, functions, tuples, `Map`, `Record` and index signatures, `Uint8Array`/`Blob`/`File`, unions mixing scalars or scalars and objects, anonymous object types and unions, opaque types, `Promise` outside a return type, async iterables outside `@Subscription`), or a resolver without the explicit return type it needs (RFC 0005 §6.2)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | error                                          |
+| ZNIGHT061 | GraphQL name conflict: two declarations or two root fields share a GraphQL name, an invalid or reserved name (`Query`, `Mutation`, `Subscription`, `__*`, enum values `true`/`false`/`null`), a field resolver conflicting with a property field, duplicate argument names; at boot, a name clash in hand-written metadata                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | error                                          |
+| ZNIGHT062 | Invalid resolver: `@ResolveField` without `@Parent()`, a subscription not returning an async iterable, resolvers without any `@Query`, inherited handlers, a resolver in a compiled provider library; an unreachable field resolver (warning)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | error / warning                                |
+| ZNIGHT063 | Invalid GraphQL input: a declaration used as input and as output, a getter, union, set or async iterable in an input type, a cycle of non-null input fields, a default value (`@default`, parameter default) not matching its type                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | error                                          |
+| ZNIGHT064 | Unresolvable abstract type: the members of a union cannot be told apart at runtime (no class, no common literal discriminant, no `__typename`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | error                                          |
+| ZNIGHT065 | Invalid loader: `@Loader()` on a type that is not `Loader<L>`, `L` not implementing `BatchLoad<K, V>`; at runtime, a batch function returning another number of values than keys (every key of the batch fails)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | error                                          |
+| ZNIGHT066 | Invalid GraphQL setup (boot): malformed or version-skewed `extensions.graphql`, graphql-js schema validation failure, invalid `GraphQLPlugin` options, no `http` plugin while the HTTP transport is on, scalar name mismatch                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | error                                          |
 
 Codes are allocated by range (`rfcs/README.md`): `ZNIGHT001`–`029` belong to the core, the
 compiler and the features shipped in 0.1 (http, messaging, config, observability); from
 `ZNIGHT030`, each first-party package reserves a block of ten in the `@znight/core` catalogue
-(`030`–`039` `@znight/openapi`, `040`–`049` `@znight/schedule`, `050`–`059` `@znight/websocket` and
-`060`–`069` `@znight/graphql`, reserved for v0.2). Codes are allocated in order inside a block and
-never change meaning. A package uses its block for its own failure modes, with one catch-all code
-for invalid usage and options, and reuses a lower code when the meaning is the same (a decorator on
-the wrong target is always ZNIGHT005). Third-party packages get no `ZNIGHT` code.
+(`030`–`039` `@znight/openapi`, `040`–`049` `@znight/schedule`, `050`–`059` `@znight/websocket`,
+reserved for v0.2, and `060`–`069` `@znight/graphql`, RFC 0005). Codes are allocated in order
+inside a block and never change meaning. A package uses its block for its own failure modes, with
+one catch-all code for invalid usage and options, and reuses a lower code when the meaning is the
+same (a decorator on the wrong target is always ZNIGHT005). Third-party packages get no `ZNIGHT`
+code.
 
 Singleton → transient is allowed (the singleton owns its instance). Error codes and descriptions
 live in `@znight/core` (`ErrorCode`, `ERROR_DESCRIPTIONS`), shared by compiler and runtime.
@@ -648,7 +656,10 @@ options `{ group?, required? }` (`required` default `false`; `group` default the
 `'app/tag'`). Invalid values throw a `TypeError` when the module loads, and the compiler reports
 them as ZNIGHT005. The decorator carries `key`, `group`, `required` (`RouteDecoratorInfo`), `get(ctx)`
 (the effective value of the current route) and `meta(value?)` (the same metadata as data, `{ key,
-value, group, required }`, for plugin routes, §9.1). Decorators of a group are alternatives: one
+value, group, required }`, for plugin routes, §9.1). `get` accepts any `RouteMetaCarrier`
+(`{ readonly route?: { readonly meta: Readonly<Record<string, unknown>> } | undefined }`) and returns
+`route?.meta[key]`: an `HttpContext` is one, and so is the context of another transport that reuses
+route decorators (RFC 0003, RFC 0005). Decorators of a group are alternatives: one
 decision per group and target (ZNIGHT005), every definition of a key uses the same options, and the
 decorators of a group agree on `required` (ZNIGHT005). For each route and each **required** group
 seen during the compile (applied somewhere, or only defined: `definitionsOf`, §6.5), the compiler
@@ -659,6 +670,26 @@ declare the decisions they enforce with a static `enforces: readonly RouteDecora
 
 **Impl.** routes are not inherited: route decorators on a class without `@Controller` (e.g. a base
 class) are ZNIGHT005; a route decorator created in a `.d.ts` (its key is not readable) is ZNIGHT005.
+
+Route decorators on the targets of other extensions (RFC 0003 §6.4, RFC 0005 H3). Besides its
+default-exported extension, `@znight/http/compiler` exports three stable functions, so that an
+extension whose targets carry route decorators (gateways, resolvers) applies exactly these rules:
+
+- `readRouteMeta(ctx: AnalyzeContext<unknown>, cls: ClassInfo, method?: MethodInfo): MetaEntry[]`:
+  the entries of the route decorators applied to the class (no `method`) or to the method, in
+  source order (`{ key, value, location, group, required, decorator, identity, definition }`), with
+  the problems above reported as ZNIGHT005 through `ctx` (once per call). The http extension reads
+  controllers and routes with it.
+- `effectiveRouteMeta(classMeta, methodMeta): MetaEntry[]`: the class entries whose group the
+  method does not decide, then the method entries (the rule of `ctx.route.meta`, §9.1).
+- `requiredRouteGroups(ctx: ValidateContext<unknown>, applied?: Iterable<MetaEntry>):
+  readonly RequiredRouteGroup[]`: the required groups of the compile (applied entries, then
+  `definitionsOf`, §6.5), in the order of their first definition by identity, each
+  `{ group, decorators: RouteGroupMember[] (source order), suggestion }`. Inconsistent definitions are
+  left out and reported only by the http extension. A target of the caller without a decision of a
+  returned group is ZNIGHT023, reported by the caller.
+
+The entry stays runtime-free (§2): other `<pkg>/compiler` entries may import it.
 
 ### `@znight/openapi`
 
@@ -796,7 +827,8 @@ interface CompileResult {
   graph: ApplicationGraph // pruned with `prune`
   stats: { files: number; providers: number; durationMs: number; parsed: number }
   library: LibraryOutput | undefined // library mode only: znight.providers.json
-  watchFiles: string[] // sources, files read outside node_modules, manifests, libraries; never outFile
+  extraFiles: ExtraFile[] // { file, content, extension }: emitFile() of the extensions (§6.5), sorted; [] on errors
+  watchFiles: string[] // sources, files read outside node_modules, manifests, libraries; never outFile nor extraFiles
   decorators: ReadonlyMap<string, DecoratorRanges> // per analysed file, for stripDecorators (§6.3)
 }
 interface GenerateOptions {
@@ -804,8 +836,8 @@ interface GenerateOptions {
 }
 interface GenerateResult extends CompileResult {
   written: string[] // files whose content changed (none when !ok)
-    stale: boolean // check mode: generated files missing or out of date
-  staleFiles: string[] // check mode: which ones, the module first (then znight.providers.json)
+  stale: boolean // check mode: generated files missing or out of date
+  staleFiles: string[] // check mode: which ones, the module first (then the extra files, then znight.providers.json)
 }
 interface ZnightCompiler {
   options: ResolvedOptions
@@ -815,6 +847,7 @@ interface ZnightCompiler {
   compile(changes?: { changed?; added?; removed? }): Promise<CompileResult> // only changed files re-read
   generate(changes?, options?: GenerateOptions): Promise<GenerateResult>
   isOutFile(file: string): boolean // watchers must ignore the generated module
+  isGeneratedFile(file: string): boolean // the outFile or an extra file of `last`: watchers ignore them too
   reloadExtensions(): void
 }
 interface Diagnostic {
@@ -827,18 +860,19 @@ interface Diagnostic {
 }
 ```
 
-- `compile()` never writes. `generate()` writes the generated module (`diskCode`, and
-  `dist/znight.providers.json` in library mode) only when its content changed and there is no
-  error; with `check` it never writes and `stale` compares the same files with the disk. The disk
-  copy is the `serve` rendering whatever the mode (it differs from `code` only in `build` mode,
-  whose bundle drops provider `source` locations), so every tool (`znight generate`, `vite build`,
-  the Bun preload under any `NODE_ENV`, `--check` after a build) writes and expects one file.
+- `compile()` never writes. `generate()` writes the generated module (`diskCode`, the extra files
+  of the extensions, and `dist/znight.providers.json` in library mode) only when its content
+  changed and there is no error; with `check` it never writes and `stale` compares the same files
+  with the disk. The disk copy is the `serve` rendering whatever the mode (it differs from `code`
+  only in `build` mode, whose bundle drops provider `source` locations), and so are the extra files,
+  so every tool (`znight generate`, `vite build`, the Bun preload under any `NODE_ENV`, `--check`
+  after a build) writes and expects the same files.
   `createCompiler()` keeps the parse cache and the loaded extensions between compiles; changes to
   `outFile` are ignored.
 - `watchFiles` lists every file the result depends on: the scanned sources and every other file the
   analysis read outside `node_modules` (a constant imported from `shared/`, a type of
   `src/types.d.ts`, a workspace package), package manifests and compiled libraries; never the
-  outFile. Watchers also recompile when a file is created where a relative import of the last
+  outFile nor the extra files. Watchers also recompile when a file is created where a relative import of the last
   compile did not resolve.
 - Options are validated by `normalizeOptions` (a `TypeError` prefixed `[znight]` naming the
   option); paths are absolute and POSIX, the root is a realpath.
@@ -882,7 +916,8 @@ plugin instance, shared by every environment the plugin applies to.
   `build.ssr = entry` (`app.entry`, default `src/main.ts`), `build.outDir = 'dist'`,
   `build.target = 'node24'`, `build.sourcemap = true`, `ssr.target = 'node'`, each only when unset.
   The dev server watcher and `build.watch` ignore the outFile (and the temporary files of its atomic
-  writes).
+  writes); the dev server watcher also ignores the extra files of the latest result (and their
+  temporary files), known once compiled.
 - `configResolved`: creates the compiler with `cwd` = Vite root, the compile mode, the runtime
   conditions (`resolve.conditions` of the server environment, `development|production` mapped, plus
   `node`, `import`, `default`) and the string `resolve.alias` entries; it is kept while these inputs
@@ -899,13 +934,14 @@ plugin instance, shared by every environment the plugin applies to.
   imports of the outFile, with a JS/TS extension or none, resolve to it and are served from memory
   (the latest result, after the pending debounced compile). The disk copy (`diskCode`, the same in
   every mode, §6.2) exists for `tsc` and editors and is written only when its content changed and
-  the compile is ok; writing it is best-effort: a failure (read-only tree of a container image) is
-  a warning, never a build failure. Imports through an alias are not intercepted (they read the
+  the compile is ok, like the extra files of the extensions (`extraFiles`); writing them is
+  best-effort: a failure (read-only tree of a container image) is a warning, never a build failure. Imports through an alias are not intercepted (they read the
   disk copy).
 - Watching: in `vite build --watch`, the include roots, every file of `watchFiles`, the root
   `tsconfig.json` and the `tsconfig` option are watched (`addWatchFile`); `watchChange` records the
   relevant events (a creation of a known file is a change, and so is a creation where a relative
-  import did not resolve) for the next `buildStart`. In the dev
+  import did not resolve; events of the outFile and of the extra files are never relevant) for the
+  next `buildStart`. In the dev
   server, listeners are prepended to the server watcher (the change is recorded before Vite reloads
   an importer), events are debounced (~50 ms, one compile per burst), `hotUpdate` adds the generated
   module to the HMR batch and a new result reloads it in the server environments. File
@@ -942,7 +978,8 @@ package root:
   `logLevel` (`'info'` adds a summary line, `'warn'` (default) prints diagnostics only, `'silent'`;
   everything on stderr). Mode `test` under `NODE_ENV=test` (`bun test`), `build` with
   `NODE_ENV=production`, else `serve`; runtime conditions `bun, node, import, default`. It generates
-  the module (disk copy, the same in every mode, written when it changed; a write failure is a
+  the module and the extra files (disk copy, the same in every mode, written when it changed; a
+  write failure is a
   warning on stderr, since the module is served from memory — but Bun resolves the import only when
   the file exists: generate it when building a read-only image), loads every file of `watchFiles`
   and the tsconfigs **as text modules** (`import(url + '?znight-watch', { with: { type: 'text' }
@@ -972,7 +1009,9 @@ package root:
   providers with token, kind (`class` / `provides`), class identity and import route, provided type,
   heritage closure, scope, name/primary, async/dispose, lifecycle members, injection points (encoded
   `TypeInfo` + qualifier + optional), interceptor chains with options, extension edges and
-  `bindInjection` requests, the data stored by extensions and, optionally, `roots` (the sorted tokens
+  `bindInjection` requests (`lazy: true` on the lazy ones, absent otherwise, so the output of a
+  library without lazy edges is unchanged), the data stored by extensions and, optionally, `roots`
+  (the sorted tokens
   of the providers declared with `AnalyzeContext.addRoot`, absent when there is none, so the output of
   a library without roots is unchanged; the application keeps them under `prune` and never reports
   them as unused). Identities are translated to the
@@ -1045,9 +1084,10 @@ interface DecoratorSpec {
 - `AnalyzeContext`: `extension`, `project`, `options`, `types` (`format`, `serialize`, `equals`,
   `stripNullish`, `awaited`), `registerProvider(cls, { scope?, name?, primary?, factory? }) → Token`
   (a class registered by two decorators is ZNIGHT005), `resolveClassRef(arg | ValueRef, { from?,
-  role? }) → ClassRef | undefined` (auto-registers injectable helper classes such as guards),
-  `bindInjection(request, { from? }) → BindingHandle` (read back with `binding(handle)`),
-  `addDependency(from, to, { location?, reason? })`, `classInfo(identity)`, `report(diagnostic)`,
+  role?, lazy? }) → ClassRef | undefined` (auto-registers injectable helper classes such as
+  guards), `bindInjection(request, { from?, lazy? }) → BindingHandle` (read back with
+  `binding(handle)`), `addDependency(from, to, { location?, reason?, lazy? })`,
+  `classInfo(identity)`, `report(diagnostic)`,
   `store(data)` (appended, read back as `stored`), `addRoot(cls, { reason?, location? }) → Token` and
   `definitionsOf(callee) → DefinitionInfo[]` (below).
 - **Roots** (`addRoot`): declares a class the extension's plugin uses at runtime although no binding
@@ -1063,12 +1103,22 @@ interface DecoratorSpec {
   declarations of the scanned files (application and source libraries) initialised with a call to
   the function of canonical identity `callee` (`'@znight/http#createRouteDecorator'`), applied
   anywhere or not, sorted by identity: `{ identity, name, displayName, file, location, call, args,
-  typeArgs, doc, exported }` (`args` evaluated as `value` arguments, nothing reported). Computed once
-  per compile and callee. **Impl.** compiled libraries and constants inside namespaces are not seen.
+  typeArgs, typeArgIdentities, doc, exported }` (`args` evaluated as `value` arguments, nothing
+  reported; `typeArgIdentities[i]` is the canonical identity named by the type argument `i` when it
+  is a type reference without type arguments, aliases not expanded, else `undefined`, so that it can
+  be passed to the `keep` option of type shapes). Computed once per compile and callee. **Impl.** compiled libraries and constants inside namespaces are not seen.
 - **Extension edges** (`addDependency`, `resolveClassRef({ from })`, `bindInjection({ from })`)
   count for ZNIGHT003 and ZNIGHT019/`prune`, never for ZNIGHT002 nor `resolutionOrder`: the plugin
   resolves them at runtime. **Impl.** consequence: a singleton controller using a request-scoped
   guard is reported as ZNIGHT003.
+- **Lazy extension edges** (`{ lazy: true }` on the three calls, with `from`): the plugin resolves
+  the dependency when it is used, in the scope of that call (a request, a message), like `Lazy<T>`,
+  and never when `from` is created. They count for ZNIGHT019/`prune` only, never for ZNIGHT003,
+  ZNIGHT002 nor `resolutionOrder`: a singleton may use a request-scoped loader or guard this way,
+  and resolving it outside a scope is the plugin's ZNIGHT013. The binding result is unchanged (the
+  token, not `{ lazy }`). In `ApplicationGraph.edges` they are `kind: 'lazy'` edges with
+  `extension: true` (a `Lazy<T>` parameter has no `extension`); compiled libraries keep them lazy
+  (§6.4). Without `lazy` (the default), extension edges behave as above.
 - `CustomFactory`: `{ deps: InjectionRequest[]; async?: boolean; generate(ctx, { cls, deps }):
   GenNode }` — `deps` are bound with §4.7 and passed as nodes (`d[i]`).
 - `ValidateContext`: `extension`, `project`, `options`, `types`, `graph` (`ApplicationGraph`),
@@ -1090,7 +1140,8 @@ interface DecoratorSpec {
     expanded, with its `typeArgs` and `explicitTypeArgs`) and `opaque` (`{ text, reason }`).
   - Interfaces are flattened with their `extends` and merged declarations; classes are their
     serialised fields (parameter properties first; no methods, accessors, static, `#private` nor
-    TypeScript `private` members; a `toJSON()` method gives the shape of its annotated return type);
+    TypeScript `private` members; a `toJSON()` method gives the shape of its annotated return type)
+    with `members: 'json'` (the default);
     generics, the usual utility types (`Partial`, `Required`, `Readonly`, `Pick`, `Omit`, `Record`,
     `NonNullable`, `Exclude`, `Extract`, `Awaited`), `keyof`, indexed access and mapped types over
     literal keys are applied structurally.
@@ -1106,7 +1157,25 @@ interface DecoratorSpec {
     `Kind.Cat` opaque (`unresolved`).
   - Options: `schemaAliases` (identity → `'input' | 'output'`, matched before alias expansion, also
     through aliases of them), `schemaMembers` (members meaning the type of a schema value, ArkType
-    `typeof S.infer`), `keep` (identities kept as `reference`), `jsdoc` (default `true`).
+    `typeof S.infer`), `keep` (identities kept as `reference`), `jsdoc` (default `true`), `members`
+    (`'json'` by default, or `'instance'`).
+  - `members: 'instance'` describes what reading an instance gives instead of what `JSON.stringify`
+    produces (GraphQL object types): `toJSON()` is ignored; a class is its public instance fields,
+    parameter properties and auto-accessors and its getters (`get x(): T`: the annotated return
+    type, `readonly` without a setter; without annotation, `opaque` with reason
+    `missing-annotation`), inherited ones first, in declaration order (parameter properties first);
+    `protected`, `private`, `#private` and static members, methods and setters are left out. An
+    interface also lists its getter signatures. Every property then carries `kind` (`'field'` or
+    `'getter'`) and `declaredBy` (the identity of the class, interface or alias whose source declares
+    it, kept through utility types, mapped types and intersections; `undefined` for a member written
+    in the target's own annotation). Function-typed properties are `opaque` (reason `function`) in
+    both modes: the extension skips them. With `'json'`, properties have neither `kind` nor
+    `declaredBy`, and every shape is the same as without the option.
+  - `NamedShape.enumMembers` (enums): `{ name, value, doc, location }` per member, in declaration
+    order (merged declarations included, no reverse mapping of numeric members). `NamedShape.literals`
+    (aliases of a union of literal types, `type Sort = 'title' | 'newest'`): the literals in source
+    order, de-duplicated (`shape` is the normalised, sorted union); set only when every member is
+    written as a literal type and the union keeps them all (`true | false` is `boolean`: not set).
   - `ShapeResult`: `root`, `named` (every named shape reached, transitively, by key, sorted; a
     declaration only used structurally is not listed) and `issues` (every `opaque` part and every
     `bigint`, with a path, the key of the named shape declaring it and a location). Results are
@@ -1119,11 +1188,26 @@ interface DecoratorSpec {
   `code` (tagged template escaping every interpolation) — also available
   as `createGenBuilders()` — plus `importValue` / `importType(ValueRef | ArgInfo | ClassInfo |
   ClassRef | identity)`, `importFrom(bareSpecifier, name, { type? })`, `tokenOf(target)`,
-  `binding(handle)`, `provider(token)`, `constant(name, value, { type? })` (§3.3), `report`, and
-  `extension`, `options`, `types`, `graph`, `stored`. Raw strings are never accepted; nodes not
+  `binding(handle)`, `provider(token)`, `constant(name, value, { type? })` (§3.3),
+  `emitFile(relativePath, content)` (below), `report`, and `extension`, `options`, `types`,
+  `graph`, `stored`. Raw strings are never accepted; nodes not
   created by the builders are rejected (ZNIGHT018); an import that cannot be routed is ZNIGHT005
   naming the extension. A custom factory receives the same context as the extension section, so
   constants are shared.
+- **Extra outputs** (`emitFile(relativePath, content)`): a file written next to the generated
+  module (an SDL schema, a JSON document), under the rules of the generated module: listed in
+  `CompileResult.extraFiles` (`{ file, content, extension }`, sorted by path, empty on errors),
+  written by `generate()`, the Vite plugin and the Bun preload only when the compile is ok and the
+  content changed (atomic write), compared with the disk by check mode (`staleFiles`, after the
+  module, before the library manifest), absent from `watchFiles` and ignored by the watchers like
+  the outFile (`ZnightCompiler.isGeneratedFile`). In `build` mode they come from the `serve`
+  rendering, like `diskCode`, so every mode writes the same files; the content MUST be
+  deterministic. The path is relative to the project root (POSIX separators, normalised) and MUST
+  stay inside it; it cannot be the outFile, `dist/znight.providers.json`, a path under
+  `node_modules`, a file already emitted (by any extension) nor a parseable source outside a
+  dot-directory (`.ts`, `.js`... files are accepted under `src/.znight/`, never scanned). A refused
+  path is a ZNIGHT018 error naming the extension and the path (the compile fails, nothing is
+  written); a path or content that is not a string is a failing extension (ZNIGHT018).
 
 ## 7. Package manifest (`package.json#znight`)
 
@@ -1365,6 +1449,7 @@ interface ZnightHooks {
   'messaging:message': MessageDeliveryEvent // produced by @znight/messaging (one delivery)
   'messaging:publish': MessagePublishEvent // produced by @znight/messaging (MessageBroker.publish)
   'schedule:run': ScheduledRunEvent // produced by @znight/schedule (one occurrence of a job)
+  'graphql:operation': GraphQLOperationEvent // produced by @znight/graphql (one operation, RFC 0005)
 } // augmentable by third-party packages
 class Hooks {
   on<K>(name: K, listener: (event) => unknown): () => void
@@ -1376,7 +1461,7 @@ class Hooks {
 }
 ```
 
-- The four hooks and their event types live in `@znight/core`, so producers and observers share
+- The five hooks and their event types live in `@znight/core`, so producers and observers share
   them without depending on each other. Event shapes:
   - `HttpRequestEvent`: `method`, `path`, `route` (pattern, `undefined` when unmatched),
     `requestId`, `headers`, `context` (`HttpContext`), `startTime`, `responseHeaders` (mutable),
@@ -1392,7 +1477,14 @@ class Hooks {
     `undefined` when the run did not execute), `startTime`, `outcome?` (`completed` / `failed` /
     `skipped` / `not-acquired`), `error?`, `aborted?` (`timeout` / `lock-lost` / `removed` /
     `shutdown`). Executed runs are wrapped with `run`, then emitted; occurrences that do not execute
-    (skipped, lock not acquired, lock store failure) are only emitted.
+    (skipped, lock not acquired, lock store failure) are only emitted;
+  - `GraphQLOperationEvent`: `operationType` (`query` / `mutation` / `subscription`, `undefined`
+    when the request was rejected before an operation was selected), `operationName` (`undefined`
+    when anonymous), `documentId` (SHA-256 hex of the query text, `undefined` without one),
+    `transport` (`http` / `sse` / `direct`), `requestId`, `context` (the `GraphQLContext`),
+    `startTime`, `outcome?` (`success` / `partial` / `error` / `rejected`) and `errors?`
+    (`{ message, code, path? }[]`, as sent to the client), both set before `run` resolves. One event
+    per operation; a subscription has one event for its whole life, settled when it ends.
 - Listeners are called synchronously in registration order; a failing listener is logged and never
   affects the emitter. Producers call `run` when there are wrappers and `emit` after it when there
   are listeners.
@@ -1738,12 +1830,15 @@ for byte, header order included.
 - **Plugin routes** (`PluginHttpRoutes`). A plugin implementing `httpRoutes({ prefix, container }):
   readonly PluginRoute[]` has it called once in `HttpPlugin.onBootstrap`, after `container.init()`
   and after the compiled routes, whatever the plugin order. A `PluginRoute` is `{ method, path,
-  name, handler: (ctx) => unknown, meta?: RouteMetaEntry[], guards?: GuardRef[] }`: `path` follows
-  the controller grammar, relative to the prefix; `meta` entries (`decorator.meta(value)`, one per
-  group) are the route metadata. The routes are registered through `adapter.registerRoute` in the
-  same pipeline: hook, request scope, global guards, then the route's `guards`, the handler and the
-  exception mappers; global interceptors do not wrap them; the body is read lazily; `GET` answers
-  `HEAD`. An invalid route or a collision with another route is ZNIGHT007 naming the plugin. The
+  name, handler: (ctx) => unknown, meta?: RouteMetaEntry[], guards?: GuardRef[], bodyLimit?:
+  ByteSize }`: `path` follows the controller grammar, relative to the prefix; `meta` entries
+  (`decorator.meta(value)`, one per group) are the route metadata; `bodyLimit` (the grammar of the
+  plugin option, parsed at boot) replaces the plugin `bodyLimit` for that route only, like
+  `@BodyLimit` (the body plan of the route). The routes are registered through
+  `adapter.registerRoute` in the same pipeline: hook, request scope, global guards, then the route's
+  `guards`, the handler and the exception mappers; global interceptors do not wrap them; the body is
+  read lazily; `GET` answers `HEAD`. An invalid route (a `bodyLimit` that `parseByteSize` rejects
+  included) or a collision with another route is ZNIGHT007 naming the plugin. The
   plugin name is `ctx.route.controller` and the `source` of the route summary.
 - **Cookies** (RFC 0006; `cookies.ts` is import-free). Request: the `cookie` header is split on `;`
   only, pairs trimmed, quoted values unquoted, `%` sequences decoded (malformed: kept raw); pairs
@@ -2574,8 +2669,8 @@ res.json()
   regenerate the module before the tests import it (§6.3); other runners run `znight generate`
   first.
   `@znight/testing` itself never compiles: it reads the metadata structurally (providers, aliases,
-  externals, `extensions.config` / `http` / `messaging` / `schedule`) and does not depend on the
-  feature packages.
+  externals, `extensions.config` / `http` / `messaging` / `schedule` / `graphql`) and does not
+  depend on the feature packages.
 - `TestBed.create(target, { metadata, provide?, overrides?, config?, mockFn?, deep?, aop? })` →
   `{ instance, mocks, container }`. The target (class, token, `TypedToken`, alias or unique display
   name) is built with its real generated factory (async factories awaited; factory errors →
@@ -2605,11 +2700,14 @@ res.json()
   runs `Application.create` with signal handlers disabled, applies `overrides` last and, by default,
   instantiates only the closure of the HTTP controllers (with their guards and interceptors), the
   message consumers, the hosts of scheduled jobs (`extensions.schedule.jobs[].token`, disabled jobs
-  included: they can be triggered), the override keys and the **plugin roots** (everything when
-  there is no controller, consumer nor job; `only: 'all' | keys`, keys to which the override keys
-  and plugin roots are added; `'all'` ignores plugin roots). Plugin roots are the providers a plugin
-  resolves in `onBootstrap` although the metadata does not reference them (`HttpPlugin`'s global
-  `guards`, `interceptors`, `exceptionMappers`): the optional `Plugin.initRoots(context: { metadata })`
+  included: they can be triggered), the GraphQL resolvers with their guards and loaders (for every
+  field of an object type bound to a resolver, `extensions.graphql.types[].fields[].resolver.token`,
+  `guards` and `loaders`; RFC 0005 §7.1), the override keys and the **plugin roots** (everything
+  when there is no controller, consumer, job nor resolver; `only: 'all' | keys`, keys to which the
+  override keys and plugin roots are added; `'all'` ignores plugin roots). Plugin roots are the
+  providers a plugin resolves in `onBootstrap` although the metadata does not reference them
+  (`HttpPlugin`'s global `guards`, `interceptors`, `exceptionMappers`): the optional
+  `Plugin.initRoots(context: { metadata })`
   of core (§8.2; `PluginInitRoots` in testing), called once per `TestApp.create()` before
   `Application.create` (it SHOULD NOT throw: invalid options are reported by `onBootstrap`; a
   non-array result is a `TypeError` naming the plugin); keys that designate providers of the
@@ -2638,15 +2736,15 @@ res.json()
 
 ## 11. CLI (`@znight/cli`)
 
-| Command                       | Behaviour                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `znight new [name]`           | Scaffold a project, interactively or from `-y/--yes`, `--pm <bun\|npm\|pnpm\|yarn>` (default: the package manager running the CLI, else `bun` under Bun, else `npm`), `--adapter <node\|fastify\|express\|hono>` (default `node`), `--features <config,observability,messaging,schedule,openapi\|all\|none>` (default `config,observability`; `schedule` adds `SchedulePlugin` before `HttpPlugin`, a sample job and its test on a virtual clock; `openapi` adds `OpenApiPlugin` after `HttpPlugin`, `src/api.ts` with `@OpenApiDocument` and the `openapi` / `openapi:check` scripts), `--no-install`, `--no-git`, `--dir`, `--force`; `.` scaffolds into the current directory. Bun projects test with `bun test` + preload, others with Vitest, and run the application on Bun (`dev` / `start` scripts with `--runtime bun`: `bun run` honours the `node` shebang of the binary); the compiler options live in `znight.config.ts`, imported by `vite.config.ts` (`znight(options)`) and read by the preload and `znight generate`; the `TestApp` test configures `ObservabilityPlugin` with `metrics: { server: false }`                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `znight generate`             | Write the generated container (compiler `generate`); `--check` (exit 1 when stale, never writes; names every missing or out-of-date file, the module first, then the library manifest in library mode: the compiler's `staleFiles` when it reports them, else a comparison of the outputs with the disk), `-w/--watch` (incremental), `--root`, `--config`, `--config-loader <bundle\|runner\|native>`. Compiler options: `znight.config.*` / `ZNIGHT_CONFIG` (`loadZnightConfig()`, Vite not loaded; skipped with `--config`), else the options the `znight()` plugin compiles with: the Vite config is resolved like `znight build` does (`vite.resolveConfig`, `NODE_ENV` restored afterwards) and the CLI reads `plugin.api.options` (or `api.getOptions()`) with the `root`, `aliases` and `runtimeConditions` of `plugin.api.compiler.options` (without it, the Vite root and the string `resolve.alias` entries), else the defaults. Compiles in `serve` mode. `--watch` watches what the Vite plugin and the Bun preload watch: the `include` directories of the project and of its source libraries, the project root and the directories of `watchFiles`, recomputed after each compile (one watcher per target, real POSIX paths); only changes that can change the result compile (parseable sources, `.js` included; resolution config files; known files), and a directory created, deleted or moved under an include root triggers a rescan (`mv src/users src/accounts` → the old files removed, the new directory added). Stops on `SIGINT`, `SIGTERM`, `SIGHUP` and, on POSIX, `SIGQUIT` |
-| `znight g <schematic> <name>` | `service`, `controller`, `consumer`, `config`, `guard` (with a commented `static enforces` line for route decisions), `interceptor` (`--aop` for a method interceptor), `factory`, `job` (`j`: `<name>.jobs.ts` with a `<Name>Jobs` class and a `@Cron` method named `<qualified>.daily`, where `<qualified>` is the directories of the file relative to `src/` (or to the project root for a `--path` outside it) and the kebab name, without the directory named after it: `g job reports/digest` → `reports.digest.daily`, `--path src/emails` → `emails.digest.daily`, so job names stay unique); `--path`, `--flat`, `-f/--force`, `-d/--dry-run`, `--root`. Aliases `generate <schematic>` and `generate:<schematic>`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `znight dev`                  | `vite build --watch` (no Vite dev server) and a full process restart after every successful rebuild — no partial HMR of providers: SIGTERM, `--kill-timeout` (5 000 ms) then SIGKILL, `--debounce`d (100 ms) and never overlapping restarts; a failed build keeps the last good process, and so does a failed compilation: the watch build succeeds with the error module, so the CLI reads `plugin.api.result.ok` of `znight()` once the bundle is written, does not restart (a pending restart is cancelled) and reports `Compilation failed` (printing the diagnostics itself with `--log-level silent`). Termination: `SIGINT` (Ctrl+C), `SIGTERM`, `SIGHUP` (terminal closed: nothing more is printed) and, on POSIX, `SIGQUIT` close the watcher and stop the application gracefully (`SIGINT` after Ctrl+C, `SIGTERM` otherwise); a second signal kills it (130). The application runs detached, in its own session and process group, so it receives exactly one signal and never the terminal's. It runs with `NODE_ENV=development` unless the variable was set when the CLI started (the environment is copied before Vite, whose build sets `NODE_ENV`, runs). Also `--runtime <auto\|node\|bun>` (`auto`: the runtime running the CLI, i.e. Node.js under `bun run` / `bunx`, whose `node` shebang Bun honours: pass `--runtime bun`), `--entry` (default: the entry chunk of the build), `--inspect`, `--clear`, `--mode` (`development`), `--log-level` (`warn`), `--root`, `--config`, `--config-loader`; arguments after `--` go to the application                                       |
-| `znight build`                | `vite build` with the Vite config (`--mode` default `production`, `--log-level`, `--root`, `--config`, `--config-loader`); compiler errors fail the build. `--openapi[=<path>]` adds the `openapi()` Vite plugin of `@znight/openapi` when the config registers none: the document is emitted after the bundle, to `dist/openapi.json` or the given path; `--openapi-prefix <path>` (with `--openapi` only, else a usage error; a path starting with `/`) passes the HTTP prefix of `HttpPlugin`, the `servers` default of the document, like `znight openapi --prefix`; when the Vite config registers its own `openapi()`, `--openapi=<path>` and `--openapi-prefix` do not apply and a warning says so. `build`, `dev` and `generate` resolve the Vite root like the Vite CLI run in the project directory: the `root` of the config file, relative to the project root (`--root`), set by a `config` hook in `order: 'pre'` (an inline `root` would override the config file's), else the project root; the config file is searched in the project root, in Vite's order                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `znight start`                | Run the build (`--entry`, default `dist/main.js` then `dist/main.mjs`; `--runtime <auto\|node\|bun>`; arguments after `--` go to the application) with `NODE_ENV` defaulting to `production`; when the runtime running the CLI provides `process.execve` (POSIX), the CLI `execve`s into the application runtime (same PID, signals, exit code), otherwise it forwards `SIGINT`, `SIGTERM` and `SIGHUP` and returns the child's code (`128 + n` on signal)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| `znight openapi`              | Write the OpenAPI document of the application with `@znight/openapi` (`emitOpenApi`, §9.5): `-o/--output <file>` (repeatable, default `openapi.json`; `.yaml` / `.yml` write YAML), `--check` (exit 1 when an output is missing or stale, never writes), `--prefix` (the `servers` default), `--runtime <auto\|node\|bun>` (the runtime loading the application modules in a child process), `--converters <file>` (a module default-exporting `SchemaConverter[]`), `--root`, `--config`, `--config-loader`. Compile errors are printed and exit 1 before any module runs; outputs are written only when they change                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Command                       | Behaviour                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `znight new [name]`           | Scaffold a project, interactively or from `-y/--yes`, `--pm <bun\|npm\|pnpm\|yarn>` (default: the package manager running the CLI, else `bun` under Bun, else `npm`), `--adapter <node\|fastify\|express\|hono>` (default `node`), `--features <config,observability,messaging,schedule,openapi\|all\|none>` (default `config,observability`; `schedule` adds `SchedulePlugin` before `HttpPlugin`, a sample job and its test on a virtual clock; `openapi` adds `OpenApiPlugin` after `HttpPlugin`, `src/api.ts` with `@OpenApiDocument` and the `openapi` / `openapi:check` scripts), `--no-install`, `--no-git`, `--dir`, `--force`; `.` scaffolds into the current directory. Bun projects test with `bun test` + preload, others with Vitest, and run the application on Bun (`dev` / `start` scripts with `--runtime bun`: `bun run` honours the `node` shebang of the binary); the compiler options live in `znight.config.ts`, imported by `vite.config.ts` (`znight(options)`) and read by the preload and `znight generate`; the `TestApp` test configures `ObservabilityPlugin` with `metrics: { server: false }`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `znight generate`             | Write the generated container (compiler `generate`); `--check` (exit 1 when stale, never writes; names every missing or out-of-date file, the module first, then the extra files of the extensions, then the library manifest in library mode: the compiler's `staleFiles` when it reports them, else a comparison of the outputs with the disk), `-w/--watch` (incremental), `--root`, `--config`, `--config-loader <bundle\|runner\|native>`. Compiler options: `znight.config.*` / `ZNIGHT_CONFIG` (`loadZnightConfig()`, Vite not loaded; skipped with `--config`), else the options the `znight()` plugin compiles with: the Vite config is resolved like `znight build` does (`vite.resolveConfig`, `NODE_ENV` restored afterwards) and the CLI reads `plugin.api.options` (or `api.getOptions()`) with the `root`, `aliases` and `runtimeConditions` of `plugin.api.compiler.options` (without it, the Vite root and the string `resolve.alias` entries), else the defaults. Compiles in `serve` mode. `--watch` watches what the Vite plugin and the Bun preload watch: the `include` directories of the project and of its source libraries, the project root and the directories of `watchFiles`, recomputed after each compile (one watcher per target, real POSIX paths); only changes that can change the result compile (parseable sources, `.js` included; resolution config files; known files), and a directory created, deleted or moved under an include root triggers a rescan (`mv src/users src/accounts` → the old files removed, the new directory added). Stops on `SIGINT`, `SIGTERM`, `SIGHUP` and, on POSIX, `SIGQUIT` |
+| `znight g <schematic> <name>` | `service`, `controller`, `consumer`, `config`, `guard` (with a commented `static enforces` line for route decisions), `interceptor` (`--aop` for a method interceptor), `factory`, `job` (`j`: `<name>.jobs.ts` with a `<Name>Jobs` class and a `@Cron` method named `<qualified>.daily`, where `<qualified>` is the directories of the file relative to `src/` (or to the project root for a `--path` outside it) and the kebab name, without the directory named after it: `g job reports/digest` → `reports.digest.daily`, `--path src/emails` → `emails.digest.daily`, so job names stay unique); `--path`, `--flat`, `-f/--force`, `-d/--dry-run`, `--root`. Aliases `generate <schematic>` and `generate:<schematic>`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `znight dev`                  | `vite build --watch` (no Vite dev server) and a full process restart after every successful rebuild — no partial HMR of providers: SIGTERM, `--kill-timeout` (5 000 ms) then SIGKILL, `--debounce`d (100 ms) and never overlapping restarts; a failed build keeps the last good process, and so does a failed compilation: the watch build succeeds with the error module, so the CLI reads `plugin.api.result.ok` of `znight()` once the bundle is written, does not restart (a pending restart is cancelled) and reports `Compilation failed` (printing the diagnostics itself with `--log-level silent`). Termination: `SIGINT` (Ctrl+C), `SIGTERM`, `SIGHUP` (terminal closed: nothing more is printed) and, on POSIX, `SIGQUIT` close the watcher and stop the application gracefully (`SIGINT` after Ctrl+C, `SIGTERM` otherwise); a second signal kills it (130). The application runs detached, in its own session and process group, so it receives exactly one signal and never the terminal's. It runs with `NODE_ENV=development` unless the variable was set when the CLI started (the environment is copied before Vite, whose build sets `NODE_ENV`, runs). Also `--runtime <auto\|node\|bun>` (`auto`: the runtime running the CLI, i.e. Node.js under `bun run` / `bunx`, whose `node` shebang Bun honours: pass `--runtime bun`), `--entry` (default: the entry chunk of the build), `--inspect`, `--clear`, `--mode` (`development`), `--log-level` (`warn`), `--root`, `--config`, `--config-loader`; arguments after `--` go to the application                                                                               |
+| `znight build`                | `vite build` with the Vite config (`--mode` default `production`, `--log-level`, `--root`, `--config`, `--config-loader`); compiler errors fail the build. `--openapi[=<path>]` adds the `openapi()` Vite plugin of `@znight/openapi` when the config registers none: the document is emitted after the bundle, to `dist/openapi.json` or the given path; `--openapi-prefix <path>` (with `--openapi` only, else a usage error; a path starting with `/`) passes the HTTP prefix of `HttpPlugin`, the `servers` default of the document, like `znight openapi --prefix`; when the Vite config registers its own `openapi()`, `--openapi=<path>` and `--openapi-prefix` do not apply and a warning says so. `build`, `dev` and `generate` resolve the Vite root like the Vite CLI run in the project directory: the `root` of the config file, relative to the project root (`--root`), set by a `config` hook in `order: 'pre'` (an inline `root` would override the config file's), else the project root; the config file is searched in the project root, in Vite's order                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `znight start`                | Run the build (`--entry`, default `dist/main.js` then `dist/main.mjs`; `--runtime <auto\|node\|bun>`; arguments after `--` go to the application) with `NODE_ENV` defaulting to `production`; when the runtime running the CLI provides `process.execve` (POSIX), the CLI `execve`s into the application runtime (same PID, signals, exit code), otherwise it forwards `SIGINT`, `SIGTERM` and `SIGHUP` and returns the child's code (`128 + n` on signal)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `znight openapi`              | Write the OpenAPI document of the application with `@znight/openapi` (`emitOpenApi`, §9.5): `-o/--output <file>` (repeatable, default `openapi.json`; `.yaml` / `.yml` write YAML), `--check` (exit 1 when an output is missing or stale, never writes), `--prefix` (the `servers` default), `--runtime <auto\|node\|bun>` (the runtime loading the application modules in a child process), `--converters <file>` (a module default-exporting `SchemaConverter[]`), `--root`, `--config`, `--config-loader`. Compile errors are printed and exit 1 before any module runs; outputs are written only when they change                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 
 Global: `--help`, `--version`, `--color`/`--no-color` (`NO_COLOR`, `FORCE_COLOR`), `--debug`
 (`ZNIGHT_DEBUG=1`). Exit codes: 0 success, 1 failure, 2 usage error (with a suggestion), 130

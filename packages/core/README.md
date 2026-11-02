@@ -338,12 +338,13 @@ return what is known (`[]`).
 declared in core, so producers and observers (`@znight/observability`, your plugins) share them
 without depending on each other:
 
-| Hook                | Event                  | Produced by                                                                  |
-| ------------------- | ---------------------- | ---------------------------------------------------------------------------- |
-| `http:request`      | `HttpRequestEvent`     | `@znight/http`, one request                                                  |
-| `messaging:message` | `MessageDeliveryEvent` | `@znight/messaging`, one delivery                                            |
-| `messaging:publish` | `MessagePublishEvent`  | `@znight/messaging`, one `MessageBroker` publication                         |
-| `schedule:run`      | `ScheduledRunEvent`    | `@znight/schedule`, one occurrence of a job (executed or not, see `outcome`) |
+| Hook                | Event                   | Produced by                                                                  |
+| ------------------- | ----------------------- | ---------------------------------------------------------------------------- |
+| `http:request`      | `HttpRequestEvent`      | `@znight/http`, one request                                                  |
+| `messaging:message` | `MessageDeliveryEvent`  | `@znight/messaging`, one delivery                                            |
+| `messaging:publish` | `MessagePublishEvent`   | `@znight/messaging`, one `MessageBroker` publication                         |
+| `schedule:run`      | `ScheduledRunEvent`     | `@znight/schedule`, one occurrence of a job (executed or not, see `outcome`) |
+| `graphql:operation` | `GraphQLOperationEvent` | `@znight/graphql` (planned, RFC 0005), one GraphQL operation                 |
 
 `ScheduledRunEvent` carries `job`, `kind` (`cron` / `interval` / `timeout`), `host`, `method`,
 `runId`, `trigger` (`schedule` / `start` / `manual` / `queued`), `scheduledAt` (epoch ms),
@@ -357,6 +358,13 @@ start: a wrapper vetoed the run (returned without calling `next()`), the run was
 wrappers waited (job removed or paused, scheduler stopping), or a wrapper threw first (`next()`
 rejects). The producer settles it after `hooks.run` (`skipped`, or `failed` for a wrapper that
 threw), so a wrapper that reports it reads `event.outcome ?? (nextRejected ? 'failed' : 'skipped')`.
+
+`GraphQLOperationEvent` carries `operationType` (`query` / `mutation` / `subscription`, `undefined`
+when the request was rejected before an operation was selected), `operationName`, `documentId`
+(SHA-256 of the query text), `transport` (`http` / `sse` / `direct`), `requestId`, `context` (the
+`GraphQLContext`), `startTime`, and, once settled, `outcome` (`success` / `partial` / `error` /
+`rejected`) and `errors` (`{ message, code, path? }`, as sent to the client). A subscription is one
+operation from its start to its end.
 
 Other packages declare their hooks by augmenting `ZnightHooks`:
 
@@ -421,6 +429,6 @@ the [architecture specification](../../docs/internals/architecture.md#48-validat
 The catalogue is shared by the compiler and every first-party package. `ZNIGHT001`–`ZNIGHT029`
 belong to the core, the compiler and the features of the first release (`ZNIGHT023`, a missing
 route decision, is reported by `@znight/http`). From `ZNIGHT030`, each package owns a block of ten:
-`ZNIGHT030`–`039` `@znight/openapi`, `ZNIGHT040`–`049` `@znight/schedule` (`050`–`059` and
-`060`–`069` are reserved for `@znight/websocket` and `@znight/graphql`, planned for v0.2). Inside a
-block, codes are allocated in order; third-party packages get no `ZNIGHT` code.
+`ZNIGHT030`–`039` `@znight/openapi`, `ZNIGHT040`–`049` `@znight/schedule`, `ZNIGHT060`–`069`
+`@znight/graphql` (RFC 0005, planned for v0.2; `050`–`059` are reserved for `@znight/websocket`).
+Inside a block, codes are allocated in order; third-party packages get no `ZNIGHT` code.

@@ -90,8 +90,8 @@ Respect them; do not reopen them in passing.
   (entities, columns, repositories, queries) are explicitly **not** on the roadmap.
 - **Built-in sessions and server-side MVC** (a session store, templates, views) are out of scope.
   Signed cookies are built in, and `examples/secure-api` shows a cookie-session recipe.
-- **WebSocket and GraphQL** are deferred to v0.2 (RFC 0003, RFC 0005); their error code blocks are
-  reserved.
+- **WebSocket** is deferred to v0.2 (RFC 0003); its error code block is reserved. **GraphQL** (RFC
+  0005) is accepted for v0.2 and in progress (`@znight/graphql`).
 
 ### Roadmap
 
@@ -268,7 +268,7 @@ Affects, Decision) and a row in `rfcs/README.md`. Implement it only once it is a
   `packages/core/src/errors.ts`, shared by compiler diagnostics and runtime `ZnightError`s.
 - Ranges (`rfcs/README.md`): `ZNIGHT001`–`029` core, compiler and the 0.1 features (http, messaging,
   config, observability); `030`–`039` openapi; `040`–`049` schedule; `050`–`059` websocket and
-  `060`–`069` graphql (reserved for v0.2). Codes are allocated in order without gaps inside a block
+  `060`–`069` graphql (`060`–`066` allocated, RFC 0005). Codes are allocated in order without gaps inside a block
   and never change meaning. Reuse a lower code when the meaning is the same (a decorator on the
   wrong target is always ZNIGHT005); one catch-all code per package for invalid usage and options;
   third-party packages get no code.

@@ -750,11 +750,12 @@ request.
 
 Other plugins can serve routes through `HttpPlugin` (the OpenAPI document, status endpoints) by
 implementing `PluginHttpRoutes`: `httpRoutes({ prefix, container })` returns
-`{ method, path, name, handler, meta?, guards? }` entries. They are registered on every adapter in
-the same pipeline as the controllers (the `http:request` hook, the global guards, then their own),
-take their route decisions from `meta` (`[Public.meta()]`), and are listed in `HttpPlugin.routes`
-with the plugin name as `source`. A path collision is [`ZNIGHT007`](/reference/error-codes#znight007)
-naming the plugin.
+`{ method, path, name, handler, meta?, guards?, bodyLimit? }` entries. They are registered on every
+adapter in the same pipeline as the controllers (the `http:request` hook, the global guards, then
+their own), take their route decisions from `meta` (`[Public.meta()]`), and are listed in
+`HttpPlugin.routes` with the plugin name as `source`. `bodyLimit` (`'100kb'`, bytes, `Infinity`)
+replaces the plugin `bodyLimit` for that route only: a larger body answers `413`. An invalid route
+or a path collision is [`ZNIGHT007`](/reference/error-codes#znight007) naming the plugin.
 
 ## Adapters
 

@@ -63,6 +63,9 @@ const SERVER_EVENTS: ReadonlyMap<string, ChangeKind> = new Map([
   ['unlink', 'removed'],
 ])
 
+/** Suffix of the temporary files of the atomic writes (`writeIfChanged`). */
+const TEMPORARY_SUFFIX = /\.\d+\.\d+\.tmp$/
+
 /** How long file events are batched before a compile in the dev server (ms). */
 const DEBOUNCE_MS = 50
 
@@ -226,7 +229,14 @@ class PluginState {
     const result: UserConfig = {}
     if (config.server?.watch !== null) {
       result.server = {
-        watch: { ignored: [(file: string) => ignored.some(pattern => pattern.test(resolvePath(file)))] },
+        watch: {
+          ignored: [
+            (file: string) => {
+              const resolved = resolvePath(file)
+              return ignored.some(pattern => pattern.test(resolved)) || this.#isExtraFile(resolved)
+            },
+          ],
+        },
       }
     }
     const build: NonNullable<UserConfig['build']> = {}
@@ -576,6 +586,9 @@ class PluginState {
       // The disk copy (the `serve` rendering in every mode) is for `tsc` and editors: the module is
       // served from memory, so a write failure (read-only tree) is a warning, never a failure.
       await this.#write(compiler, result.outFile, result.diskCode)
+      for (const extra of result.extraFiles) {
+        await this.#write(compiler, extra.file, extra.content, true)
+      }
       if (result.library !== undefined && this.#kind === 'dev') {
         await this.#write(compiler, result.library.file, result.library.content)
       }
@@ -589,14 +602,28 @@ class PluginState {
     }
   }
 
+  /**
+   * `true` for an extra file of the latest result (`extraFiles`) or a temporary file of its atomic
+   * write: the dev server watcher ignores them like the outFile (their paths are known once compiled).
+   */
+  #isExtraFile(file: string): boolean {
+    const extraFiles = this.#result?.extraFiles
+    if (extraFiles === undefined || extraFiles.length === 0) {
+      return false
+    }
+    const written = file.replace(TEMPORARY_SUFFIX, '')
+    return extraFiles.some(extra => extra.file === written)
+  }
+
   /** Writes a generated file when it changed; failures are reported as warnings. */
-  async #write(compiler: ZnightCompiler, file: string, content: string): Promise<void> {
+  async #write(compiler: ZnightCompiler, file: string, content: string, extra = false): Promise<void> {
     try {
       await writeIfChanged(file, content)
     } catch (error) {
       const display = path.posix.relative(compiler.options.root, file)
+      const note = extra ? '' : ' (the generated module is served from memory; tsc and editors read the disk copy)'
       this.#config?.logger.warn(
-        `${pc.cyan('[znight]')} cannot write ${display}: ${error instanceof Error ? error.message : String(error)} (the generated module is served from memory; tsc and editors read the disk copy)`,
+        `${pc.cyan('[znight]')} cannot write ${display}: ${error instanceof Error ? error.message : String(error)}${note}`,
         { timestamp: this.#kind !== 'build' },
       )
     }

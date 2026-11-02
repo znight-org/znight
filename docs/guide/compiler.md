@@ -394,17 +394,17 @@ console.log(result.stats) // { files, providers, durationMs, parsed }
 await generate({ check: process.env.CI === 'true' })
 ```
 
-| Export                     | Description                                                                                                                                       |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `znight(options)`          | The Vite plugin (also the default export)                                                                                                         |
-| `compile(options)`         | Pure compile: `{ ok, code, diskCode, outFile, diagnostics, graph, stats, watchFiles, decorators }`                                                |
-| `generate(options)`        | Compile and write `outFile` (`diskCode`, the same in every mode) when it changed (`written`); `check: true` only compares (`stale`, `staleFiles`) |
-| `createCompiler(options)`  | Incremental compiler for watchers: `compile(changes)` / `generate(changes)` re-read only changed files                                            |
-| `formatDiagnostics`        | Pretty-prints diagnostics with code frames (`{ color?, cwd?, summary? }`)                                                                         |
-| `renderErrorModule`        | The module served instead of the container when the compilation fails                                                                             |
-| `createPreload(options)`   | The Bun preload with these options (Bun only)                                                                                                     |
-| `znightBunPlugin(options)` | The Bun plugin alone: serves the container from memory, blanks the decorators                                                                     |
-| `loadZnightConfig(cwd?)`   | `{ file, options }` of `znight.config.*` / `ZNIGHT_CONFIG`                                                                                        |
+| Export                     | Description                                                                                                                                                                               |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `znight(options)`          | The Vite plugin (also the default export)                                                                                                                                                 |
+| `compile(options)`         | Pure compile: `{ ok, code, diskCode, outFile, diagnostics, graph, stats, extraFiles, watchFiles, decorators }`                                                                            |
+| `generate(options)`        | Compile and write `outFile` (`diskCode`, the same in every mode) and the extra files of the extensions when they changed (`written`); `check: true` only compares (`stale`, `staleFiles`) |
+| `createCompiler(options)`  | Incremental compiler for watchers: `compile(changes)` / `generate(changes)` re-read only changed files                                                                                    |
+| `formatDiagnostics`        | Pretty-prints diagnostics with code frames (`{ color?, cwd?, summary? }`)                                                                                                                 |
+| `renderErrorModule`        | The module served instead of the container when the compilation fails                                                                                                                     |
+| `createPreload(options)`   | The Bun preload with these options (Bun only)                                                                                                                                             |
+| `znightBunPlugin(options)` | The Bun plugin alone: serves the container from memory, blanks the decorators                                                                                                             |
+| `loadZnightConfig(cwd?)`   | `{ file, options }` of `znight.config.*` / `ZNIGHT_CONFIG`                                                                                                                                |
 
 ## Provider libraries
 
@@ -444,6 +444,10 @@ Feature packages teach the compiler new decorators through **extensions**: `@zni
 controllers and routes, `@znight/messaging` consumers, `@znight/config` config classes. They are found
 through each package's manifest (`"znight": { "compiler": "@znight/http/compiler" }`), so installing
 the package is enough. Third-party extensions must be listed in `trustedExtensions`.
+
+An extension may also write **extra files** next to the generated module (a schema, a document):
+they follow the same rules (written only when the compile succeeds and their content changed,
+checked by `znight generate --check`, ignored by the watchers) and appear in `extraFiles`.
 
 Writing an extension is an advanced topic covered by the
 [specification](/contributing/architecture).

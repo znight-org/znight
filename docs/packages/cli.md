@@ -84,9 +84,9 @@ The compiler options come from `znight.config.ts` when the project has one (or t
 a specific one): Vite resolves it like for `znight build`, so the plugin options come with the Vite
 `root`, the string aliases and the runtime conditions it compiles with. Otherwise, the defaults.
 
-`--check` names every missing or stale file: the module and, in library mode,
-`dist/znight.providers.json` (a build cleaning `dist/` deletes it: run `znight generate` after such a
-build). `--watch` watches what the Vite plugin and the Bun preload watch: the `include` directories
+`--check` names every missing or stale file: the module, the extra files compiler extensions emit
+next to it (an SDL schema...) and, in library mode, `dist/znight.providers.json` (a build cleaning
+`dist/` deletes it: run `znight generate` after such a build). `--watch` watches what the Vite plugin and the Bun preload watch: the `include` directories
 of the project and of its source libraries, the project root and the files the compiler read;
 directories created, deleted or moved under an `include` directory trigger a rescan.
 

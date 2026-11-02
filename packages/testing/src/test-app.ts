@@ -15,7 +15,7 @@ import type {
 
 import { Application, createConsoleLogger, ErrorCode, ZnightError } from '@znight/core'
 
-import { readHttpRoots, readMessagingRoots, readScheduleRoots } from './extensions.ts'
+import { readGraphQLRoots, readHttpRoots, readMessagingRoots, readScheduleRoots } from './extensions.ts'
 import { MetadataIndex } from './metadata-index.ts'
 import { entriesOf } from './utils.ts'
 
@@ -446,9 +446,12 @@ function initOptions(
   let roots: readonly ProviderKey[]
   if (only === undefined) {
     const metadata = options.metadata
-    roots = [...readHttpRoots(metadata), ...readMessagingRoots(metadata), ...readScheduleRoots(metadata)].filter(
-      token => index.isProvider(token),
-    )
+    roots = [
+      ...readHttpRoots(metadata),
+      ...readMessagingRoots(metadata),
+      ...readScheduleRoots(metadata),
+      ...readGraphQLRoots(metadata),
+    ].filter(token => index.isProvider(token))
     // plugin roots complete the entry points; they never restrict the boot by themselves
     if (roots.length === 0) return {}
   } else {
