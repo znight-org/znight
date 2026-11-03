@@ -135,12 +135,15 @@ class Conformance {
     { readonly name: string; readonly site: Site; readonly location?: Location }[]
   >()
   readonly #predicates = graphqlModules().type
+  /** Identities of the `T` of the `scalar<T>()` declarations. */
+  readonly #scalarTypes: ReadonlySet<string>
 
   constructor(input: ConformanceInput) {
     this.#config = input
     this.#ctx = input.ctx
     const keep = new Set<string>(BASE_KEEP)
     for (const scalar of input.scalars.values()) keep.add(scalar.type)
+    this.#scalarTypes = new Set([...input.scalars.values()].map(scalar => scalar.type))
     this.#options = Object.freeze({
       keep: Object.freeze([...keep].sort(compareStrings)),
       members: 'instance',
@@ -364,7 +367,7 @@ class Conformance {
         if (this.#scalarAccepts(inner.name, member, 'output')) continue
         this.#mismatch(
           site,
-          `${site.label} ${this.#describe(member)}, which is not a ${inner.name} (${site.coordinate})`,
+          `${site.label} ${this.#describe(member)}, which does not conform to ${inner.name} (${site.coordinate})`,
           [this.#scalarHint(inner.name)],
         )
       }
@@ -660,6 +663,8 @@ class Conformance {
   #scalarAccepts(name: string, shape: Shape, position: 'input' | 'output'): boolean {
     const custom = this.#config.scalars.get(name)
     if (custom !== undefined) return this.#hasReference(shape, custom.type)
+    // the type of another scalar<T>() declaration (a branded id for an ID): its representation is not known
+    if (shape.kind === 'reference' && this.#scalarTypes.has(shape.identity)) return true
     const output = position === 'output'
     switch (name) {
       case 'String':
