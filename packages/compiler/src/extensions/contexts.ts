@@ -9,7 +9,7 @@ import type { ProviderBuilder } from '../analysis/providers.ts'
 import type { ExtensionBinding, ExtensionEdge } from '../graph/build.ts'
 import type { ApplicationGraph, ProviderNode } from '../graph/types.ts'
 import type { ResolvedOptions } from '../options.ts'
-import type { Diagnostic, Project, TypeInfo, ValueRef } from '../project/index.ts'
+import type { Diagnostic, InputFile, Project, TypeInfo, ValueRef } from '../project/index.ts'
 import type {
   AnalyzeContext,
   ArgInfo,
@@ -251,6 +251,10 @@ export class ExtensionValidateContext implements ValidateContext<unknown> {
 
   definitionsOf(callee: string): readonly DefinitionInfo[] {
     return this.#state.definitions.definitionsOf(callee)
+  }
+
+  inputFiles(patterns: readonly string[]): readonly InputFile[] {
+    return this.project.inputFiles(patterns)
   }
 }
 

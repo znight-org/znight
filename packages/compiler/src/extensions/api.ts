@@ -36,6 +36,7 @@ import type {
   Diagnostic,
   ImportRoute,
   ImportRouteFailure,
+  InputFile,
   Location,
   Project,
   ReferenceType,
@@ -845,4 +846,11 @@ export interface ValidateContext<TData = unknown> {
   report(diagnostic: Diagnostic): void
   /** Same as {@link AnalyzeContext.definitionsOf}. */
   definitionsOf(callee: string): readonly DefinitionInfo[]
+  /**
+   * Non-source files the extension reads (a `.graphql` schema): the files matching `patterns`
+   * (globs relative to the project root, `!` negations allowed; `node_modules`, dot-directories and
+   * the generated module never match), read as UTF-8 and sorted by path. They are part of
+   * `watchFiles`, and the watchers recompile when a file matching the patterns is created.
+   */
+  inputFiles(patterns: readonly string[]): readonly InputFile[]
 }

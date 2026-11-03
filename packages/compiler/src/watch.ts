@@ -82,7 +82,8 @@ export function isGeneratedFile(compiler: ZnightCompiler, file: string): boolean
  * Whether a file system event can change the compile result: a change of a file the last result
  * depends on (`watched`: its `watchFiles`) or of a resolution config file (package.json, tsconfig,
  * lockfile), a source created or deleted under an include root (`roots`: {@link includeRoots}), a
- * file created where a relative import of the last compile did not resolve. The generated module,
+ * file created where a relative import of the last compile did not resolve, a file created that
+ * matches the input patterns of an extension (`ValidateContext.inputFiles`). The generated module,
  * the extra files of the last result and `node_modules` (except the watched files) are ignored.
  *
  * Watchers that report a moved or deleted directory as one event on the directory alone (`fs.watch`)
@@ -116,6 +117,9 @@ export function isRelevantChange(
       return true
     }
     return kind !== 'changed' && inRoots
+  }
+  if (kind === 'added' && compiler.project.isInputPath(real)) {
+    return true
   }
   if (kind === 'removed') {
     return containsWatched(watched, resolved)
