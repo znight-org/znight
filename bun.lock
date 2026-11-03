@@ -398,10 +398,12 @@
       "peerDependencies": {
         "@znight/compiler": "workspace:^",
         "@znight/http": "workspace:^",
+        "@znight/testing": "workspace:^",
         "graphql": "^17.0.2",
       },
       "optionalPeers": [
         "@znight/compiler",
+        "@znight/testing",
       ],
     },
     "packages/http": {
