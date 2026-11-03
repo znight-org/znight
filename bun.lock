@@ -328,7 +328,7 @@
     },
     "packages/cli": {
       "name": "@znight/cli",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "bin": {
         "znight": "./bin/znight.mjs",
       },
@@ -357,7 +357,7 @@
     },
     "packages/compiler": {
       "name": "@znight/compiler",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "dependencies": {
         "@znight/core": "workspace:*",
         "magic-string": "^1.4.5",
@@ -378,7 +378,7 @@
     },
     "packages/config": {
       "name": "@znight/config",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "dependencies": {
         "@znight/core": "workspace:*",
       },
@@ -400,11 +400,11 @@
     },
     "packages/core": {
       "name": "@znight/core",
-      "version": "0.2.0",
+      "version": "0.2.1",
     },
     "packages/graphql": {
       "name": "@znight/graphql",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "dependencies": {
         "@znight/core": "workspace:*",
         "dataloader": "^2.2.3",
@@ -432,7 +432,7 @@
     },
     "packages/http": {
       "name": "@znight/http",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "dependencies": {
         "@znight/core": "workspace:*",
       },
@@ -466,7 +466,7 @@
     },
     "packages/messaging": {
       "name": "@znight/messaging",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "dependencies": {
         "@znight/core": "workspace:*",
       },
@@ -496,7 +496,7 @@
     },
     "packages/observability": {
       "name": "@znight/observability",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "dependencies": {
         "@opentelemetry/api": "^1.10.0",
         "@znight/core": "workspace:*",
@@ -520,7 +520,7 @@
     },
     "packages/openapi": {
       "name": "@znight/openapi",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "dependencies": {
         "@znight/core": "workspace:*",
       },
@@ -559,7 +559,7 @@
     },
     "packages/schedule": {
       "name": "@znight/schedule",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "dependencies": {
         "@znight/core": "workspace:*",
       },
@@ -580,7 +580,7 @@
     },
     "packages/testing": {
       "name": "@znight/testing",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "dependencies": {
         "@znight/core": "workspace:*",
       },
