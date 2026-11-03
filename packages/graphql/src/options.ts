@@ -41,7 +41,10 @@ export interface GraphQLLimits {
   readonly maxTokens?: number | false
   /** Field nesting of an operation (introspection fields exempt). Default 12. */
   readonly maxDepth?: number | false
-  /** Aliases of a document. Default 30. */
+  /**
+   * Aliases of a document, as written and as one operation executes them (a fragment spread several
+   * times counts each time). Default 30.
+   */
   readonly maxAliases?: number | false
   /** Directives of a document. Default 50. */
   readonly maxDirectives?: number | false

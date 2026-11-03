@@ -59,7 +59,10 @@ export interface GraphQLExceptionOptions {
   readonly code: GraphQLErrorCodeValue | (string & Record<never, never>)
   /** Extra `extensions` entries, sent to the client (`code` always wins). */
   readonly extensions?: Readonly<Record<string, unknown>>
-  /** The original error (logged, never sent). */
+  /**
+   * The original error: never sent, logged once at `error` level with the request id, the schema
+   * coordinate and the path when the exception is shown for a field.
+   */
   readonly cause?: unknown
 }
 

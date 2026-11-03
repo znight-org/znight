@@ -10,7 +10,8 @@
  * - The response is `application/graphql-response+json` when the client lists it (200 with data,
  *   400 for request errors), otherwise `application/json` (200 for every well-formed request); no
  *   `accept` header is `application/json`; nothing acceptable is 406. `accept: text/event-stream`
- *   selects GraphQL over SSE for any operation.
+ *   selects GraphQL over SSE for any operation when it is preferred to the JSON types (or the only
+ *   one listed); listed at the same quality as a JSON type, only subscriptions are streamed.
  *
  * Hot path (a cached query whose resolvers are synchronous): a memoised negotiation (a map lookup),
  * the query string read without `URLSearchParams` or the body read and parsed once, one options
@@ -29,8 +30,9 @@ import type { ExecuteOptions, GraphQLExecutor, GraphQLRequest, GraphQLResponse }
 import { HttpResponse, isHttpException, parseMediaType } from '@znight/http'
 
 import { GraphQLErrorCode } from '../errors.ts'
+import { SUBSCRIBE } from '../execution.ts'
 import { DeferredAbort } from './abort.ts'
-import { Media, type MediaKind, Negotiator } from './accept.ts'
+import { MEDIA, Media, type MediaKind, Negotiator, STREAMABLE } from './accept.ts'
 import { renderGraphiQL } from './graphiql.ts'
 import { ResultEvents } from './sse.ts'
 
@@ -206,7 +208,8 @@ export class HttpTransport {
   /** `POST path`. */
   readonly post = (ctx: HttpContext): unknown => {
     const headers = ctx.headers
-    const media = this.#post.choose(headers['accept'])
+    const negotiated = this.#post.choose(headers['accept'])
+    const media = (negotiated & MEDIA) as MediaKind
     if (media === Media.None) return NOT_ACCEPTABLE
     if (!isJsonRequest(headers['content-type'])) {
       return errorReply(
@@ -220,14 +223,14 @@ export class HttpTransport {
       return errorReply(media, 415, errorBody(`Unsupported content encoding "${encoding}"`))
     }
     return ctx.rawBody().then(
-      bytes => this.#posted(ctx, bytes, media),
+      bytes => this.#posted(ctx, bytes, media, negotiated >= STREAMABLE),
       (error: unknown) => transportError(error, media),
     )
   }
 
   /** `GET path`. */
   readonly get = (ctx: HttpContext): unknown => {
-    const media = this.#get.choose(ctx.headers['accept'])
+    const media = (this.#get.choose(ctx.headers['accept']) & MEDIA) as MediaKind
     if (media === Media.Html) return this.#graphiql
     if (media === Media.None) return NOT_ACCEPTABLE
     if (!this.#getQueries) return GET_NOT_ALLOWED
@@ -250,11 +253,12 @@ export class HttpTransport {
     const invalid = invalidParams(request)
     if (invalid !== undefined) return errorReply(media, 400, errorBody(invalid))
     if (media === Media.EventStream) return this.#stream(ctx, request as unknown as GraphQLRequest, true)
-    return this.#execute(ctx, request as unknown as GraphQLRequest, media, true)
+    // GET carries queries only: no subscription to stream
+    return this.#execute(ctx, request as unknown as GraphQLRequest, media, true, false)
   }
 
   /** A `POST` body read: parsed, checked, executed or streamed. */
-  #posted(ctx: HttpContext, bytes: Uint8Array, media: MediaKind): unknown {
+  #posted(ctx: HttpContext, bytes: Uint8Array, media: MediaKind, streamable: boolean): unknown {
     if (bytes.byteLength === 0) {
       return errorReply(media, 400, errorBody('Missing request body: send { query, variables?, operationName? }'))
     }
@@ -273,15 +277,25 @@ export class HttpTransport {
     const invalid = invalidParams(body as Record<string, unknown>)
     if (invalid !== undefined) return errorReply(media, 400, errorBody(invalid))
     if (media === Media.EventStream) return this.#stream(ctx, body as GraphQLRequest, false)
-    return this.#execute(ctx, body as GraphQLRequest, media, false)
+    return this.#execute(ctx, body as GraphQLRequest, media, false, streamable)
   }
 
-  /** Executes a query or a mutation; synchronous while the execution is. */
-  #execute(ctx: HttpContext, request: GraphQLRequest, media: MediaKind, get: boolean): unknown {
+  /**
+   * Executes a query or a mutation; synchronous while the execution is. A subscription is streamed
+   * when the client accepts an event stream (`streamable`), a 400 otherwise.
+   */
+  #execute(ctx: HttpContext, request: GraphQLRequest, media: MediaKind, get: boolean, streamable: boolean): unknown {
     const executor = this.#executor ?? this.#bind()
     const abort = new DeferredAbort()
-    const options: ExecuteOptions = { transport: 'http', http: ctx, abortSignal: abort.asSignal(), queriesOnly: get }
+    const options: ExecuteOptions = {
+      transport: 'http',
+      http: ctx,
+      abortSignal: abort.asSignal(),
+      queriesOnly: get,
+      streamSubscriptions: streamable,
+    }
     const response = executor.execute(request, options)
+    if (response === SUBSCRIBE) return this.#stream(ctx, request, get)
     if (!isPromise(response)) return reply(response, media, get)
     // asynchronous resolvers: a client leaving now aborts the execution
     abort.follow(() => ctx.signal)

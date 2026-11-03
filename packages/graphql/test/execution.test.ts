@@ -175,6 +175,47 @@ describe('execution', () => {
     expect(executor.cachedDocuments).toBe(2)
   })
 
+  it('counts the aliases of fragments each time they are spread', async () => {
+    await using booted = await boot(metadata(), { limits: { maxAliases: 30, maxDepth: 12 } })
+    const executor = executorOf(booted.plugin)
+    // F1 → F2 → ... → F10, each with 2 aliased fields spreading the next: 20 written, 2 046 executed,
+    // 12 levels deep
+    const chain = Array.from({ length: 10 }, (_, index) => {
+      const next = index === 9 ? 'id' : `...F${index + 2}`
+      return `fragment F${index + 1} on Node { a: child { ${next} } b: child { ${next} } }`
+    })
+    const bomb = await executor.execute({ query: `query Bomb { node { ...F1 } } ${chain.join(' ')}` })
+    expect(bomb).toMatchObject({
+      status: 400,
+      result: {
+        errors: [
+          {
+            message: 'The operation Bomb has more than 30 aliases once its fragments are expanded.',
+            extensions: { code: 'QUERY_TOO_COMPLEX' },
+          },
+        ],
+      },
+    })
+    // a fragment spread twice counts twice: 2 × 15 = 30 is within the limit, 2 × 16 is not
+    const fields = (count: number): string => Array.from({ length: count }, (_, index) => `f${index}: id`).join(' ')
+    const within = await executor.execute({
+      query: `{ node { ...F child { ...F } } } fragment F on Node { ${fields(15)} }`,
+    })
+    expect(within.status).toBe(200)
+    const over = await executor.execute({
+      query: `{ node { ...F child { ...F } } } fragment F on Node { ${fields(16)} }`,
+    })
+    expect(over.result.errors?.[0]?.message).toBe(
+      'The operation has more than 30 aliases once its fragments are expanded.',
+    )
+    // a fragment cycle stops the count (validation reports it)
+    const cycle = await executor.execute({
+      query:
+        '{ node { ...A } } fragment A on Node { x: id child { ...B } } fragment B on Node { y: id child { ...A } }',
+    })
+    expect(cycle.result.errors?.[0]?.extensions).toEqual({ code: 'GRAPHQL_VALIDATION_FAILED' })
+  })
+
   it('accepts false to disable a limit', async () => {
     await using booted = await boot(metadata(), { limits: { maxDepth: false } })
     expect((await executorOf(booted.plugin).execute({ query: deep(15) })).status).toBe(200)

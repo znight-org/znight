@@ -5,9 +5,12 @@
  * `application/json` is the only type matched by wildcards (`*\/*`, `application/*`): the
  * GraphQL-over-HTTP draft asks for `application/json` when the client accepts anything, and the
  * other types change the protocol (`application/graphql-response+json` statuses, an event stream,
- * the GraphiQL page), so they are chosen only when listed. Among types of equal quality, the order
- * of {@link Media} decides: an event stream, then `application/graphql-response+json`, then
- * `application/json`, then HTML (a browser listing `text/html` first gets GraphiQL).
+ * the GraphiQL page), so they are chosen only when listed. Among types of equal quality,
+ * `application/graphql-response+json` wins, then `application/json`, then HTML (a browser listing
+ * `text/html` first gets GraphiQL). An event stream is chosen only when it is strictly preferred, or
+ * the only acceptable type: a client listing JSON and `text/event-stream` alike (urql, for
+ * incremental delivery) gets its queries and mutations as one JSON body, and its subscriptions as
+ * a stream ({@link STREAMABLE}).
  */
 
 /** What a response is encoded as. */
@@ -22,6 +25,15 @@ export const Media: {
 
 /** One of the {@link Media} values. */
 export type MediaKind = (typeof Media)[keyof typeof Media]
+
+/**
+ * Added to a negotiated JSON type when an event stream is acceptable too, though not preferred: a
+ * subscription, which has no JSON answer, is then streamed. `answer & MEDIA` is the {@link MediaKind}.
+ */
+export const STREAMABLE = 8
+
+/** The {@link MediaKind} bits of a {@link negotiate} answer. */
+export const MEDIA = 7
 
 /** The media type names, by {@link Media} value (`None` excluded). */
 const NAMES: readonly (readonly [type: string, subtype: string])[] = [
@@ -83,22 +95,29 @@ function quality(ranges: readonly Range[], type: string, subtype: string, wildca
 
 /**
  * Chooses the media type of a response among `produced` (a bit mask of `1 << Media.X`), per
- * `accept` (`undefined`: no header, i.e. `application/json`).
+ * `accept` (`undefined`: no header, i.e. `application/json`): a {@link MediaKind}, plus
+ * {@link STREAMABLE} when a JSON type wins and an event stream is acceptable too.
  */
-export function negotiate(accept: string | undefined, produced: number): MediaKind {
+export function negotiate(accept: string | undefined, produced: number): number {
   if (accept === undefined) return produced & (1 << Media.Json) ? Media.Json : Media.None
   const ranges = parseRanges(accept)
   if (ranges.length === 0) return produced & (1 << Media.Json) ? Media.Json : Media.None
-  let chosen: MediaKind = Media.None
+  let chosen: number = Media.None
   let best = 0
-  for (let media = 0; media < NAMES.length; media++) {
+  for (let media: number = Media.GraphQLJson; media < NAMES.length; media++) {
     if ((produced & (1 << media)) === 0) continue
     const [type, subtype] = NAMES[media] as readonly [string, string]
     const q = quality(ranges, type, subtype, media === Media.Json)
     if (q > best) {
       best = q
-      chosen = media as MediaKind
+      chosen = media
     }
+  }
+  if (produced & (1 << Media.EventStream)) {
+    const q = quality(ranges, 'text', 'event-stream', false)
+    // strictly preferred, or the only acceptable type
+    if (q > best) return Media.EventStream
+    if (q > 0 && (chosen === Media.GraphQLJson || chosen === Media.Json)) chosen |= STREAMABLE
   }
   return chosen
 }
@@ -112,9 +131,9 @@ const CACHE_MAX = 64
  */
 export class Negotiator {
   readonly #produced: number
-  readonly #cache = new Map<string, MediaKind>()
+  readonly #cache = new Map<string, number>()
   /** The answer without `accept` header. */
-  readonly #absent: MediaKind
+  readonly #absent: number
 
   /** `produced`: a bit mask of `1 << Media.X`. */
   constructor(produced: number) {
@@ -122,7 +141,8 @@ export class Negotiator {
     this.#absent = negotiate(undefined, produced)
   }
 
-  choose(accept: string | undefined): MediaKind {
+  /** The {@link negotiate} answer: a {@link MediaKind}, possibly with {@link STREAMABLE}. */
+  choose(accept: string | undefined): number {
     if (accept === undefined) return this.#absent
     let media = this.#cache.get(accept)
     if (media === undefined) {

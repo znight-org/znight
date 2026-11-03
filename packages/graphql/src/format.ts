@@ -4,6 +4,7 @@
  * Execution errors, in order: a `GraphQLException` (or a `GraphQLError` thrown by user code) as is →
  * the error mappers, in order → an `HttpException` mapped by status (5xx masked) → anything else
  * masked as `Unexpected error.` with `INTERNAL_SERVER_ERROR`, logged once (unless `exposeErrors`).
+ * The `cause` of a shown `GraphQLException` is logged once too, never sent.
  * Request errors (parse, validation, variables, limits) carry their code and are never logged
  * above `debug`.
  *
@@ -94,16 +95,25 @@ export class ErrorFormatter {
       const exposed = this.#exposed(original, ctx)
       if (exposed !== undefined) {
         result[index] = render(error, exposed)
+        // the original failure behind a presented error (`{ cause }`): logged once, never sent
+        const cause = exposed.cause
+        if (cause !== undefined) {
+          logged ??= new Set()
+          if (!logged.has(cause)) {
+            logged.add(cause)
+            this.#log(error, cause, ctx, exposed.code)
+          }
+        }
         continue
       }
-      if (original instanceof GraphQLError) {
+      if (original instanceof GraphQLError && !isCompletionError(original)) {
         result[index] = { ...original.toJSON(), ...located(error) }
         continue
       }
       logged ??= new Set()
       if (!logged.has(original)) {
         logged.add(original)
-        this.#log(error, original, ctx)
+        this.#log(error, original, ctx, undefined)
       }
       result[index] = {
         message: this.#expose && original instanceof Error ? original.message : MASKED_MESSAGE,
@@ -143,15 +153,34 @@ export class ErrorFormatter {
     return undefined
   }
 
-  #log(error: GraphQLError, cause: unknown, ctx: GraphQLContext): void {
+  /** Logs an unexpected error, or the cause of a presented one (`code`), at `error` level. */
+  #log(error: GraphQLError, cause: unknown, ctx: GraphQLContext, code: string | undefined): void {
     const coordinate = coordinateOf(this.#schema, ctx.document, ctx.operationName, error.path)
-    this.#logger.error(`GraphQL: unexpected error${coordinate === undefined ? '' : ` in ${coordinate}`}`, {
+    const what = code === undefined ? 'unexpected error' : `${code} error`
+    this.#logger.error(`GraphQL: ${what}${coordinate === undefined ? '' : ` in ${coordinate}`}`, {
       err: cause,
       requestId: ctx.requestId,
+      ...(code === undefined ? {} : { code }),
       ...(coordinate === undefined ? {} : { coordinate }),
       ...(error.path === undefined ? {} : { path: error.path.join('.') }),
     })
   }
+}
+
+/**
+ * What graphql-js raises while completing a resolver's value: a built-in scalar or an enum that
+ * cannot represent it (`String cannot represent value: { passwordHash: ... }`), a list value that
+ * is not iterable, a union or interface value that resolves to no member. A server bug whose message
+ * holds the value, masked and logged like any unexpected error. graphql-js throws plain
+ * `GraphQLError`s without code there, told apart from the ones of user code by their message.
+ */
+const COMPLETION_ERROR =
+  /^(?:(?:Int|Float|String|Boolean|ID) cannot represent |Enum "[^"]*" cannot represent |Expected Iterable, but did not find one for field "|Abstract type "|Runtime Object type ")/
+
+function isCompletionError(error: GraphQLError): boolean {
+  return (
+    error.constructor === GraphQLError && error.extensions['code'] === undefined && COMPLETION_ERROR.test(error.message)
+  )
 }
 
 function located(error: GraphQLError): Pick<GraphQLFormattedError, 'locations' | 'path'> {

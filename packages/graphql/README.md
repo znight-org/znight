@@ -610,7 +610,9 @@ export class CatalogErrorMapper implements GraphQLErrorMapper {
 Every error of `errors[]` is resolved in this order:
 
 1. a `GraphQLException` (or a graphql-js `GraphQLError` thrown by user code) is shown as is:
-   `{ message, locations, path, extensions: { ...extensions, code } }`;
+   `{ message, locations, path, extensions: { ...extensions, code } }`; its `cause`
+   (`new GraphQLException(message, { code, cause })`) is never sent, and logged once at `error`
+   level with the request id, the schema coordinate, the path and the code;
 2. the `errorMappers`, in order (synchronous: `map(error, ctx)`; the first exception wins, a mapper
    that throws is logged and skipped);
 3. an `HttpException` of `@znight/http` is mapped by status: a `ValidationException` is
@@ -619,7 +621,10 @@ Every error of `errors[]` is resolved in this order:
    5xx masked;
 4. anything else is masked as `Unexpected error.` with `INTERNAL_SERVER_ERROR`, and logged once at
    `error` level with the request id, the schema coordinate, the path and the cause (with
-   `exposeErrors: true`, the original message is sent).
+   `exposeErrors: true`, the original message is sent). This includes the errors graphql-js raises
+   while completing a resolver's value, whose message holds that value: a built-in scalar or an enum
+   that cannot represent it (`String cannot represent value: { passwordHash: ... }`), a list value
+   that is not iterable, a union value that resolves to no member.
 
 `HttpException` headers (`www-authenticate`) are not sent from field errors: one response carries
 many fields. Request errors (parse, validation, variables, limits) are never logged above `debug`.
@@ -708,14 +713,17 @@ endpoint follows the GraphQL-over-HTTP specification draft:
 | `GET ?query=...&variables=...` (JSON parameters)       | queries only; a mutation or a subscription is 405 with `allow: POST`   |
 | `GET` with `http.get: false`                           | 405 with `allow: POST`                                                 |
 | `GET` with `accept: text/html` and `graphiql` on       | the GraphiQL page, with its own `content-security-policy`              |
-| A subscription without `accept: text/event-stream`     | 400, with a hint                                                       |
+| A subscription without `accept: text/event-stream`     | a request error with a hint: 400, or 200 in `application/json`         |
 | `accept` that lists none of the produced types         | 406                                                                    |
 
 The `accept` header picks the answer: `application/graphql-response+json` when listed (200 with
 `data`, 400 for parse, validation, variable and limit errors), otherwise `application/json` (200 for
 every well-formed request; no `accept` header, `*/*` and `application/*` mean `application/json`),
-or `text/event-stream` for GraphQL over SSE (distinct connections mode, any operation): one `next`
-event per result, then `complete`. The stream is RFC 0006's `HttpResponse.sse()` with the
+or `text/event-stream` for GraphQL over SSE (distinct connections mode): one `next` event per
+result, then `complete`. An event stream preferred to the JSON types (a higher `q`), or the only
+type listed, streams any operation; listed at the same quality as a JSON type (urql lists
+`application/graphql-response+json, application/json, text/event-stream`), it streams subscriptions
+only, and queries and mutations get one JSON body. The stream is RFC 0006's `HttpResponse.sse()` with the
 `subscriptions` options (`heartbeat`, `maxDuration`): a client that leaves aborts `ctx.signal` and
 ends the source, a stream closed by the shutdown ends without `complete`, and past
 `subscriptions.maxActive` a new subscription is 503. An asynchronous query whose client leaves is
@@ -734,7 +742,9 @@ adapter in memory and `injectStream()` / `injectSse()` stream subscriptions.
 - **Error masking** on: unexpected errors are `Unexpected error.` unless `exposeErrors`.
 - **Limits**: `maxTokens` (2 000) is passed to `parse`; `maxDepth` (12, introspection fields exempt),
   `maxAliases` (30) and `maxDirectives` (50) are checked in one pass before the validation rules, so
-  an abusive document is rejected before the expensive rules run (`QUERY_TOO_COMPLEX`).
+  an abusive document is rejected before the expensive rules run (`QUERY_TOO_COMPLEX`). Aliases count
+  as written and as executed: a fragment spread several times counts its aliases each time, so a
+  chain of fragments cannot multiply aliased fields past the limit.
 - **Transport**: no batching, JSON-only `POST` (CSRF-safe), `GET` for queries only, body limit 100 KiB,
   active subscriptions capped.
 - **Document cache** keyed by the exact query text, bounded in entries (LRU); documents rejected by

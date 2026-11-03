@@ -1,8 +1,9 @@
 /**
  * Document limits (RFC 0005 §8.9): depth, aliases and directives, checked in one walk of the parsed
  * document **before** the specified validation rules, so that an abusive document is rejected
- * before rules whose cost grows with it (`OverlappingFieldsCanBeMerged`) run. `maxTokens` is
- * enforced by `parse()` itself.
+ * before rules whose cost grows with it (`OverlappingFieldsCanBeMerged`) run. Aliases are counted as
+ * written, and, when the document spreads fragments, as each operation executes them (a fragment
+ * spread several times counts each time). `maxTokens` is enforced by `parse()` itself.
  */
 import type { DirectiveNode, DocumentNode, FragmentDefinitionNode, SelectionSetNode } from 'graphql'
 
@@ -21,7 +22,7 @@ export interface DocumentLimits {
 export function checkLimits(document: DocumentNode, limits: DocumentLimits): GraphQLError[] | undefined {
   const { maxDepth, maxAliases, maxDirectives } = limits
   if (maxDepth === undefined && maxAliases === undefined && maxDirectives === undefined) return undefined
-  const counter = { aliases: 0, directives: 0 }
+  const counter = { aliases: 0, directives: 0, spreads: 0 }
   const fragments = new Map<string, FragmentDefinitionNode>()
   for (const definition of document.definitions) {
     if (definition.kind === Kind.FRAGMENT_DEFINITION) fragments.set(definition.name.value, definition)
@@ -31,7 +32,7 @@ export function checkLimits(document: DocumentNode, limits: DocumentLimits): Gra
     errors ??= []
     errors.push(new GraphQLError(message, { extensions: { code: GraphQLErrorCode.QueryTooComplex } }))
   }
-  // counts every selection once (fragments are counted where they are defined)
+  // counts every selection once, where it is written (fragment spreads expanded below for aliases)
   for (const definition of document.definitions) {
     if (definition.kind === Kind.OPERATION_DEFINITION || definition.kind === Kind.FRAGMENT_DEFINITION) {
       countDirectives(definition.directives, counter)
@@ -41,8 +42,22 @@ export function checkLimits(document: DocumentNode, limits: DocumentLimits): Gra
       count(definition.selectionSet, counter)
     }
   }
-  if (maxAliases !== undefined && counter.aliases > maxAliases) {
-    fail(`The document has ${counter.aliases} aliases, more than the limit of ${maxAliases}.`)
+  if (maxAliases !== undefined) {
+    if (counter.aliases > maxAliases) {
+      fail(`The document has ${counter.aliases} aliases, more than the limit of ${maxAliases}.`)
+    } else if (counter.spreads > 0) {
+      // a fragment spread several times executes its aliases each time: counted as executed
+      const memo = new Map<string, number>()
+      for (const definition of document.definitions) {
+        if (definition.kind !== Kind.OPERATION_DEFINITION) continue
+        const executed = aliasesOf(definition.selectionSet, fragments, memo, new Set(), maxAliases + 1)
+        if (executed > maxAliases) {
+          const name = definition.name === undefined ? 'The operation' : `The operation ${definition.name.value}`
+          fail(`${name} has more than ${maxAliases} aliases once its fragments are expanded.`)
+          break
+        }
+      }
+    }
   }
   if (maxDirectives !== undefined && counter.directives > maxDirectives) {
     fail(`The document has ${counter.directives} directives, more than the limit of ${maxDirectives}.`)
@@ -64,6 +79,7 @@ export function checkLimits(document: DocumentNode, limits: DocumentLimits): Gra
 interface Counter {
   aliases: number
   directives: number
+  spreads: number
 }
 
 function countDirectives(directives: readonly DirectiveNode[] | undefined, counter: Counter): void {
@@ -78,8 +94,49 @@ function count(set: SelectionSetNode, counter: Counter): void {
       if (selection.selectionSet !== undefined) count(selection.selectionSet, counter)
     } else if (selection.kind === Kind.INLINE_FRAGMENT) {
       count(selection.selectionSet, counter)
+    } else {
+      counter.spreads++
     }
   }
+}
+
+/**
+ * Aliases a selection set executes, fragment spreads expanded (`a: f { ...F } b: f { ...F }` counts
+ * the aliases of `F` twice). Fragment counts are memoised, so the walk stays linear in the document;
+ * counts saturate at `cap` (one more than the limit) and a fragment cycle counts 0 (validation
+ * rejects it).
+ */
+function aliasesOf(
+  set: SelectionSetNode,
+  fragments: ReadonlyMap<string, FragmentDefinitionNode>,
+  memo: Map<string, number>,
+  visiting: Set<string>,
+  cap: number,
+): number {
+  let total = 0
+  for (const selection of set.selections) {
+    if (selection.kind === Kind.FIELD) {
+      if (selection.alias !== undefined) total++
+      if (selection.selectionSet !== undefined)
+        total += aliasesOf(selection.selectionSet, fragments, memo, visiting, cap)
+    } else if (selection.kind === Kind.INLINE_FRAGMENT) {
+      total += aliasesOf(selection.selectionSet, fragments, memo, visiting, cap)
+    } else {
+      const name = selection.name.value
+      let known = memo.get(name)
+      if (known === undefined) {
+        const fragment = fragments.get(name)
+        if (fragment === undefined || visiting.has(name)) continue
+        visiting.add(name)
+        known = aliasesOf(fragment.selectionSet, fragments, memo, visiting, cap)
+        visiting.delete(name)
+        memo.set(name, known)
+      }
+      total += known
+    }
+    if (total >= cap) return cap
+  }
+  return total
 }
 
 /**

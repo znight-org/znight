@@ -16,6 +16,7 @@ import { bind, boot, field, graphqlMetadata } from './support/app.ts'
 import { describe, expect, it } from 'bun:test'
 
 class DomainError extends Error {}
+const DB_ERROR = new Error('deadlock detected on orders')
 class Unmapped extends Error {}
 
 /** The error each field throws, by name. */
@@ -32,6 +33,9 @@ const THROWN: Record<string, () => unknown> = {
   server: () => new HttpException(503, 'database down'),
   validation: () => new ValidationException('input', [{ message: 'Too short', path: ['title'] }]),
   plain: () => new Unmapped('connection string postgres://secret'),
+  uncoded: () => new GraphQLError('String cannot be empty here'),
+  caused: () => new GraphQLException('Order failed', { code: 'ORDER_FAILED', cause: DB_ERROR }),
+  causedAgain: () => new GraphQLException('Order failed', { code: 'ORDER_FAILED', cause: DB_ERROR }),
   string: () => 'not even an error',
 }
 
@@ -44,6 +48,8 @@ class Thrower {
     throw new Unmapped('later')
   }
 }
+
+const SECRET_ROW = { passwordHash: 'abc123', email: 'a@b.c' }
 
 let mapperCalls = 0
 class DomainMapper implements GraphQLErrorMapper {
@@ -75,8 +81,14 @@ function metadata() {
           ...Object.keys(THROWN).map(name => field(name, 'String', bind(Thrower, 'fail'))),
           { name: 'book', type: 'Book', resolver: { ...bind(Thrower, 'later'), invoke: () => ({ id: '1' }) } },
           field('required', 'String!', bind(Thrower, 'later')),
+          // resolver values graphql-js cannot complete: built-in scalars, enums, lists
+          { name: 'leak', type: 'String', resolver: { ...bind(Thrower, 'later'), invoke: () => SECRET_ROW } },
+          { name: 'count', type: 'Int', resolver: { ...bind(Thrower, 'later'), invoke: () => 'a lot' } },
+          { name: 'genre', type: 'Genre', resolver: { ...bind(Thrower, 'later'), invoke: () => 'poetry' } },
+          { name: 'tags', type: '[String]', resolver: { ...bind(Thrower, 'later'), invoke: () => 42 } },
         ],
       },
+      { kind: 'enum', name: 'Genre', values: [{ name: 'Fantasy', value: 'fantasy' }] },
     ],
   })
 }
@@ -176,6 +188,81 @@ describe('error formatting', () => {
     expect(result.errors?.[0]).toMatchObject({
       message: 'connection string postgres://secret',
       extensions: { code: 'INTERNAL_SERVER_ERROR' },
+    })
+  })
+
+  it('logs the cause of a shown GraphQLException once, never sends it', async () => {
+    await using booted = await boot(metadata())
+    const result = await booted.plugin.execute({ query: '{ caused causedAgain exception }' }, { requestId: 'req-4' })
+    expect(result.errors?.map(error => [error.message, error.extensions])).toEqual([
+      ['Order failed', { code: 'ORDER_FAILED' }],
+      ['Order failed', { code: 'ORDER_FAILED' }],
+      ['No such book', { id: '7', code: 'NOT_FOUND' }],
+    ])
+    expect(JSON.stringify(result)).not.toContain('deadlock')
+    const logged = booted.logs.entries.filter(entry => entry.level === 'error')
+    expect(logged.map(entry => entry.message)).toEqual(['GraphQL: ORDER_FAILED error in Query.caused'])
+    expect(logged[0]?.context).toMatchObject({
+      requestId: 'req-4',
+      coordinate: 'Query.caused',
+      path: 'caused',
+      code: 'ORDER_FAILED',
+    })
+    expect(logged[0]?.context?.['err']).toBe(DB_ERROR)
+  })
+
+  it('shows user GraphQLErrors without code as they are', async () => {
+    await using booted = await boot(metadata())
+    const result = await booted.plugin.execute({ query: '{ uncoded }' })
+    expect(result.errors).toEqual([
+      { message: 'String cannot be empty here', locations: [{ line: 1, column: 3 }], path: ['uncoded'] },
+    ])
+    expect(booted.logs.entries.filter(entry => entry.level === 'error')).toEqual([])
+  })
+
+  it('masks and logs the errors graphql-js raises completing resolver values (they hold the value)', async () => {
+    await using booted = await boot(metadata())
+    const result = await booted.plugin.execute({ query: '{ leak count genre tags }' }, { requestId: 'req-3' })
+    expect(result).toEqual({
+      data: { leak: null, count: null, genre: null, tags: null },
+      errors: ['leak', 'count', 'genre', 'tags'].map((name, index) => ({
+        message: 'Unexpected error.',
+        locations: [{ line: 1, column: [3, 8, 14, 20][index] as number }],
+        path: [name],
+        extensions: { code: 'INTERNAL_SERVER_ERROR' },
+      })),
+    })
+    expect(JSON.stringify(result)).not.toContain('abc123')
+    const logged = booted.logs.entries.filter(entry => entry.level === 'error')
+    expect(logged.map(entry => entry.message)).toEqual([
+      'GraphQL: unexpected error in Query.leak',
+      'GraphQL: unexpected error in Query.count',
+      'GraphQL: unexpected error in Query.genre',
+      'GraphQL: unexpected error in Query.tags',
+    ])
+    expect(logged[0]?.context).toMatchObject({ requestId: 'req-3', coordinate: 'Query.leak', path: 'leak' })
+    expect(logged[0]?.context?.['err']).toMatchObject({ message: expect.stringContaining('abc123') })
+    await using exposed = await boot(metadata(), { exposeErrors: true })
+    const shown = await exposed.plugin.execute({ query: '{ count }' })
+    expect(shown.errors?.[0]).toMatchObject({
+      message: 'Int cannot represent non-integer value: "a lot"',
+      extensions: { code: 'INTERNAL_SERVER_ERROR' },
+    })
+  })
+
+  it('keeps invalid variables a request error (scalar input coercion)', async () => {
+    await using booted = await boot(metadata())
+    const invalid = await booted.plugin.execute({
+      query: 'query ($b: Boolean!) { uncoded @include(if: $b) }',
+      variables: { b: 'yes' },
+    })
+    expect(invalid).toEqual({
+      errors: [
+        expect.objectContaining({
+          message: expect.stringContaining('Boolean cannot represent a non boolean value: "yes"'),
+          extensions: { code: 'BAD_USER_INPUT' },
+        }),
+      ],
     })
   })
 

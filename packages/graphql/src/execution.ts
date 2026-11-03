@@ -82,7 +82,18 @@ export interface ExecuteOptions {
   readonly requestId?: string
   /** GET: queries only, other operations are rejected with 405 and `allow: POST`. */
   readonly queriesOnly?: boolean
+  /**
+   * {@link GraphQLExecutor.execute} answers a subscription with {@link SUBSCRIBE} (nothing observed
+   * yet) instead of a 400: the HTTP transport then streams it (the client accepts an event stream).
+   */
+  readonly streamSubscriptions?: boolean
 }
+
+/**
+ * The answer of {@link GraphQLExecutor.execute} to a subscription with
+ * {@link ExecuteOptions.streamSubscriptions}: start it with {@link GraphQLExecutor.subscribe}.
+ */
+export const SUBSCRIBE: GraphQLResponse = Object.freeze({ status: 0, result: Object.freeze({}) })
 
 /** The answer to a request: an HTTP-like status and the formatted result. */
 export interface GraphQLResponse {
@@ -260,6 +271,8 @@ export class GraphQLExecutor {
   readonly #maxActive: number | undefined
   readonly #streams = new Set<SubscriptionStream>()
   readonly #direct = new Set<SubscriptionStream>()
+  /** Subscriptions counted against `maxActive` while their source starts (not yet in `#streams`). */
+  #starting = 0
 
   constructor(options: ExecutorOptions) {
     this.#schema = options.schema
@@ -290,12 +303,14 @@ export class GraphQLExecutor {
   /**
    * Executes a query or a mutation. Resolves (or returns, when every resolver is synchronous) a
    * response; rejects only when `options.signal` aborts the execution (with the signal's reason).
-   * A subscription is a 400: it needs {@link subscribe}.
+   * A subscription is a 400: it needs {@link subscribe} ({@link SUBSCRIBE} with
+   * `streamSubscriptions`).
    */
   execute(request: GraphQLRequest, options: ExecuteOptions = DIRECT): GraphQLResponse | Promise<GraphQLResponse> {
     const prepared = this.#prepare(request, options)
     if (prepared instanceof Rejection) return this.#reject(prepared, request, options)
     if (prepared.operation.operation === 'subscription') {
+      if (options.streamSubscriptions === true) return SUBSCRIBE
       return this.#reject(
         new Rejection(
           400,
@@ -339,7 +354,8 @@ export class GraphQLExecutor {
       const response = await this.execute(request, options)
       return response.status === 200 ? new SingleResultStream(response.result) : response
     }
-    if (this.#maxActive !== undefined && this.#streams.size >= this.#maxActive) {
+    const limited = this.#maxActive !== undefined
+    if (limited && this.#streams.size + this.#starting >= (this.#maxActive as number)) {
       return this.#reject(
         new Rejection(
           503,
@@ -350,6 +366,16 @@ export class GraphQLExecutor {
         request,
         options,
       )
+    }
+    // the slot is reserved before the source starts (guards and subscribe methods may be async):
+    // concurrent subscriptions see it; released once the stream is counted or did not start
+    let reserved = limited
+    if (reserved) this.#starting++
+    const release = (): void => {
+      if (reserved) {
+        reserved = false
+        this.#starting--
+      }
     }
     const outer = this.#container.currentScope()
     const ctx = this.#context(prepared, request, options, outer)
@@ -369,7 +395,10 @@ export class GraphQLExecutor {
     }
     const observer = this.#observer(ctx, prepared.entry.id)
     try {
-      const stream = await run(() => this.#startSubscription(prepared, request, options, ctx, observer, run, close))
+      const stream = await run(() =>
+        this.#startSubscription(prepared, request, options, ctx, observer, run, close, release),
+      )
+      release()
       if (stream instanceof Rejection) {
         close()
         observer?.end('rejected', stream.errors)
@@ -377,6 +406,7 @@ export class GraphQLExecutor {
       }
       return stream
     } catch (error) {
+      release()
       close()
       observer?.end('error', undefined)
       throw error
@@ -596,6 +626,7 @@ export class GraphQLExecutor {
     observer: Observer | undefined,
     run: <R>(fn: () => R) => R,
     close: () => void,
+    release: () => void,
   ): Promise<GraphQLResultStream | Rejection> | GraphQLResultStream | Rejection {
     const validated = validateSubscriptionArgs({
       schema: this.#schema,
@@ -610,6 +641,8 @@ export class GraphQLExecutor {
       return new Rejection(400, validated.map(variableError), prepared.entry.id, prepared.operation)
     }
     const start = (source: AsyncIterable<unknown> | ExecutionResult): GraphQLResultStream => {
+      // the reservation becomes the stream (counted in #streams), or ends with the failed start
+      release()
       if (!isAsyncIterable(source)) {
         // the subscription could not start (guard, resolver error): one error result
         const result = this.formatEvent(source, ctx)

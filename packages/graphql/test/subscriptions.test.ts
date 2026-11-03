@@ -18,6 +18,14 @@ class TickGuard implements GraphQLGuard {
   }
 }
 
+/** An asynchronous guard (a token check): the source starts after an await. */
+class AsyncTickGuard implements GraphQLGuard {
+  async canResolve(ctx: ResolverContext): Promise<boolean> {
+    await Bun.sleep(1)
+    return ctx.args['deny'] !== true
+  }
+}
+
 class Ticks {
   constructor(readonly pubsub: PubSub<Events>) {}
   now(): number {
@@ -34,7 +42,7 @@ class Ticks {
 
 function metadata() {
   return graphqlMetadata({
-    providers: [{ class: Ticks, deps: ['@znight/graphql#PubSub'] }, TickGuard],
+    providers: [{ class: Ticks, deps: ['@znight/graphql#PubSub'] }, TickGuard, AsyncTickGuard],
     types: [
       { kind: 'object', name: 'Query', fields: [field('now', 'Int', bind(Ticks, 'now'))] },
       {
@@ -45,6 +53,9 @@ function metadata() {
             args: [{ name: 'deny', type: 'Boolean' }],
           }),
           field('failing', 'Int', bind(Ticks, 'failing', { operation: 'subscription' })),
+          field('guardedTicks', 'Int', bind(Ticks, 'ticks', { operation: 'subscription', guards: [AsyncTickGuard] }), {
+            args: [{ name: 'deny', type: 'Boolean' }],
+          }),
         ],
       },
     ],
@@ -172,6 +183,27 @@ describe('subscriptions', () => {
     expect(second).toMatchObject({ status: 503, result: { errors: [{ extensions: { code: 'SERVICE_UNAVAILABLE' } }] } })
     expect(booted.plugin.activeSubscriptions).toBe(1)
     await (first as { return(): Promise<unknown> }).return()
+  })
+
+  it('caps concurrent subscriptions whose source starts asynchronously, and frees failed starts', async () => {
+    await using booted = await boot(metadata(), { subscriptions: { maxActive: 1 } })
+    const executor = executorOf(booted.plugin)
+    const query = 'subscription { guardedTicks }'
+    const results = await Promise.all([1, 2, 3].map(() => executor.subscribe({ query })))
+    const streams = results.filter(result => !('status' in result))
+    expect(streams).toHaveLength(1)
+    expect(results.filter(result => 'status' in result && result.status === 503)).toHaveLength(2)
+    expect(booted.plugin.activeSubscriptions).toBe(1)
+    await (streams[0] as { return(): Promise<unknown> }).return()
+    expect(booted.plugin.activeSubscriptions).toBe(0)
+    // a start that fails (guard) releases its slot
+    const denied = await executor.subscribe({ query: 'subscription { guardedTicks(deny: true) }' })
+    expect('status' in denied).toBe(false)
+    expect((await (denied as AsyncIterator<{ errors?: unknown }>).next()).value?.errors).toBeDefined()
+    const next = await executor.subscribe({ query })
+    expect('status' in next).toBe(false)
+    expect(booted.plugin.activeSubscriptions).toBe(1)
+    await (next as { return(): Promise<unknown> }).return()
   })
 
   it('ends when the caller signal aborts', async () => {

@@ -74,6 +74,43 @@ describe('GraphQL over SSE', () => {
     ])
   })
 
+  it('answers queries and mutations in JSON, and streams subscriptions, when JSON and SSE tie (urql)', async () => {
+    const urql =
+      'application/graphql-response+json, application/graphql+json, application/json, text/event-stream, multipart/mixed'
+    const query = await subscribe(library, { query: '{ hello }' }, { accept: urql })
+    expect(query.status).toBe(200)
+    expect(query.headers['content-type']).toBe('application/graphql-response+json; charset=utf-8')
+    expect(query.json()).toEqual({ data: { hello: 'Hello world' } })
+    const mutation = await subscribe(
+      library,
+      { query: 'mutation { addBook(title: "Tie") { title } }' },
+      { accept: 'application/json, text/event-stream' },
+    )
+    expect(mutation.headers['content-type']).toBe('application/json; charset=utf-8')
+    expect(mutation.json()).toEqual({ data: { addBook: { title: 'Tie' } } })
+    // a subscription has no JSON answer: streamed whenever an event stream is acceptable
+    for (const accept of [urql, 'application/json, text/event-stream;q=0.5']) {
+      const stream = await subscribe(library, { query: 'subscription { countdown(from: 1) }' }, { accept })
+      expect(stream.headers['content-type']).toBe('text/event-stream; charset=utf-8')
+      expect(await events(stream)).toEqual([
+        ['next', '{"data":{"countdown":1}}'],
+        ['complete', ''],
+      ])
+    }
+    // an event stream strictly preferred streams every operation
+    const preferred = await subscribe(
+      library,
+      { query: '{ hello }' },
+      { accept: 'application/json;q=0.9, text/event-stream' },
+    )
+    expect(preferred.headers['content-type']).toBe('text/event-stream; charset=utf-8')
+    expect(await events(preferred)).toEqual([
+      ['next', '{"data":{"hello":"Hello world"}}'],
+      ['complete', ''],
+    ])
+    await until(() => library.graphql.activeSubscriptions === 0)
+  })
+
   it('serves queries over GET (EventSource)', async () => {
     const stream = await library.http.injectSse({ url: '/graphql?query=%7B%20hello%20%7D' })
     expect(await events(stream)).toEqual([

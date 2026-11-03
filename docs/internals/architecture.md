@@ -2856,7 +2856,8 @@ interface GraphQLResolverBinding {
 - **Execution:** one operation per request scope (no batching); `plugin.execute()` /
   `subscribe()` run in the current scope or open one. A document is parsed with `maxTokens`,
   checked against `maxDepth` (introspection fields exempt), `maxAliases` and `maxDirectives` in one
-  pass, then validated (specified rules, plus `NoSchemaIntrospectionCustomRule` and
+  pass (aliases as written, and as each operation executes them: a fragment spread several times
+  counts its aliases each time, memoised per fragment), then validated (specified rules, plus `NoSchemaIntrospectionCustomRule` and
   `hideSuggestions` when introspection is off); only valid documents enter the LRU document cache,
   keyed by the query text. The `GraphQLContext` is seeded in the scope and passed as
   `contextValue`, with the request's `ctx.signal` as `abortSignal`. Subscriptions use
@@ -2867,12 +2868,16 @@ interface GraphQLResolverBinding {
   execution. A batch returning another number of values than keys fails every key with ZNIGHT065;
   a returned `Error` fails its key only.
 - **Errors (normative order):** `GraphQLException` (or a `GraphQLError` thrown by user code) as is,
-  rendered `{ message, locations, path, extensions: { ...extensions, code } }` → the error mappers
+  rendered `{ message, locations, path, extensions: { ...extensions, code } }`, its `cause` logged
+  once at `error` (with `requestId`, `coordinate`, `path` and `code`), never sent → the error mappers
   in order (`map(error, ctx)`, synchronous) → `HttpException` by status (`ValidationException` →
   `BAD_USER_INPUT` with `issues`; 400, 401, 403, 404, 409, 429 → `BAD_USER_INPUT`,
   `UNAUTHENTICATED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `TOO_MANY_REQUESTS`; other 4xx
   `BAD_REQUEST`; 5xx masked) → masked `Unexpected error.` / `INTERNAL_SERVER_ERROR`, logged once at
-  `error` with `requestId`, `coordinate` and `path` (unmasked with `exposeErrors`). Request errors
+  `error` with `requestId`, `coordinate` and `path` (unmasked with `exposeErrors`). The errors
+  graphql-js raises while completing a resolver's value (a built-in scalar or an enum that cannot
+  represent it, a list that is not iterable, an abstract type resolving to no member) are not user
+  `GraphQLError`s: they hold the value and are masked and logged. Request errors
   carry `GRAPHQL_PARSE_FAILED`, `GRAPHQL_VALIDATION_FAILED`, `BAD_USER_INPUT`, `QUERY_TOO_COMPLEX`
   or `BAD_REQUEST` and are not logged above `debug`.
 - **GraphQL over HTTP** (GraphQL-over-HTTP draft): `POST` with `content-type: application/json`
@@ -2880,10 +2885,13 @@ interface GraphQLResolverBinding {
   with `allow: POST`), GraphiQL on `GET` with `accept: text/html` when enabled (its own
   `content-security-policy`). `accept` selects `application/graphql-response+json` (200, or 400
   for request errors), `application/json` (200 for every well-formed request; the default) or
-  `text/event-stream` (GraphQL over SSE, distinct connections mode, any operation: `next` events
-  then `complete`, through `HttpResponse.sse()` with the `subscriptions` heartbeat and
-  `maxDuration`); a subscription without SSE is 400; an unacceptable `accept` is 406; a body past
-  the limit is 413 with a GraphQL error body.
+  `text/event-stream` (GraphQL over SSE, distinct connections mode: `next` events then
+  `complete`, through `HttpResponse.sse()` with the `subscriptions` heartbeat and `maxDuration`).
+  Equal qualities prefer `application/graphql-response+json`, then `application/json`: an event
+  stream serves any operation only when it has a strictly higher quality or is the only acceptable
+  type, and otherwise, when acceptable, subscriptions only. A subscription without an acceptable
+  event stream is a request error (400; 200 in `application/json`); an unacceptable `accept` is
+  406; a body past the limit is 413 with a GraphQL error body.
 - **Hook:** `graphql:operation` (§8.3) wraps every operation, and a subscription for its whole
   life; the event is built only when the hook has wrappers or listeners. `outcome` is `success`,
   `partial`, `error` or `rejected` (rejected before execution).
