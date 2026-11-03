@@ -31,6 +31,7 @@ const LINKS: Readonly<Record<string, string>> = {
   '@znight/graphql': GRAPHQL_ROOT,
   '@znight/http': fs.realpathSync.native(path.join(MODULES, '@znight/http')),
   graphql: fs.realpathSync.native(path.join(MODULES, 'graphql')),
+  zod: fs.realpathSync.native(path.join(MODULES, 'zod')),
   '@types/node': fs.realpathSync.native(path.join(PACKAGES, '../node_modules/@types/node')),
 }
 

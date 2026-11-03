@@ -1,26 +1,9 @@
-/**
- * Generation (RFC 0005 §7): the `extensions.graphql` section of the catalog, the SDL artifact
- * (byte-identical to graphql-js `printSchema`), the schema hash, determinism across compiles and
- * modes, the section omitted without resolver, and a generated module that type-checks under
- * max-strict settings.
- */
-import fs from 'node:fs'
 import path from 'node:path'
 import { buildSchema, printSchema } from 'graphql'
 
 import { schemaHash } from '../../src/schema-hash.ts'
 import { CATALOG } from './fixtures.ts'
-import {
-  cleanupApps,
-  compileApp,
-  GRAPHQL_ROOT,
-  render,
-  schemaOf,
-  section,
-  tempApp,
-  typecheck,
-  typecheckSanity,
-} from './helpers.ts'
+import { cleanupApps, compileApp, render, schemaOf, section, tempApp, typecheck, typecheckSanity } from './helpers.ts'
 import { afterAll, describe, expect, test as it } from 'bun:test'
 
 afterAll(cleanupApps)
@@ -159,14 +142,6 @@ describe('the catalog (RFC 0005 §5)', () => {
 
   it('generates a module that type-checks under max-strict settings', async () => {
     const app = tempApp(CATALOG)
-    // until the runtime exports validateArgs (it is built in parallel), declare it for the check
-    const runtime = fs.readFileSync(path.join(GRAPHQL_ROOT, 'src/index.ts'), 'utf8')
-    if (!runtime.includes('validateArgs')) {
-      app.write(
-        'src/validate-args.d.ts',
-        "export {}\ndeclare module '@znight/graphql' {\n  export function validateArgs(schema: unknown, value: unknown, label: string): unknown\n}\n",
-      )
-    }
     const result = await compileApp(app.root, { mode: 'build' })
     expect(render({ root: app.root, diagnostics: result.diagnostics })).toEqual([])
     const outFile = path.relative(app.root, result.outFile)
