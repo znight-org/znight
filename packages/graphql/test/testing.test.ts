@@ -2,9 +2,14 @@
  * `@znight/graphql/testing` (RFC 0005 §5.12): `executeOperation()`, `subscribeOperation()` and
  * `fakeLoader()`, against `TestApp` with and without the HTTP transport.
  */
-import type { GraphQLPluginOptions } from '../src/index.ts'
+import type { HttpAdapter } from '@znight/http'
+import type { GraphQLPluginOptions, MemoryPubSub } from '../src/index.ts'
 
 import { HttpPlugin } from '@znight/http'
+import { expressAdapter } from '@znight/http/express'
+import { fastifyAdapter } from '@znight/http/fastify'
+import { honoAdapter } from '@znight/http/hono'
+import { nodeAdapter } from '@znight/http/node'
 import { TestApp } from '@znight/testing'
 
 import { GraphQLPlugin } from '../src/index.ts'
@@ -13,11 +18,17 @@ import { captureLogger } from './support/app.ts'
 import { libraryMetadata, observed } from './support/library.ts'
 import { describe, expect, it } from 'bun:test'
 
-function createTestApp(options: GraphQLPluginOptions = {}, http = true): Promise<TestApp> {
+function createTestApp(
+  options: GraphQLPluginOptions = {},
+  http = true,
+  adapter: HttpAdapter | undefined = undefined,
+): Promise<TestApp> {
   return TestApp.create({
     metadata: libraryMetadata(),
     plugins: [
-      ...(http ? [HttpPlugin.configure({ port: 0, host: '127.0.0.1' })] : []),
+      ...(http
+        ? [HttpPlugin.configure({ port: 0, host: '127.0.0.1', ...(adapter === undefined ? {} : { adapter }) })]
+        : []),
       GraphQLPlugin.configure({ introspection: true, ...options }),
     ],
     logger: captureLogger(),
@@ -154,6 +165,38 @@ describe('subscribeOperation()', () => {
     const invalid = await subscribeOperation(app, { query: 'subscription { nope }' })
     expect(invalid.status).toBe(400)
     expect((await invalid.next()).value?.errors).toHaveLength(1)
+  })
+})
+
+// every adapter, and without HTTP transport (plugin.subscribe())
+const TRANSPORTS: readonly [string, () => Promise<TestApp>][] = [
+  ['node', () => createTestApp({}, true, nodeAdapter())],
+  ['fastify', () => createTestApp({}, true, fastifyAdapter())],
+  ['express', () => createTestApp({}, true, expressAdapter())],
+  ['hono', () => createTestApp({}, true, honoAdapter())],
+  ['in memory', () => createTestApp({ http: false }, false)],
+]
+
+describe.each(TRANSPORTS)('subscribeOperation() on %s', (_name, create) => {
+  it('resolves once the generator of the resolver subscribed: an event published at once is received', async () => {
+    await using app = await create()
+    const pubsub = (app.app.getPlugin<GraphQLPlugin>('graphql') as GraphQLPlugin).pubsub as MemoryPubSub
+    await using events = await subscribeOperation(app, { query: 'subscription { newBook { title } }' })
+    expect(pubsub.subscribers).toBe(1)
+    await executeOperation(app, { query: ADD, variables: { title: 'At once' } })
+    expect((await events.next()).value).toEqual({ data: { newBook: { title: 'At once' } } })
+  })
+
+  it('return() ends the started generator and its PubSub subscription', async () => {
+    await using app = await create()
+    const plugin = app.app.getPlugin<GraphQLPlugin>('graphql') as GraphQLPlugin
+    const pubsub = plugin.pubsub as MemoryPubSub
+    const events = await subscribeOperation(app, { query: 'subscription { newBook { title } }' })
+    expect(pubsub.subscribers).toBe(1)
+    await events.return()
+    for (let attempt = 0; attempt < 200 && pubsub.subscribers > 0; attempt++) await Bun.sleep(5)
+    expect(pubsub.subscribers).toBe(0)
+    expect(plugin.activeSubscriptions).toBe(0)
   })
 })
 

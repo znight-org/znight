@@ -346,10 +346,9 @@ before the tests. [`support/app.ts`](test/support/app.ts) boots the application 
 | [`guide.test.ts`](test/guide.test.ts)                 | the links of the GraphQL guide to this application                                                                                                             |
 | [`e2e.test.ts`](test/e2e.test.ts)                     | `ZNIGHT_E2E=1`: `znight build`, the bundle on Node.js then Bun: a query, a mutation with an API key, a subscription receiving the added book, SIGTERM          |
 
-In memory, `subscribeOperation()` reads the event stream only when the test asks for the next
-result, and an `async *` resolver subscribes to the `PubSub` when its stream is first read. The
-tests therefore start reading (`const first = events.next()`), wait for the subscriber, then
-publish. Over a real connection the server reads the stream at once (see `e2e.test.ts`).
+`subscribeOperation()` resolves once the subscription is established: the plugin starts the
+resolver's `async *` generator with the stream, so it has subscribed to the `PubSub` and the tests
+publish right away, then read the event.
 
 ## In this repository
 

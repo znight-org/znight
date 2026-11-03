@@ -9,7 +9,8 @@ import { describe, expect, test as it } from 'bun:test'
 /*
  * Subscriptions over Server-Sent Events, in memory: `subscribeOperation()` streams through
  * `app.injectStream()` (the whole HTTP pipeline, the access guard included, no socket) and parses the
- * `next` events into results.
+ * `next` events into results. It resolves once the resolver's generator has subscribed to the
+ * PubSub, so a test publishes right away.
  */
 
 const ADD_REVIEW = 'mutation Add($input: NewReviewInput!) { addReview(input: $input) { id } }'
@@ -22,12 +23,10 @@ describe('Subscription.bookAdded', () => {
       headers: READER,
     })
     expect(events.status).toBe(200)
-    const first = events.next() // reading starts the resolver's generator: it subscribes to the PubSub
-    await subscribers(app, 1)
 
     await executeOperation(app, { query: ADD_BOOK, variables: { input: FELLOWSHIP }, headers: EDITOR })
 
-    expect((await first).value).toEqual({
+    expect((await events.next()).value).toEqual({
       data: { bookAdded: { title: 'The Fellowship of the Ring', author: { name: 'J. R. R. Tolkien' } } },
     })
   })
@@ -38,13 +37,11 @@ describe('Subscription.bookAdded', () => {
       query: 'subscription { bookAdded(genre: Fantasy) { title genre } }',
       headers: READER,
     })
-    const first = fantasy.next()
-    await subscribers(app, 1)
 
     await executeOperation(app, { query: ADD_BOOK, variables: { input: DISPOSSESSED }, headers: EDITOR }) // science fiction
     await executeOperation(app, { query: ADD_BOOK, variables: { input: FELLOWSHIP }, headers: EDITOR })
 
-    expect((await first).value).toEqual({
+    expect((await fantasy.next()).value).toEqual({
       data: { bookAdded: { title: 'The Fellowship of the Ring', genre: 'Fantasy' } },
     })
   })
@@ -54,8 +51,7 @@ describe('Subscription.bookAdded', () => {
     const plugin = graphqlOf(app)
     const pubsub = plugin.pubsub as MemoryPubSub // the default: in-process fan-out
     const events = await subscribeOperation(app, { query: 'subscription { bookAdded { id } }', headers: READER })
-    const pending = events.next({ timeoutMs: 5_000 })
-    await subscribers(app, 1)
+    expect(pubsub.subscribers).toBe(1)
     expect(plugin.activeSubscriptions).toBe(1)
     expect((await app.inject({ url: '/health' })).json()).toMatchObject({ subscriptions: 1 })
 
@@ -64,7 +60,7 @@ describe('Subscription.bookAdded', () => {
 
     expect(pubsub.subscribers).toBe(0)
     expect(plugin.activeSubscriptions).toBe(0)
-    expect((await pending).done).toBe(true)
+    expect((await events.next()).done).toBe(true)
   })
 })
 
@@ -75,8 +71,6 @@ describe('Subscription.reviewAdded', () => {
       query: `subscription { reviewAdded(bookId: "${dune.id}") { rating reviewer } }`,
       headers: READER,
     })
-    const first = reviews.next()
-    await subscribers(app, 1)
 
     for (const input of [
       { bookId: 'b5', rating: 2, reviewer: 'other@example.org' },
@@ -85,7 +79,7 @@ describe('Subscription.reviewAdded', () => {
       await executeOperation(app, { query: ADD_REVIEW, variables: { input }, headers: READER })
     }
 
-    expect((await first).value).toEqual({ data: { reviewAdded: { rating: 5, reviewer: 'ada@example.org' } } })
+    expect((await reviews.next()).value).toEqual({ data: { reviewAdded: { rating: 5, reviewer: 'ada@example.org' } } })
   })
 })
 
@@ -98,10 +92,8 @@ describe('shutdown', () => {
       headers: { 'content-type': 'application/json', accept: 'text/event-stream', ...READER },
       body: JSON.stringify({ query: 'subscription { bookAdded { title } }' }),
     })
-    const first = stream.next()
-    await subscribers(app, 1)
     await executeOperation(app, { query: ADD_BOOK, variables: { input: FELLOWSHIP }, headers: EDITOR })
-    expect((await first).event).toBe('next')
+    expect((await stream.next()).event).toBe('next')
 
     const closing = app.close()
     const events: string[] = []

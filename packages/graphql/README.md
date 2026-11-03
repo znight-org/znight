@@ -438,8 +438,13 @@ for await (const book of this.events.subscribe('bookAdded', { signal: ctx.signal
   without bound. The plugin closes the `MemoryPubSub` it created when the application is disposed.
 - Several instances need a shared implementation (Redis, a broker): pass any object with
   `publish(topic, payload)` and `subscribe(topic, { signal })` as the `pubsub` option.
-- `subscribe()` ends when its `signal` aborts: the client left, the application shuts down, or the
-  stream reached `subscriptions.maxDuration`. Always pass `ctx.signal`.
+- `subscribe()` ends when its `signal` aborts: the client left, the application shuts down, the
+  stream reached `subscriptions.maxDuration`, or (`plugin.subscribe()`) its `return()` was called.
+  Always pass `ctx.signal`.
+- The source starts with the subscription: the plugin requests its first event before the SSE
+  response starts (or `plugin.subscribe()` resolves), so a generator has subscribed to the PubSub by
+  the time the client is connected, and an event published right after is not lost. The stream reads
+  that one event ahead; the next ones are read as the client consumes them.
 - The request scope of a subscription lasts as long as its stream: request-scoped providers live
   for the subscription, while loaders are renewed for every event. Root subscription guards run
   once, when the subscription starts (per-event authorization is the generator's job).
@@ -814,7 +819,9 @@ test('bookAdded streams new books', async () => {
   `GraphQLPlugin.execute()` and reports the status the endpoint would answer.
 - `subscribeOperation(app, request)` streams the operation over GraphQL over SSE in memory
   (`app.injectStream()`), or through `GraphQLPlugin.subscribe()` without HTTP transport (no HTTP
-  guards then). It resolves once the subscription is started; its `next({ timeoutMs? })` rejects
+  guards then). It resolves once the subscription is established (its source started: a generator
+  resolver has subscribed to the PubSub), so an event published right after, before any `next()`,
+  is received. Its `next({ timeoutMs? })` rejects
   when no result arrives in time (2 s by default), and `return()` (or `await using`) disconnects,
   which the server sees as a client abort.
 - `fakeLoader<L>(values | map | fn)` answers from a record by key, a `Map` or a function of the key;
@@ -843,6 +850,17 @@ byte-identical to graphql-js `printSchema()` of the schema the plugin builds (de
 line print as `"""text"""`), types sorted by name. Commit it: every pull request then shows its
 schema diff, and `znight generate --check` fails when it is stale. Without the option,
 `plugin.printSchema()` gives the same text at runtime.
+
+The committed file is compared byte for byte with the compiler's output: keep formatters away from
+it. With Biome, exclude it in `biome.jsonc` (as this repository does for `examples/graphql-api`):
+
+```jsonc
+{
+  "files": {
+    "includes": ["**", "!schema.graphql"]
+  }
+}
+```
 
 ## Observability
 

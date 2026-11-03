@@ -233,18 +233,13 @@ describe.skipIf(!ENABLED)('end to end (production build)', () => {
       })().catch(() => undefined) // aborted at the end
       const nextEvents = (): SseItem[] => items.filter(item => item.type === 'event' && item.event === 'next')
 
-      // The resolver subscribes to the PubSub when the stream starts, right after the headers: add
-      // books until the first one arrives (one is enough, unless the first was published earlier).
-      const titles: string[] = []
-      for (let attempt = 0; attempt < 10 && nextEvents().length === 0; attempt++) {
-        const input = newBook()
-        titles.push(String(input.title))
-        expect((await graphql(url, ADD_BOOK, { input }, EDITOR_KEY)).result.errors).toBeUndefined()
-        for (let wait = 0; wait < 20 && nextEvents().length === 0; wait++) await Bun.sleep(25)
-      }
+      // the headers arrive once the resolver's generator has subscribed to the PubSub: publish now
+      const input = newBook()
+      expect((await graphql(url, ADD_BOOK, { input }, EDITOR_KEY)).result.errors).toBeUndefined()
+      for (let wait = 0; wait < 200 && nextEvents().length === 0; wait++) await Bun.sleep(25)
       const [event] = nextEvents()
       expect(event?.type === 'event' ? JSON.parse(event.data) : undefined).toEqual({
-        data: { bookAdded: { title: titles.at(-1), author: { name: 'J. R. R. Tolkien' } } },
+        data: { bookAdded: { title: input.title, author: { name: 'J. R. R. Tolkien' } } },
       })
 
       // SIGTERM while the subscription streams: the stream ends without `complete`, the process exits

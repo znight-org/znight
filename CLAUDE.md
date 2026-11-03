@@ -137,6 +137,7 @@ packages/compiler/src/   project/ (scan, parse, identities), analysis/, binding/
 examples/                runnable applications with their tests: rest-api, microservice, worker,
                          secure-api, storefront-api, uptime-monitor, monorepo (packages/shared,
                          services/users-api, services/notifications-worker)
+                         graphql-api (code-first GraphQL on Hono, SSE subscriptions, schema.graphql)
 benchmarks/              performance benchmarks, run by hand (not in CI): apps/ (znight, nestjs,
                          hand-wired baseline), src/ (runner, report), results/results.json; they
                          feed docs/benchmarks.md, the home page and the README (checked by docs/test)
@@ -374,3 +375,4 @@ and docs updated with the code.
   the tested source of the security guide), `storefront-api` (OpenAPI, typed client),
   `uptime-monitor` (scheduled jobs, SSE: the tested source of the scheduling guide), `monorepo` (a
   shared provider library and two services).
+  `graphql-api` (Hono, `@znight/graphql`, loaders, SSE subscriptions: the source of the GraphQL guide).

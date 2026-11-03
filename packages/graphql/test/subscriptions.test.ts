@@ -34,6 +34,14 @@ class Ticks {
   ticks(_args: unknown, _parent: unknown, ctx: GraphQLContext): AsyncIterableIterator<number> {
     return this.pubsub.subscribe('tick', { signal: ctx.signal })
   }
+  /** `ticks` through an async generator: it subscribes on its first `next()`. */
+  async *tickStream(_args: unknown, _parent: unknown, ctx: GraphQLContext): AsyncGenerator<number> {
+    for await (const tick of this.pubsub.subscribe('tick', { signal: ctx.signal })) yield tick
+  }
+  /** Ignores `ctx.signal`: its subscription ends with the next event only. */
+  async *deafTicks(): AsyncGenerator<number> {
+    for await (const tick of this.pubsub.subscribe('tick')) yield tick
+  }
   async *failing(): AsyncGenerator<number> {
     yield await Promise.resolve(1)
     throw new Error('source broke')
@@ -52,6 +60,8 @@ function metadata() {
           field('ticks', 'Int', bind(Ticks, 'ticks', { operation: 'subscription', guards: [TickGuard] }), {
             args: [{ name: 'deny', type: 'Boolean' }],
           }),
+          field('tickStream', 'Int', bind(Ticks, 'tickStream', { operation: 'subscription' })),
+          field('deafTicks', 'Int', bind(Ticks, 'deafTicks', { operation: 'subscription' })),
           field('failing', 'Int', bind(Ticks, 'failing', { operation: 'subscription' })),
           field('guardedTicks', 'Int', bind(Ticks, 'ticks', { operation: 'subscription', guards: [AsyncTickGuard] }), {
             args: [{ name: 'deny', type: 'Boolean' }],
@@ -134,6 +144,30 @@ describe('subscriptions', () => {
     expect(await stream.next()).toEqual({ done: true, value: undefined })
   })
 
+  it('starts the source before subscribe() resolves: a generator has subscribed, return() ends it', async () => {
+    await using booted = await boot(metadata())
+    const pubsub = booted.app.container.get(GraphQLTokens.PubSub) as MemoryPubSub<Events>
+    const stream = await booted.plugin.subscribe({ query: 'subscription { tickStream }' })
+    expect(pubsub.subscribers).toBe(1)
+    await pubsub.publish('tick', 1) // before any next(): not lost
+    expect((await stream.next()).value).toEqual({ data: { tickStream: 1 } })
+    expect(await stream.return()).toEqual({ done: true, value: undefined })
+    expect(pubsub.subscribers).toBe(0) // ctx.signal aborted with the stream
+    expect(booted.plugin.activeSubscriptions).toBe(0)
+  })
+
+  it('return() does not wait for a started source that ignores ctx.signal', async () => {
+    await using booted = await boot(metadata())
+    const pubsub = booted.app.container.get(GraphQLTokens.PubSub) as MemoryPubSub<Events>
+    const stream = await booted.plugin.subscribe({ query: 'subscription { deafTicks }' })
+    expect(pubsub.subscribers).toBe(1)
+    expect(await stream.return()).toEqual({ done: true, value: undefined })
+    expect(booted.plugin.activeSubscriptions).toBe(0)
+    await pubsub.publish('tick', 1) // the generator resumes, then runs its return()
+    await subscribers(pubsub, 0)
+    expect(pubsub.subscribers).toBe(0)
+  })
+
   it('gives a single error result when the subscription cannot start', async () => {
     await using booted = await boot(metadata())
     const stream = await booted.plugin.subscribe({ query: 'subscription { ticks(deny: true) }' })
@@ -160,8 +194,11 @@ describe('subscriptions', () => {
     const pubsub = booted.app.container.get(GraphQLTokens.PubSub) as MemoryPubSub<Events>
     const stream = await booted.plugin.subscribe({ query: 'subscription { ticks }' })
     await subscribers(pubsub, 1)
+    // the stream reads its first event ahead (the source starts with the subscription): 1 goes to
+    // that pending read, 2 fills the buffer, 3 overflows it
     for (let n = 1; n <= 3; n++) await pubsub.publish('tick', n)
     expect((await stream.next()).value).toEqual({ data: { ticks: 1 } })
+    expect((await stream.next()).value).toEqual({ data: { ticks: 2 } })
     expect((await stream.next()).value?.errors?.[0]).toMatchObject({ extensions: { code: 'SUBSCRIPTION_OVERFLOW' } })
     expect((await stream.next()).done).toBe(true)
   })

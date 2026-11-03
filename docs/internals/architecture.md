@@ -2875,7 +2875,12 @@ interface GraphQLResolverBinding {
   keyed by the query text. The `GraphQLContext` is seeded in the scope and passed as
   `contextValue`, with the request's `ctx.signal` as `abortSignal`. Subscriptions use
   `createSourceEventStream` and `executeSubscriptionEvent` with fresh loaders per event; past
-  `subscriptions.maxActive`, a subscription is rejected with 503.
+  `subscriptions.maxActive`, a subscription is rejected with 503. The source event stream MUST be
+  started before the SSE response starts or `plugin.subscribe()` resolves (its first `next()` is
+  requested at once, one event read ahead, the next ones on demand), so a generator resolver has
+  subscribed when the client is connected; a subscription's `GraphQLContext.signal` also aborts when
+  its stream ends (`return()` included), and `return()` does not wait for a source still awaiting
+  an event.
 - **Loaders:** per execution, `c.loader(token)` creates a DataLoader around the provider's
   `load(keys)` with its `options` (`maxBatchSize`, `cache`, `cacheKeyFn`), cached for the
   execution. A batch returning another number of values than keys fails every key with ZNIGHT065;
@@ -2915,7 +2920,8 @@ interface GraphQLResolverBinding {
 - `@znight/graphql/testing` (optional peer `@znight/testing`): `executeOperation(app, request)`
   (`POST` through `app.inject()`, or `plugin.execute()` without HTTP transport),
   `subscribeOperation(app, request)` (SSE through `app.injectStream()`, or `plugin.subscribe()`;
-  `next()` times out, 2 s by default) and `fakeLoader<L>(values)`.
+  resolves once the subscription is established; `next()` times out, 2 s by default) and
+  `fakeLoader<L>(values)`.
 
 **Impl.** Two concurrent `plugin.execute()` calls in one request scope share the scope's
 `GraphQLContext` entry (`@Ctx()` gets the right one). The SDL of a `GraphQLScalarType` definition

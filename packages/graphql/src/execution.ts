@@ -379,6 +379,10 @@ export class GraphQLExecutor {
     }
     const outer = this.#container.currentScope()
     const ctx = this.#context(prepared, request, options, outer)
+    // ctx.signal also aborts when the stream ends (return() included, on every transport): the
+    // source, started before the first read (SubscriptionStream), then lets go of its PubSub topic
+    const ended = new AbortController()
+    ctx.endsWith(ended.signal)
     let run: <R>(fn: () => R) => R
     let close: () => void
     if (outer === undefined) {
@@ -386,12 +390,13 @@ export class GraphQLExecutor {
       const opened = this.#container.openScope([[GraphQLTokens.Context, ctx]])
       run = fn => opened.run(fn)
       close = () => {
+        ended.abort()
         opened.close()?.catch(error => this.#runtimeLogError('Failed to close the scope of a subscription', error))
       }
     } else {
       outer.set(GraphQLTokens.Context, ctx)
       run = fn => fn()
-      close = noop
+      close = () => ended.abort()
     }
     const observer = this.#observer(ctx, prepared.entry.id)
     try {
@@ -929,10 +934,20 @@ interface SubscriptionStreamInit {
 /**
  * The results of a subscription: each source event executed with `executeSubscriptionEvent`, a
  * fresh per-execution state (loaders) and the operation's `GraphQLContext`.
+ *
+ * The source is started at once: its first `next()` is requested when the stream is created, so
+ * that a resolver written as an async generator (`for await (const x of pubsub.subscribe(...))`)
+ * has subscribed when `subscribe()` resolves, whatever the transport and however late its consumer
+ * reads (an SSE body pulled on demand). Only that first event is read ahead; the next ones are read
+ * when the consumer asks (backpressure).
  */
 class SubscriptionStream implements GraphQLResultStream {
   readonly #init: SubscriptionStreamInit
   readonly #onAbort: (() => void) | undefined
+  /** The first `next()` of the source, requested at creation and consumed by the first read. */
+  #first: Promise<IteratorResult<unknown>> | undefined
+  /** `next()` calls of the source still pending. */
+  #reading = 0
   #ended = false
   #partial = false
 
@@ -945,6 +960,10 @@ class SubscriptionStream implements GraphQLResultStream {
       }
       signal.addEventListener('abort', this.#onAbort, { once: true })
     }
+    const first = init.run(() => this.#read())
+    // handled by the first read; ignored when the stream ends before it
+    first.catch(noop)
+    this.#first = first
   }
 
   next(): Promise<IteratorResult<FormattedExecutionResult>> {
@@ -952,11 +971,23 @@ class SubscriptionStream implements GraphQLResultStream {
     return this.#init.run(() => this.#pull())
   }
 
+  /** The next event of the source. */
+  async #read(): Promise<IteratorResult<unknown>> {
+    this.#reading++
+    try {
+      return await this.#init.source.next()
+    } finally {
+      this.#reading--
+    }
+  }
+
   async #pull(): Promise<IteratorResult<FormattedExecutionResult>> {
     const init = this.#init
     let step: IteratorResult<unknown>
     try {
-      step = await init.source.next()
+      const first = this.#first
+      this.#first = undefined
+      step = await (first ?? this.#read())
     } catch (error) {
       if (this.#ended) return DONE
       // the source failed (MemoryPubSub overflow...): a final error result, then the end
@@ -987,9 +1018,16 @@ class SubscriptionStream implements GraphQLResultStream {
 
   async return(): Promise<IteratorResult<FormattedExecutionResult>> {
     if (this.#ended) return DONE
+    this.#first = undefined
+    // ends ctx.signal: a source following it (MemoryPubSub, a generator iterating it) ends at once
     this.#end(this.#partial ? 'partial' : 'success', undefined)
+    const reading = this.#reading > 0
     try {
-      await this.#init.source.return?.()
+      const returned = Promise.resolve(this.#init.source.return?.())
+      // an async generator runs return() only once its pending next() settles, which a source
+      // ignoring ctx.signal may never do: do not wait for it then
+      if (reading) returned.catch(noop)
+      else await returned
     } catch {
       // the source is gone either way
     }

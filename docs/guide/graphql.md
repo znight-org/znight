@@ -326,6 +326,8 @@ curl -N -H 'accept: text/event-stream' -H 'content-type: application/json' \
 
 - Always pass `ctx.signal` to `subscribe()`: it aborts when the client leaves, when the application
   shuts down and after `subscriptions.maxDuration`.
+- The generator starts with the subscription: it has subscribed to the PubSub by the time the client
+  is connected, so an event published right after reaches it.
 - The default `MemoryPubSub` buffers 100 events per subscriber (`subscriptions.bufferSize`). A
   subscriber that falls behind ends with a `SUBSCRIPTION_OVERFLOW` error instead of growing memory.
 - With several instances, events published on one must reach subscribers on all: give the `pubsub`
@@ -528,8 +530,9 @@ test('bookAdded streams new books', async () => {
 
 `executeOperation()` sends a `POST` through `app.inject()`: HTTP guards, hooks and the adapter run
 as in production, and the response carries `status`, `headers`, `data` and `errors`.
-`subscribeOperation()` streams over SSE in memory; its `next()` times out after 2 s, so a missing
-event fails the test instead of hanging it.
+`subscribeOperation()` streams over SSE in memory and resolves once the subscription is
+established (the resolver's generator has subscribed), so the mutation can publish right away; its
+`next()` times out after 2 s, so a missing event fails the test instead of hanging it.
 
 ## Review the schema in pull requests {#sdl}
 
@@ -546,6 +549,17 @@ The compiler writes `schema.graphql` next to the generated module, exactly as gr
 print it. Commit it: a change to a TypeScript type now shows as a schema diff in the pull request,
 and `znight generate --check` in CI fails when the committed file is stale. Client code generators
 (GraphQL Code Generator, gql.tada) can read it without starting the server.
+
+The committed file is compared byte for byte with the compiler's output, so keep formatters away
+from it. With Biome, exclude it in `biome.jsonc` (the repository does so for `examples/graphql-api`):
+
+```jsonc [biome.jsonc]
+{
+  "files": {
+    "includes": ["**", "!schema.graphql"]
+  }
+}
+```
 
 ## Go to production {#production}
 

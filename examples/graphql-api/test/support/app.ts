@@ -57,10 +57,8 @@ export function graphqlOf(app: TestApp): GraphQLPlugin {
 }
 
 /**
- * Waits until `count` subscribers listen to the application's `MemoryPubSub`. An `async *` resolver
- * subscribes to the PubSub when its stream is first read: in memory, the stream is read when the test
- * asks for the next event, so a test starts reading (`const first = events.next()`), waits for the
- * subscriber, then publishes.
+ * Waits until `count` subscribers listen to the application's `MemoryPubSub`: a client that leaves
+ * reaches the server asynchronously (the stream's abort, then the generator's end).
  */
 export async function subscribers(app: TestApp, count: number): Promise<void> {
   const pubsub = graphqlOf(app).pubsub as MemoryPubSub
