@@ -2,15 +2,16 @@
 
 Design documents for significant changes. Each RFC is discussed before implementation.
 
-| RFC                                    | Title                                     | Status           |
-| -------------------------------------- | ----------------------------------------- | ---------------- |
-| [0001](./0001-security.md)             | Security (route decisions, CORS, headers) | Accepted (v0.1)  |
-| [0002](./0002-openapi.md)              | `@znight/openapi`                         | Accepted (v0.1)  |
-| [0003](./0003-websocket.md)            | `@znight/websocket`                       | Deferred to v0.2 |
-| [0004](./0004-schedule.md)             | `@znight/schedule`                        | Accepted (v0.1)  |
-| [0005](./0005-graphql.md)              | `@znight/graphql`                         | Accepted (v0.2)  |
-| [0006](./0006-http-cookies-sse.md)     | HTTP cookies and Server-Sent Events       | Accepted (v0.1)  |
-| [0007](./0007-graphql-schema-first.md) | Schema-first GraphQL (`@znight/graphql`)  | Accepted (v0.2)  |
+| RFC                                      | Title                                     | Status           |
+| ---------------------------------------- | ----------------------------------------- | ---------------- |
+| [0001](./0001-security.md)               | Security (route decisions, CORS, headers) | Accepted (v0.1)  |
+| [0002](./0002-openapi.md)                | `@znight/openapi`                         | Accepted (v0.1)  |
+| [0003](./0003-websocket.md)              | `@znight/websocket`                       | Deferred to v0.2 |
+| [0004](./0004-schedule.md)               | `@znight/schedule`                        | Accepted (v0.1)  |
+| [0005](./0005-graphql.md)                | `@znight/graphql`                         | Accepted (v0.2)  |
+| [0006](./0006-http-cookies-sse.md)       | HTTP cookies and Server-Sent Events       | Accepted (v0.1)  |
+| [0007](./0007-graphql-schema-first.md)   | Schema-first GraphQL (`@znight/graphql`)  | Accepted (v0.2)  |
+| [0008](./0008-graphql-errors-as-data.md) | Errors as data in `@znight/graphql`       | Accepted (v0.2)  |
 
 ## Error code allocation
 

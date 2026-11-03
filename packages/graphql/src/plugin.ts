@@ -22,7 +22,7 @@ import type { ExecuteOptions, GraphQLRequest, GraphQLResultStream } from './exec
 import type { Resolvable } from './format.ts'
 import type { GraphQLInputTypeDefinition, GraphQLMetadata, GraphQLResolverBinding } from './metadata.ts'
 import type { GraphQLPluginOptions, ResolvedGraphQLOptions } from './options.ts'
-import type { GraphQLErrorMapper, GraphQLGuard } from './types.ts'
+import type { GraphQLErrorMapper, GraphQLGuard, GraphQLResultMapper } from './types.ts'
 
 import { displayName, ErrorCode, resolveOptions, ZnightError } from '@znight/core'
 import { printSchema } from 'graphql'
@@ -35,7 +35,8 @@ import { MemoryPubSub } from './memory-pubsub.ts'
 import { invalidOption, resolveGraphQLOptions } from './options.ts'
 import { globalGuardsApply, pipelineFactory } from './pipeline.ts'
 import { PubSub } from './pubsub.ts'
-import { buildGraphQLSchema, graphqlSection } from './schema.ts'
+import { checkResultTypes, declaredTypes, ResultMappers } from './results.ts'
+import { buildGraphQLSchema, checkGraphQLSection, graphqlSection } from './schema.ts'
 import { GraphQLTokens } from './tokens.ts'
 import { checkSseOptions, HttpTransport } from './transport/http.ts'
 
@@ -120,7 +121,7 @@ export class GraphQLPlugin implements Plugin, PluginHttpRoutes {
   }
 
   /**
-   * Providers `TestApp` creates at boot: the classes of the `guards` and `errorMappers` options, and
+   * Providers `TestApp` creates at boot: the classes of the `guards`, `errorMappers` and `resultMappers` options, and
    * the resolvers, guards and loaders of the metadata.
    */
   initRoots(context?: PluginRootsContext): readonly ProviderKey[] {
@@ -128,7 +129,7 @@ export class GraphQLPlugin implements Plugin, PluginHttpRoutes {
     try {
       const options: unknown = this.#options
       if (options !== null && typeof options === 'object') {
-        for (const key of ['guards', 'errorMappers'] as const) {
+        for (const key of ['guards', 'errorMappers', 'resultMappers'] as const) {
           const refs: unknown = (options as GraphQLPluginOptions)[key]
           if (Array.isArray(refs)) for (const ref of refs) if (typeof ref === 'function') roots.add(ref as ProviderKey)
         }
@@ -349,6 +350,10 @@ export class GraphQLPlugin implements Plugin, PluginHttpRoutes {
     const providers = new Providers(container, metadata)
     const globalGuards = options.guards.map(ref => providers.ref<GraphQLGuard>(ref, 'guard', 'canResolve'))
     const mappers = options.errorMappers.map(ref => providers.ref<GraphQLErrorMapper>(ref, 'error mapper', 'map'))
+    const resultMappers = options.resultMappers.map(ref => ({
+      ...providers.ref<GraphQLResultMapper>(ref, 'result mapper', 'toResult'),
+      types: declaredTypes(ref),
+    }))
     const inputs = new Map<string, GraphQLInputTypeDefinition>()
     const fields: CheckedField[] = []
     const types = Array.isArray(section?.types) ? section.types : []
@@ -371,6 +376,18 @@ export class GraphQLPlugin implements Plugin, PluginHttpRoutes {
         })
       }
     }
+    // a malformed section is reported by buildGraphQLSchema, not as types missing from it
+    if (resultMappers.length > 0 && checkGraphQLSection(section).length === 0) checkResultTypes(resultMappers, types)
+    const results = new ResultMappers(
+      container,
+      ctx.logger,
+      resultMappers.map(mapper => ({
+        resolvable: mapper.resolvable,
+        name: mapper.name,
+        types: mapper.types as readonly string[],
+      })),
+      types,
+    )
     const schema = buildGraphQLSchema(
       section,
       pipelineFactory({
@@ -380,6 +397,7 @@ export class GraphQLPlugin implements Plugin, PluginHttpRoutes {
         resolver: (binding, coordinate) =>
           providers.token<object>(binding.token, `resolver of ${coordinate}`, binding.method),
         inputs,
+        results: (field, coordinate) => results.recover(field, coordinate),
       }),
     )
     checkFieldDecisions(fields, section.groups, options.enforcement, ctx.logger)
@@ -406,7 +424,11 @@ export class GraphQLPlugin implements Plugin, PluginHttpRoutes {
       documentCache: options.documentCache,
       maxActiveSubscriptions: options.subscriptions === false ? undefined : options.subscriptions.maxActive,
     })
-    ctx.logger.debug('GraphQL schema built', { types: types.length, schemaHash: section.schemaHash })
+    ctx.logger.debug('GraphQL schema built', {
+      types: types.length,
+      schemaHash: section.schemaHash,
+      ...(results.fields === 0 ? {} : { resultFields: results.fields }),
+    })
     return { schema, section, executor }
   }
 }

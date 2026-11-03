@@ -17,7 +17,6 @@ import type {
   GraphQLInputType,
   GraphQLNamedType,
   GraphQLOutputType,
-  GraphQLTypeResolver,
 } from 'graphql'
 import type {
   GraphQLArgumentDefinition,
@@ -440,7 +439,7 @@ export function invalidSchema(problems: readonly string[]): never {
 }
 
 /** The `resolveType` of a union or an interface, from its discriminator: data read once, at boot. */
-function typeResolver(discriminator: GraphQLDiscriminator): GraphQLTypeResolver<unknown, unknown> {
+export function typeResolver(discriminator: GraphQLDiscriminator): (value: unknown) => string | undefined {
   switch (discriminator.by) {
     case 'property': {
       const property = discriminator.property

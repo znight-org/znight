@@ -3,7 +3,15 @@
  */
 import type { ByteSize, GuardRef, RouteMetaEntry } from '@znight/http'
 import type { SubscribeOptions } from './pubsub.ts'
-import type { GraphQLErrorMapper, GraphQLErrorMapperClass, GraphQLGuard, GraphQLGuardClass } from './types.ts'
+import type {
+  GraphQLErrorMapper,
+  GraphQLErrorMapperClass,
+  GraphQLGuard,
+  GraphQLGuardClass,
+  GraphQLResultMapper,
+  GraphQLResultMapperClass,
+  GraphQLResultTypes,
+} from './types.ts'
 
 import { ErrorCode, ZnightError } from '@znight/core'
 import { parseByteSize } from '@znight/http'
@@ -22,6 +30,12 @@ export type GraphQLGuardRef = GraphQLGuardClass | GraphQLGuard
 
 /** An error mapper: a provider class or an instance. */
 export type GraphQLErrorMapperRef = GraphQLErrorMapperClass | GraphQLErrorMapper
+
+/**
+ * A result mapper: a provider class with `static types`, or an instance (its `types` property, or the
+ * `static types` of its class).
+ */
+export type GraphQLResultMapperRef = GraphQLResultMapperClass | (GraphQLResultMapper & Partial<GraphQLResultTypes>)
 
 /** Options of the GraphQL-over-HTTP endpoint. */
 export interface GraphQLHttpOptions {
@@ -72,6 +86,11 @@ export interface GraphQLPluginOptions {
   readonly guards?: readonly GraphQLGuardRef[]
   /** Error mappers (classes or instances), tried in order. */
   readonly errorMappers?: readonly GraphQLErrorMapperRef[]
+  /**
+   * Result mappers (classes or instances), tried in order: errors as data (RFC 0008), on the fields
+   * whose union holds one of their `types`.
+   */
+  readonly resultMappers?: readonly GraphQLResultMapperRef[]
   /** Unmasked messages for unexpected errors (development). Default `false`. */
   readonly exposeErrors?: boolean
   /** Introspection; off, suggestions are hidden too. Default `NODE_ENV !== 'production'`. */
@@ -98,6 +117,7 @@ export interface ResolvedGraphQLOptions {
   readonly http: Required<GraphQLHttpOptions> | false
   readonly guards: readonly GraphQLGuardRef[]
   readonly errorMappers: readonly GraphQLErrorMapperRef[]
+  readonly resultMappers: readonly GraphQLResultMapperRef[]
   readonly exposeErrors: boolean
   readonly introspection: boolean
   readonly graphiql: boolean
@@ -126,6 +146,7 @@ const KEYS: ReadonlySet<string> = new Set([
   'http',
   'guards',
   'errorMappers',
+  'resultMappers',
   'exposeErrors',
   'introspection',
   'graphiql',
@@ -291,6 +312,7 @@ export function resolveGraphQLOptions(
     http,
     guards: refs<GraphQLGuardRef>('guards', options['guards'], 'canResolve'),
     errorMappers: refs<GraphQLErrorMapperRef>('errorMappers', options['errorMappers'], 'map'),
+    resultMappers: refs<GraphQLResultMapperRef>('resultMappers', options['resultMappers'], 'toResult'),
     exposeErrors: boolean('exposeErrors', options['exposeErrors'], false),
     introspection: boolean('introspection', options['introspection'], nodeEnv !== 'production'),
     graphiql: boolean('graphiql', options['graphiql'], nodeEnv === 'development'),

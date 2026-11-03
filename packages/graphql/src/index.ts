@@ -15,6 +15,7 @@ export type {
   GraphQLHttpOptions,
   GraphQLLimits,
   GraphQLPluginOptions,
+  GraphQLResultMapperRef,
   GraphQLSubscriptionOptions,
 } from './options.ts'
 export type {
@@ -28,6 +29,9 @@ export type {
   GraphQLGuard,
   GraphQLGuardClass,
   GraphQLOperationKind,
+  GraphQLResultMapper,
+  GraphQLResultMapperClass,
+  GraphQLResultTypes,
   GraphQLTransport,
   LoaderKey,
   LoaderOptions,

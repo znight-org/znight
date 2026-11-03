@@ -58,6 +58,7 @@ dependencies, `dataloader` is a dependency, `@znight/testing` an optional peer (
 - [Context and injection](#context-and-injection)
 - [Authorization](#authorization)
 - [Errors](#errors)
+  - [Errors as data](#errors-as-data)
 - [Plugin options](#plugin-options)
 - [GraphQL over HTTP and SSE](#graphql-over-http-and-sse)
 - [Security defaults and limits](#security-defaults-and-limits)
@@ -663,6 +664,104 @@ many fields. Request errors (parse, validation, variables, limits) are never log
 
 Applications may use their own codes: `new GraphQLException(message, { code: 'OUT_OF_STOCK' })`.
 
+### Errors as data
+
+Errors a client is expected to handle can be **values** of the field instead of entries of
+`errors[]` (the "result union" pattern, RFC 0008). The field says which ones it can return through
+its TypeScript return type, a union; a result mapper turns errors into those values:
+
+```ts
+import { Injectable } from '@znight/core'
+import {
+  Args,
+  GraphQLErrorCode,
+  GraphQLException,
+  GraphQLPlugin,
+  type GraphQLResultMapper,
+  Query,
+  Resolver,
+} from '@znight/graphql'
+import { NotFoundException } from '@znight/http'
+
+export interface NotFoundRejection {
+  readonly __typename: 'NotFoundRejection'
+  readonly message: string
+}
+
+export interface ValidationRejection {
+  readonly __typename: 'ValidationRejection'
+  readonly issues: readonly string[]
+}
+
+export type BookResult = Book | NotFoundRejection | ValidationRejection
+
+@Resolver()
+export class BookResolver {
+  constructor(private readonly books: BookService) {}
+
+  @Query()
+  book(@Args('id') id: string): Promise<BookResult> {
+    return this.books.get(id) // throws NotFoundException
+  }
+}
+
+@Injectable()
+export class Rejections implements GraphQLResultMapper {
+  /** The object types this mapper produces: only fields whose union holds one of them use it. */
+  static readonly types = ['NotFoundRejection', 'ValidationRejection']
+
+  toResult(error: unknown): NotFoundRejection | ValidationRejection | undefined {
+    if (error instanceof NotFoundException) return { __typename: 'NotFoundRejection', message: error.message }
+    if (error instanceof GraphQLException && error.code === GraphQLErrorCode.BadUserInput) {
+      const issues = (error.extensions?.['issues'] ?? []) as readonly { readonly message: string }[]
+      return { __typename: 'ValidationRejection', issues: issues.map(issue => issue.message) }
+    }
+    return undefined
+  }
+}
+
+GraphQLPlugin.configure({ resultMappers: [Rejections] })
+```
+
+`{ book(id: "7") { ... on Book { title } ... on NotFoundRejection { message } } }` answers
+`{ "data": { "book": { "message": "No book 7" } } }`, without `errors`.
+
+- **Which fields.** A resolver-backed field whose type, without `!`, is a union (not a list) holding
+  one of the mapper's `types`; nothing else per field. This is decided at boot: every other field
+  keeps its resolve function, with no wrapper and no cost.
+- **Which errors.** Everything the field's pipeline throws or rejects: its guards (a guard returning
+  `false` is a `GraphQLException` with code `FORBIDDEN`, a thrown `UnauthorizedException` is passed
+  as is), the Standard Schema validation of `@Args` (`BAD_USER_INPUT`, with `extensions.issues`),
+  the method (synchronously or as a rejected promise). Guards run before validation, so input
+  errors are only shown to clients allowed to call the field. `toResult(error, ctx)` receives the
+  raw error and the `ResolverContext` guards receive (the field's coordinate and metadata, the
+  arguments, the parent, the operation).
+- **The value.** The first mapper returning a value that the union resolves to one of its members
+  (its discriminator, then `__typename`) wins. `undefined` passes to the next mapper; a value of
+  another object type is skipped (logged at `debug`), a value of no type is skipped (`warn`), a
+  mapper that throws is skipped (`error`). `toResult()` is synchronous: a returned promise is
+  skipped (`error`). When no mapper produces a member, the error goes to `errors[]` as above.
+- **Per field.** An error of a child field stays an error of the child, even when its parent's
+  union holds the rejection; give the child a union to return a value there. A non-null union
+  field resolved to a value is no longer nulled.
+- **Masking and logs.** Values are data chosen by the application: never masked, and an error
+  resolved as a value is logged at `debug` only. A mapper turning unexpected errors into values (an
+  `InternalErrorRejection`) must log them itself; prefer leaving them in `errors[]`.
+- **Hook and transports.** A value is data: an operation whose only failure became a value has
+  the `success` outcome in `graphql:operation`, with no `errors`. HTTP, SSE and `plugin.execute()`
+  send it like any result. On a root subscription field, an error when the subscription starts
+  (a guard, or the method before it returns its stream) becomes a stream of that single event (one
+  `next`, then `complete`). The body of an `async *` method runs in the stream, after the start: its
+  errors stay in `errors[]`; check before returning the generator to map them.
+- **At boot.** A result mapper is a provider of any scope (a class that is not a provider is
+  ZNIGHT001) or an instance (its `types` property, or its class's `static types`), with a
+  `toResult()` method. Its `types` must name
+  object types of the schema: a typo is ZNIGHT066.
+
+The thrown error can be the value itself (Pothos style) when its class is a member of the union:
+`toResult: error => (error instanceof OutOfStock ? error : undefined)` with
+`static types = ['OutOfStock']`.
+
 ## Plugin options
 
 `GraphQLPlugin.configure(options | (container) => options)`, name `graphql`. A function is evaluated
@@ -675,6 +774,7 @@ ZNIGHT066.
 | `http`          | `{}`                                                                   | `false`: no HTTP transport (schema, `execute()` and `subscribe()` only). Object: `{ meta?, guards?, bodyLimit = '100kb', get = true }`                                   |
 | `guards`        | `[]`                                                                   | Global GraphQL guards (classes or instances implementing `GraphQLGuard`)                                                                                                 |
 | `errorMappers`  | `[]`                                                                   | `GraphQLErrorMapper` classes or instances, tried in order                                                                                                                |
+| `resultMappers` | `[]`                                                                   | `GraphQLResultMapper` classes or instances, tried in order: errors as data on the fields whose union holds one of their `types` ([Errors as data](#errors-as-data))      |
 | `exposeErrors`  | `false`                                                                | Unmasked messages for unexpected errors (development)                                                                                                                    |
 | `introspection` | `NODE_ENV !== 'production'`                                            | Off: graphql-js `NoSchemaIntrospectionCustomRule`, and suggestions are hidden                                                                                            |
 | `graphiql`      | `NODE_ENV === 'development'`                                           | `GET path` with `accept: text/html` serves GraphiQL                                                                                                                      |

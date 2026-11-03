@@ -83,6 +83,7 @@ walks through a migration.
 | `@WebSocketGateway()`                                | Planned for v0.2 ([roadmap](/roadmap#v0-2)); Server-Sent Events today                                                                    |
 | `@nestjs/graphql` (code first)                       | [`@znight/graphql`](/packages/graphql): the TypeScript types are the schema ([guide](/guide/graphql#nestjs))                             |
 | `@nestjs/graphql` (schema first, `typePaths`)        | [`@znight/graphql`](/packages/graphql) schema-first: the same `.graphql` files, resolvers bound by name ([below](#graphql-schema-first)) |
+| A Yoga/Envelop plugin turning exceptions into data   | `resultMappers` of `GraphQLPlugin`, per field ([errors as data](/guide/graphql#errors-as-data))                                          |
 | `express-session`, `@Session()`                      | Not included: signed cookies, and cookie sessions in the [Security guide](./security#csrf)                                               |
 
 ## Modules → flat DI {#modules-to-flat-di}
