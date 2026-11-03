@@ -442,8 +442,9 @@ for await (const book of this.events.subscribe('bookAdded', { signal: ctx.signal
   stream reached `subscriptions.maxDuration`, or (`plugin.subscribe()`) its `return()` was called.
   Always pass `ctx.signal`.
 - The source starts with the subscription: the plugin requests its first event before the SSE
-  response starts (or `plugin.subscribe()` resolves), so a generator has subscribed to the PubSub by
-  the time the client is connected, and an event published right after is not lost. The stream reads
+  response starts (or `plugin.subscribe()` resolves), so a generator that calls `subscribe()` before
+  its first `await` has subscribed to the PubSub by the time the client is connected, and an event
+  published right after is not lost. The stream reads
   that one event ahead; the next ones are read as the client consumes them.
 - The request scope of a subscription lasts as long as its stream: request-scoped providers live
   for the subscription, while loaders are renewed for every event. Root subscription guards run
@@ -820,7 +821,7 @@ test('bookAdded streams new books', async () => {
 - `subscribeOperation(app, request)` streams the operation over GraphQL over SSE in memory
   (`app.injectStream()`), or through `GraphQLPlugin.subscribe()` without HTTP transport (no HTTP
   guards then). It resolves once the subscription is established (its source started: a generator
-  resolver has subscribed to the PubSub), so an event published right after, before any `next()`,
+  resolver that calls `subscribe()` before its first `await` has subscribed to the PubSub), so an event published right after, before any `next()`,
   is received. Its `next({ timeoutMs? })` rejects
   when no result arrives in time (2 s by default), and `return()` (or `await using`) disconnects,
   which the server sees as a client abort.

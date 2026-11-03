@@ -2877,8 +2877,8 @@ interface GraphQLResolverBinding {
   `createSourceEventStream` and `executeSubscriptionEvent` with fresh loaders per event; past
   `subscriptions.maxActive`, a subscription is rejected with 503. The source event stream MUST be
   started before the SSE response starts or `plugin.subscribe()` resolves (its first `next()` is
-  requested at once, one event read ahead, the next ones on demand), so a generator resolver has
-  subscribed when the client is connected; a subscription's `GraphQLContext.signal` also aborts when
+  requested at once, one event read ahead, the next ones on demand), so a generator resolver that
+  calls `subscribe()` before its first `await` has subscribed when the client is connected; a subscription's `GraphQLContext.signal` also aborts when
   its stream ends (`return()` included), and `return()` does not wait for a source still awaiting
   an event.
 - **Loaders:** per execution, `c.loader(token)` creates a DataLoader around the provider's

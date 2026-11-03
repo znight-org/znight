@@ -964,6 +964,8 @@ class SubscriptionStream implements GraphQLResultStream {
     // handled by the first read; ignored when the stream ends before it
     first.catch(noop)
     this.#first = first
+    // the client may have left while the operation was starting (async guards): end at once
+    if (signal?.aborted === true) void this.return()
   }
 
   next(): Promise<IteratorResult<FormattedExecutionResult>> {
