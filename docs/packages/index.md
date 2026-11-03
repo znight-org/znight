@@ -1,5 +1,5 @@
 ---
-description: The Znight packages - core runtime, compiler, HTTP, OpenAPI, messaging, scheduling, config, observability, testing and CLI - and how they fit together.
+description: The Znight packages - core runtime, compiler, HTTP, OpenAPI, GraphQL, messaging, scheduling, config, observability, testing and CLI - and how they fit together.
 ---
 
 # Packages
@@ -14,6 +14,7 @@ what you use.
 | [`@znight/compiler`](./compiler)           | Vite plugin, CLI/Bun integration: analysis, validation, code generation                                           | devDependency | <Badge type="tip" text="available" /> |
 | [`@znight/http`](./http)                   | Controllers, validation, guards, access decisions, files, cookies, SSE, CORS; `node:http`, Fastify, Express, Hono | dependency    | <Badge type="tip" text="available" /> |
 | [`@znight/openapi`](./openapi)             | OpenAPI 3.1 documents generated at build time; Scalar or Swagger UI                                               | dependency    | <Badge type="tip" text="available" /> |
+| [`@znight/graphql`](./graphql)             | Code-first GraphQL: schema derived from TypeScript types at build time, loaders, subscriptions over SSE           | dependency    | <Badge type="tip" text="v0.2" />      |
 | [`@znight/messaging`](./messaging)         | Consumers, retries, dead-letter queues; RabbitMQ, SQS, Kafka, in-memory                                           | dependency    | <Badge type="tip" text="available" /> |
 | [`@znight/schedule`](./schedule)           | Cron, interval and timeout jobs checked at build time; locks across instances                                     | dependency    | <Badge type="tip" text="available" /> |
 | [`@znight/config`](./config)               | Typed config classes from env, `.env`, JSON/YAML, Vault, AWS Secrets Manager                                      | dependency    | <Badge type="tip" text="available" /> |
@@ -23,12 +24,12 @@ what you use.
 
 ## Not a package (on purpose)
 
-| You need...         | In Znight                                                                                                                                                                          |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Security            | Built into [`@znight/http`](./http): access decisions checked at build time and at boot, CORS, security headers, trusted proxies; recipes in the [Security guide](/guide/security) |
-| A database, an ORM  | The client of your choice, provided by a `@Factory()`; Drizzle recommended for SQL ([Data access](/guide/data-access))                                                             |
-| Caching             | A method interceptor ([recipe](/guide/aop#cache)); `@znight/cache` is on the [roadmap](/roadmap#znight-cache)                                                                      |
-| WebSockets, GraphQL | Planned for v0.2 ([roadmap](/roadmap#v0-2)); [Server-Sent Events](./http#server-sent-events) today                                                                                 |
+| You need...        | In Znight                                                                                                                                                                          |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Security           | Built into [`@znight/http`](./http): access decisions checked at build time and at boot, CORS, security headers, trusted proxies; recipes in the [Security guide](/guide/security) |
+| A database, an ORM | The client of your choice, provided by a `@Factory()`; Drizzle recommended for SQL ([Data access](/guide/data-access))                                                             |
+| Caching            | A method interceptor ([recipe](/guide/aop#cache)); `@znight/cache` is on the [roadmap](/roadmap#znight-cache)                                                                      |
+| WebSockets         | Planned for v0.2 ([roadmap](/roadmap#v0-2)); [Server-Sent Events](./http#server-sent-events) today                                                                                 |
 
 ## How a feature package is built
 

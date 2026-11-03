@@ -1,5 +1,5 @@
 ---
-description: What Znight v0.1 contains, what is planned for v0.2 (WebSocket gateways, GraphQL) and after (a cache package), what is being considered, and what is deliberately not planned.
+description: What Znight v0.1 contains, what v0.2 brings (GraphQL, then WebSocket gateways) and after (a cache package), what is being considered, and what is deliberately not planned.
 ---
 
 # Roadmap
@@ -48,7 +48,7 @@ And around them:
 - **Caching** is a method interceptor today: the [cache recipe](/guide/aop#cache).
 - Seven [example applications](/examples), each with its tests, running on Node.js and Bun.
 
-## v0.2: planned {#v0-2}
+## v0.2: in progress {#v0-2}
 
 ### `@znight/websocket`
 
@@ -65,17 +65,18 @@ Until then, [Server-Sent Events](/packages/http#server-sent-events) cover server
 
 ### `@znight/graphql`
 
-**In progress.** The RFC is accepted and the package is being implemented for v0.2.
+**Implemented**, released with v0.2: [package page](/packages/graphql) and
+[guide](/guide/graphql).
 
 Code-first GraphQL ([RFC 0005](https://github.com/znight-org/znight/blob/main/rfcs/0005-graphql.md)):
 the TypeScript types are the schema. Resolvers are providers marked with `@Resolver`, `@Query`,
 `@Mutation`, `@Subscription` and `@ResolveField`; the compiler derives the schema from their
-signatures at build time, with descriptions from JSDoc, and reports schema mistakes as diagnostics.
-It runs on graphql-js, served over HTTP by `HttpPlugin`, with subscriptions over Server-Sent Events,
-batching with loaders, and access control with the same route decorators and guards as HTTP. Its
-error codes, `ZNIGHT060`–`ZNIGHT066`, are already in the
-[error reference](/reference/error-codes#znight060), and the `graphql:operation` hook is declared
-in `@znight/core`.
+signatures at build time, with descriptions from JSDoc, and reports schema mistakes as diagnostics
+([`ZNIGHT060`](/reference/error-codes#znight060)–[`ZNIGHT066`](/reference/error-codes#znight066)).
+It runs on graphql-js 17, served over HTTP by `HttpPlugin` on every adapter, with subscriptions
+over Server-Sent Events, batching with loaders, access control with the same route decorators and
+guards as HTTP, and the `graphql:operation` hook. GraphQL interfaces and the follow-ups below are
+not part of this first version.
 
 ## Planned, without a date {#planned}
 
@@ -109,8 +110,9 @@ These are tracked in the RFCs as follow-ups. None has a date.
   the lifetime of event streams; fan-out of events across instances.
 - **WebSocket follow-ups**: rooms shared across instances, a typed client generated from the
   metadata, an AsyncAPI document.
-- **GraphQL follow-ups**: `graphql-ws` subscriptions, trusted documents checked at build time,
-  query cost analysis, federation.
+- **GraphQL follow-ups**: GraphQL interfaces, `graphql-ws` subscriptions, `@defer` / `@stream`,
+  trusted documents checked at build time, query cost analysis, federation, per-operation spans and
+  metrics in `@znight/observability`, a `graphql-api` example application.
 
 Interested in one of them? Say so in an issue or a discussion on
 [GitHub](https://github.com/znight-org/znight): real use cases are what moves an item up.

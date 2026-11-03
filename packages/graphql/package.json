@@ -1,0 +1,97 @@
+{
+  "name": "@znight/graphql",
+  "version": "0.1.4",
+  "description": "Znight GraphQL: code-first GraphQL whose schema is derived from TypeScript types at build time, on graphql-js 17",
+  "license": "MIT",
+  "author": "Ugho STEPHAN",
+  "homepage": "https://github.com/znight-org/znight/tree/main/packages/graphql#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/znight-org/znight.git",
+    "directory": "packages/graphql"
+  },
+  "bugs": "https://github.com/znight-org/znight/issues",
+  "keywords": ["znight", "graphql", "code-first", "dataloader", "subscriptions", "sse"],
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=24"
+  },
+  "exports": {
+    ".": {
+      "@znight/source": "./src/index.ts",
+      "types": "./dist/index.d.mts",
+      "default": "./dist/index.mjs"
+    },
+    "./compiler": {
+      "@znight/source": "./src/compiler/index.ts",
+      "types": "./dist/compiler.d.mts",
+      "default": "./dist/compiler.mjs"
+    },
+    "./testing": {
+      "@znight/source": "./src/testing.ts",
+      "types": "./dist/testing.d.mts",
+      "default": "./dist/testing.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "types": "./dist/index.d.mts",
+  "files": ["dist", "src"],
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p test",
+    "test": "bun test --conditions=@znight/source test"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@znight/core": "workspace:*",
+    "dataloader": "^2.2.3"
+  },
+  "peerDependencies": {
+    "@znight/http": "workspace:^",
+    "@znight/compiler": "workspace:^",
+    "@znight/testing": "workspace:^",
+    "graphql": "^17.0.2"
+  },
+  "peerDependenciesMeta": {
+    "@znight/compiler": {
+      "optional": true
+    },
+    "@znight/testing": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@znight/http": "workspace:*",
+    "@znight/compiler": "workspace:*",
+    "@znight/testing": "workspace:*",
+    "graphql": "17.0.2",
+    "graphql-http": "1.23.1",
+    "graphql-sse": "2.6.3",
+    "valibot": "1.5.0",
+    "zod": "catalog:"
+  },
+  "znight": {
+    "apiVersion": 1,
+    "compiler": "@znight/graphql/compiler",
+    "provides": [
+      {
+        "export": "GraphQLContext",
+        "plugin": "GraphQLPlugin",
+        "scope": "request"
+      },
+      {
+        "export": "PubSub",
+        "plugin": "GraphQLPlugin",
+        "scope": "singleton"
+      },
+      {
+        "export": "GraphQLPlugin",
+        "plugin": "GraphQLPlugin",
+        "scope": "singleton"
+      }
+    ]
+  }
+}

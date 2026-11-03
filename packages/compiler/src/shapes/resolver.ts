@@ -1933,7 +1933,8 @@ function enumMemberName(id: TSEnumMember['id']): string | undefined {
 
 /**
  * {@link NamedShape.literals}: the literal types of an alias of a union of literal types, in source
- * order and de-duplicated, when the (normalised) shape keeps every one of them as a literal.
+ * order and de-duplicated, when the (normalised) shape keeps every one of them as a literal. `null`
+ * and `undefined` members are skipped (`'a' | 'b' | null`: `['a', 'b']`).
  */
 function aliasLiterals(declaration: Declaration, shape: Shape): readonly (string | number | boolean)[] | undefined {
   const values: (string | number | boolean)[] = []
@@ -1943,6 +1944,9 @@ function aliasLiterals(declaration: Declaration, shape: Shape): readonly (string
         return collect(node.typeAnnotation)
       case 'TSUnionType':
         return node.types.every(collect)
+      case 'TSNullKeyword':
+      case 'TSUndefinedKeyword':
+        return true
       case 'TSLiteralType': {
         const value = literalTypeValue(node)
         if (value === undefined) {
@@ -1960,8 +1964,11 @@ function aliasLiterals(declaration: Declaration, shape: Shape): readonly (string
   if (!collect((declaration.node as TSTypeAliasDeclaration).typeAnnotation)) {
     return undefined
   }
-  const members = shape.kind === 'union' ? shape.members : [shape]
+  const members = (shape.kind === 'union' ? shape.members : [shape]).filter(
+    member => member.kind !== 'null' && member.kind !== 'undefined',
+  )
   if (
+    values.length === 0 ||
     members.length !== values.length ||
     !members.every(member => member.kind === 'literal' && values.includes(member.value))
   ) {

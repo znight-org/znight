@@ -819,22 +819,20 @@ type Author {
   born: Int
 }
 
-"""
-A book of the catalog.
-"""
+"""A book of the catalog."""
 type Book {
   kind: String!
   id: ID!
   title: String!
   isbn: String!
-  """
-  Year of first publication, `null` when unknown.
-  """
+
+  """Year of first publication, `null` when unknown."""
   publishedYear: Int
   genre: Genre!
   tags: [String!]!
   createdAt: DateTime!
   category: String @deprecated(reason: "Use `tags`.")
+
   """
   Who wrote the book. Batched: one repository call per execution, whatever the number of books.
   """
@@ -847,9 +845,7 @@ type BookPage {
   hasMore: Boolean!
 }
 
-"""
-Sort orders of the book list.
-"""
+"""Sort orders of the book list."""
 enum BookSort {
   title
   newest
@@ -857,9 +853,7 @@ enum BookSort {
 
 scalar DateTime @specifiedBy(url: "https://datatracker.ietf.org/doc/html/rfc3339")
 
-"""
-Literary genres.
-"""
+"""Literary genres."""
 enum Genre {
   Fantasy
   ScienceFiction
@@ -867,9 +861,7 @@ enum Genre {
 }
 
 type Mutation {
-  """
-  Adds a book to the catalog.
-  """
+  """Adds a book to the catalog."""
   addBook(input: NewBookInput!): Book!
 }
 
@@ -886,34 +878,25 @@ input NewBookInput {
 }
 
 type Query {
-  """
-  Books of the catalog, filtered and paginated.
-  """
+  """Books of the catalog, filtered and paginated."""
   books(
-    """
-    Case-insensitive search in titles.
-    """
+    """Case-insensitive search in titles."""
     search: String
     genre: Genre
     sort: BookSort = title
     limit: Int = 20
     offset: Int = 0
   ): BookPage!
-  """
-  One book.
-  """
+
+  """One book."""
   book(
-    """
-    The id of the book.
-    """
+    """The id of the book."""
     id: ID!
   ): Book
 }
 
 type Subscription {
-  """
-  Books added from now on, optionally of one genre.
-  """
+  """Books added from now on, optionally of one genre."""
   bookAdded(genre: Genre): Book!
 }
 ```

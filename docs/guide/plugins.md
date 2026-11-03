@@ -239,13 +239,13 @@ Paths are relative to the HTTP `prefix`; `meta` carries the route decisions guar
 `app.hooks` (also `ctx.hooks`) is a small, typed event bus that lets plugins observe and wrap what
 other plugins do, without depending on each other. Feature packages emit:
 
-| Hook                | Event                   | Emitted by                                            |
-| ------------------- | ----------------------- | ----------------------------------------------------- |
-| `http:request`      | `HttpRequestEvent`      | `@znight/http`                                        |
-| `messaging:message` | `MessageDeliveryEvent`  | `@znight/messaging`                                   |
-| `messaging:publish` | `MessagePublishEvent`   | `@znight/messaging`                                   |
-| `schedule:run`      | `ScheduledRunEvent`     | `@znight/schedule`                                    |
-| `graphql:operation` | `GraphQLOperationEvent` | `@znight/graphql` (planned for [v0.2](/roadmap#v0-2)) |
+| Hook                | Event                   | Emitted by                             |
+| ------------------- | ----------------------- | -------------------------------------- |
+| `http:request`      | `HttpRequestEvent`      | `@znight/http`                         |
+| `messaging:message` | `MessageDeliveryEvent`  | `@znight/messaging`                    |
+| `messaging:publish` | `MessagePublishEvent`   | `@znight/messaging`                    |
+| `schedule:run`      | `ScheduledRunEvent`     | `@znight/schedule`                     |
+| `graphql:operation` | `GraphQLOperationEvent` | [`@znight/graphql`](/packages/graphql) |
 
 ### Observe: `on`
 
@@ -343,8 +343,9 @@ including those that did not run (`skipped` by the overlap policy, `not-acquired
 instance holds the lock). A `schedule:run` wrapper that does not call `next()` vetoes the run
 (outcome `skipped`): a feature flag or a maintenance window.
 
-`graphql:operation` is declared for `@znight/graphql` ([RFC 0005](../../rfcs/0005-graphql.md),
-planned for v0.2): one event per operation, and one for the whole life of a subscription.
+`graphql:operation` is produced by [`@znight/graphql`](/packages/graphql): one event per operation,
+and one for the whole life of a subscription; the event is built only when the hook has wrappers or
+listeners.
 
 ### Declaring your own hooks
 

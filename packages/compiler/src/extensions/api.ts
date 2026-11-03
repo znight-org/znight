@@ -500,8 +500,9 @@ export interface NamedShape {
   /**
    * The literals of an alias of a union of literal types (`type Sort = 'title' | 'newest'`), in
    * source order and de-duplicated, while {@link shape} is a normalised (sorted) union. Set when
-   * every member of the union is written as a literal type (parenthesised unions of them included)
-   * and the union keeps them all (`true | false` is `boolean`: not set); `undefined` otherwise.
+   * every member of the union is written as a literal type (parenthesised unions of them included),
+   * `null` and `undefined` members aside (skipped: `'a' | 'b' | null` gives `['a', 'b']`), and the
+   * union keeps them all (`true | false` is `boolean`: not set); `undefined` otherwise.
    */
   readonly literals?: readonly (string | number | boolean)[]
 }

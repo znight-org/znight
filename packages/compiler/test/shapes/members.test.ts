@@ -138,7 +138,7 @@ export enum Merged {
 export type Sort = 'title' | 'newest' | ('author' | 'newest')
 export type Numbers = 3 | 1 | -2
 export type One = 'only'
-export type MaybeSort = 'a' | null
+export type MaybeSort = 'zeta' | null | 'alpha' | undefined
 export type Wide = 'a' | string
 export type Flag = true | false
 export type Ref = Sort | 'other'
@@ -401,8 +401,9 @@ describe('TypeHelpers.shape() with members', () => {
     expect(sort.literals).toEqual(['title', 'newest', 'author'])
     expect(namedOf(shapeOf('numbers'), 'src/model.ts#Numbers').literals).toEqual([3, 1, -2])
     expect(namedOf(shapeOf('one'), 'src/model.ts#One').literals).toEqual(['only'])
+    // null and undefined members are skipped
+    expect(namedOf(shapeOf('maybe'), 'src/model.ts#MaybeSort').literals).toEqual(['zeta', 'alpha'])
     // not a union of literals only
-    expect(namedOf(shapeOf('maybe'), 'src/model.ts#MaybeSort').literals).toBeUndefined()
     expect(namedOf(shapeOf('wide'), 'src/model.ts#Wide').literals).toBeUndefined()
     expect(namedOf(shapeOf('flag'), 'src/model.ts#Flag').literals).toBeUndefined()
     expect(namedOf(shapeOf('ref'), 'src/model.ts#Ref').literals).toBeUndefined()

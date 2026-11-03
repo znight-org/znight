@@ -326,6 +326,7 @@ amqplib, prom-client...) are optional peer dependencies loaded from subpath expo
 | [`@znight/observability`](./packages/observability) | Pino logging, Prometheus metrics, OpenTelemetry tracing                              | dependency    |
 | [`@znight/openapi`](./packages/openapi)             | OpenAPI 3.1 document built at compile time, served with Scalar or Swagger UI         | dependency    |
 | [`@znight/schedule`](./packages/schedule)           | Cron, interval and timeout jobs checked at build time, locks across instances        | dependency    |
+| [`@znight/graphql`](./packages/graphql)             | Code-first GraphQL: schema derived from TypeScript types at build time, SSE, loaders | dependency    |
 | [`@znight/testing`](./packages/testing)             | `TestBed` with auto-mocks, `TestApp` for in-memory end-to-end tests                  | devDependency |
 | [`@znight/cli`](./packages/cli)                     | `znight new`, generators, `generate`, `dev`, `build`, `start`, `openapi`             | devDependency |
 
@@ -411,12 +412,13 @@ with `bun run docs:dev`.
 
 ## Roadmap
 
-Planned for `0.2`, with their design documents in [`rfcs/`](./rfcs/README.md) (details on the
+`0.2`, with the design documents in [`rfcs/`](./rfcs/README.md) (details on the
 [roadmap page](./docs/roadmap.md)):
 
-- **WebSocket** gateways served by the HTTP plugin ([RFC 0003](./rfcs/0003-websocket.md)).
 - **GraphQL**, code-first, with the schema derived from TypeScript types at build time
-  ([RFC 0005](./rfcs/0005-graphql.md)).
+  ([RFC 0005](./rfcs/0005-graphql.md)): implemented in [`@znight/graphql`](./packages/graphql),
+  see the [GraphQL guide](./docs/guide/graphql.md).
+- **WebSocket** gateways served by the HTTP plugin ([RFC 0003](./rfcs/0003-websocket.md)).
 
 Also planned, without a date yet: a dedicated **cache** package. Today, caching is a method
 interceptor: see the [recipe](./docs/guide/aop.md#cache).
