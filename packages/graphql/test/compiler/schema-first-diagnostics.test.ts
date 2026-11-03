@@ -368,3 +368,30 @@ describe('ZNIGHT068: coverage', () => {
     ])
   })
 })
+
+describe('cascades', () => {
+  it('a resolver method with an analysis error does not also leave its field without resolver', async () => {
+    expect(
+      await diagnostics({
+        'src/schema.graphql': `${SDL}extend type Book {\n  author: String\n}\n`,
+        'src/book.resolver.ts': resolver(`  @Query()
+  book(id: string): Book | null {
+    return null
+  }`),
+        'src/fields.resolver.ts': resolver(
+          `  @ResolveField()
+  author(@Parent() book: Book, extra: string): string {
+    return book.authorId + extra
+  }`,
+          "'Book'",
+          'BookFields',
+        ),
+      }),
+    ).toEqual([
+      `error ZNIGHT005 src/book.resolver.ts:7:8 Parameter 'id' of BookResolver.book has no @Args(), @Parent(), @Ctx(), @Info() or @Loader() decorator
+  = Every resolver parameter is filled by GraphQL: @Args(name?, schema?) for arguments, @Parent() for the parent object, @Ctx() for the GraphQLContext, @Info() for the GraphQLResolveInfo, @Loader() for a DataLoader`,
+      `error ZNIGHT005 src/fields.resolver.ts:7:32 Parameter 'extra' of BookFields.author has no @Args(), @Parent(), @Ctx(), @Info() or @Loader() decorator
+  = Every resolver parameter is filled by GraphQL: @Args(name?, schema?) for arguments, @Parent() for the parent object, @Ctx() for the GraphQLContext, @Info() for the GraphQLResolveInfo, @Loader() for a DataLoader`,
+    ])
+  })
+})

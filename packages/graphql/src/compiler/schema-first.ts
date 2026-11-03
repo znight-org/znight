@@ -96,8 +96,7 @@ class SchemaFirstBuilder {
       .sort((a, b) => compareStrings(a.name, b.name))
     this.#checkUnsupported(sdl, types)
     const scalars = this.#scalars(sdl, types, scalarDeclarations)
-    const bindings = this.#bind(sdl, resolvers)
-    const bound = new Set(bindings.map(binding => `${binding.type.name}.${binding.sdlField.name}`))
+    const { bindings, claimed: bound } = this.#bind(sdl, resolvers)
     const conformance = checkConformance({
       ctx: this.#ctx,
       schema,
@@ -227,14 +226,21 @@ class SchemaFirstBuilder {
 
   // ------------------------------------------------------------------------------------- binding
 
-  /** Binds every resolver method to its SDL field (coverage, RFC 0007 §5.3). */
-  #bind(sdl: SdlSource, resolvers: readonly ResolverData[]): Binding[] {
+  /**
+   * Binds every resolver method to its SDL field (coverage, RFC 0007 §5.3). `claimed`: the
+   * coordinates a resolver method names, bound or not (a method with an analysis error already
+   * reported), so that their fields are never also reported as missing a resolver.
+   */
+  #bind(sdl: SdlSource, resolvers: readonly ResolverData[]): { bindings: Binding[]; claimed: Set<string> } {
     const schema = sdl.schema
     const bindings: Binding[] = []
+    const claimed = new Set<string>()
     const byCoordinate = new Map<string, Binding>()
     for (const resolver of resolvers) {
       const target = this.#resolverType(sdl, resolver)
       for (const field of resolver.fields) {
+        const owner = field.operation === 'field' ? resolver.typeName?.name : rootType(schema, field.operation)?.name
+        if (owner !== undefined) claimed.add(`${owner}.${field.name}`)
         if (!field.complete) continue
         const method = this.#method(resolver, field)
         if (method === undefined) continue
@@ -281,13 +287,13 @@ class SchemaFirstBuilder {
       const root = rootType(schema, operation)
       if (root === undefined) continue
       for (const field of Object.values(root.getFields())) {
-        if (byCoordinate.has(`${root.name}.${field.name}`)) continue
+        if (claimed.has(`${root.name}.${field.name}`)) continue
         this.#mismatch(sdl.locate(field.astNode), `Root field ${root.name}.${field.name} has no resolver`, [
           `Add a method to a @Resolver() class: ${DECORATORS[operation]}() ${field.name}(...) (or ${DECORATORS[operation]}('${field.name}') on another method)`,
         ])
       }
     }
-    return bindings
+    return { bindings, claimed }
   }
 
   /** The object type of `@Resolver('Type')`, reported when it is not one. */

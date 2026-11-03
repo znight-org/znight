@@ -156,7 +156,7 @@ describe('repository boundaries (architecture §2)', () => {
     },
   )
 
-  it('@znight/graphql/compiler never loads graphql-js, dataloader nor the HTTP runtime (RFC 0005 §8.1)', () => {
+  it('@znight/graphql/compiler never imports graphql-js, dataloader nor the HTTP runtime (RFC 0005 §8.1)', () => {
     const graphql = compilerEntries.find(({ pkg }) => pkg.manifest.name === '@znight/graphql')
     expect(graphql).toBeDefined()
     const { bare } = closure(graphql?.file ?? '')
@@ -168,6 +168,21 @@ describe('repository boundaries (architecture §2)', () => {
         (specifier.startsWith('@znight/http') && specifier !== '@znight/http/compiler'),
     )
     expect(forbidden.map(({ specifier, chain }) => `${specifier} (${show(chain)})`)).toEqual([])
+  })
+
+  it('@znight/graphql/compiler loads lazily only the build-time modules of graphql-js (RFC 0007 §7)', () => {
+    const graphql = compilerEntries.find(({ pkg }) => pkg.manifest.name === '@znight/graphql')
+    const required = closure(graphql?.file ?? '').files.flatMap(({ file, chain }) =>
+      [...readFileSync(file, 'utf8').matchAll(/\bload\(\s*'([^']+)'\s*\)|\brequire\(\s*'([^']+)'\s*\)/g)].map(
+        match => `${match[1] ?? match[2]} (${show(chain)})`,
+      ),
+    )
+    // the language, the type system and the utilities: never the executor (graphql, graphql/execution)
+    expect(required.map(entry => entry.slice(0, entry.indexOf(' ')))).toEqual([
+      'graphql/language',
+      'graphql/type',
+      'graphql/utilities',
+    ])
   })
 
   it.each(runtimeEntries.map(({ pkg, subpath, file }) => [`${pkg.manifest.name} ${subpath}`, pkg, file] as const))(
