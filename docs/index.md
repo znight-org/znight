@@ -213,7 +213,7 @@ services testable with mocks. Use the library that fits your data: for SQL, we r
 
 ## Learn from complete applications
 
-The repository ships seven production-shaped [example applications](/examples), each with unit,
+The repository ships eight production-shaped [example applications](/examples), each with unit,
 application and end-to-end tests on Node.js and Bun:
 
 - [**rest-api**](/examples#rest-api): the reference HTTP service, Drizzle on PostgreSQL, API keys,
@@ -224,6 +224,8 @@ application and end-to-end tests on Node.js and Bun:
   typed client;
 - [**uptime-monitor**](/examples#uptime-monitor): scheduled and dynamic jobs, one runner across
   instances, live results over Server-Sent Events;
+- [**graphql-api**](/examples#graphql-api): a GraphQL schema derived from the types, loaders against
+  N+1 queries, subscriptions over SSE and per-field access decisions;
 - [**microservice**](/examples#microservice), [**worker**](/examples#worker) and
   [**monorepo**](/examples#monorepo): messaging, retries and dead letters, background workers,
   provider libraries shared between services.

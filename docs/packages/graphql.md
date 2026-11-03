@@ -28,7 +28,7 @@ npm install @znight/graphql graphql
 
 `@znight/http` and `graphql` 17 are required peers. The full reference is the
 [package README](../../packages/graphql/README.md); the [GraphQL guide](/guide/graphql) walks
-through a complete API.
+through a complete API, and the [`graphql-api` example](/examples#graphql-api) runs it.
 
 ## Quick start
 

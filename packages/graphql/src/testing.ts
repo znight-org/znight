@@ -130,8 +130,10 @@ export async function executeOperation<TData = Record<string, unknown>>(
 /**
  * Starts an operation as a stream: GraphQL over SSE in memory (`app.injectStream()`: `POST` with
  * `accept: text/event-stream`), or `GraphQLPlugin.subscribe()` without HTTP transport (no HTTP
- * guards then). Resolves once the subscription is started: events published from then on are
- * received.
+ * guards then). Resolves once the subscription is established: its source has started (a resolver
+ * written as an async generator has subscribed to the PubSub, when it subscribes before its first
+ * `await`), so events published from then on
+ * are received, even before the first `next()`.
  *
  * ```ts
  * await using events = await subscribeOperation(app, { query: 'subscription { bookAdded { title } }' })

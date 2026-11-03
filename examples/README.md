@@ -1,6 +1,6 @@
 # Examples
 
-Seven applications built with Znight, production-shaped rather than minimal: configuration validated
+Eight applications built with Znight, production-shaped rather than minimal: configuration validated
 at boot, structured logs, graceful shutdown, and tests at every level, including end-to-end tests of
 the production build on Node.js **and** Bun. Several guides are written from them: their code
 samples are files of these examples.
@@ -11,6 +11,7 @@ samples are files of these examples.
 | [`secure-api`](./secure-api)         | Security end to end, the source of the security guide: JWT, API keys, cookie sessions, CSRF, rate limiting, webhooks    | `node:http`, `jose`         |
 | [`storefront-api`](./storefront-api) | An OpenAPI 3.1 document generated from the code, committed, served with Scalar and checked; a typed client              | Hono, Zod, Valibot          |
 | [`uptime-monitor`](./uptime-monitor) | Scheduled and dynamic jobs, one runner across instances, live results over Server-Sent Events, tests on a virtual clock | Hono, PGlite                |
+| [`graphql-api`](./graphql-api)       | A GraphQL schema derived from the types and committed, loaders, subscriptions over SSE, access decisions per field      | Hono, graphql-js, Zod       |
 | [`microservice`](./microservice)     | HTTP and messaging in one service: retries, dead letters, tracing from the request to the consumer                      | Hono, RabbitMQ or in memory |
 | [`worker`](./worker)                 | Message consumers without HTTP: a request scope per message, an async factory, draining on shutdown                     | RabbitMQ or in memory       |
 | [`monorepo`](./monorepo)             | Two services sharing a provider library, one of them overriding its providers; the compiled-library flow                | Express, messaging          |

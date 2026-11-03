@@ -9,6 +9,17 @@ time**. This guide builds a small book catalog step by step. The [package page](
 summarises the API, and the [package README](../../packages/graphql/README.md) is the complete
 reference.
 
+::: info The graphql-api example
+The catalog of this guide is a complete application:
+[`examples/graphql-api`](https://github.com/znight-org/znight/tree/main/examples/graphql-api), running
+on Node.js 24 and Bun (Hono). Its [resolvers](../../examples/graphql-api/src/catalog/book.resolver.ts),
+[loaders](../../examples/graphql-api/src/catalog/authors-by-id.loader.ts),
+[access guard](../../examples/graphql-api/src/auth/access.guard.ts) and committed
+[`schema.graphql`](../../examples/graphql-api/schema.graphql) are the full versions of the snippets
+below, and its tests cover each section: batching, the access matrix of every root field,
+subscriptions, GraphQL over HTTP and the build-time diagnostics.
+:::
+
 ## Set up {#setup}
 
 ```sh
@@ -315,6 +326,9 @@ curl -N -H 'accept: text/event-stream' -H 'content-type: application/json' \
 
 - Always pass `ctx.signal` to `subscribe()`: it aborts when the client leaves, when the application
   shuts down and after `subscriptions.maxDuration`.
+- The generator starts with the subscription: it has subscribed to the PubSub by the time the client
+  is connected, so an event published right after reaches it, provided it calls `subscribe()` before
+  its first `await` (subscribe first, then await anything else).
 - The default `MemoryPubSub` buffers 100 events per subscriber (`subscriptions.bufferSize`). A
   subscriber that falls behind ends with a `SUBSCRIPTION_OVERFLOW` error instead of growing memory.
 - With several instances, events published on one must reach subscribers on all: give the `pubsub`
@@ -517,8 +531,10 @@ test('bookAdded streams new books', async () => {
 
 `executeOperation()` sends a `POST` through `app.inject()`: HTTP guards, hooks and the adapter run
 as in production, and the response carries `status`, `headers`, `data` and `errors`.
-`subscribeOperation()` streams over SSE in memory; its `next()` times out after 2 s, so a missing
-event fails the test instead of hanging it.
+`subscribeOperation()` streams over SSE in memory and resolves once the subscription is
+established (the resolver's generator has subscribed, when it subscribes before its first `await`),
+so the mutation can publish right away; its
+`next()` times out after 2 s, so a missing event fails the test instead of hanging it.
 
 ## Review the schema in pull requests {#sdl}
 
@@ -535,6 +551,17 @@ The compiler writes `schema.graphql` next to the generated module, exactly as gr
 print it. Commit it: a change to a TypeScript type now shows as a schema diff in the pull request,
 and `znight generate --check` in CI fails when the committed file is stale. Client code generators
 (GraphQL Code Generator, gql.tada) can read it without starting the server.
+
+The committed file is compared byte for byte with the compiler's output, so keep formatters away
+from it. With Biome, exclude it in `biome.jsonc` (the repository does so for `examples/graphql-api`):
+
+```jsonc [biome.jsonc]
+{
+  "files": {
+    "includes": ["**", "!schema.graphql"]
+  }
+}
+```
 
 ## Go to production {#production}
 
@@ -554,8 +581,10 @@ Raise `limits` only for the operations that need it, and prefer pagination argum
 sending the same queries pays parsing and validation once.
 
 The `graphql:operation` hook observes every operation (type, name, outcome, error codes), for logs
-and metrics of your own; the endpoint itself is observed like any HTTP route by
-`@znight/observability`.
+and metrics of your own. [`@znight/observability`](/packages/observability#graphql-operations)
+wraps it: a span per operation under the HTTP request span, `graphql_operations_total` and
+`graphql_operation_duration_seconds` by type and (capped) operation name, and opt-in operation logs
+(`logging: { graphql: true }`).
 
 ## Coming from `@nestjs/graphql` {#nestjs}
 

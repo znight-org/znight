@@ -46,7 +46,7 @@ And around them:
   and leaves the choice of the database library to you; [Drizzle](https://orm.drizzle.team) is the
   recommended choice for SQL. See [Data access](/guide/data-access).
 - **Caching** is a method interceptor today: the [cache recipe](/guide/aop#cache).
-- Seven [example applications](/examples), each with its tests, running on Node.js and Bun.
+- Eight [example applications](/examples), each with its tests, running on Node.js and Bun.
 
 ## v0.2: in progress {#v0-2}
 
@@ -111,8 +111,8 @@ These are tracked in the RFCs as follow-ups. None has a date.
 - **WebSocket follow-ups**: rooms shared across instances, a typed client generated from the
   metadata, an AsyncAPI document.
 - **GraphQL follow-ups**: GraphQL interfaces, `graphql-ws` subscriptions, `@defer` / `@stream`,
-  trusted documents checked at build time, query cost analysis, federation, per-operation spans and
-  metrics in `@znight/observability`, a `graphql-api` example application.
+  trusted documents checked at build time, query cost analysis, federation, resolver-level spans
+  in `@znight/observability`, a `graphql-api` example application.
 
 Interested in one of them? Say so in an issue or a discussion on
 [GitHub](https://github.com/znight-org/znight): real use cases are what moves an item up.

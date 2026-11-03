@@ -1,7 +1,8 @@
 /**
  * A small library schema served over HTTP, shared by the transport tests and by the fixture
  * scripts that run on Node.js and Bun: synchronous and asynchronous queries, a mutation that
- * publishes an event, and subscriptions (PubSub topic, finite generator, endless generator).
+ * publishes an event, and subscriptions (PubSub topic, the same topic through an async generator,
+ * finite generator, endless generator).
  */
 import type { ExternalDefinition, ZnightMetadata } from '@znight/core'
 import type { HttpAdapter, HttpPluginOptions } from '@znight/http'
@@ -83,6 +84,11 @@ export class Library {
     return this.#pubsub.subscribe('bookAdded', { signal: ctx.signal })
   }
 
+  /** `bookAdded` through an async generator: it subscribes to the PubSub on its first `next()` only. */
+  async *newBook(_args: unknown, _parent: unknown, ctx: GraphQLContext): AsyncGenerator<Book> {
+    for await (const book of this.#pubsub.subscribe('bookAdded', { signal: ctx.signal })) yield book
+  }
+
   async *countdown(args: { from: number }): AsyncGenerator<number> {
     try {
       for (let n = args.from; n > 0; n--) yield await Promise.resolve(n)
@@ -141,6 +147,7 @@ const types: GraphQLTypeDefinition[] = [
     name: 'Subscription',
     fields: [
       field('bookAdded', 'Book!', bind(Library, 'bookAdded', { operation: 'subscription' })),
+      field('newBook', 'Book!', bind(Library, 'newBook', { operation: 'subscription' })),
       field('countdown', 'Int!', bind(Library, 'countdown', { operation: 'subscription' }), {
         args: [{ name: 'from', type: 'Int!' }],
       }),

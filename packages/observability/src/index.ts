@@ -2,6 +2,18 @@ export type { Counter, Gauge, Histogram, LabelValues, PromClient, PromRegistry, 
 export type { LoggingOptions, MetricsOptions, ObservabilityOptions, TracingOptions } from './plugin/options.ts'
 
 export { Logged, Metric, Traced } from './decorators.ts'
+export {
+  ANONYMOUS_OPERATION,
+  DEFAULT_MAX_OPERATION_NAMES,
+  type GraphQLMetricsOptions,
+  type GraphQLOperationLogOptions,
+  type GraphQLTracingOptions,
+  logGraphQLOperations,
+  measureGraphQLOperations,
+  OTHER_OPERATION_NAME,
+  traceGraphQLOperations,
+  UNKNOWN_OPERATION_TYPE,
+} from './graphql/operations.ts'
 export { LoggedInterceptor, type LoggedOptions } from './interceptors/logged.ts'
 export {
   MetricInterceptor,

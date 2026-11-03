@@ -1,3 +1,4 @@
+import type { GraphQLMetricsOptions, GraphQLOperationLogOptions, GraphQLTracingOptions } from '../graphql/operations.ts'
 import type { LoggerOptions } from '../logging/logger.ts'
 import type { HttpRequestLogOptions, MessageLogOptions } from '../logging/requests.ts'
 import type { HttpMetricsOptions, MessagingMetricsOptions } from '../metrics/hooks.ts'
@@ -15,6 +16,8 @@ export interface LoggingOptions extends Omit<LoggerOptions, 'scope'> {
   readonly messages?: boolean | MessageLogOptions
   /** One entry per scheduled run (`schedule:run` hook of `@znight/schedule`). Default: `true`. */
   readonly jobs?: boolean | JobLogOptions
+  /** One entry per GraphQL operation (`graphql:operation` hook of `@znight/graphql`). Default: `false`. */
+  readonly graphql?: boolean | GraphQLOperationLogOptions
   /**
    * Route the framework's own logs (core, plugins) through the logger, with `component: 'znight'`
    * (`app.setLogger()`). Default: `true`.
@@ -32,6 +35,8 @@ export interface MetricsOptions extends MetricsRegistryOptions {
   readonly messaging?: boolean | MessagingMetricsOptions
   /** Scheduled job metrics (`schedule:run` hook of `@znight/schedule`). Default: `true`. */
   readonly schedule?: boolean | ScheduleMetricsOptions
+  /** GraphQL operation metrics (`graphql:operation` hook of `@znight/graphql`). Default: `true`. */
+  readonly graphql?: boolean | GraphQLMetricsOptions
 }
 
 /** `tracing` options of `ObservabilityPlugin.configure()`. */
@@ -50,6 +55,11 @@ export interface TracingOptions extends TracerOptions {
    * new trace except for manual runs. Default: `true`.
    */
   readonly schedule?: boolean | ScheduleTracingOptions
+  /**
+   * An `INTERNAL` span per GraphQL operation, child of the HTTP request span (`graphql:operation`
+   * hook of `@znight/graphql`). Default: `true`.
+   */
+  readonly graphql?: boolean | GraphQLTracingOptions
 }
 
 /** Options of `ObservabilityPlugin.configure()`. */
@@ -63,9 +73,9 @@ export interface ObservabilityOptions {
    */
   readonly metrics?: boolean | MetricsOptions
   /**
-   * Automatic spans for HTTP requests and message deliveries. `false` disables them (the injectable
-   * `Tracer` and `@Traced()` keep working). Spans are recorded by whatever OpenTelemetry SDK the
-   * application registers. Default: `true`.
+   * Automatic spans for HTTP requests, messages, scheduled runs and GraphQL operations. `false`
+   * disables them (the injectable `Tracer` and `@Traced()` keep working). Spans are recorded by
+   * whatever OpenTelemetry SDK the application registers. Default: `true`.
    */
   readonly tracing?: boolean | TracingOptions
 }

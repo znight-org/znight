@@ -63,6 +63,7 @@ export class OperationContext implements GraphQLContext {
   #requestId: string | undefined
   #http: HttpContext | null | undefined
   #signal: AbortSignal | undefined
+  #ended: AbortSignal | undefined
   #state: Map<string | symbol, unknown> | undefined
   #loaders: Map<Token, BatchLoader<unknown, unknown>> | undefined
 
@@ -121,9 +122,23 @@ export class OperationContext implements GraphQLContext {
   }
 
   get signal(): AbortSignal {
-    // HttpContext.signal is created on first read: only read it when someone asks
-    this.#signal ??= this.#options.signal ?? this.http?.signal ?? this.#runtime.signal
-    return this.#signal
+    let signal = this.#signal
+    if (signal === undefined) {
+      // HttpContext.signal is created on first read: only read it when someone asks
+      const base = this.#options.signal ?? this.http?.signal ?? this.#runtime.signal
+      const ended = this.#ended
+      signal = ended === undefined ? base : AbortSignal.any([base, ended])
+      this.#signal = signal
+    }
+    return signal
+  }
+
+  /**
+   * Ties {@link signal} to the end of a subscription: it also aborts when `ended` does (the stream
+   * ended by itself or with `return()`). Called before any resolver runs.
+   */
+  endsWith(ended: AbortSignal): void {
+    this.#ended = ended
   }
 
   get state(): Map<string | symbol, unknown> {

@@ -1,6 +1,6 @@
 /**
  * OpenTelemetry semantic convention attribute names used by the instrumentation (stable HTTP
- * conventions, messaging and code conventions). Declared here to avoid a runtime dependency on
+ * conventions, messaging, GraphQL and code conventions). Declared here to avoid a runtime dependency on
  * `@opentelemetry/semantic-conventions`.
  */
 export const SemanticAttributes = {
@@ -21,6 +21,9 @@ export const SemanticAttributes = {
   MESSAGING_DESTINATION_NAME: 'messaging.destination.name',
   MESSAGING_MESSAGE_ID: 'messaging.message.id',
   CODE_FUNCTION_NAME: 'code.function.name',
+  GRAPHQL_OPERATION_TYPE: 'graphql.operation.type',
+  GRAPHQL_OPERATION_NAME: 'graphql.operation.name',
+  GRAPHQL_DOCUMENT: 'graphql.document',
   /** Znight specific: request id of the HTTP request. */
   ZNIGHT_REQUEST_ID: 'znight.request.id',
   /** Znight specific: consumer class and handler method of a message. */
@@ -38,4 +41,9 @@ export const SemanticAttributes = {
   ZNIGHT_SCHEDULE_SCHEDULED_AT: 'znight.schedule.scheduled_at',
   ZNIGHT_SCHEDULE_OUTCOME: 'znight.schedule.outcome',
   ZNIGHT_SCHEDULE_ABORTED: 'znight.schedule.aborted',
+  /** Znight specific: GraphQL operations (`@znight/graphql`). */
+  ZNIGHT_GRAPHQL_TRANSPORT: 'znight.graphql.transport',
+  ZNIGHT_GRAPHQL_DOCUMENT_ID: 'znight.graphql.document_id',
+  ZNIGHT_GRAPHQL_OUTCOME: 'znight.graphql.outcome',
+  ZNIGHT_GRAPHQL_ERROR_CODES: 'znight.graphql.error_codes',
 } as const

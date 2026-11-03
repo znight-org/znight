@@ -107,6 +107,7 @@ export interface GraphQLContext {
   /**
    * Over HTTP, the request's `ctx.signal` (RFC 0006): client gone, SSE stream closed on shutdown or
    * `maxDuration`. Passed to graphql-js as `abortSignal`. Direct executions get the plugin's own.
+   * A subscription's also aborts when its stream ends (the source ended, or `return()`).
    */
   readonly signal: AbortSignal
   /** Per-operation storage. */

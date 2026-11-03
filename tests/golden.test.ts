@@ -24,7 +24,7 @@ const TIMEOUT = 180_000
 
 /** Example applications: the standalone examples and every service of the monorepo example. */
 function exampleRoots(): string[] {
-  const roots = ['examples/rest-api', 'examples/microservice', 'examples/worker']
+  const roots = ['examples/rest-api', 'examples/microservice', 'examples/worker', 'examples/graphql-api']
   const services = join(REPO, 'examples/monorepo/services')
   if (existsSync(services)) {
     for (const name of readdirSync(services).sort()) roots.push(`examples/monorepo/services/${name}`)
@@ -93,7 +93,7 @@ function firstDifference(a: string, b: string): string | undefined {
 
 describe.skipIf(!enabled)('golden: generated modules with and without @znight/source (ZNIGHT_E2E=1)', () => {
   beforeAll(() => {
-    const missing = ['compiler', 'core', 'http', 'messaging', 'config'].filter(
+    const missing = ['compiler', 'core', 'http', 'messaging', 'config', 'graphql'].filter(
       name => !existsSync(join(REPO, 'packages', name, 'dist')),
     )
     if (missing.length > 0) {

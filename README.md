@@ -341,6 +341,7 @@ Runnable applications with their tests, in [`examples/`](./examples) (overview:
 | [`secure-api`](./examples/secure-api)                                         | Notes API: JWT, API keys, password sign-in with cookie sessions, policies, signed webhooks, CORS, CSRF      |
 | [`storefront-api`](./examples/storefront-api)                                 | Shop on Hono: OpenAPI document generated from the code, committed, checked in CI, with a typed client       |
 | [`uptime-monitor`](./examples/uptime-monitor)                                 | Scheduled probes and digests with time zones, a Postgres lock store, a live status page over SSE            |
+| [`graphql-api`](./examples/graphql-api)                                       | Book catalog over GraphQL on Hono: schema from the types, loaders, SSE subscriptions, per-field access      |
 | [`microservice`](./examples/microservice)                                     | Orders service: Hono API publishing events, a consumer with retries and dead letters, logs, metrics, traces |
 | [`worker`](./examples/worker)                                                 | Background worker without HTTP: two queues, typed payloads, retries, a draining shutdown                    |
 | [`monorepo`](./examples/monorepo)                                             | Two services sharing providers through a library package of the monorepo                                    |

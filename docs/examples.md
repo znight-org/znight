@@ -1,10 +1,10 @@
 ---
-description: The example applications of the Znight repository - a REST API with Drizzle, a secured API, an OpenAPI storefront, an uptime monitor with scheduled jobs, an event-driven microservice, a worker and a monorepo - what each one shows and how to run it.
+description: The example applications of the Znight repository - a REST API with Drizzle, a secured API, an OpenAPI storefront, an uptime monitor with scheduled jobs, a GraphQL API, an event-driven microservice, a worker and a monorepo - what each one shows and how to run it.
 ---
 
 # Examples
 
-The repository ships seven example applications in
+The repository ships eight example applications in
 [`examples/`](https://github.com/znight-org/znight/tree/main/examples) (the monorepo one holds two
 services and a shared library). They are production-shaped rather than minimal: configuration
 validated at boot, structured logs, graceful shutdown, and tests at every level, including
@@ -17,6 +17,7 @@ them: their code samples are files of the examples.
 | [`secure-api`](#secure-api)         | Security end to end: JWT, API keys, cookie sessions, CSRF, rate limiting, webhooks | `node:http`  |
 | [`storefront-api`](#storefront-api) | OpenAPI generated from the code, committed, served and checked; a typed client     | Hono         |
 | [`uptime-monitor`](#uptime-monitor) | Scheduled and dynamic jobs, one runner across instances, live results over SSE     | Hono         |
+| [`graphql-api`](#graphql-api)       | A GraphQL schema derived from the types, loaders, subscriptions, per-field access  | Hono         |
 | [`microservice`](#microservice)     | HTTP and messaging in one service, retries, dead letters, distributed tracing      | Hono         |
 | [`worker`](#worker)                 | Message consumers without HTTP, request scope per message, draining on shutdown    | —            |
 | [`monorepo`](#monorepo)             | Two services sharing a provider library, overriding its providers                  | Express      |
@@ -135,6 +136,33 @@ reference example of [`@znight/schedule`](/packages/schedule) and the tested sou
 Packages: [`@znight/http`](/packages/http) (`@znight/http/hono`), [`@znight/schedule`](/packages/schedule).
 Libraries: Hono, PGlite, Zod; Testcontainers for `bun run test:integration` (Docker).
 [Source on GitHub](https://github.com/znight-org/znight/tree/main/examples/uptime-monitor).
+
+## graphql-api
+
+**A book catalog over GraphQL**: books, authors and reviews, a REST health check next to the
+endpoint. It is the reference example of [`@znight/graphql`](/packages/graphql), the application
+of [RFC 0005](https://github.com/znight-org/znight/blob/main/rfcs/0005-graphql.md) §14 and the source
+of the [GraphQL guide](/guide/graphql)'s snippets.
+
+- The schema is derived from the TypeScript types at build time: a TypeScript enum and a
+  literal-union enum, `@default` arguments, a generic `Page<Book>`, a union told apart by `kind`, a
+  custom `EmailAddress` scalar, descriptions and deprecations from JSDoc, `@gqlHidden` properties.
+- `schema.graphql` is written by the compiler, committed and checked (`znight generate --check`); a
+  test proves the served schema is the file, byte for byte.
+- Arguments and inputs validated by Zod schemas of the same name (`BAD_USER_INPUT` with the issues),
+  domain errors mapped to `CONFLICT` and `NOT_FOUND`.
+- Loaders against N+1 queries (one repository call per execution, proven by a test), a
+  request-scoped resolver, subscriptions over Server-Sent Events fed by the injectable `PubSub`.
+- One access vocabulary for routes and fields: a required `access` group, an HTTP guard that
+  identifies the caller by API key, one guard deciding for routes and fields; the access matrix of
+  every root field is a committed snapshot.
+- Tests: `TestBed` and `fakeLoader`, operations through the whole HTTP pipeline, GraphQL-over-HTTP
+  behaviour (statuses, `GET`, CSRF, limits, introspection in production), build checks of
+  `ZNIGHT060` and `ZNIGHT064`, and the production build on Node.js and Bun.
+
+Packages: [`@znight/http`](/packages/http) (`@znight/http/hono`), [`@znight/graphql`](/packages/graphql).
+Libraries: graphql-js 17, Hono, Zod. With `bun run dev`, GraphiQL is on `http://localhost:3000/graphql`.
+[Source on GitHub](https://github.com/znight-org/znight/tree/main/examples/graphql-api).
 
 ## microservice
 
