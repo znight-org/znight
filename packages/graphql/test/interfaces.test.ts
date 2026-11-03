@@ -123,6 +123,28 @@ describe('interfaces', () => {
     expect(booted.plugin.schema.getType('Url')?.description).toBe('SDL')
   })
 
+  it('serves the description of the metadata only for a schema-first scalar (sdl: true)', async () => {
+    const described = scalar<string>('Url', {
+      description: 'From the definition.',
+      specifiedByURL: 'https://example.com',
+      serialize: value => String(value),
+      parseValue: value => String(value),
+    })
+    const withSdl = types.map(type =>
+      type.name === 'Url' ? { kind: 'scalar' as const, name: 'Url', scalar: described, sdl: true as const } : type,
+    )
+    await using booted = await boot(graphqlMetadata({ providers: [Library], types: withSdl }))
+    const url = booted.plugin.schema.getType('Url') as GraphQLScalarType
+    expect(url.description).toBeUndefined()
+    expect(url.specifiedByURL).toBeUndefined()
+    const native = new GraphQLScalarType({ name: 'Url', description: 'native', specifiedByURL: 'https://x' })
+    const nativeSdl = types.map(type =>
+      type.name === 'Url' ? { kind: 'scalar' as const, name: 'Url', scalar: native, sdl: true as const } : type,
+    )
+    await using other = await boot(graphqlMetadata({ providers: [Library], types: nativeSdl }))
+    expect((other.plugin.schema.getType('Url') as GraphQLScalarType).description).toBeUndefined()
+  })
+
   it('reports invalid interfaces at boot (ZNIGHT066)', () => {
     const problems = checkGraphQLSection({
       version: 1,
@@ -137,7 +159,7 @@ describe('interfaces', () => {
           fields: [field('id', 'ID!', bind(Library, 'node'))],
           discriminator: { by: 'property', property: 'kind', values: { a: 'Query' } },
         },
-        { kind: 'scalar', name: 'Url', scalar: Url, description: 1 },
+        { kind: 'scalar', name: 'Url', scalar: Url, description: 1, sdl: false },
       ],
     })
     expect(problems).toEqual([
@@ -147,6 +169,7 @@ describe('interfaces', () => {
       'Node.id: interface fields have no resolver (bind it on the object types)',
       'Node: the discriminator names "Query", not a member',
       'Url: description must be a string',
+      'Url: sdl must be true when present',
     ])
     expect(ErrorCode.InvalidGraphQLSetup).toBe('ZNIGHT066')
   })

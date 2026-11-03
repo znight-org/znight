@@ -284,6 +284,7 @@ export function checkGraphQLSection(section: unknown): string[] {
           if (type[key] !== undefined && typeof type[key] !== 'string')
             problems.push(`${name}: ${key} must be a string`)
         }
+        if (type['sdl'] !== undefined && type['sdl'] !== true) problems.push(`${name}: sdl must be true when present`)
         break
       default:
         problems.push(`${name}: unknown kind ${show(type['kind'])}`)
@@ -602,15 +603,21 @@ function createType(
       })
     default: {
       if ('builtin' in type) return builtinScalar(type.name) as GraphQLScalarType
+      // `sdl`: the entry's description and specifiedByURL replace the definition's, absent ones too
+      const sdl = type.sdl === true
       const overrides = {
-        ...(type.description === undefined ? {} : { description: type.description }),
-        ...(type.specifiedByURL === undefined ? {} : { specifiedByURL: type.specifiedByURL }),
+        ...(type.description === undefined && !sdl ? {} : { description: type.description }),
+        ...(type.specifiedByURL === undefined && !sdl ? {} : { specifiedByURL: type.specifiedByURL }),
       }
       const scalar = type.scalar
       if (scalar instanceof GraphQLScalarType) {
-        return type.description === undefined && type.specifiedByURL === undefined
-          ? scalar
-          : new GraphQLScalarType({ ...scalar.toConfig(), ...overrides })
+        if (Object.keys(overrides).length === 0) return scalar
+        const config = scalar.toConfig()
+        return new GraphQLScalarType({
+          ...config,
+          description: 'description' in overrides ? overrides.description : config.description,
+          specifiedByURL: 'specifiedByURL' in overrides ? overrides.specifiedByURL : config.specifiedByURL,
+        })
       }
       return definitionScalar(type.name, scalar as ScalarDefinition<unknown>, overrides)
     }

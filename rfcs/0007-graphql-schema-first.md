@@ -94,12 +94,12 @@ Non-goals:
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | D1  | Opt-in through the compiler extension options: `graphql.configure({ schema: string \| string[] })`, globs relative to the project root. Without `schema`, code-first as in RFC 0005                                                                                                             |
 | D2  | No mixing: with `schema`, TypeScript types never add anything to the schema (JSDoc, `@gqlName`, `@gqlHidden`, `@default` and the `number` option are ignored); TypeScript types are only checked against the SDL                                                                              |
-| D3  | The SDL is parsed, merged (`extend`) and validated by graphql-js (`graphql/language`, `graphql/type`, `graphql/utilities`, `graphql/validation`), loaded lazily and only in schema-first mode: build-time and runtime agree on what a valid schema is. The executor is never loaded at build time |
+| D3  | The SDL is parsed, merged (`extend`) and validated with graphql-js (`graphql/language`, `graphql/type`, `graphql/utilities`; the SDL rules graphql-js keeps internal are re-implemented), loaded lazily and only in schema-first mode: build-time and runtime agree on what a valid schema is. The executor is never loaded at build time |
 | D4  | Binding by name, as NestJS schema-first: root fields by `@Query/@Mutation/@Subscription(name?)` (default: the method name), type fields by `@Resolver('Type')` + `@ResolveField(name?)`. `@Parent()` is optional in schema-first                                                              |
 | D5  | Coverage (step 1) and type conformance (step 2) ship together, as errors. `any` and `unknown` opt out locally; a missing annotation is not checked                                                                                                                                            |
 | D6  | GraphQL interfaces are supported end to end (metadata, runtime, SDL printer), for schema-first only: code-first still maps no TypeScript type to an interface (RFC 0005 §15)                                                                                                                  |
 | D7  | Two new codes: ZNIGHT067 (the SDL itself) and ZNIGHT068 (the code does not match the SDL). Existing codes are reused where the meaning is the same (ZNIGHT005, 061, 062, 064, 065, 023)                                                                                                      |
-| D8  | Abstract types (unions, interfaces) resolve their members from `__typename` (what graphql-codegen and NestJS applications return), or with `instanceof` when every member the resolvers return is an exported class                                                                          |
+| D8  | Abstract types (unions, interfaces) resolve their members from `__typename` (what graphql-codegen and NestJS applications return), with `instanceof` first when the resolvers return exported classes for them                                                                               |
 
 ## 4. User-facing API
 
@@ -118,7 +118,8 @@ export default {
 - `schema`: a glob or a list of globs (`!` negations allowed), relative to the project root. Files
   are read in path order; `node_modules` is never matched. No file matching is ZNIGHT067.
 - The files are inputs of the compile (`watchFiles`): editing, creating or deleting a matching file
-  recompiles in `vite dev`, `bun --watch` and `znight generate --watch`.
+  recompiles in `vite dev` and `znight generate --watch` (the Bun preload picks a new file up at its
+  next start). The `sdl` artifact is never read back, even when the globs match it.
 - `sdl` keeps its meaning: the artifact is the schema the runtime serves, printed like code-first
   (types sorted by name), semantically equal to the source SDL without its custom directives.
 - `number` is ignored (the SDL says `Int` or `Float`).
@@ -178,8 +179,9 @@ types work too but are not needed: decorated classes are checked directly.
 
 `validate` reads the files (`ValidateContext.inputFiles(patterns)`), parses each with
 `graphql/language` `parse` (syntax errors: ZNIGHT067 at the error position), concatenates the
-documents, runs graphql-js SDL validation (`validateSDL`) then `buildASTSchema` and
-`validateSchema`: every GraphQL error is a ZNIGHT067 at the first AST node it names (unknown types,
+documents, checks it the way graphql-js SDL validation does (unique names, known types and
+directives, directive locations and arguments, valid extensions; graphql-js does not export these
+rules) then runs `buildASTSchema` and `validateSchema`: every GraphQL error is a ZNIGHT067 at the first AST node it names (unknown types,
 duplicate names, invalid extensions, wrong kinds, interface implementations, default values...).
 Then, in this order: unsupported constructs, scalars, resolver binding (coverage), conformance,
 model assembly. Errors stop before emission; the generated module is the error module.
@@ -205,7 +207,7 @@ model assembly. Errors stop before emission; the generated module is the error m
 | `@Resolver('X')`: no type `X`, or `X` is not an object type                                 | the `@Resolver` argument    |
 | `@ResolveField('x')`: the type has no field `x`                                             | the decorator               |
 | `@Args('x')`, or a property of an `@Args()` object type: no argument `x`                    | the decorator, the property |
-| An object field without resolver that the TypeScript type returned for its parent lacks     | the resolver return type    |
+| An object field without resolver that the TypeScript type returned for its parent lacks     | the SDL field               |
 
 Two methods bound to one field are ZNIGHT061, a `@Subscription` not returning an async iterable
 ZNIGHT062 (as code-first). The last row needs the TypeScript type of the parent: it is checked for
@@ -221,10 +223,12 @@ properties of the TypeScript types, each (SDL type, TypeScript declaration) pair
 
 - `T!` rejects a TypeScript type that includes `null`, `undefined` or an optional property; `T`
   accepts anything `T` accepts plus `null` and `undefined`.
-- `[T]` accepts arrays, `ReadonlyArray`, `Set`, `ReadonlySet` and `Iterable` of a conforming item.
+- `[T]` accepts arrays, tuples, `ReadonlyArray`, `Set`, `ReadonlySet` and `Iterable` of a
+  conforming item.
 - `String`: strings, string literals, string enums and branded strings (`string & { ... }`). `ID`:
   the same plus numbers. `Int`, `Float`: numbers, number literals, numeric enums, the `Int` and
-  `Float` aliases. `Boolean`: booleans. `DateTime`: `Date`. `BigInt`: `bigint`. `JSON`: `JSONValue`.
+  `Float` aliases. `Boolean`: booleans. `DateTime`: `Date`. `BigInt`: `bigint` or numbers. `JSON`:
+  anything.
   A custom scalar: the `T` of its `scalar<T>()` declaration.
 - An enum: a TypeScript enum, a union of literals or a literal whose values are SDL value names.
 - An object type: an interface, class, object alias or intersection; each SDL field without
@@ -232,15 +236,18 @@ properties of the TypeScript types, each (SDL type, TypeScript declaration) pair
 - A union or an interface: each member of the TypeScript union is matched to a possible type by
   its `__typename` literal, else by its declaration name; a member matching none is a mismatch,
   and a member that is neither an exported class nor declares `__typename` cannot be told apart at
-  runtime (ZNIGHT064, §6). A TypeScript type named like the abstract type itself (graphql-codegen's
+  runtime (ZNIGHT064, §6). An optional `__typename` (graphql-codegen's default) passes: the value
+  must still carry it at runtime. A TypeScript type named like the abstract type itself (graphql-codegen's
   interface types) is checked against the fields of the interface.
 
 **Input** (`@Args` parameters, input objects): the TypeScript type must accept every value
 graphql-js passes.
 
-- A nullable argument or input field may be absent or `null`: the TypeScript type must accept
-  `null`, or accept `undefined` (optional, `| undefined`, a parameter default), in which case the
-  runtime turns `null` into `undefined` (`nullAsUndefined`, as code-first).
+- A nullable argument or input field without default may be absent: the TypeScript type must
+  accept `undefined` (optional, `| undefined`, a parameter default); with a default it may still be
+  `null`: the type must accept `null` or `undefined`. When the types reading it accept `undefined`
+  but not `null`, the runtime turns `null` into `undefined` (`nullAsUndefined`, as code-first). A
+  nullable list item must accept `null` (items are never converted).
 - Scalars, enums and lists as in output, reversed: `String` needs `string` (a literal union is
   narrower), an enum needs every SDL value, `[T]` needs an array.
 - An input object: an object type; a property the input object does not declare is a mismatch (it
@@ -266,10 +273,12 @@ same `invoke` as code-first. The SDL artifact and `schemaHash` are printed from 
   fields have no `resolver` (graphql-js resolves the fields of the concrete object). The boot check
   (ZNIGHT066) and the SDL printer support them. Code-first never emits them, so its metadata,
   artifact and hashes are unchanged.
-- **Discriminators.** Unions and interfaces use the existing `typename` and `class` discriminators.
-  ZNIGHT064 (reused) reports a TypeScript member that cannot be told apart.
-- **Custom scalars.** `GraphQLCustomScalarDefinition` gains optional `description` and
-  `specifiedByURL`, which win over the definition's (the SDL is the truth).
+- **Discriminators.** Unions and interfaces use the existing `typename` and `class` discriminators
+  (`class` lists every exported class the resolvers return; its runtime falls back to `__typename`).
+  ZNIGHT064 (reused) reports a TypeScript member that is neither a class nor declares `__typename`.
+- **Custom scalars.** `GraphQLCustomScalarDefinition` gains optional `description`,
+  `specifiedByURL` and `sdl: true`: with `sdl`, they replace the definition's, absent ones included
+  (the SDL is the truth, and the served schema is the artifact).
 - Nothing else changes: same execution path, same costs.
 
 ## 7. Compiler changes
@@ -279,7 +288,7 @@ same `invoke` as code-first. The SDL artifact and `schemaHash` are printed from 
   `watchFiles`, and the watchers recompile when a file matching the patterns of the last compile is
   created or deleted (`isRelevantChange`).
 - The boundaries rule of RFC 0005 §8.1 is amended: `@znight/graphql/compiler` may load
-  `graphql/language`, `graphql/type`, `graphql/utilities` and `graphql/validation`, lazily (a
+  `graphql/language`, `graphql/type` and `graphql/utilities`, lazily (a
   `createRequire` call in schema-first mode), never the `graphql` root entry, `graphql/execution`
   nor dataloader. Code-first compiles never load graphql-js. `tests/boundaries.test.ts` enforces
   both.

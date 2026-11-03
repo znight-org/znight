@@ -248,6 +248,7 @@ A decorator is used where it is not allowed, or with arguments the compiler cann
 | Situation                                                                                            | Fix                                                                       |
 | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
 | Provider class not exported (or anonymous default export)                                            | `export class X`                                                          |
+| A type name in `@Resolver('Book')` in code-first mode                                                | Remove it, or switch to schema-first (`graphql.configure({ schema })`)    |
 | Static argument not evaluable: `@Controller(process.env.X)`                                          | Use a literal or `export const X = '...'`                                 |
 | Inline value argument not evaluable: `@Body(z.object({...}))`                                        | Extract it: `export const Schema = z.object({...})`, then `@Body(Schema)` |
 | `@Provides()` outside a `@Factory()` class                                                           | Move it to a `@Factory()` class                                           |
@@ -1227,6 +1228,7 @@ A resolver class or method is structured in a way GraphQL cannot serve.
 | Situation                                                                    | Message                                                                                                                     |
 | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | A `@ResolveField` without `@Parent()` parameter                              | `@ResolveField BookResolver.author has no @Parent() parameter`                                                              |
+| Schema-first: a `@ResolveField` in a `@Resolver()` without type name         | `@ResolveField R.title needs the type it resolves a field of: name it in @Resolver (schema-first)`                          |
 | Several `@Parent()` parameters, or `@Parent()` on a root field               | `R.twice has several @Parent() parameters`                                                                                  |
 | A `@Subscription` that does not return an async iterable                     | `@Subscription BookResolver.bookAdded must return an async iterable, not Book`                                              |
 | Resolvers, but no `@Query` in the application (GraphQL needs a query root)   | `The application has GraphQL resolvers but no @Query field: GraphQL requires a query root type`                             |
@@ -1346,8 +1348,9 @@ are not all exported`: the generated module imports them for `instanceof`.
 
 In [schema-first mode](/guide/graphql#schema-first), the members of a union or the
 implementations of an interface come from the SDL, and the compiler checks the TypeScript types
-the resolvers return for it: each one must declare `__typename` (graphql-codegen's types do), or
-every one must be an exported class.
+the resolvers return for it: each one must be an exported class (told apart with `instanceof`) or
+declare `__typename`. graphql-codegen declares it optional: that passes the check, but the returned
+objects must carry it at runtime.
 
 ```txt
 ✗ ZNIGHT064: Book cannot be told apart among the members of Result at runtime: it declares no __typename and is not an exported class
@@ -1438,17 +1441,18 @@ In [schema-first mode](/guide/graphql#schema-first) (`graphql.configure({ schema
 [RFC 0007](../../rfcs/0007-graphql-schema-first.md)), the `.graphql` files cannot be read, parsed
 or validated. Every problem is located in the `.graphql` file.
 
-| Situation                                                                                        | Severity |
-| ------------------------------------------------------------------------------------------------ | -------- |
-| No file matches the `schema` globs (relative to the project root)                                | error    |
-| A syntax error                                                                                   | error    |
-| A type defined twice, a field, enum value or argument declared twice (extensions included)       | error    |
-| An unknown type or directive (with a suggestion), an extension of a missing type                 | error    |
-| An error of graphql-js schema validation (interfaces not implemented, union members...)          | error    |
-| A scalar without `scalar<T>()` declaration of its name (other than `DateTime`, `BigInt`, `JSON`) | error    |
-| A `@oneOf` input object (not supported yet)                                                      | error    |
-| A custom directive (left out of the served schema)                                               | warning  |
-| A description or another `@specifiedBy` on the built-in `DateTime`, `BigInt` or `JSON`           | warning  |
+| Situation                                                                                                                             | Severity |
+| ------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| No file matches the `schema` globs (relative to the project root)                                                                     | error    |
+| A syntax error                                                                                                                        | error    |
+| A type defined twice, a field, enum value or argument declared twice (extensions included)                                            | error    |
+| An unknown type or directive (with a suggestion), an extension of a missing type                                                      | error    |
+| A directive where it does not apply, applied twice, with an unknown or a missing argument; two types for one operation in `schema {}` | error    |
+| An error of graphql-js schema validation (interfaces not implemented, union members...)                                               | error    |
+| A scalar without `scalar<T>()` declaration of its name (other than `DateTime`, `BigInt`, `JSON`)                                      | error    |
+| A `@oneOf` input object (not supported yet)                                                                                           | error    |
+| A custom directive (left out of the served schema)                                                                                    | warning  |
+| A description or another `@specifiedBy` on the built-in `DateTime`, `BigInt` or `JSON`                                                | warning  |
 
 ```graphql
 type Query {

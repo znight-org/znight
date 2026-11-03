@@ -90,6 +90,8 @@ interface Site {
   readonly sdl: Location | undefined
   /** An optional property (output: may be `undefined`). */
   readonly optional: boolean
+  /** The type of the field or argument, when `type` is the type of its list items. */
+  readonly list?: string
 }
 
 /** Options of an input position. */
@@ -100,6 +102,8 @@ interface InputPosition {
   readonly sdlDefault: boolean
   /** Coordinate whose `nullAsUndefined` this position votes for. */
   readonly vote?: string
+  /** A list item: never absent, and a `null` item stays `null` (no `nullAsUndefined`). */
+  readonly item?: true
 }
 
 /** A shape split into its non-nullish members. */
@@ -336,11 +340,18 @@ class Conformance {
     if (isNonNullType(inner)) {
       if (parts.hasNull || parts.hasUndefined || site.optional) {
         const what = parts.hasNull ? 'null' : 'undefined'
-        this.#mismatch(
-          site,
-          `${site.label} ${this.#describeParts(parts, site.optional)}, which may be ${what}, but ${site.coordinate} is ${String(type)} (non-null)`,
-          [`Return a value in every case, or make ${site.coordinate} nullable in the SDL (${String(inner.ofType)})`],
-        )
+        const described = `${site.label} ${this.#describeParts(parts, site.optional)}, which may be ${what}`
+        if (site.list === undefined) {
+          this.#mismatch(site, `${described}, but ${site.coordinate} is ${String(type)} (non-null)`, [
+            `Return a value in every case, or make ${site.coordinate} nullable in the SDL (${String(inner.ofType)})`,
+          ])
+        } else {
+          this.#mismatch(
+            site,
+            `${described}, but the items of ${site.coordinate} (${site.list}) are ${String(type)} (non-null)`,
+            [`Return non-null items, or make the items of ${site.coordinate} nullable in the SDL`],
+          )
+        }
       }
       inner = inner.ofType
     }
@@ -357,7 +368,12 @@ class Conformance {
           continue
         }
         for (const shape of item) {
-          this.#output(inner.ofType, shape, { ...site, label: `${site.label} a list of`, optional: false }, depth + 1)
+          this.#output(
+            inner.ofType,
+            shape,
+            { ...site, label: `${site.label} a list of`, optional: false, list: site.list ?? String(type) },
+            depth + 1,
+          )
         }
       }
       return
@@ -482,6 +498,12 @@ class Conformance {
       if (target === undefined && named !== undefined && names.includes(named.name)) target = named.name
       if (target === undefined || !names.includes(target)) {
         const what = named?.name ?? this.#describe(member)
+        if (names.length === 0) {
+          this.#mismatch(site, `${site.label} ${what}, but no object type implements ${type.name} in the SDL`, [
+            `Declare an implementation: type ${what} implements ${type.name} { ... }`,
+          ])
+          continue
+        }
         this.#mismatch(
           site,
           `${site.label} ${what}, which is not ${names.length === 1 ? 'the member' : 'a member'} of ${type.name} (${names.join(', ')})`,
@@ -531,8 +553,17 @@ class Conformance {
     if (isNonNullType(inner)) inner = inner.ofType
     else {
       const acceptsNull = parts.hasNull || parts.unchecked
-      const acceptsUndefined = parts.hasUndefined || position.optional || parts.unchecked
-      if (!position.sdlDefault && !acceptsUndefined) {
+      // a list item is never absent, and a null item is never turned into undefined
+      const acceptsUndefined = position.item !== true && (parts.hasUndefined || position.optional || parts.unchecked)
+      if (position.item === true) {
+        if (!acceptsNull) {
+          this.#mismatch(
+            site,
+            `${site.label} does not accept null, but the items of ${site.coordinate} (${site.list ?? String(type)}) may be null`,
+            [`Accept null items ((T | null)[]), or make the items non-null in the SDL (${String(type)}!)`],
+          )
+        }
+      } else if (!position.sdlDefault && !acceptsUndefined) {
         this.#mismatch(
           site,
           `${site.label} does not accept undefined, but ${site.coordinate} (${String(type)}) may be omitted`,
@@ -577,8 +608,8 @@ class Conformance {
           this.#input(
             inner.ofType,
             item,
-            { optional: false, sdlDefault: true },
-            { ...site, label: `${site.label} (items)` },
+            { optional: false, sdlDefault: true, item: true },
+            { ...site, label: `${site.label} (items)`, list: site.list ?? String(type) },
             depth + 1,
           )
         }
@@ -632,7 +663,8 @@ class Conformance {
       if (property.name === '__typename') continue
       const field = fields[property.name]
       const propertySite: Site = {
-        label: `${this.#tsName(shape) ?? 'the input type'}.${property.name}`,
+        label:
+          this.#tsName(shape) === undefined ? `property '${property.name}'` : `${this.#tsName(shape)}.${property.name}`,
         origin: site.origin,
         coordinate: `${type.name}.${property.name}`,
         locate: () => annotationLocation(this.#ctx.project, property.location) ?? site.locate(),
@@ -663,8 +695,11 @@ class Conformance {
   #scalarAccepts(name: string, shape: Shape, position: 'input' | 'output'): boolean {
     const custom = this.#config.scalars.get(name)
     if (custom !== undefined) return this.#hasReference(shape, custom.type)
-    // the type of another scalar<T>() declaration (a branded id for an ID): its representation is not known
-    if (shape.kind === 'reference' && this.#scalarTypes.has(shape.identity)) return true
+    // the type of another scalar<T>() declaration (a branded id for an ID or a String): its
+    // representation is not known, string-like scalars only
+    if ((name === 'String' || name === 'ID') && shape.kind === 'reference' && this.#scalarTypes.has(shape.identity)) {
+      return true
+    }
     const output = position === 'output'
     switch (name) {
       case 'String':
@@ -922,24 +957,22 @@ class Conformance {
   #discriminators(): ReadonlyMap<string, DiscriminatorModel> {
     const result = new Map<string, DiscriminatorModel>()
     for (const [name, byMember] of [...this.#members].sort(([a], [b]) => compareStrings(a, b))) {
+      // every exported class returned for a member: instanceof first, __typename as the fallback
       const classes: { identity: string; name: string; depth: number }[] = []
-      let allClasses = true
       for (const [member, identities] of byMember) {
-        const identity = identities.size === 1 ? [...identities][0] : ''
-        if (identity === undefined || identity === '') {
-          allClasses = false
-          break
+        for (const identity of identities) {
+          if (identity !== '') classes.push({ identity, name: member, depth: this.#classDepth(identity) })
         }
-        classes.push({ identity, name: member, depth: this.#classDepth(identity) })
       }
-      if (allClasses && classes.length > 0) {
+      if (classes.length > 0) {
         // subclasses first: `instanceof` matches the most derived class
-        classes.sort((a, b) => b.depth - a.depth || compareStrings(a.name, b.name))
+        classes.sort(
+          (a, b) => b.depth - a.depth || compareStrings(a.name, b.name) || compareStrings(a.identity, b.identity),
+        )
         result.set(name, {
           by: 'class',
           classes: classes.map(({ identity, name: member }) => ({ identity, name: member })),
         })
-        continue
       }
       for (const entry of this.#untellable.get(name) ?? []) {
         const location = entry.site.locate()

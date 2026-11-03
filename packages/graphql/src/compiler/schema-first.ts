@@ -58,9 +58,17 @@ const DECORATORS: Readonly<Record<FieldData['operation'], string>> = {
   field: '@ResolveField',
 }
 
-/** Builds the model from the SDL files matching `patterns`; `undefined` after an error. */
-export function buildSchemaFirstModel(ctx: Context, patterns: readonly string[]): GraphQLModel | undefined {
-  return new SchemaFirstBuilder(ctx).build(patterns)
+/**
+ * Builds the model from the SDL files matching `patterns`; `undefined` after an error. `artifact`:
+ * the path of the SDL artifact (option `sdl`), never read back as an input.
+ */
+export function buildSchemaFirstModel(
+  ctx: Context,
+  patterns: readonly string[],
+  artifact: string | false,
+): GraphQLModel | undefined {
+  // the artifact is the output: matched by the globs, it would define every type a second time
+  return new SchemaFirstBuilder(ctx).build(artifact === false ? patterns : [...patterns, `!${artifact}`])
 }
 
 class SchemaFirstBuilder {
@@ -74,7 +82,9 @@ class SchemaFirstBuilder {
 
   build(patterns: readonly string[]): GraphQLModel | undefined {
     const report = (diagnostic: Diagnostic): void => this.#report(diagnostic)
-    const resolvers = [...this.#ctx.stored].sort((a, b) => compareStrings(a.host.identity, b.host.identity))
+    const stored = [...this.#ctx.stored].sort((a, b) => compareStrings(a.host.identity, b.host.identity))
+    const resolvers = stored.filter(resolver => resolver.invalid !== true)
+    const rejected = stored.filter(resolver => resolver.invalid === true)
     checkLoaders(this.#ctx, resolvers, report)
     const scalarDeclarations = readScalars(this.#ctx, report)
     const sdl = loadSdl(this.#ctx, patterns, report)
@@ -96,7 +106,7 @@ class SchemaFirstBuilder {
       .sort((a, b) => compareStrings(a.name, b.name))
     this.#checkUnsupported(sdl, types)
     const scalars = this.#scalars(sdl, types, scalarDeclarations)
-    const { bindings, claimed: bound } = this.#bind(sdl, resolvers)
+    const { bindings, claimed: bound } = this.#bind(sdl, resolvers, rejected)
     const conformance = checkConformance({
       ctx: this.#ctx,
       schema,
@@ -231,10 +241,20 @@ class SchemaFirstBuilder {
    * coordinates a resolver method names, bound or not (a method with an analysis error already
    * reported), so that their fields are never also reported as missing a resolver.
    */
-  #bind(sdl: SdlSource, resolvers: readonly ResolverData[]): { bindings: Binding[]; claimed: Set<string> } {
+  #bind(
+    sdl: SdlSource,
+    resolvers: readonly ResolverData[],
+    rejected: readonly ResolverData[],
+  ): { bindings: Binding[]; claimed: Set<string> } {
     const schema = sdl.schema
     const bindings: Binding[] = []
     const claimed = new Set<string>()
+    for (const resolver of rejected) {
+      for (const field of resolver.fields) {
+        const owner = field.operation === 'field' ? resolver.typeName?.name : rootType(schema, field.operation)?.name
+        if (owner !== undefined) claimed.add(`${owner}.${field.name}`)
+      }
+    }
     const byCoordinate = new Map<string, Binding>()
     for (const resolver of resolvers) {
       const target = this.#resolverType(sdl, resolver)
@@ -329,7 +349,9 @@ class SchemaFirstBuilder {
         typeName.location,
         `@Resolver('${type.name}') of ${owner}: ${type.name} is an interface, field resolvers bind the fields of object types`,
         [
-          `Bind the field on each implementation: @Resolver('${implementations[0] ?? 'Book'}')${implementations.length > 1 ? ` (and ${implementations.slice(1).join(', ')})` : ''}`,
+          implementations.length === 0
+            ? `Declare an object type implementing ${type.name} and bind the field on it`
+            : `Bind the field on each implementation: @Resolver('${implementations[0]}')${implementations.length > 1 ? ` (and ${implementations.slice(1).join(', ')})` : ''}`,
         ],
         related,
       )

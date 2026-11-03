@@ -905,17 +905,17 @@ libraries.
 
 `ctx.inputFiles(patterns)` (in `validate`) reads the non-source files an extension depends on, such
 as the `.graphql` files of `@znight/graphql`'s schema-first mode: the files matching the globs
-(relative to the project root, `!` negations allowed; `node_modules`, dot-directories and the
-generated module never match), as `{ file, relativeFile, text }`, sorted by path.
+(relative to the project root, `!` negations allowed; `node_modules` and the generated module never
+match, dot-directories only when a pattern names them), as `{ file, relativeFile, text }`, sorted by path.
 
 ```ts
 const files = ctx.inputFiles(['src/**/*.graphql'])
 // [{ file: '/app/src/books.graphql', relativeFile: 'src/books.graphql', text: 'type Book { ... }' }]
 ```
 
-They are inputs of the compile: listed in `watchFiles`, and the watchers (Vite plugin, Bun preload,
-`znight generate --watch`) recompile when one changes, or when a file matching the patterns is
-created.
+They are inputs of the compile: listed in `watchFiles`, so every watcher recompiles when one
+changes; the Vite plugin and `znight generate --watch` also recompile when a file matching the
+patterns is created (the Bun preload picks it up at its next start).
 
 ### Definitions
 

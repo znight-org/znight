@@ -104,7 +104,7 @@ describe('graphql-codegen types', () => {
     const result = await analyzeSchemaFirst(files(resolver))
     expect(result.diagnostics.filter(diagnostic => diagnostic.code === 'ZNIGHT068').map(d => d.message)).toEqual([
       "parameter 'id' of EventResolver.event is string, which does not accept every EventId (Query.event(id:))",
-      'EventResolver.events returns a list of Event | null, which may be null, but Query.events is Event! (non-null)',
+      'EventResolver.events returns a list of Event | null, which may be null, but the items of Query.events ([Event!]!) are Event! (non-null)',
     ])
   })
 })

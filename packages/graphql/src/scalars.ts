@@ -121,8 +121,9 @@ export function definitionScalar(
   overrides: { readonly description?: string; readonly specifiedByURL?: string } = {},
 ): GraphQLScalarType {
   const parseLiteral = definition.parseLiteral
-  const description = overrides.description ?? definition.description
-  const specifiedByURL = overrides.specifiedByURL ?? definition.specifiedByURL
+  // a key present in `overrides` wins, even undefined (schema-first: the SDL is the truth)
+  const description = 'description' in overrides ? overrides.description : definition.description
+  const specifiedByURL = 'specifiedByURL' in overrides ? overrides.specifiedByURL : definition.specifiedByURL
   return new GraphQLScalarType({
     name,
     ...(description === undefined ? {} : { description }),

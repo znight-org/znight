@@ -1,5 +1,5 @@
 ---
-description: "@znight/graphql - code-first GraphQL whose schema is derived from TypeScript types at build time, on graphql-js 17: resolvers, loaders, subscriptions over SSE, route decisions and guards."
+description: "@znight/graphql - GraphQL on graphql-js 17 whose schema is derived from TypeScript types at build time, or read from SDL files and checked against the resolvers: loaders, subscriptions over SSE, route decisions and guards."
 ---
 
 # @znight/graphql <Badge type="tip" text="new in v0.2" />

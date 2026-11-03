@@ -148,6 +148,7 @@ function typeNode(ctx: Context, imports: Imports, type: TypeModel): GenNode {
       if (type.fromSdl === true) {
         if (type.description !== undefined) entries.push(['description', type.description])
         if (type.specifiedByURL !== undefined) entries.push(['specifiedByURL', type.specifiedByURL])
+        entries.push(['sdl', ctx.lit(true)])
       }
       return ctx.obj(entries)
     }

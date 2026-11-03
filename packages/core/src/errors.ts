@@ -116,7 +116,7 @@ export const ErrorCode = {
    * input fields, a default value not matching its type.
    */
   InvalidGraphQLInput: 'ZNIGHT063',
-  /** The members of a GraphQL union cannot be told apart at runtime. */
+  /** The members of a GraphQL union (or the implementations of an interface) cannot be told apart at runtime. */
   UnresolvableAbstractType: 'ZNIGHT064',
   /**
    * Invalid loader: `@Loader()` on a type that is not `Loader<L>`, `L` not a `BatchLoad`; at runtime,
@@ -184,7 +184,7 @@ export const ERROR_DESCRIPTIONS: Readonly<Record<ErrorCode, string>> = {
   ZNIGHT061: 'GraphQL name conflict: two types or root fields share a name, or a name is invalid or reserved',
   ZNIGHT062: 'Invalid resolver: the structure of a GraphQL resolver is invalid',
   ZNIGHT063: 'Invalid GraphQL input: a type cannot be used in an input position',
-  ZNIGHT064: 'Unresolvable abstract type: the members of a GraphQL union cannot be told apart at runtime',
+  ZNIGHT064: 'Unresolvable abstract type: the members of a GraphQL union or interface cannot be told apart at runtime',
   ZNIGHT065: 'Invalid loader: not a Loader of a BatchLoad provider, or a batch returning the wrong number of values',
   ZNIGHT066: 'Invalid GraphQL setup: metadata, schema, GraphQLPlugin options or HttpPlugin missing',
   ZNIGHT067: 'Invalid GraphQL SDL: the schema-first .graphql files cannot be read, parsed or validated',

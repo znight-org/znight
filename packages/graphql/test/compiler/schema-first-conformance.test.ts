@@ -199,7 +199,7 @@ describe('output positions: the TypeScript type is assignable to the SDL type', 
     [
       '[String!]!',
       '(string | null)[]',
-      'F.f returns a list of string | null, which may be null, but Query.f is String! (non-null)',
+      'F.f returns a list of string | null, which may be null, but the items of Query.f ([String!]!) are String! (non-null)',
     ],
     ['[String!]!', 'string', 'F.f returns string, not a list, but Query.f is [String!]!'],
     ['Genre!', "'FANTASY' | 'HORROR'", 'F.f returns "HORROR", not a value of the enum Genre (Query.f)'],
@@ -344,7 +344,7 @@ describe('input positions: the TypeScript type accepts every value of the SDL ty
     [
       'Filter!',
       '{ readonly limit: number }',
-      'the input type.limit does not accept undefined, but Filter.limit (Int) may be omitted',
+      "property 'limit' does not accept undefined, but Filter.limit (Int) may be omitted",
     ],
     ['Filter!', 'string', "parameter 'x' of F.f is string, not an object type, but Query.f(x:) is Filter"],
   ]
@@ -397,5 +397,43 @@ describe('input positions: the TypeScript type accepts every value of the SDL ty
       'src/upper.ts': `import { z } from 'zod'\nexport const Upper = z.string().transform(value => ({ upper: value.toUpperCase() }))\n`,
     })
     expect(messages(result)).toEqual([])
+  })
+})
+
+describe('review fixes', () => {
+  it('rejects the type of another scalar for a non-string scalar, accepts it for String and ID', async () => {
+    expect(await output('Int!', 'Isbn')).toEqual(['F.f returns Isbn, which does not conform to Int (Query.f)'])
+    expect(await output('Boolean!', 'Isbn')).toEqual(['F.f returns Isbn, which does not conform to Boolean (Query.f)'])
+    expect(await output('ID!', 'Isbn')).toEqual([])
+  })
+
+  it('requires null in the items of a nullable-item list argument (no nullAsUndefined for items)', async () => {
+    expect(await input('[String]!', '(string | undefined)[]')).toEqual([
+      "parameter 'x' of F.f (items) does not accept null, but the items of Query.f(x:) ([String]!) may be null",
+    ])
+    expect(await input('[String]!', 'readonly (string | null)[]')).toEqual([])
+  })
+
+  it('uses instanceof with a __typename fallback when some resolvers return classes', async () => {
+    const { diagnostics, code } = await schemaOf(
+      files(
+        'extend type Query {\n  f: [Result!]!\n  g: [Result!]!\n}\n',
+        `  @Query()
+  f(): (ClassBook | Author)[] {
+    return []
+  }
+
+  @Query()
+  g(): ClassAuthor[] {
+    return []
+  }`,
+        "import type { Author as ClassAuthor, Book as ClassBook } from './classes.ts'",
+      ),
+      { schema: 'src/**/*.graphql' },
+    )
+    expect(diagnostics.filter(diagnostic => CODES.has(diagnostic.code))).toEqual([])
+    expect(section(code)).toContain(
+      "['discriminator']: { ['by']: 'class', ['classes']: [[Author, 'Author'], [Book, 'Book']] },",
+    )
   })
 })

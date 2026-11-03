@@ -78,7 +78,10 @@ function createExtension(options: ResolvedGraphQLCompilerOptions): GraphQLCompil
     analyzeClass: (cls, ctx) => analyzeGraphQLClass(cls, ctx, options),
     validate(ctx) {
       const schema = options.schema
-      models.set(ctx.graph.extensions, schema === false ? buildModel(ctx, options) : buildSchemaFirstModel(ctx, schema))
+      models.set(
+        ctx.graph.extensions,
+        schema === false ? buildModel(ctx, options) : buildSchemaFirstModel(ctx, schema, options.sdl),
+      )
     },
     generate(ctx) {
       return generateGraphQL(ctx, modelOf(ctx.graph), options)

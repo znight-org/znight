@@ -35,6 +35,38 @@ const KNOWN_DIRECTIVES: ReadonlySet<string> = new Set([
   'stream',
 ])
 
+/** A directive as the SDL checks see it: where it applies, its arguments, repeatable or not. */
+interface DirectiveSpec {
+  readonly locations: ReadonlySet<string>
+  /** Argument name → required (non-null without default). */
+  readonly args: ReadonlyMap<string, boolean>
+  readonly repeatable: boolean
+}
+
+/** The built-in directives allowed in an SDL (the others are executable directives). */
+const SDL_DIRECTIVES: ReadonlyMap<string, DirectiveSpec> = new Map([
+  [
+    'deprecated',
+    {
+      locations: new Set(['FIELD_DEFINITION', 'ARGUMENT_DEFINITION', 'INPUT_FIELD_DEFINITION', 'ENUM_VALUE']),
+      args: new Map([['reason', false]]),
+      repeatable: false,
+    },
+  ],
+  ['specifiedBy', { locations: new Set(['SCALAR']), args: new Map([['url', true]]), repeatable: false }],
+  ['oneOf', { locations: new Set(['INPUT_OBJECT']), args: new Map(), repeatable: false }],
+])
+
+/** The directive location of each kind of type definition and extension. */
+const TYPE_LOCATIONS: Readonly<Record<string, string>> = {
+  type: 'OBJECT',
+  interface: 'INTERFACE',
+  union: 'UNION',
+  enum: 'ENUM',
+  input: 'INPUT_OBJECT',
+  scalar: 'SCALAR',
+}
+
 /** Names of the types graphql-js always provides. */
 const PROVIDED_TYPES: ReadonlySet<string> = new Set(['String', 'Int', 'Float', 'Boolean', 'ID'])
 
@@ -45,6 +77,21 @@ export interface SdlSource {
   readonly customDirectives: ReadonlySet<string>
   /** The location of an AST node (its name when it has one); `undefined` for nodes without location. */
   locate(node: ASTNode | null | undefined): Location | undefined
+}
+
+/** Directive locations in messages. */
+const LOCATION_NAMES: Readonly<Record<string, string>> = {
+  SCHEMA: 'the schema',
+  SCALAR: 'scalars',
+  OBJECT: 'object types',
+  FIELD_DEFINITION: 'fields',
+  ARGUMENT_DEFINITION: 'arguments',
+  INTERFACE: 'interfaces',
+  UNION: 'unions',
+  ENUM: 'enums',
+  ENUM_VALUE: 'enum values',
+  INPUT_OBJECT: 'input objects',
+  INPUT_FIELD_DEFINITION: 'input fields',
 }
 
 const TYPE_KINDS: Readonly<Record<string, string>> = {
@@ -111,6 +158,8 @@ export function loadSdl(
 
   const documents: DocumentNode[] = []
   for (const file of files) {
+    // a file with comments only (a placeholder) defines nothing: graphql-js would reject it
+    if (/^(?:\s|,|#[^\n\r]*)*$/.test(file.text.replace(/^\uFEFF/, ''))) continue
     try {
       documents.push(language.parse(new language.Source(file.text, file.file)))
     } catch (error) {
@@ -126,6 +175,15 @@ export function loadSdl(
     }
   }
   if (errors > 0) return undefined
+  if (documents.length === 0) {
+    report({
+      code: Codes.InvalidSdl,
+      severity: 'error',
+      message: `The GraphQL schema files matching ${patterns.map(pattern => `'${pattern}'`).join(', ')} define nothing (schema-first)`,
+      hints: ['Declare the types of the schema, starting with type Query { ... }'],
+    })
+    return undefined
+  }
   const document = utilities.concatAST(documents)
   const customDirectives = checkStructure(document, fail, (message, node) => {
     const location = locator.locate(node)
@@ -162,6 +220,10 @@ export function loadSdl(
       message: `Invalid schema: ${problem.message}`,
       ...(location === undefined ? {} : { location }),
       ...(related.length === 0 ? {} : { related }),
+      // the one schema-wide error without node: no query type
+      ...(node === undefined && schema.getQueryType() == null
+        ? { hints: ['Declare the query root type in one of the files: type Query { ... }'] }
+        : {}),
     })
   }
   if (errors > 0) return undefined
@@ -180,6 +242,7 @@ function checkStructure(
 ): ReadonlySet<string> {
   const definitions = new Map<string, TypeNodeLike>()
   const directives = new Map<string, ASTNode>()
+  const specs = new Map<string, DirectiveSpec>(SDL_DIRECTIVES)
   let schemaDefinition: ASTNode | undefined
   for (const definition of document.definitions) {
     if (definition.kind === 'SchemaDefinition') {
@@ -201,6 +264,16 @@ function checkStructure(
         fail(`@${name} is a built-in directive: it cannot be redefined`, definition.name)
       else {
         directives.set(name, definition.name)
+        specs.set(name, {
+          locations: new Set(definition.locations.map(location => location.value)),
+          args: new Map(
+            (definition.arguments ?? []).map(arg => [
+              arg.name.value,
+              arg.type.kind === 'NonNullType' && arg.defaultValue === undefined,
+            ]),
+          ),
+          repeatable: definition.repeatable,
+        })
         warn(`The custom directive @${name} is ignored`, definition.name)
       }
       continue
@@ -213,7 +286,11 @@ function checkStructure(
       fail(
         `The type ${node.name.value} is defined twice`,
         node.name,
-        [`Extend it instead (extend ${kind} ${node.name.value} { ... }), or rename one of them`],
+        [
+          kind === 'scalar'
+            ? 'Keep one of them, or rename one'
+            : `Extend it instead (${declaration(`extend ${kind}`, kind, node.name.value)}), or rename one of them`,
+        ],
         previous.name,
       )
       continue
@@ -231,13 +308,46 @@ function checkStructure(
       suggestion === undefined ? ['Define it, or fix the name'] : [`Did you mean ${suggestion}?`],
     )
   }
-  const directivesOf = (nodes: readonly DirectiveNode[] | undefined): void => {
+  /** The directives applied at `location`: known, allowed there, once unless repeatable, valid arguments. */
+  const directivesOf = (nodes: readonly DirectiveNode[] | undefined, location: string): void => {
+    const seen = new Map<string, ASTNode>()
     for (const directive of nodes ?? []) {
       const name = directive.name.value
-      if (KNOWN_DIRECTIVES.has(name) || directives.has(name)) continue
-      fail(`Unknown directive @${name}`, directive.name, [
-        `Define it (directive @${name} on FIELD_DEFINITION), or remove it`,
-      ])
+      const spec = specs.get(name)
+      if (spec === undefined) {
+        fail(
+          KNOWN_DIRECTIVES.has(name)
+            ? `@${name} is an executable directive: it cannot be used in a schema`
+            : `Unknown directive @${name}`,
+          directive.name,
+          KNOWN_DIRECTIVES.has(name) ? ['Remove it'] : [`Define it (directive @${name} on ${location}), or remove it`],
+        )
+        continue
+      }
+      if (!spec.locations.has(location)) {
+        fail(`@${name} cannot be used on ${LOCATION_NAMES[location] ?? location}`, directive.name, [
+          `@${name} applies to ${[...spec.locations].map(where => LOCATION_NAMES[where] ?? where).join(', ')}`,
+        ])
+      }
+      const previous = seen.get(name)
+      if (previous !== undefined && !spec.repeatable) {
+        fail(`@${name} is applied twice`, directive.name, ['Apply it once'], previous)
+      }
+      seen.set(name, directive.name)
+      const given = new Set<string>()
+      for (const arg of directive.arguments ?? []) {
+        given.add(arg.name.value)
+        if (!spec.args.has(arg.name.value)) {
+          const names = [...spec.args.keys()]
+          fail(`@${name} has no argument '${arg.name.value}'`, arg.name, [
+            names.length === 0 ? `@${name} takes no argument` : `Its arguments: ${names.join(', ')}`,
+          ])
+        }
+      }
+      for (const [arg, required] of spec.args) {
+        if (required && !given.has(arg))
+          fail(`@${name} needs its argument '${arg}'`, directive.name, [`@${name}(${arg}: ...)`])
+      }
     }
   }
   /** Members of a type: its definition and extensions, by name (fields, values, input fields). */
@@ -264,7 +374,7 @@ function checkStructure(
       }
       seen.set(value.name.value, value.name)
       known(namedType(value.type), `${owner}(${value.name.value}:)`)
-      directivesOf(value.directives)
+      directivesOf(value.directives, 'ARGUMENT_DEFINITION')
     }
   }
   const fields = (owner: string, list: readonly FieldDefinitionNode[] | undefined): void => {
@@ -272,13 +382,21 @@ function checkStructure(
       member(owner, 'field', field.name)
       known(namedType(field.type), `${owner}.${field.name.value}`)
       inputValues(`${owner}.${field.name.value}`, field.arguments)
-      directivesOf(field.directives)
+      directivesOf(field.directives, 'FIELD_DEFINITION')
     }
   }
+  const operations = new Map<string, ASTNode>()
   for (const definition of document.definitions) {
     if (definition.kind === 'SchemaDefinition' || definition.kind === 'SchemaExtension') {
-      for (const operation of definition.operationTypes ?? []) known(operation.type, `schema ${operation.operation}`)
-      directivesOf(definition.directives)
+      for (const operation of definition.operationTypes ?? []) {
+        known(operation.type, `schema ${operation.operation}`)
+        const previous = operations.get(operation.operation)
+        if (previous !== undefined) {
+          fail(`The ${operation.operation} root type is declared twice`, operation, ['Keep one'], previous)
+        }
+        operations.set(operation.operation, operation)
+      }
+      directivesOf(definition.directives, 'SCHEMA')
       continue
     }
     if (definition.kind === 'DirectiveDefinition') {
@@ -301,34 +419,51 @@ function checkStructure(
         if (!PROVIDED_TYPES.has(name)) {
           const suggestion = closest(name, typeNames)
           fail(`Cannot extend ${kind} ${name}: it is not defined`, node.name, [
-            suggestion === undefined ? `Define it: ${kind} ${name} { ... }` : `Did you mean ${suggestion}?`,
+            suggestion === undefined ? `Define it: ${declaration(kind, kind, name)}` : `Did you mean ${suggestion}?`,
           ])
         }
         continue
       }
       if (TYPE_KINDS[base.kind] !== kind) {
-        fail(`Cannot extend ${name} as a ${kind}: it is a ${TYPE_KINDS[base.kind]}`, node.name, [], base.name)
+        const actual = TYPE_KINDS[base.kind] as string
+        fail(
+          `Cannot extend ${name} as ${article(kind)} ${kind}: it is ${article(actual)} ${actual}`,
+          node.name,
+          [`Use ${declaration(`extend ${actual}`, actual, name)}`],
+          base.name,
+        )
         continue
       }
     }
-    directivesOf(node.directives)
+    directivesOf(node.directives, TYPE_LOCATIONS[kind] as string)
     for (const implemented of node.interfaces ?? []) known(implemented, `${name} implements`)
     for (const target of node.types ?? []) known(target, `union ${name}`)
     for (const value of node.values ?? []) {
       member(name, 'value', value.name)
-      directivesOf(value.directives)
+      directivesOf(value.directives, 'ENUM_VALUE')
     }
     if (kind === 'input') {
       for (const field of (node.fields ?? []) as readonly InputValueDefinitionNode[]) {
         member(name, 'field', field.name)
         known(namedType(field.type), `${name}.${field.name.value}`)
-        directivesOf(field.directives)
+        directivesOf(field.directives, 'INPUT_FIELD_DEFINITION')
       }
     } else {
       fields(name, node.fields as readonly FieldDefinitionNode[] | undefined)
     }
   }
   return new Set(directives.keys())
+}
+
+/** `extend type Book { ... }`, `union Hit = ...`, `scalar Url`: valid SDL for a hint. */
+function declaration(keyword: string, kind: string, name: string): string {
+  if (kind === 'scalar') return `${keyword} ${name}`
+  if (kind === 'union') return `${keyword} ${name} = ...`
+  return `${keyword} ${name} { ... }`
+}
+
+function article(word: string): string {
+  return /^[aeiou]/.test(word) ? 'an' : 'a'
 }
 
 function namedType(type: TypeNode): NamedTypeNode {

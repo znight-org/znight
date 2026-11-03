@@ -46,8 +46,9 @@ packages/
                   emission (/emit, /vite: `znight openapi`), validateResponse (/testing) (RFC 0002)
   schedule/       decorators, compiler extension, SchedulePlugin, SchedulerRegistry, cron engine, lock
                   stores, test clock and lock store scenarios (/testing) (RFC 0004)
-  graphql/        decorators, compiler extension (schema derived from TypeScript types), GraphQLPlugin
-                  (graphql-js 17, GraphQL over HTTP and SSE), loaders, PubSub, test helpers (/testing) (RFC 0005)
+  graphql/        decorators, compiler extension (schema derived from TypeScript types, or schema-first
+                  SDL checked at build time), GraphQLPlugin (graphql-js 17, GraphQL over HTTP and SSE),
+                  loaders, PubSub, test helpers (/testing) (RFCs 0005, 0007)
   testing/        TestBed (auto-mocking), TestApp (e2e), mocks and spies
   cli/            `znight` binary: new, generate, g, dev, build, start
 examples/         runnable example applications: rest-api, microservice, worker, monorepo (services + a
@@ -1153,7 +1154,7 @@ interface DecoratorSpec {
 - **Input files** (`inputFiles(patterns) → InputFile[]`, `{ file, relativeFile, text }`): the
   non-source files an extension reads (the `.graphql` schema of `@znight/graphql`, RFC 0007),
   matching `patterns` (globs relative to the root, `!` negations allowed; `node_modules`,
-  dot-directories and the outFile never match), read as UTF-8 and sorted by path (unreadable
+  dot-directories and the outFile are excluded unless a pattern names them), read as UTF-8 and sorted by path (unreadable
   matches skipped). They are inputs of the compile: part of `watchFiles`, and a file created that
   matches the patterns of the current or the previous compile is a relevant change for the
   watchers (`isRelevantChange`). An invalid pattern list is a `TypeError`.
@@ -2778,13 +2779,15 @@ TypeScript types are only checked against them; the two modes never mix (JSDoc, 
 - `validate` reads the files with `ValidateContext.inputFiles(schema)` (§6.5; none is ZNIGHT067),
   parses each with `graphql/language` (a syntax error is ZNIGHT067 at its position), checks the
   merged document (one definition per type, unique fields, values and arguments across extensions,
-  known types and directives, extensions of a defined type of the same kind, one `schema`
-  definition: ZNIGHT067 with suggestions), builds it with `buildASTSchema` and validates it with
+  known types and directives, directive locations, arguments and repetitions, extensions of a
+  defined type of the same kind, one `schema` definition and one type per operation: ZNIGHT067
+  with suggestions; files without definitions are skipped, and the `sdl` artifact is never read
+  back), builds it with `buildASTSchema` and validates it with
   `validateSchema` (each error a ZNIGHT067 at its first AST node, the others related).
 - A custom directive definition is a ZNIGHT067 warning (once); the directive and its uses are left
   out of the served schema. `@oneOf` inputs are ZNIGHT067. A scalar binds the `scalar<T>()`
   declaration of its name (its description and `@specifiedBy` come from the SDL and are emitted in
-  the metadata); without one, `DateTime`, `BigInt` and `JSON` are the built-in scalars (a description
+  the metadata with `sdl: true`, replacing the definition's, absent ones included); without one, `DateTime`, `BigInt` and `JSON` are the built-in scalars (a description
   or another `@specifiedBy` on them is a ZNIGHT067 warning) and any other is ZNIGHT067.
 - **Binding** (by name): `@Query`, `@Mutation`, `@Subscription` bind the field of the query,
   mutation or subscription root type (`schema { ... }` names included) named by the decorator or
@@ -2803,14 +2806,14 @@ TypeScript types are only checked against them; the two modes never mix (JSDoc, 
   `undefined` and optional properties; lists accept arrays, tuples, `Set`, `ReadonlySet`,
   `Iterable`; `String` strings, string literals and enums, branded strings; `ID` those and numbers;
   `Int` / `Float` numbers, number literals and enums, the aliases; `Boolean` booleans; `DateTime`
-  `Date`; `BigInt` `bigint` and numbers; `JSON` anything; a custom scalar its `T` (a `T` of another
-  declaration is not checked against a specified scalar); an enum literals and enums whose values
+  `Date`; `BigInt` `bigint` and numbers; `JSON` anything; a custom scalar its `T` (the `T` of
+  another declaration is accepted for `String` and `ID` only); an enum literals and enums whose values
   are SDL value names; an object type an object type with a conforming property for every field
   without resolver (a missing one is ZNIGHT068 at the SDL field); an abstract type each TypeScript
   member matched to a possible type by its `__typename` literal, else by its name (or, for an
   interface, a TypeScript type named like it, checked against its fields). Input positions MUST
   accept every value: a nullable argument or input field without default MUST accept `undefined`,
-  one with a default `null` or `undefined`; `[T]` needs an array; a scalar a type accepting all its
+  one with a default `null` or `undefined`, a nullable list item `null`; `[T]` needs an array; a scalar a type accepting all its
   values (no literals); an enum every value; an input object an object type whose properties are
   fields of the input. `any`, `unknown`, opaque types and missing annotations are not checked.
   Each mismatch is one ZNIGHT068 on the TypeScript annotation, the SDL definition related.
@@ -2820,9 +2823,10 @@ TypeScript types are only checked against them; the two modes never mix (JSDoc, 
   (`valueFromASTUntyped`); enum values `{ name, value: name }`; union members sorted; object and
   interface types with their `interfaces`. `nullAsUndefined` is set on a nullable argument or input
   field when every TypeScript type reading it accepts `undefined` but not `null` (mixed uses are
-  ZNIGHT068). Abstract types use the `class` discriminator when every TypeScript member returned
-  for them is an exported class (one per member), else `typename`; a member that is neither a class
-  nor declares `__typename` is ZNIGHT064. The SDL artifact and `schemaHash` are printed from the
+  ZNIGHT068). Abstract types use the `class` discriminator, listing every exported class the
+  resolvers return for them (the runtime falls back to `__typename`), else `typename`; a member
+  that is neither a class nor declares `__typename` is ZNIGHT064 (an optional `__typename`
+  passes: the value must carry it at runtime). The SDL artifact and `schemaHash` are printed from the
   model.
 
 **Metadata.**
@@ -2843,7 +2847,7 @@ type GraphQLTypeDefinition = { name: string; description?: string } & ( // no de
   | { kind: 'enum'; values: GraphQLEnumValueDefinition[] } // { name, value: string | number, description?, deprecationReason? }
   | { kind: 'union'; members: string[]; discriminator: GraphQLDiscriminator } // members sorted
   | { kind: 'scalar'; builtin: true } // DateTime, BigInt, JSON
-  | { kind: 'scalar'; scalar: ScalarDefinition<unknown> | GraphQLScalarType; specifiedByURL?: string } // imported from user code; description and specifiedByURL win over the definition's (schema-first)
+  | { kind: 'scalar'; scalar: ScalarDefinition<unknown> | GraphQLScalarType; specifiedByURL?: string; sdl?: true } // imported from user code; description and specifiedByURL win over the definition's; with sdl (schema-first) they replace them, absent ones included
 )
 
 interface GraphQLFieldDefinition {

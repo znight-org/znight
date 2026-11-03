@@ -104,7 +104,8 @@ describe('ZNIGHT067: the SDL', () => {
     ).toEqual([
       `error ZNIGHT067 src/schema.graphql:9:13 Cannot extend type Boook: it is not defined
   = Did you mean Book?`,
-      `error ZNIGHT067 src/schema.graphql:12:14 Cannot extend Book as a input: it is a type
+      `error ZNIGHT067 src/schema.graphql:12:14 Cannot extend Book as an input: it is a type
+  = Use extend type Book { ... }
   - first declared here (src/schema.graphql:1:6)`,
     ])
   })
@@ -277,7 +278,7 @@ describe('ZNIGHT068: coverage', () => {
       `error ZNIGHT068 src/a.resolver.ts:4:11 @Resolver('Bok') of A: the schema has no type Bok
   = Did you mean 'Book'?`,
       `error ZNIGHT068 src/b.resolver.ts:4:11 @Resolver('Node') of B: Node is an interface, field resolvers bind the fields of object types
-  = Bind the field on each implementation: @Resolver('Book')
+  = Declare an object type implementing Node and bind the field on it
   - Node is declared here (src/schema.graphql:9:11)`,
       `error ZNIGHT068 src/c.resolver.ts:4:11 @Resolver('Genre') of C: Genre is not an object type, it has no field to resolve
   = Name an object type of the SDL (type ... { ... })
@@ -392,6 +393,104 @@ describe('cascades', () => {
   = Every resolver parameter is filled by GraphQL: @Args(name?, schema?) for arguments, @Parent() for the parent object, @Ctx() for the GraphQLContext, @Info() for the GraphQLResolveInfo, @Loader() for a DataLoader`,
       `error ZNIGHT005 src/fields.resolver.ts:7:32 Parameter 'extra' of BookFields.author has no @Args(), @Parent(), @Ctx(), @Info() or @Loader() decorator
   = Every resolver parameter is filled by GraphQL: @Args(name?, schema?) for arguments, @Parent() for the parent object, @Ctx() for the GraphQLContext, @Info() for the GraphQLResolveInfo, @Loader() for a DataLoader`,
+    ])
+  })
+})
+
+describe('review fixes', () => {
+  it('directives: executable ones, wrong locations, duplicates, unknown or missing arguments, duplicate roots', async () => {
+    expect(
+      await diagnostics({
+        'src/schema.graphql': `${SDL}scalar Url @specifiedBy
+extend type Book {
+  isbn: String @deprecated @deprecated(why: "x") @skip(if: true)
+}
+enum Genre @deprecated {
+  FANTASY
+}
+schema {
+  query: Query
+  query: Book
+}
+`,
+        'src/book.resolver.ts': resolver(BOOK_QUERY),
+      }),
+    ).toEqual([
+      `error ZNIGHT067 src/schema.graphql:9:13 @specifiedBy needs its argument 'url'
+  = @specifiedBy(url: ...)`,
+      `error ZNIGHT067 src/schema.graphql:11:29 @deprecated is applied twice
+  = Apply it once
+  - first declared here (src/schema.graphql:11:17)`,
+      `error ZNIGHT067 src/schema.graphql:11:40 @deprecated has no argument 'why'
+  = Its arguments: reason`,
+      `error ZNIGHT067 src/schema.graphql:11:51 @skip is an executable directive: it cannot be used in a schema
+  = Remove it`,
+      `error ZNIGHT067 src/schema.graphql:13:13 @deprecated cannot be used on enums
+  = @deprecated applies to fields, arguments, input fields, enum values`,
+      `error ZNIGHT067 src/schema.graphql:18:3 The query root type is declared twice
+  = Keep one
+  - first declared here (src/schema.graphql:17:3)`,
+    ])
+  })
+
+  it('skips files without definitions; a schema of empty files only is reported', async () => {
+    expect(
+      await diagnostics({
+        'src/schema.graphql': SDL,
+        'src/empty.graphql': '',
+        'src/notes.graphql': '# todo: the reviews\n',
+        'src/book.resolver.ts': resolver(BOOK_QUERY),
+      }),
+    ).toEqual([])
+    expect(await diagnostics({ 'src/empty.graphql': '\n', 'src/book.resolver.ts': resolver(BOOK_QUERY) })).toEqual([
+      `error ZNIGHT067 - The GraphQL schema files matching 'src/**/*.graphql' define nothing (schema-first)
+  = Declare the types of the schema, starting with type Query { ... }`,
+    ])
+  })
+
+  it('a missing query root type, with a hint', async () => {
+    expect(
+      await diagnostics({ 'src/schema.graphql': 'type Book {\n  id: ID!\n}\n', 'src/book.resolver.ts': resolver('') }),
+    ).toEqual([
+      `error ZNIGHT067 - Invalid schema: Query root type must be provided.
+  = Declare the query root type in one of the files: type Query { ... }`,
+    ])
+  })
+
+  it('valid SDL hints for scalars and unions', async () => {
+    expect(
+      await diagnostics({
+        'src/schema.graphql': `${SDL}scalar Url\nscalar Url\nextend union Hits = Book\n`,
+        'src/book.resolver.ts': resolver(BOOK_QUERY),
+      }),
+    ).toEqual([
+      `error ZNIGHT067 src/schema.graphql:10:8 The type Url is defined twice
+  = Keep one of them, or rename one
+  - first declared here (src/schema.graphql:9:8)`,
+      `error ZNIGHT067 src/schema.graphql:11:14 Cannot extend union Hits: it is not defined
+  = Define it: union Hits = ...`,
+    ])
+  })
+
+  it('a class rejected by the analysis does not leave its fields without resolver', async () => {
+    const files = {
+      'src/schema.graphql': `${SDL}type Mutation {\n  addBook(title: String!): Book!\n}\n`,
+      'src/book.resolver.ts': resolver(BOOK_QUERY),
+      'src/abstract.resolver.ts': `import { Args, Mutation, Resolver } from '@znight/graphql'
+import type { Book } from './model.ts'
+
+@Resolver()
+export abstract class Base {
+  @Mutation()
+  addBook(@Args('title') title: string): Book {
+    return { id: '1', title, authorId: 'a' }
+  }
+}
+`,
+    }
+    expect(await diagnostics(files)).toEqual([
+      `error ZNIGHT005 src/abstract.resolver.ts:4:1 @Resolver cannot be applied to the abstract class Base
+  = Resolvers are instantiated: remove \`abstract\``,
     ])
   })
 })

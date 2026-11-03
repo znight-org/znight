@@ -712,21 +712,22 @@ extend type Query {
 ```ts [src/catalog/book.resolver.ts]
 import { Args, Loader, Parent, Query, ResolveField, Resolver } from '@znight/graphql'
 
+import type { Author, QueryBooksArgs } from '../graphql.generated.ts'
 import { AuthorsById } from './authors-by-id.loader.ts'
-import { CatalogService } from './catalog.service.ts'
-import type { Author, Book, QueryBooksArgs } from './graphql.generated.ts'
+import { type BookModel, CatalogService } from './catalog.service.ts'
 
 @Resolver('Book')
 export class BookResolver {
   constructor(private readonly catalog: CatalogService) {}
 
+  // BookModel: the fields of Book without author, plus authorId
   @Query()
-  books(@Args('limit') limit: QueryBooksArgs['limit']): Promise<Book[]> {
+  books(@Args('limit') limit: QueryBooksArgs['limit']): Promise<BookModel[]> {
     return this.catalog.list(limit ?? 10)
   }
 
   @ResolveField()
-  author(@Parent() book: Book, @Loader() authors: Loader<AuthorsById>): Promise<Author> {
+  author(@Parent() book: BookModel, @Loader() authors: Loader<AuthorsById>): Promise<Author> {
     return authors.load(book.authorId)
   }
 }
@@ -740,8 +741,9 @@ export class BookResolver {
   work the same way.
 - Descriptions, deprecations and default values come from the SDL. `extend type`, enums, unions,
   **interfaces**, input objects and `@specifiedBy` are supported. Enum values are their SDL names
-  on both sides. Union members and interface implementations are told apart by `__typename`, or
-  by `instanceof` when the resolvers return exported classes.
+  on both sides. Union members and interface implementations are told apart by `instanceof` for
+  the exported classes the resolvers return, else by `__typename`: graphql-codegen declares it
+  optional, so make sure the returned objects carry it.
 - Every custom scalar is declared once in TypeScript with `scalar<T>('Name', definition)`, `T` being
   the type of its values; `DateTime`, `BigInt` and `JSON` are built in. A custom directive is
   ignored with a warning.
@@ -770,7 +772,7 @@ const config: CodegenConfig = {
     'src/graphql.generated.ts': {
       plugins: ['typescript'],
       config: {
-        scalars: { DateTime: 'Date', EventId: './events/event-id.ts#EventId' },
+        scalars: { DateTime: 'Date', Isbn: './catalog/isbn.ts#Isbn' },
         namingConvention: { enumValues: 'keep' },
         useTypeImports: true,
       },

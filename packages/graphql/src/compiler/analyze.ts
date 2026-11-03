@@ -52,6 +52,7 @@ export function analyzeGraphQLClass(cls: ClassInfo, ctx: Context, options: Resol
   const resolver = resolvers[0]
   if (resolver === undefined) {
     reportOutsideResolver(cls, ctx)
+    storeClaims(ctx, cls, undefined, options)
     return
   }
   for (const extra of resolvers.slice(1)) {
@@ -71,6 +72,7 @@ export function analyzeGraphQLClass(cls: ClassInfo, ctx: Context, options: Resol
       ],
       [{ message: '@Controller is applied here', location: controller.location }],
     )
+    storeClaims(ctx, cls, resolver, options)
     return
   }
   if (ctx.options.library) {
@@ -81,6 +83,7 @@ export function analyzeGraphQLClass(cls: ClassInfo, ctx: Context, options: Resol
       `${cls.displayName} is a @Resolver in a compiled provider library: the schema is derived from the sources`,
       ['Publish the package as a source library (without library: true), so that applications compile its resolvers'],
     )
+    storeClaims(ctx, cls, resolver, options)
     return
   }
   if (cls.abstract || cls.typeParameters.length > 0) {
@@ -93,6 +96,7 @@ export function analyzeGraphQLClass(cls: ClassInfo, ctx: Context, options: Resol
         : `@Resolver cannot be applied to the generic class ${cls.displayName}<${cls.typeParameters.join(', ')}>`,
       [cls.abstract ? 'Resolvers are instantiated: remove `abstract`' : 'Remove the type parameters of the resolver'],
     )
+    storeClaims(ctx, cls, resolver, options)
     return
   }
 
@@ -136,6 +140,53 @@ export function analyzeGraphQLClass(cls: ClassInfo, ctx: Context, options: Resol
     }
   }
   ctx.store(data)
+}
+
+/**
+ * Schema-first: a class rejected above (no `@Resolver`, abstract, a controller...) still names the
+ * fields its methods resolve, stored as an `invalid` resolver, so that these fields are not also
+ * reported as missing a resolver (one diagnostic per mistake).
+ */
+function storeClaims(
+  ctx: Context,
+  cls: ClassInfo,
+  resolver: DecoratorInfo | undefined,
+  options: ResolvedGraphQLCompilerOptions,
+): void {
+  if (options.schema === false) return
+  const typeArg = resolver?.args[0]
+  const typeName =
+    typeArg?.evaluated === true && typeof typeArg.value === 'string'
+      ? { name: typeArg.value, location: typeArg.location }
+      : undefined
+  const fields: FieldData[] = []
+  for (const method of cls.methods) {
+    for (const decorator of method.decorators.filter(isFieldDecorator)) {
+      const arg = decorator.args[0]
+      fields.push({
+        method: method.name,
+        operation: FIELD_DECORATORS.get(decorator.identity as string) as FieldOperation,
+        name: arg?.evaluated === true && typeof arg.value === 'string' ? arg.value : method.name,
+        location: decorator.location,
+        methodLocation: method.location,
+        guards: [],
+        meta: [],
+        params: [],
+        complete: false,
+      })
+    }
+  }
+  if (fields.length === 0) return
+  ctx.store({
+    kind: 'resolver',
+    host: cls,
+    scope: 'singleton',
+    location: resolver?.location ?? cls.location,
+    guards: [],
+    fields,
+    invalid: true,
+    ...(typeName === undefined ? {} : { typeName }),
+  })
 }
 
 function isFieldDecorator(decorator: DecoratorInfo): boolean {

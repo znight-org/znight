@@ -281,8 +281,8 @@ export class Project implements ProjectHost {
 
   /**
    * Non-source files an extension reads (`.graphql` schemas...): the files matching `patterns`
-   * (globs relative to the root, `!` negations allowed; `node_modules`, dot-directories and the
-   * generated module never match), read as UTF-8, sorted by path. They are inputs of the current
+   * (globs relative to the root, `!` negations allowed; `node_modules` and the generated module
+   * never match, dot-directories only when a pattern names them), read as UTF-8, sorted by path. They are inputs of the current
    * compile ({@link loadedFiles}, hence `watchFiles`), and creating a file matching the patterns
    * makes the watchers recompile ({@link isInputPath}). Unreadable matches are skipped.
    */

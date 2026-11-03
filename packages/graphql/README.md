@@ -984,21 +984,25 @@ export default {
 ```
 
 - **Files.** The globs (a string or a list, `!` negations allowed) are relative to the project
-  root; `node_modules` and dot-directories never match; the files are read in path order. They are
-  inputs of the compile (`watchFiles`): editing, creating or deleting one recompiles in `znight
-  dev`, the Vite plugin, the Bun preload and `znight generate --watch`.
+  root; `node_modules` and dot-directories are excluded unless a pattern names them; the files are
+  read in path order, files without definitions skipped, and the `sdl` artifact is never read back.
+  They are inputs of the compile (`watchFiles`): editing, creating or deleting one recompiles in
+  `znight dev`, the Vite plugin and `znight generate --watch` (the Bun preload recompiles on edits,
+  and picks a new file up at its next start).
 - **One source of truth.** TypeScript types never add to the schema: JSDoc, `@gqlName`,
   `@gqlHidden`, `@default` and `number` are ignored. Descriptions, deprecations and default values
   come from the SDL. The runtime is the code-first one: same metadata, `schemaHash` and `sdl`
   artifact (the served schema, semantically equal to the SDL without its custom directives).
 - **SDL.** Parsed, merged (`extend` of every kind, across files) and validated with graphql-js at
   build time (`graphql/language`, `graphql/type`, `graphql/utilities`, loaded lazily in this mode
-  only). Object types, interfaces (implementing interfaces too), unions, enums, input objects,
+  only), with the SDL rules graphql-js keeps internal (directive locations, arguments and
+  repetitions, unique names) checked too. Object types, interfaces (implementing interfaces too), unions, enums, input objects,
   `schema { ... }` root names, `@deprecated` and `@specifiedBy` are supported. Custom directives
   are a ZNIGHT067 warning and left out; `@oneOf` inputs are not supported yet (ZNIGHT067).
 - **Scalars.** A scalar of the SDL binds the `scalar<T>('Name', definition)` declaration of its
-  name (its description and `@specifiedBy` come from the SDL, emitted in the metadata where they win
-  over the definition's). Without one, `DateTime`, `BigInt` and `JSON` are the built-in scalars;
+  name (its description and `@specifiedBy` come from the SDL, emitted in the metadata with
+  `sdl: true`: they replace the definition's, absent ones included, so the served schema is the
+  artifact). Without one, `DateTime`, `BigInt` and `JSON` are the built-in scalars;
   any other scalar is ZNIGHT067.
 - **Binding by name.** `@Query()`, `@Mutation()`, `@Subscription()` bind the root field named by the
   decorator, else by the method. `@ResolveField()` binds a field of the object type named by the
@@ -1007,8 +1011,9 @@ export default {
   every argument as an object, `@Args('name', Schema)` validates with a Standard Schema.
 - **Enums and abstract types.** An enum value is its SDL name on both sides (graphql-codegen's
   enums compare by value, so any `namingConvention` works). Unions and interfaces resolve their
-  members from `__typename`, or with `instanceof` when every TypeScript member the resolvers return
-  is an exported class named like its member.
+  members with `instanceof` for the exported classes the resolvers return (a class is matched to a
+  member by its name, or its `__typename`), then from `__typename`. graphql-codegen declares
+  `__typename` optional: the check accepts it, but the returned objects must carry it.
 
 ```graphql
 type Book {
@@ -1053,23 +1058,24 @@ binding, the return type (`Promise<T>` unwrapped, the events of a `@Subscription
 parameters and the `@Parent()` type are compared with the SDL, following the fields without
 resolver through the properties of the returned types:
 
-| SDL                          | Output (return types, properties): assignable                             | Input (arguments, input fields): accepts every value                         |
-| ---------------------------- | ------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| `T!` / `T`                   | `T!` rejects `null`, `undefined`, optional properties                     | `T` without default may be omitted: accept `undefined`; with one, `null` too |
-| `[T]`                        | arrays, tuples, `Set`, `ReadonlySet`, `Iterable`                          | arrays                                                                       |
-| `String`, `ID`               | strings, string literals and enums, branded strings (`ID`: numbers too)   | `string` (a literal union is narrower)                                       |
-| `Int`, `Float`               | numbers, number literals and enums, `Int` / `Float`                       | `number`                                                                     |
-| `Boolean`                    | `boolean`, `true`, `false`                                                | `boolean`                                                                    |
-| `DateTime`, `BigInt`, `JSON` | `Date`; `bigint` or number; anything                                      | `Date`; `bigint`; anything                                                   |
-| custom scalar                | the `T` of its `scalar<T>()`                                              | the `T` of its `scalar<T>()`                                                 |
-| enum                         | literals or an enum whose values are SDL values                           | `string`, or literals / an enum covering every value                         |
-| object                       | an object type with a conforming property for each field without resolver | –                                                                            |
-| union, interface             | each member matched by its `__typename` literal, else by name             | –                                                                            |
-| input object                 | –                                                                         | an object type whose properties are fields of the input                      |
+| SDL                          | Output (return types, properties): assignable                             | Input (arguments, input fields): accepts every value                                              |
+| ---------------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `T!` / `T`                   | `T!` rejects `null`, `undefined`, optional properties                     | `T` without default: accept `undefined`; with one: `null` or `undefined`; a nullable item: `null` |
+| `[T]`                        | arrays, tuples, `Set`, `ReadonlySet`, `Iterable`                          | arrays                                                                                            |
+| `String`, `ID`               | strings, string literals and enums, branded strings (`ID`: numbers too)   | `string` (a literal union is narrower)                                                            |
+| `Int`, `Float`               | numbers, number literals and enums, `Int` / `Float`                       | `number`                                                                                          |
+| `Boolean`                    | `boolean`, `true`, `false`                                                | `boolean`                                                                                         |
+| `DateTime`, `BigInt`, `JSON` | `Date`; `bigint` or number; anything                                      | `Date`; `bigint`; anything                                                                        |
+| custom scalar                | the `T` of its `scalar<T>()`                                              | the `T` of its `scalar<T>()`                                                                      |
+| enum                         | literals or an enum whose values are SDL values                           | `string`, or literals / an enum covering every value                                              |
+| object                       | an object type with a conforming property for each field without resolver | –                                                                                                 |
+| union, interface             | each member matched by its `__typename` literal, else by name             | –                                                                                                 |
+| input object                 | –                                                                         | an object type whose properties are fields of the input                                           |
 
 When a nullable argument or input field is read by TypeScript types that accept `undefined` but not
-`null`, the runtime turns `null` into `undefined` (`nullAsUndefined`), as in code-first. A type of
-another `scalar<T>()` declaration (a branded id for an `ID`) is accepted for the specified scalars.
+`null`, the runtime turns `null` into `undefined` (`nullAsUndefined`), as in code-first (never for
+list items). The `T` of another `scalar<T>()` declaration (a branded id for an `ID`) is accepted for
+`String` and `ID`.
 `any`, `unknown`, opaque types, missing annotations and arguments validated by a Standard Schema are
 not checked. Each mismatch is one diagnostic on the TypeScript annotation, the SDL definition
 related:
@@ -1115,7 +1121,8 @@ decorated methods are checked directly. Models that replace the fields a field r
 
 **Performance.** The SDL is parsed and validated once per compile; the conformance walk visits each
 (SDL type, TypeScript declaration) pair once, on shapes the compiler caches. An SDL of about 560
-types in 240 files compiles in under 200 ms on Bun (`test/compiler/schema-first-performance.test.ts`).
+types (80 SDL files, 160 TypeScript files) compiles in about 200 ms on Bun
+(`test/compiler/schema-first-performance.test.ts`).
 Boot and execution are those of code-first.
 
 ## Observability
@@ -1226,8 +1233,9 @@ type GraphQLTypeDefinition =
       kind: 'scalar'
       name: string
       scalar: ScalarDefinition<unknown> | GraphQLScalarType // imported from user code
-      description?: string // schema-first: the SDL's, winning over the definition's
+      description?: string // wins over the definition's
       specifiedByURL?: string
+      sdl?: true // schema-first: description and specifiedByURL replace the definition's, absent ones included
     }
 
 interface GraphQLFieldDefinition {

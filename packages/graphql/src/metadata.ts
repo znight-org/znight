@@ -119,6 +119,11 @@ export interface GraphQLCustomScalarDefinition {
   readonly description?: string
   /** Wins over the `specifiedByURL` of the definition (schema-first: the SDL's `@specifiedBy`). */
   readonly specifiedByURL?: string
+  /**
+   * Schema-first (RFC 0007): `description` and `specifiedByURL` are the SDL's and replace the
+   * definition's, also when absent, so that the served schema is the SDL.
+   */
+  readonly sdl?: true
   /** `ScalarDefinition<T>` of any `T` (its methods are bivariant), or a graphql-js scalar named `name`. */
   readonly scalar: ScalarDefinition<unknown> | GraphQLScalarType
 }

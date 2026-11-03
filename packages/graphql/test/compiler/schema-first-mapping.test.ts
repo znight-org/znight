@@ -3,9 +3,14 @@
  * every kind across files, descriptions, deprecations, default values, custom root type names,
  * interfaces implementing interfaces, union members sorted, deterministic output.
  */
+
+import type { CompilerExtension } from '@znight/compiler'
+
+import { generate } from '@znight/compiler'
 import { buildSchema, GraphQLSchema, lexicographicSortSchema, printSchema, specifiedDirectives } from 'graphql'
 
-import { cleanupApps, schemaOf, section } from './helpers.ts'
+import graphql from '../../src/compiler/index.ts'
+import { cleanupApps, compileApp, schemaOf, section, tempApp } from './helpers.ts'
 import { afterAll, describe, expect, test as it } from 'bun:test'
 
 afterAll(cleanupApps)
@@ -185,5 +190,20 @@ describe('SDL constructs', () => {
     const second = await schemaOf(FILES, { schema: ['src/b.graphql', 'src/a.graphql'] })
     expect(second.code).toBe(first.code)
     expect(second.sdl).toBe(first.sdl)
+  })
+})
+
+describe('the SDL artifact', () => {
+  it('is never read back as an input, even when the globs match it', async () => {
+    const app = tempApp(FILES)
+    const extension = graphql.configure({
+      schema: 'src/**/*.graphql',
+      sdl: 'src/generated/schema.graphql',
+    }) as unknown as CompilerExtension
+    const first = await generate({ root: app.root, conditions: ['@znight/source'], extensions: [extension] })
+    expect(first.written).toContain(app.path('src/generated/schema.graphql'))
+    const second = await compileApp(app.root, { extensions: [extension] })
+    expect(second.diagnostics.filter(diagnostic => diagnostic.severity === 'error')).toEqual([])
+    expect(second.watchFiles).not.toContain(app.path('src/generated/schema.graphql'))
   })
 })
