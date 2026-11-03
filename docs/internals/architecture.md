@@ -1196,7 +1196,8 @@ interface DecoratorSpec {
     order (merged declarations included, no reverse mapping of numeric members). `NamedShape.literals`
     (aliases of a union of literal types, `type Sort = 'title' | 'newest'`): the literals in source
     order, de-duplicated (`shape` is the normalised, sorted union); set only when every member is
-    written as a literal type and the union keeps them all (`true | false` is `boolean`: not set).
+    written as a literal type, `null` and `undefined` members aside (skipped: `'a' | 'b' | null`
+    gives `['a', 'b']`), and the union keeps them all (`true | false` is `boolean`: not set).
   - `ShapeResult`: `root`, `named` (every named shape reached, transitively, by key, sorted; a
     declaration only used structurally is not listed) and `issues` (every `opaque` part and every
     `bigint`, with a path, the key of the named shape declaring it and a location). Results are
