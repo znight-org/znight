@@ -171,6 +171,7 @@ function withResults(
     )
     return subscription ? once(value) : value
   }
+  // captures nothing per call: the rejection handler is created in recoverAsync, on the promise path only
   return (p, a, c, i) => {
     let result: unknown
     try {
@@ -178,8 +179,19 @@ function withResults(
     } catch (error) {
       return fail(error, p, a, c, i)
     }
-    return isThenable(result) ? Promise.resolve(result).then(undefined, error => fail(error, p, a, c, i)) : result
+    return isThenable(result) ? recoverAsync(result, fail, p, a, c, i) : result
   }
+}
+
+function recoverAsync(
+  result: PromiseLike<unknown>,
+  fail: (error: unknown, p: unknown, a: unknown, c: unknown, i: GraphQLResolveInfo) => unknown,
+  p: unknown,
+  a: unknown,
+  c: unknown,
+  i: GraphQLResolveInfo,
+): Promise<unknown> {
+  return Promise.resolve(result).then(undefined, error => fail(error, p, a, c, i))
 }
 
 /** A source event stream of one event. */

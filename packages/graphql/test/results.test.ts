@@ -27,6 +27,7 @@ function outcome(id: string): unknown {
     case 'other':
     case 'garbage':
     case 'mapper-bug':
+    case 'getter':
     case 'value':
       throw new Error(id)
     default:
@@ -51,6 +52,16 @@ class Books {
   async *watch(): AsyncGenerator<unknown> {
     await Promise.resolve()
     yield BOOK
+  }
+  /** The body of an async generator runs in the source stream, on its first `next()`. */
+  async *watchBody(): AsyncGenerator<unknown> {
+    await Promise.resolve()
+    if (BOOK.title === 'Dune') throw new NotFoundException('No book to watch')
+    yield BOOK
+  }
+  /** Checks before returning the stream: an error here is an error of the start. */
+  watchChecked(): AsyncGenerator<unknown> {
+    throw new NotFoundException('No book to watch')
   }
 }
 
@@ -93,7 +104,24 @@ class Rejections implements GraphQLResultMapper {
     if (error.message === 'other') return { __typename: 'Other', x: 'other' }
     if (error.message === 'garbage') return { nope: true }
     if (error.message === 'mapper-bug') throw new Error('the mapper failed')
+    if (error.message === 'getter') {
+      return {
+        get __typename(): string {
+          throw new Error('the value cannot be read')
+        },
+      }
+    }
     return undefined
+  }
+}
+
+/** Asynchronous by mistake: its promise is ignored (and its rejection handled), the next mapper runs. */
+class AsyncMapper implements GraphQLResultMapper {
+  static readonly types = ['NotFoundRejection']
+
+  async toResult(): Promise<unknown> {
+    await Promise.resolve()
+    throw new Error('async mapper failed')
   }
 }
 
@@ -102,7 +130,7 @@ class Fallback implements GraphQLResultMapper {
   static readonly types = ['NotFoundRejection']
 
   toResult(error: unknown): unknown {
-    if (error instanceof Error && ['other', 'garbage', 'mapper-bug'].includes(error.message)) {
+    if (error instanceof Error && ['other', 'garbage', 'mapper-bug', 'getter', 'value'].includes(error.message)) {
       return { __typename: 'NotFoundRejection', message: `fallback: ${error.message}` }
     }
     return undefined
@@ -172,13 +200,15 @@ const types: GraphQLTypeDefinition[] = [
     fields: [
       field('watch', 'BookResult', bind(Books, 'watch', { operation: 'subscription', guards: [Deny] })),
       field('watchOpen', 'BookResult', bind(Books, 'watch', { operation: 'subscription' })),
+      field('watchBody', 'BookResult', bind(Books, 'watchBody', { operation: 'subscription' })),
+      field('watchChecked', 'BookResult', bind(Books, 'watchChecked', { operation: 'subscription' })),
     ],
   },
 ]
 
 function metadata(extra: readonly GraphQLTypeDefinition[] = []) {
   return graphqlMetadata({
-    providers: [Books, Deny, DenyLater, Unauthenticated, Rejections, Fallback],
+    providers: [Books, Deny, DenyLater, Unauthenticated, Rejections, Fallback, AsyncMapper],
     types: [...types, ...extra],
     externals: HTTP_EXTERNALS,
   })
@@ -304,6 +334,25 @@ describe('result mappers', () => {
     expect(booted.logs.messages('error')).toEqual(['GraphQLPlugin: the result mapper Rejections failed'])
   })
 
+  it('skip an asynchronous mapper (its rejection handled) and a value whose type cannot be read', async () => {
+    await using booted = await boot(metadata(), { resultMappers: [AsyncMapper, Rejections, Fallback] })
+    const result = await booted.plugin.execute({
+      query: `{ a: bookAsync(id: "value") { ${SELECTION} } b: bookAsync(id: "getter") { ${SELECTION} } }`,
+    })
+    expect(result).toEqual({
+      data: {
+        a: { __typename: 'NotFoundRejection', message: 'fallback: value' },
+        b: { __typename: 'NotFoundRejection', message: 'fallback: getter' },
+      },
+    })
+    await Bun.sleep(1)
+    expect(booted.logs.messages('error')).toEqual([
+      'GraphQLPlugin: the result mapper AsyncMapper returned a promise: toResult() must be synchronous',
+      'GraphQLPlugin: the result mapper AsyncMapper returned a promise: toResult() must be synchronous',
+      'GraphQLPlugin: the result mapper Rejections failed',
+    ])
+  })
+
   it('keep a non-null field non-null: a declined error nulls the parent as before', async () => {
     await using booted = await boot(metadata(), { resultMappers: [Rejections] })
     const result = booted.plugin.execute({ query: '{ book(id: "plain") { __typename } }' })
@@ -392,7 +441,7 @@ describe('result mappers', () => {
     }
     expect(withMappers.logs.messages('debug')).toContain('GraphQL schema built')
     const built = withMappers.logs.entries.find(entry => entry.message === 'GraphQL schema built')
-    expect(built?.context?.['resultFields']).toBe(10)
+    expect(built?.context?.['resultFields']).toBe(12)
   })
 })
 
@@ -406,6 +455,18 @@ describe('result mappers on subscriptions', () => {
     })
     expect(await stream.next()).toEqual({ done: true, value: undefined })
     expect(booted.plugin.activeSubscriptions).toBe(0)
+  })
+
+  it('map an error of a method returning the stream, not of the body of an async generator', async () => {
+    await using booted = await boot(metadata(), { resultMappers: [Rejections] })
+    const checked = await booted.plugin.subscribe({ query: `subscription { watchChecked { ${SELECTION} } }` })
+    expect((await checked.next()).value).toEqual({
+      data: { watchChecked: { __typename: 'NotFoundRejection', message: 'No book to watch' } },
+    })
+    // the body runs in the source stream: its errors end the stream with errors[]
+    const body = await booted.plugin.subscribe({ query: `subscription { watchBody { ${SELECTION} } }` })
+    const event = (await body.next()).value as { errors?: { extensions?: { code?: string } }[] }
+    expect(event.errors?.[0]?.extensions?.code).toBe('NOT_FOUND')
   })
 
   it('stream the value as one next event, then complete, over SSE', async () => {

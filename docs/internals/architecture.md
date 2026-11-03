@@ -2830,11 +2830,12 @@ interface GraphQLResolverBinding {
 
 **Runtime.** `GraphQLPlugin.configure(options | (container) => options)` (name `graphql`; options
 `path` (`'/graphql'`), `http` (`false` or `{ meta, guards, bodyLimit = '100kb', get = true }`),
-`guards`, `errorMappers`, `resultMappers` (RFC 0008), `exposeErrors` (`false`), `introspection` (`NODE_ENV !== 'production'`),
-`graphiql` (`NODE_ENV === 'development'`), `limits` (`maxTokens` 2 000, `maxDepth` 12, `maxAliases`
-30, `maxDirectives` 50, each `false`-able), `documentCache` (1 000), `subscriptions` (`false` or
-`{ maxActive = 10 000, bufferSize = 100, heartbeat?, maxDuration? }`), `pubsub`, `enforcement`
-(`'error'` | `'warn'`); unknown keys and invalid values are ZNIGHT066):
+`guards`, `errorMappers`, `resultMappers` (RFC 0008), `exposeErrors` (`false`), `introspection`
+(`NODE_ENV !== 'production'`), `graphiql` (`NODE_ENV === 'development'`), `limits` (`maxTokens`
+2 000, `maxDepth` 12, `maxAliases` 30, `maxDirectives` 50, each `false`-able), `documentCache`
+(1 000), `subscriptions` (`false` or `{ maxActive = 10 000, bufferSize = 100, heartbeat?,
+maxDuration? }`), `pubsub`, `enforcement` (`'error'` | `'warn'`); unknown keys and invalid values
+are ZNIGHT066):
 
 - `register` refuses a second running application (ZNIGHT004), validates static options and checks
   that a plugin named `http` exists unless `http: false` (ZNIGHT066), declares `GraphQLContext`
@@ -2854,7 +2855,7 @@ interface GraphQLResolverBinding {
   on the guard chain of every field with a decision (ZNIGHT023, or a warning with
   `enforcement: 'warn'`). A guard class without `canResolve()` is ZNIGHT066; a global guard or
   mapper class that is not a provider is ZNIGHT001. The `types` of every result mapper (a class's
-  `static types`, an instance's own `types` or its class's) MUST be a non-empty array of names of
+  `static types`, an instance's `types` property or its class's) MUST be a non-empty array of names of
   object types of the section, ZNIGHT066 otherwise (every problem in one error).
 - `onStart` logs `GraphQL endpoint ready` (path, types, schema hash); `onStop` aborts the direct
   subscriptions (`plugin.subscribe()`); requests and SSE streams that came over HTTP are drained
@@ -2912,12 +2913,15 @@ interface GraphQLResolverBinding {
   `issues` for a Standard Schema failure); the first value that is neither `undefined` nor `null`
   and that the union's type resolution (discriminator, then `__typename`) maps to a member becomes
   the field's value, logged at `debug`. A value of another object type of the schema is skipped
-  (`debug`), a value of no type is skipped (`warn`), a mapper that throws is skipped (`error`);
+  (`debug`), a value of no type is skipped (`warn`), a mapper that throws (or whose value the
+  discriminator cannot read) or returns a promise is skipped (`error`, its rejection handled);
   when no mapper produces a member, the original error is rethrown and follows the order above.
   Only the field's own pipeline is concerned (an error of a child field stays the child's;
   completion errors are not caught). A value is never masked and does not count as an error for
   the hook's `outcome` and `errors`. On a root subscription field, a value produced when the
-  subscription starts is a source stream of that single event (one `next`, then `complete`).
+  subscription starts (guards, the method call) is a source stream of that single event (one
+  `next`, then `complete`); errors of the source stream, including the body of an `async *`
+  method, are not mapped.
 - **GraphQL over HTTP** (GraphQL-over-HTTP draft): `POST` with `content-type: application/json`
   only (415 otherwise, or with a content encoding), no batching (400), `GET` for queries only (405
   with `allow: POST`), GraphiQL on `GET` with `accept: text/html` when enabled (its own

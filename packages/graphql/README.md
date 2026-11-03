@@ -733,8 +733,8 @@ GraphQLPlugin.configure({ resultMappers: [Rejections] })
 - **The value.** The first mapper returning a value that the union resolves to one of its members
   (its discriminator, then `__typename`) wins. `undefined` passes to the next mapper; a value of
   another object type is skipped (logged at `debug`), a value of no type is skipped (`warn`), a
-  mapper that throws is skipped (`error`). When no mapper produces a member, the error goes to
-  `errors[]` as above.
+  mapper that throws is skipped (`error`). `toResult()` is synchronous: a returned promise is
+  skipped (`error`). When no mapper produces a member, the error goes to `errors[]` as above.
 - **Per field.** An error of a child field stays an error of the child, even when its parent's
   union holds the rejection; give the child a union to return a value there. A non-null union
   field resolved to a value is no longer nulled.
@@ -744,9 +744,12 @@ GraphQLPlugin.configure({ resultMappers: [Rejections] })
 - **Hook and transports.** A value is data: an operation whose only failure became a value has
   the `success` outcome in `graphql:operation`, with no `errors`. HTTP, SSE and `plugin.execute()`
   send it like any result. On a root subscription field, an error when the subscription starts
-  (a guard) becomes a stream of that single event (one `next`, then `complete`).
-- **At boot.** A result mapper is a provider (any scope; ZNIGHT001 otherwise) or an instance (its
-  own `types`, or its class's `static types`), with a `toResult()` method. Its `types` must name
+  (a guard, or the method before it returns its stream) becomes a stream of that single event (one
+  `next`, then `complete`). The body of an `async *` method runs in the stream, after the start: its
+  errors stay in `errors[]`; check before returning the generator to map them.
+- **At boot.** A result mapper is a provider of any scope (a class that is not a provider is
+  ZNIGHT001) or an instance (its `types` property, or its class's `static types`), with a
+  `toResult()` method. Its `types` must name
   object types of the schema: a typo is ZNIGHT066.
 
 The thrown error can be the value itself (Pothos style) when its class is a member of the union:

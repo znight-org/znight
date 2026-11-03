@@ -32,7 +32,7 @@ export type GraphQLGuardRef = GraphQLGuardClass | GraphQLGuard
 export type GraphQLErrorMapperRef = GraphQLErrorMapperClass | GraphQLErrorMapper
 
 /**
- * A result mapper: a provider class with `static types`, or an instance (its own `types`, or the
+ * A result mapper: a provider class with `static types`, or an instance (its `types` property, or the
  * `static types` of its class).
  */
 export type GraphQLResultMapperRef = GraphQLResultMapperClass | (GraphQLResultMapper & Partial<GraphQLResultTypes>)

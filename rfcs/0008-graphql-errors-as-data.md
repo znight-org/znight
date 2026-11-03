@@ -1,11 +1,11 @@
 # RFC 0008: Errors as data in `@znight/graphql`
 
-|          |                                                                                                                                                                                                                                                                                                                                                                                                |
-| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Status   | Accepted (v0.2)                                                                                                                                                                                                                                                                                                                                                                                |
-| Date     | 2026-11-03                                                                                                                                                                                                                                                                                                                                                                                     |
-| Affects  | `@znight/graphql` (runtime only: a plugin option, a provider contract, the resolver pipeline); docs (`TestApp` creates the new providers through `initRoots()`, no change to `@znight/testing`). No compiler, metadata or generated code change. No new error code: ZNIGHT066 (boot) and ZNIGHT001 (a class that is not a provider) are reused                                                 |
-| Decision | **Result mappers.** A field opts in through its TypeScript return type (a union holding the error types), a `GraphQLResultMapper` provider turns an error into a value of one of the types it declares (`static types`). At boot, only the fields whose union holds a declared type get a wrapper; every other field keeps its resolve function unchanged. Unmatched errors stay in `errors[]` |
+|          |                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Status   | Accepted (v0.2)                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Date     | 2026-11-03                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Affects  | `@znight/graphql` (runtime only: a plugin option, a provider contract, the resolver pipeline); docs (`TestApp` creates the new providers through `initRoots()`, no change to `@znight/testing`). No compiler, metadata or generated code change. No new error code: ZNIGHT066 (boot) and ZNIGHT001 (a class that is not a provider) are reused                                                                                                  |
+| Decision | **Result mappers.** A field opts in through its TypeScript return type (a union holding the error types), a `GraphQLResultMapper` provider turns an error into a value of a member of the field's union; the object types it declares (`static types`) select the fields. At boot, only the fields whose union holds a declared type get a wrapper; every other field keeps its resolve function unchanged. Unmatched errors stay in `errors[]` |
 
 ## 1. Summary
 
@@ -59,7 +59,7 @@ GraphQLPlugin.configure({ resultMappers: [Rejections] })
 | Hot Chocolate, mutation conventions   | `[Error(typeof(UserNameTakenException))]`               | the exception itself, a static `CreateErrorFrom(ex)`, a constructor, or a DI factory                            | `errors[]`       |
 | Shopify Admin, GitHub (payloads)      | `userErrors: [UserError!]!` on mutation payloads        | written by hand in every resolver                                                                               | `errors[]`       |
 | "Result union" pattern (Apollo, Yelp) | `union UserResult = User \| Suspended \| NotFound`      | written by hand (`return`), errors interface optional                                                           | `errors[]`       |
-| Envelop / Yoga plugin (the wishlist)  | nothing                                                 | `onExecuteDone` rewrites `data` from the first error                                                            | none             |
+| Envelop / Yoga plugin (custom)        | nothing                                                 | `onExecuteDone` rewrites `data` from the first error                                                            | none             |
 
 The common ground: **the schema of the field says which errors it can return**, one central mapping
 turns errors into those types, and anything else is an unexpected error that stays in `errors[]`.
@@ -96,7 +96,7 @@ Non-goals (§9):
 /** `@znight/graphql` */
 export interface GraphQLResultMapper {
   /**
-   * The value of the field for `error`, an object of one of the declared types, or `undefined` to
+   * The value of the field for `error`, an object of a member of the field's union, or `undefined` to
    * leave the error to the next mapper (then `errors[]`). Synchronous.
    */
   toResult(error: unknown, ctx: ResolverContext): unknown
@@ -144,7 +144,7 @@ option order.
 
 ### 4.3 Boot (normative)
 
-`onBootstrap`, after the schema is built:
+`onBootstrap`, before the schema is built (the per-field decision is made while building it):
 
 1. each `resultMappers` ref is resolved like an error mapper (a class must be a provider, ZNIGHT001;
    it must have a `toResult()` method, ZNIGHT066);
@@ -169,7 +169,9 @@ handling, `invoke`):
   type resolution: its discriminator, then `__typename`) becomes the field's value;
 - a value of another object type of the schema (a member of another union) is skipped, logged at
   `debug`; a value that resolves to no object type is skipped, logged at `warn` (a mapper bug); a
-  mapper that throws is skipped, logged at `error`. The next mapper is tried;
+  mapper that throws, or whose value cannot be read by the discriminator, is skipped, logged at
+  `error`; a mapper returning a promise (an `async toResult()`) is skipped, logged at `error`, and
+  its rejection is handled. The next mapper is tried;
 - when no mapper produces a member, the original error is rethrown unchanged: it ends in `errors[]`
   through the usual order (`GraphQLException`, `errorMappers`, `HttpException`, masking, logging).
 
@@ -187,7 +189,11 @@ A root subscription field carries results when its event type is a union holding
 Its guards and its method run once, when the subscription starts (RFC 0005 §8.5): an error there
 mapped to a value gives a source stream of that single event. The client receives one `next` with
 the value, then `complete` (SSE), or a stream of one result (`plugin.subscribe()`). Errors of the
-source stream after the start are not mapped (non-goal).
+source stream are not mapped (non-goal), and the body of an `async *` method is the source stream:
+it runs on the first `next()`, after the method returned, so its errors stay in `errors[]`. A method
+that checks before returning a stream (`watch(id) { this.check(id); return this.events(id) }`)
+gets its errors mapped. Wrapping the source to map its first event would cost an extra async step
+per event and change when `return()` reaches the source.
 
 ### 4.6 Build time, boot, runtime
 
@@ -206,7 +212,8 @@ container), so no build-time check is possible without a new marker; the boot ch
 
 A value is data chosen by the application: it is never masked, and `exposeErrors` does not apply.
 An error turned into a value is not logged above `debug` (`GraphQL: error resolved as
-NotFoundRejection in Query.book`, with the request id and the path): it is an expected outcome. A
+NotFoundRejection in Query.book`, with the coordinate and the type only, so that this business path
+builds no request id nor path): it is an expected outcome. A
 mapper that turns unexpected errors into values (a catch-all `InternalErrorRejection`) must log them
 itself (inject `Logger`); the guides recommend leaving unexpected errors in `errors[]`.
 

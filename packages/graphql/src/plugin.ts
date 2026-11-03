@@ -36,7 +36,7 @@ import { invalidOption, resolveGraphQLOptions } from './options.ts'
 import { globalGuardsApply, pipelineFactory } from './pipeline.ts'
 import { PubSub } from './pubsub.ts'
 import { checkResultTypes, declaredTypes, ResultMappers } from './results.ts'
-import { buildGraphQLSchema, graphqlSection } from './schema.ts'
+import { buildGraphQLSchema, checkGraphQLSection, graphqlSection } from './schema.ts'
 import { GraphQLTokens } from './tokens.ts'
 import { checkSseOptions, HttpTransport } from './transport/http.ts'
 
@@ -376,7 +376,8 @@ export class GraphQLPlugin implements Plugin, PluginHttpRoutes {
         })
       }
     }
-    checkResultTypes(resultMappers, types)
+    // a malformed section is reported by buildGraphQLSchema, not as types missing from it
+    if (resultMappers.length > 0 && checkGraphQLSection(section).length === 0) checkResultTypes(resultMappers, types)
     const results = new ResultMappers(
       container,
       ctx.logger,

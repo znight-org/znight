@@ -14,6 +14,7 @@ import type { GraphQLFieldDefinition, GraphQLTypeDefinition } from './metadata.t
 import type { GraphQLResultMapper, ResolverContext } from './types.ts'
 
 import { ErrorCode, ZnightError } from '@znight/core'
+import { isThenable } from '@znight/http'
 
 import { resolveIn } from './format.ts'
 import { typeResolver } from './schema.ts'
@@ -31,7 +32,7 @@ export interface ResultMapperEntry {
 /** The value of a field for an error, or the error thrown back. */
 export type Recover = (error: unknown, ctx: ResolverContext) => unknown
 
-/** The object types a result mapper ref declares: `static types` of a class, own `types` or the class's of an instance. */
+/** The object types a result mapper ref declares: `static types` of a class; for an instance, its `types` property or its class's. */
 export function declaredTypes(ref: unknown): unknown {
   try {
     if (typeof ref === 'function') return (ref as { types?: unknown }).types
@@ -130,16 +131,28 @@ export class ResultMappers {
     return (error, ctx) => {
       for (const mapper of applicable) {
         let value: unknown
+        let type: string | undefined
         try {
           value = resolveIn(container, mapper.resolvable).toResult(error, ctx)
+          if (value === undefined || value === null) continue
+          if (isThenable(value)) {
+            // not awaited: the field cannot wait for a mapper, and its rejection must not go unhandled
+            Promise.resolve(value).catch(noop)
+            logger.error(
+              `GraphQLPlugin: the result mapper ${mapper.name} returned a promise: toResult() must be synchronous`,
+              details(ctx, coordinate, error),
+            )
+            continue
+          }
+          // the discriminator reads the value (a getter, a class check): a failure is the mapper's
+          type = union.typeOf(value)
         } catch (failure) {
           logger.error(`GraphQLPlugin: the result mapper ${mapper.name} failed`, details(ctx, coordinate, failure))
           continue
         }
-        if (value === undefined || value === null) continue
-        const type = union.typeOf(value)
         if (type !== undefined && union.members.has(type)) {
-          logger.debug(`GraphQL: error resolved as ${type} in ${coordinate}`, details(ctx, coordinate, error))
+          // the business path: no request id (it may be minted on first read) nor path built for a debug line
+          logger.debug(`GraphQL: error resolved as ${type} in ${coordinate}`, { coordinate, type })
           return value
         }
         if (type !== undefined && objects.has(type)) {
@@ -178,6 +191,8 @@ function index(types: readonly GraphQLTypeDefinition[]): {
   return { objects, unions }
 }
 
+function noop(): void {}
+
 function details(ctx: ResolverContext, coordinate: string, err: unknown): Record<string, unknown> {
   return { err, requestId: ctx.operation.requestId, coordinate, path: pathOf(ctx.info).join('.') }
 }
@@ -185,7 +200,7 @@ function details(ctx: ResolverContext, coordinate: string, err: unknown): Record
 function pathOf(info: GraphQLResolveInfo): (string | number)[] {
   const path: (string | number)[] = []
   for (let step: GraphQLResolveInfo['path'] | undefined = info.path; step !== undefined; step = step.prev) {
-    path.unshift(step.key)
+    path.push(step.key)
   }
-  return path
+  return path.reverse()
 }

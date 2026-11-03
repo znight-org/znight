@@ -469,6 +469,8 @@ select the failures with fragments, checked by their query compiler. Declare the
 members of the field's return type:
 
 ```ts [src/catalog/rejections.ts]
+import type { Book } from './book.js'
+
 export interface NotFoundRejection {
   readonly __typename: 'NotFoundRejection'
   readonly message: string
@@ -486,11 +488,11 @@ export type BookResult = Book | NotFoundRejection | ValidationRejection
 ```ts
 @Query()
 book(@Args('id') id: ID): Promise<BookResult> {
-  return this.catalog.get(id) // throws NotFoundException
+  return this.catalog.get(id) // throws BookNotFoundError instead of answering null
 }
 
 @Mutation()
-addBook(@Args('input', NewBookInput) input: NewBook): Promise<BookResult> {
+addBook(@Args('input', NewBookInput) input: NewBookInput): Promise<BookResult> {
   return this.catalog.add(input)
 }
 ```
@@ -502,8 +504,8 @@ typo fails the boot.
 ```ts [src/shared/rejections.mapper.ts]
 import { Injectable } from '@znight/core'
 import { GraphQLErrorCode, GraphQLException, type GraphQLResultMapper } from '@znight/graphql'
-import { NotFoundException } from '@znight/http'
 
+import { BookNotFoundError } from '../catalog/errors.js'
 import type { NotFoundRejection, ValidationRejection } from '../catalog/rejections.js'
 
 @Injectable()
@@ -511,7 +513,7 @@ export class RejectionsMapper implements GraphQLResultMapper {
   static readonly types = ['NotFoundRejection', 'ValidationRejection']
 
   toResult(error: unknown): NotFoundRejection | ValidationRejection | undefined {
-    if (error instanceof NotFoundException) return { __typename: 'NotFoundRejection', message: error.message }
+    if (error instanceof BookNotFoundError) return { __typename: 'NotFoundRejection', message: error.message }
     // a Standard Schema of @Args rejected the input
     if (error instanceof GraphQLException && error.code === GraphQLErrorCode.BadUserInput) {
       const issues = (error.extensions?.['issues'] ?? []) as readonly { readonly message: string }[]
@@ -528,7 +530,7 @@ GraphQLPlugin.configure({ resultMappers: [RejectionsMapper] })
 
 ```graphql
 mutation {
-  addBook(input: { title: "" }) {
+  addBook(input: { title: " ", isbn: "9780441013593", authorId: "1", genre: ScienceFiction }) {
     ... on Book {
       id
       title
@@ -540,12 +542,12 @@ mutation {
 }
 ```
 
-answers `{ "data": { "addBook": { "issues": ["Too short"] } } }`, with no `errors`. Guards can be
+answers `{ "data": { "addBook": { "issues": ["A title is required"] } } }`, with no `errors`. Guards can be
 mapped too: a guard returning `false` is a `GraphQLException` with code `FORBIDDEN`. An error the
 mappers leave alone, or an error on a field whose union does not hold the produced type, stays in
 `errors[]`; so do errors of nested fields, unless that field returns a union of its own. Keep
 unexpected failures there: a catch-all `InternalErrorRejection` hides them unless the mapper logs
-them. The [package reference](/packages/graphql) lists every rule.
+them. The [package README](../../packages/graphql/README.md#errors-as-data) lists every rule.
 
 ## Test GraphQL code {#testing}
 
