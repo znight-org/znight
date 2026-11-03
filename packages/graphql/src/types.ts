@@ -172,6 +172,41 @@ export interface GraphQLErrorMapper {
 export type GraphQLErrorMapperClass = abstract new (...args: never[]) => GraphQLErrorMapper
 
 /**
+ * Turns the errors of a field into values of the field (errors as data, RFC 0008). It applies to
+ * the resolver-backed fields whose type is a union holding one of the object types it declares
+ * (`static types`), decided at boot; every other field keeps its errors in `errors[]`.
+ *
+ * ```ts
+ * @Injectable()
+ * export class Rejections implements GraphQLResultMapper {
+ *   static readonly types = ['NotFoundRejection']
+ *
+ *   toResult(error: unknown): NotFoundRejection | undefined {
+ *     if (error instanceof NotFoundException) return { __typename: 'NotFoundRejection', message: error.message }
+ *     return undefined
+ *   }
+ * }
+ * ```
+ */
+export interface GraphQLResultMapper {
+  /**
+   * The value of the field for `error`: an object of a member of the field's union, or `undefined`
+   * to leave the error to the next mapper, then to `errors[]`. Synchronous. `error` is the raw
+   * error, a `GraphQLException` included (a guard returning `false` is `FORBIDDEN`, a Standard
+   * Schema failure of the arguments `BAD_USER_INPUT` with `extensions.issues`).
+   */
+  toResult(error: unknown, ctx: ResolverContext): unknown
+}
+
+/** The object types a result mapper may produce: names of object types of the schema. */
+export interface GraphQLResultTypes {
+  readonly types: readonly string[]
+}
+
+/** A class producing {@link GraphQLResultMapper}s, with the object types it produces (`static types`). */
+export type GraphQLResultMapperClass = (abstract new (...args: never[]) => GraphQLResultMapper) & GraphQLResultTypes
+
+/**
  * The implementation of a custom scalar (§5.7), given to `scalar<T>(name, definition)`. The
  * runtime maps it to graphql-js 17 `GraphQLScalarType` coercers: `serialize` → `coerceOutputValue`,
  * `parseValue` → `coerceInputValue`, `parseLiteral` → `coerceInputLiteral` (the deprecated

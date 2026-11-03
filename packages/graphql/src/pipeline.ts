@@ -11,6 +11,8 @@
  *
  * A field without guards nor normaliser calls `invoke` from the closure graphql-js needs anyway:
  * no extra wrapper, no promise, no `await`. Plain property fields keep graphql-js' default resolver.
+ * A field that carries results (RFC 0008, `results.ts`) gets one wrapper around the whole pipeline,
+ * catching its errors to turn them into values; no other field does.
  */
 import type { Container, Token } from '@znight/core'
 import type { GraphQLFieldResolver, GraphQLResolveInfo } from 'graphql'
@@ -23,6 +25,7 @@ import type {
   GraphQLObjectTypeDefinition,
   GraphQLResolverBinding,
 } from './metadata.ts'
+import type { Recover } from './results.ts'
 import type { FieldFunctions, FieldFunctionsFactory } from './schema.ts'
 import type { GraphQLTypeRef } from './type-ref.ts'
 import type { GraphQLArgs, GraphQLContext, GraphQLGuard, ResolverContext } from './types.ts'
@@ -44,6 +47,8 @@ export interface PipelineOptions {
   readonly resolver: (binding: GraphQLResolverBinding, coordinate: string) => Resolvable<object>
   /** Input object types by name (null handling of nested input values). */
   readonly inputs: ReadonlyMap<string, GraphQLInputTypeDefinition>
+  /** The {@link Recover} function of a field that carries results (RFC 0008), `undefined` for the others. */
+  readonly results?: (field: GraphQLFieldDefinition, coordinate: string) => Recover | undefined
 }
 
 /** The generated invoker of a binding. */
@@ -80,6 +85,11 @@ function fieldFunctions(
     ...binding.guards.map(token => options.guard(token, coordinate)),
   ]
   const normalize = field.args === undefined ? undefined : normalizers.args(field.args)
+  const recover = options.results?.(field, coordinate)
+  const route =
+    guards.length === 0 && recover === undefined ? undefined : Object.freeze({ meta: binding.meta, coordinate })
+  const parentType = parent.name
+  const fieldName = field.name
 
   let resolve: GraphQLFieldResolver<unknown, unknown>
   if (guards.length === 0) {
@@ -104,9 +114,6 @@ function fieldFunctions(
             }
     }
   } else {
-    const route = Object.freeze({ meta: binding.meta, coordinate })
-    const parentType = parent.name
-    const fieldName = field.name
     const forbidden = (): never => {
       throw new GraphQLException(`Not allowed to resolve ${coordinate}`, { code: GraphQLErrorCode.Forbidden })
     }
@@ -116,7 +123,7 @@ function fieldFunctions(
       const allowed = runGuards(
         container,
         guards,
-        new FieldContext(route, operation, parentType, fieldName, args, p, i),
+        new FieldContext(route as ResolverContext['route'], operation, parentType, fieldName, args, p, i),
       )
       // §8.5: guards (they see the coerced arguments), then null handling, then invoke
       const call = (): unknown => {
@@ -128,7 +135,11 @@ function fieldFunctions(
       return allowed.then(ok => (ok ? call() : forbidden()))
     }
   }
-  if (binding.operation === 'subscription') {
+  const subscription = binding.operation === 'subscription'
+  if (recover !== undefined) {
+    resolve = withResults(resolve, recover, route as ResolverContext['route'], parentType, fieldName, subscription)
+  }
+  if (subscription) {
     // the method gives the source event stream; each event is the field value
     return { subscribe: resolve, resolve: identity }
   }
@@ -137,6 +148,44 @@ function fieldFunctions(
 
 function identity(payload: unknown): unknown {
   return payload
+}
+
+/**
+ * The resolve function of a field that carries results (RFC 0008): errors of the whole pipeline
+ * (guards, null handling, `invoke`), thrown or rejected, go through `recover`. Synchronous results
+ * stay synchronous; a promise gets one rejection handler. For a subscription, a value is a source
+ * stream of that single event.
+ */
+function withResults(
+  resolve: GraphQLFieldResolver<unknown, unknown>,
+  recover: Recover,
+  route: ResolverContext['route'],
+  parentType: string,
+  fieldName: string,
+  subscription: boolean,
+): GraphQLFieldResolver<unknown, unknown> {
+  const fail = (error: unknown, p: unknown, a: unknown, c: unknown, i: GraphQLResolveInfo): unknown => {
+    const value = recover(
+      error,
+      new FieldContext(route, c as OperationContext, parentType, fieldName, a as GraphQLArgs, p, i),
+    )
+    return subscription ? once(value) : value
+  }
+  return (p, a, c, i) => {
+    let result: unknown
+    try {
+      result = resolve(p, a, c, i)
+    } catch (error) {
+      return fail(error, p, a, c, i)
+    }
+    return isThenable(result) ? Promise.resolve(result).then(undefined, error => fail(error, p, a, c, i)) : result
+  }
+}
+
+/** A source event stream of one event. */
+// biome-ignore lint/suspicious/useAwait: an async generator is the shortest AsyncIterable of one value
+async function* once(value: unknown): AsyncGenerator<unknown> {
+  yield value
 }
 
 /** Runs guards in order, synchronously until one returns a promise. */
