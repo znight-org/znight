@@ -9,6 +9,7 @@
 import fs from 'node:fs'
 
 import { DEFAULT_OUT_FILE } from '../../src/options.ts'
+import { COMPILER_VERSION } from '../../src/version.ts'
 import { integrationApp, integrationTemplate, report, run, SOURCE_CONDITION, sleep, waitFor } from './helpers.ts'
 import { describe, expect, test as it } from 'bun:test'
 
@@ -44,7 +45,8 @@ export class Notifier {
 const RECORDING_CORE = {
   'node_modules/@znight/core/package.json': JSON.stringify({
     name: '@znight/core',
-    version: '0.1.0',
+    // the release line of the compiler (ZNIGHT018 otherwise)
+    version: COMPILER_VERSION,
     type: 'module',
     exports: { '.': './index.ts' },
   }),

@@ -6,7 +6,7 @@ import fs from 'node:fs'
 
 import { renderErrorModule } from '../src/codegen/error-module.ts'
 import { compile, createCompiler, generate } from '../src/compiler.ts'
-import { compatibleVersions, parseVersion } from '../src/version.ts'
+import { COMPILER_VERSION, compatibleVersions, parseVersion } from '../src/version.ts'
 import { includeRoots, isRelevantChange } from '../src/watch.ts'
 import { tempApp } from './analysis/helpers.ts'
 import { codesOf, render } from './codegen/helpers.ts'
@@ -162,10 +162,16 @@ describe('diagnostics of compile()', () => {
   })
 
   it('reports @znight/* packages of another release line (ZNIGHT018)', async () => {
+    // relative to the compiler's own version, so that releases do not break the test
+    const current = parseVersion(COMPILER_VERSION) ?? { major: 0, minor: 1, patch: 0 }
+    const zero = current.major === 0
+    const other = zero ? `0.${current.minor + 1}.0` : `${current.major + 1}.0.0`
+    const same = zero ? `0.${current.minor}.7` : `${current.major}.${current.minor}.7`
+    const line = zero ? `0.${current.minor}.x` : `${current.major}.x`
     const app = tempApp({
       'src/service.ts': SERVICE,
-      'node_modules/@znight/http/package.json': JSON.stringify({ name: '@znight/http', version: '0.2.0' }),
-      'node_modules/@znight/messaging/package.json': JSON.stringify({ name: '@znight/messaging', version: '0.1.7' }),
+      'node_modules/@znight/http/package.json': JSON.stringify({ name: '@znight/http', version: other }),
+      'node_modules/@znight/messaging/package.json': JSON.stringify({ name: '@znight/messaging', version: same }),
     })
     try {
       app.write(
@@ -175,7 +181,7 @@ describe('diagnostics of compile()', () => {
             name: 'temp-app',
             private: true,
             type: 'module',
-            dependencies: { '@znight/http': '^0.2.0', '@znight/messaging': '0.1.7' },
+            dependencies: { '@znight/http': `^${other}`, '@znight/messaging': same },
           },
           null,
           2,
@@ -185,9 +191,9 @@ describe('diagnostics of compile()', () => {
       expect(result.ok).toBe(false)
       expect(codesOf(app.root, result.diagnostics)).toEqual(['ZNIGHT018 package.json:6'])
       expect(render(app.root, result.diagnostics)).toContain(
-        '✗ ZNIGHT018: @znight/http@0.2.0 is not compatible with @znight/compiler@',
+        `✗ ZNIGHT018: @znight/http@${other} is not compatible with @znight/compiler@${COMPILER_VERSION}`,
       )
-      expect(result.diagnostics[0]?.hints?.[0]).toContain('install @znight/http@0.1.x')
+      expect(result.diagnostics[0]?.hints?.[0]).toContain(`install @znight/http@${line}`)
     } finally {
       app.cleanup()
     }
