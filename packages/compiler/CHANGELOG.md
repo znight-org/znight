@@ -1,5 +1,12 @@
 # @znight/compiler
 
+## 0.2.0
+
+### Patch Changes
+
+- b6119e6: `NamedShape.literals` also lists the literals of an alias whose union holds `null` or `undefined` (`type Sort = 'title' | 'newest' | null` gives `['title', 'newest']`), so a nullable literal union keeps its source order.
+- @znight/core@0.2.0
+
 ## 0.1.4
 
 ### Patch Changes

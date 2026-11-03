@@ -1,5 +1,13 @@
 # @znight/config
 
+## 0.2.0
+
+### Patch Changes
+
+- Updated dependencies [b6119e6]
+  - @znight/compiler@0.2.0
+  - @znight/core@0.2.0
+
 ## 0.1.4
 
 ### Patch Changes

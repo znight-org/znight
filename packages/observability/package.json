@@ -1,6 +1,6 @@
 {
   "name": "@znight/observability",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "description": "Znight observability plugin: structured logging (Pino), Prometheus metrics and OpenTelemetry tracing",
   "license": "MIT",
   "author": "Ugho STEPHAN",
