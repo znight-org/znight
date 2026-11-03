@@ -1,18 +1,18 @@
 # @znight/observability
 
 Logging, metrics and tracing for [Znight](../../README.md) applications, wired into every request,
-message and scheduled run by one plugin:
+message, scheduled run and GraphQL operation by one plugin:
 
 - **Logging**: a structured [pino](https://getpino.io) `Logger`, automatically enriched with the
   current `requestId`, `traceId` and `spanId` (and `job` / `runId` inside a scheduled run);
   redaction; transports for stdout JSON, pretty output, Datadog and CloudWatch / AWS Lambda; one log
-  entry per HTTP request, per message and per scheduled run.
+  entry per HTTP request, per message and per scheduled run (and, on demand, per GraphQL operation).
 - **Metrics**: a Prometheus `MetricsRegistry` ([prom-client](https://github.com/siimon/prom-client)),
-  HTTP RED metrics, consumer metrics, scheduled job metrics, process metrics, a dedicated `/metrics`
-  server.
+  HTTP RED metrics, consumer metrics, scheduled job metrics, GraphQL operation metrics, process
+  metrics, a dedicated `/metrics` server.
 - **Tracing**: an OpenTelemetry `Tracer`, a `SERVER` span per HTTP request, a `CONSUMER` span per
-  message with W3C trace context propagation, and an `INTERNAL` span per scheduled run. Works with
-  any OpenTelemetry SDK.
+  message with W3C trace context propagation, and an `INTERNAL` span per scheduled run and per GraphQL
+  operation. Works with any OpenTelemetry SDK.
 - **Decorators**: `@Logged()`, `@Traced()` and `@Metric()` on any provider method.
 
 Everything is wired by one plugin, and like the rest of Znight, it is resolved at compile time: no
@@ -247,18 +247,21 @@ final `Application stopped` or `The application stopped with errors`) is flushed
 written: the pending request keeps the process alive until it is delivered. Standalone, call
 `await logger.close()` (or `transport.close()`) before exiting.
 
-### Request, message and job logs
+### Request, message, job and GraphQL logs
 
 The plugin writes one entry per HTTP request (`request completed` / `request failed`), per message
 delivery (`message processed`, `message failed, will be retried`, `message dead-lettered`) and per
 scheduled run of `@znight/schedule` (`job completed`, `job failed`, `job skipped`, `job not
-acquired`):
+acquired`), and, when asked, per GraphQL operation of `@znight/graphql` (`graphql operation
+completed`, `graphql operation completed with errors`, `graphql operation rejected`, `graphql
+operation failed`):
 
 | Option              | Default | Description                                                                                                                                             |
 | ------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `requests`          | `true`  | `false`, or `{ level?, ignore?(event) }`. 4xx are `warn`, 5xx `error` (with `err`).                                                                     |
 | `messages`          | `true`  | `false`, or `{ level?, ignore?(event) }`. Retries are `warn`, dead letters `error`.                                                                     |
 | `jobs`              | `true`  | `false`, or `{ level?, ignore?(event) }`. Failed runs are `error` (with `err`), skipped `warn`, not acquired (another instance holds the lock) `debug`. |
+| `graphql`           | `false` | `true`, or `{ level?, ignore?(event) }`. `partial` and `rejected` operations are `warn`, `error` is `error`.                                            |
 | `replaceCoreLogger` | `true`  | Route the framework's own logs (core, plugins) through the logger, with `component: 'znight'`.                                                          |
 
 ```ts
@@ -274,13 +277,24 @@ a `schedule:run` wrapper that does not call `next()` (feature flag, maintenance 
 skipped` at `warn`, without `durationMs` or `err`, wherever that wrapper sits relative to the
 plugin's own.
 
+GraphQL entries are off by default: the HTTP request carrying an operation is already logged. They
+carry `operationType`, `operationName`, `outcome`, `transport`, `documentId`, `requestId` and
+`durationMs`, plus `errors` (message, code and path, as sent to the client) when the response has
+errors, and `err` when the execution threw. They are written inside the operation's span.
+
+```ts
+ObservabilityPlugin.configure({
+  logging: { graphql: { ignore: event => event.operationName === 'IntrospectionQuery' } },
+})
+```
+
 ## Metrics
 
 Metrics are enabled when the optional peer `prom-client` is installed (`metrics: false` disables them,
 `metrics: true` or an object requires it). The plugin then:
 
 - provides an injectable `MetricsRegistry`;
-- records HTTP and messaging metrics through the hooks;
+- records HTTP, messaging, scheduled job and GraphQL metrics through the hooks;
 - serves everything on a dedicated server (default `http://0.0.0.0:9464/metrics`), started in
   `onStart`, closed in `onStop`. It is separate from your API: no auth, middleware or routing
   interference, and it is not exposed through the public load balancer.
@@ -357,6 +371,22 @@ after the plugin). Dynamic job names can be unbounded
   expr: time() - znight_schedule_last_success_timestamp_seconds{job="digest.daily"} > 26 * 3600
 ```
 
+### GraphQL metrics
+
+One series per operation of `@znight/graphql` (`graphql:operation` hook):
+
+| Metric                               | Type      | Labels                    |
+| ------------------------------------ | --------- | ------------------------- |
+| `graphql_operations_total`           | counter   | `type`, `name`, `outcome` |
+| `graphql_operation_duration_seconds` | histogram | `type`, `name`            |
+
+`type` is `query`, `mutation`, `subscription`, or `unknown` for a request rejected before an
+operation was selected (a parse error). `name` is the operation name, `anonymous` for an anonymous
+operation; clients choose operation names, so at most `maxOperationNames` (100) distinct names are
+labelled, later ones are `_OTHER`. `outcome` is `success`, `partial` (data with field errors),
+`error` (no data, or the execution threw) or `rejected` (parse, validation, variables or limits). A
+subscription is timed over its whole life: filter on `type` before reading latencies.
+
 ### Metrics options
 
 | Option           | Default        | Description                                                                                                               |
@@ -368,6 +398,7 @@ after the plugin). Dynamic job names can be unbounded
 | `http`           | `true`         | `false`, or `{ buckets?, ignore?(event) }`                                                                                |
 | `messaging`      | `true`         | `false`, or `{ buckets?, ignore?(event), maxTypesPerHandler? }`                                                           |
 | `schedule`       | `true`         | `false`, or `{ buckets?, latenessBuckets?, ignore?(event), maxJobs? }`                                                    |
+| `graphql`        | `true`         | `false`, or `{ buckets?, ignore?(event), maxOperationNames? }`                                                            |
 | `registry`       | a new registry | An existing `prom-client` registry (e.g. `client.register`, the global one)                                               |
 | `client`         | loaded lazily  | The `prom-client` module, for exotic bundling setups                                                                      |
 
@@ -442,6 +473,21 @@ Occurrences that did not run (skipped, not acquired) get no span, except a run v
 `schedule:run` wrapper registered after the plugin: its span is already open, and ends with the
 outcome `skipped`.
 
+### GraphQL operation spans
+
+One `INTERNAL` span per operation of `@znight/graphql`, child of the active span (the `SERVER` span
+of the HTTP request carrying it), named after the OpenTelemetry GraphQL semantic conventions:
+`query Books`, `mutation` (anonymous operation), `GraphQL Operation` (rejected before an operation
+was selected). Attributes: `graphql.operation.type`, `graphql.operation.name`, `znight.request.id`,
+`znight.graphql.transport`, `.document_id` (SHA-256 of the query text), `.outcome` and
+`.error_codes` (the distinct `extensions.code` of the response errors). The `error` and `rejected`
+outcomes set the status to `ERROR` (`error.type`: the first error code); a `partial` response keeps
+it unset, and an execution that threw records the exception. A subscription's span covers its
+whole life, and is active while it runs.
+
+The query text (`graphql.document`) may carry literal values, so it is recorded only with
+`tracing: { graphql: { document: true } }`.
+
 ### The `Tracer`
 
 ```ts
@@ -480,6 +526,7 @@ export class PaymentService {
 | `messaging`      | `true`                    | `false`, or `{ ignore?(event), system? }`         |
 | `publish`        | `true`                    | `false`, or `{ ignore?(event), system? }`         |
 | `schedule`       | `true`                    | `false`, or `{ ignore?(event) }`                  |
+| `graphql`        | `true`                    | `false`, or `{ ignore?(event), document? }`       |
 
 `tracing: false` disables the automatic spans; the injectable `Tracer` and `@Traced()` keep working.
 
@@ -533,13 +580,13 @@ conflicting metric definition is reported once through the logger and the method
 
 `ObservabilityPlugin.configure(options)` (name `observability`):
 
-| Hook          | What happens                                                                                                                                                                                                                                                                                                                                                                                                   |
-| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `register`    | Validates decorator options, creates the logger, tracer and registry (object options), replaces the core logger, provides the externals, wraps `http:request`, `messaging:message` and `schedule:run` (spans → metrics → logs) and `messaging:publish` (producer spans), listens to `schedule:run` (run counters, logs of runs that did not execute); a hook whose features are all disabled is not registered |
-| `onBootstrap` | Evaluates function options if nothing did yet, then removes the hooks of the features they disable                                                                                                                                                                                                                                                                                                             |
-| `onStart`     | Starts the `/metrics` server                                                                                                                                                                                                                                                                                                                                                                                   |
-| `onStop`      | Closes the `/metrics` server                                                                                                                                                                                                                                                                                                                                                                                   |
-| `onDispose`   | Removes the hook wrappers, flushes the tracer provider (`forceFlush`) and the logger transports; entries logged afterwards are flushed as soon as they are written                                                                                                                                                                                                                                             |
+| Hook          | What happens                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `register`    | Validates decorator options, creates the logger, tracer and registry (object options), replaces the core logger, provides the externals, wraps `http:request`, `messaging:message`, `schedule:run` and `graphql:operation` (spans → metrics → logs) and `messaging:publish` (producer spans), listens to `schedule:run` (run counters, logs of runs that did not execute); a hook whose features are all disabled is not registered |
+| `onBootstrap` | Evaluates function options if nothing did yet, then removes the hooks of the features they disable                                                                                                                                                                                                                                                                                                                                  |
+| `onStart`     | Starts the `/metrics` server                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `onStop`      | Closes the `/metrics` server                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `onDispose`   | Removes the hook wrappers, flushes the tracer provider (`forceFlush`) and the logger transports; entries logged afterwards are flushed as soon as they are written                                                                                                                                                                                                                                                                  |
 
 Options may be computed from the container, e.g. from a config class:
 
@@ -581,6 +628,9 @@ const jobs = logJobs(logger)
 if (jobs.wrap) app.hooks.wrap('schedule:run', jobs.wrap)
 if (jobs.listen) app.hooks.on('schedule:run', jobs.listen)
 ```
+
+For `graphql:operation`, `traceGraphQLOperations(tracer)`, `measureGraphQLOperations(metrics)` and
+`logGraphQLOperations(logger)` are wrappers.
 
 ## Testing
 

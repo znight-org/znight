@@ -554,8 +554,10 @@ Raise `limits` only for the operations that need it, and prefer pagination argum
 sending the same queries pays parsing and validation once.
 
 The `graphql:operation` hook observes every operation (type, name, outcome, error codes), for logs
-and metrics of your own; the endpoint itself is observed like any HTTP route by
-`@znight/observability`.
+and metrics of your own. [`@znight/observability`](/packages/observability#graphql-operations)
+wraps it: a span per operation under the HTTP request span, `graphql_operations_total` and
+`graphql_operation_duration_seconds` by type and (capped) operation name, and opt-in operation logs
+(`logging: { graphql: true }`).
 
 ## Coming from `@nestjs/graphql` {#nestjs}
 

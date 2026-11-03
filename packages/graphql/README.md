@@ -863,9 +863,12 @@ export class OperationLog implements OnStart {
 }
 ```
 
-The endpoint is an HTTP route, so `@znight/observability` already logs, measures and traces it like
-any request (route `/graphql`). Per-operation spans and metrics in `@znight/observability` are not
-implemented yet: use the hook.
+The endpoint is an HTTP route, so `@znight/observability` logs, measures and traces it like any
+request (route `/graphql`), and it also wraps this hook: a span `<type> <name>` per operation (child
+of the HTTP span), the metrics `graphql_operations_total{type, name, outcome}` and
+`graphql_operation_duration_seconds{type, name}` (operation names capped at `maxOperationNames`,
+then `_OTHER`), and one log entry per operation with `logging: { graphql: true }` (off by default).
+See [GraphQL operation spans](../observability/README.md#graphql-operation-spans).
 
 ## Performance
 
@@ -1028,8 +1031,8 @@ entry; of `@znight/http` it only imports `@znight/http/compiler` (`readRouteMeta
 - The SDL artifact and `schemaHash` see the `description` and `specifiedByURL` of a
   `ScalarDefinition` written as literals only; a graphql-js `GraphQLScalarType` (`graphql-scalars`)
   is printed without them at build time, so its runtime `printSchema()` may differ.
-- `@znight/observability` has no GraphQL-specific spans or metrics yet (the HTTP request is
-  observed); resolver-level tracing is planned on graphql-js tracing channels.
+- `@znight/observability` observes operations, not resolvers: resolver-level tracing is planned on
+  graphql-js tracing channels.
 - Two concurrent `plugin.execute()` calls inside one request scope share the scope's
   `GraphQLContext` entry: `@Ctx()` always gets its own operation, a `GraphQLContext` injected
   through DI sees the latest.

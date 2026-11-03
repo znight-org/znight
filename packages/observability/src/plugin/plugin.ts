@@ -42,11 +42,11 @@ export interface ObservabilityPluginInstance extends Plugin {
  * ```
  *
  * - `register`: provides `Logger`, `Tracer`, `MetricsRegistry` and the `@Logged` / `@Traced` /
- *   `@Metric` interceptors, wraps the `http:request`, `messaging:message` and `schedule:run` hooks
- *   (spans → RED metrics → logs) and `messaging:publish` (producer spans), listens to `schedule:run`
- *   (run counters) and routes the framework logs through the logger; a hook whose features are all
- *   disabled is not registered (options given as a function: removed in `onBootstrap`, once they
- *   are evaluated);
+ *   `@Metric` interceptors, wraps the `http:request`, `messaging:message`, `schedule:run` and
+ *   `graphql:operation` hooks (spans → metrics → logs) and `messaging:publish` (producer spans),
+ *   listens to `schedule:run` (run counters) and routes the framework logs through the logger; a
+ *   hook whose features are all disabled is not registered (options given as a function: removed in
+ *   `onBootstrap`, once they are evaluated);
  * - `onStart`: starts the `/metrics` server; `onStop`: closes it;
  * - `onDispose`: flushes the tracer provider and the logger transports; entries logged afterwards
  *   (the application's final `Application stopped`) are flushed as soon as they are written.
@@ -160,6 +160,12 @@ class ObservabilityPluginImpl implements ObservabilityPluginInstance {
         this.#kit?.scheduleListener?.(event)
       }),
     )
+    this.#hook('graphql', () =>
+      hooks.wrap('graphql:operation', (event, next) => {
+        const wrapper = this.#kit?.graphql
+        return wrapper === undefined ? next() : wrapper(event, next)
+      }),
+    )
   }
 
   onBootstrap(ctx: PluginContext): void {
@@ -216,7 +222,7 @@ class ObservabilityPluginImpl implements ObservabilityPluginInstance {
 }
 
 /** The features of the kit served by a hook of the plugin. */
-type HookedFeature = 'http' | 'messaging' | 'publish' | 'schedule' | 'scheduleListener'
+type HookedFeature = 'http' | 'messaging' | 'publish' | 'schedule' | 'scheduleListener' | 'graphql'
 
 /**
  * A runtime definition returning an object owned by the plugin. Transient: created on injection

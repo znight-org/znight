@@ -1,5 +1,5 @@
 ---
-description: "@znight/observability - structured logging with Pino, Prometheus metrics and OpenTelemetry tracing, wired into HTTP requests and message deliveries."
+description: "@znight/observability - structured logging with Pino, Prometheus metrics and OpenTelemetry tracing, wired into HTTP requests, message deliveries, scheduled runs and GraphQL operations."
 ---
 
 # @znight/observability <Badge type="tip" text="available" />
@@ -101,6 +101,33 @@ incoming trace ids still reach the logs, the `traceresponse` header and the mess
 handling the request (Znight registers a minimal `AsyncLocalStorage` context manager when nothing
 did: register your SDK before the first request). Add spans to your own methods with `@Traced()` or
 the `Tracer` (`withSpan`, `startSpan`, `inject`, `extract`).
+
+## GraphQL operations
+
+With [`@znight/graphql`](/packages/graphql), the plugin also wraps the `graphql:operation` hook:
+
+- **Span** `<type> <name>` (`query Books`; `mutation` for an anonymous operation) per operation,
+  child of the HTTP request span, with the OpenTelemetry attributes `graphql.operation.type` and
+  `graphql.operation.name`, plus the transport, the document id, the outcome and the error codes.
+  The `error` and `rejected` outcomes set the status to `ERROR`; a subscription's span covers its
+  whole life. The query text (`graphql.document`) is recorded only with
+  `tracing: { graphql: { document: true } }`.
+- **Metrics** `graphql_operations_total{type, name, outcome}` and
+  `graphql_operation_duration_seconds{type, name}`. Clients choose operation names, so the `name`
+  label is capped (`maxOperationNames`, 100, then `_OTHER`); anonymous operations are `anonymous`.
+- **Logs**, off by default (the HTTP request is logged already): `logging: { graphql: true }` writes
+  one entry per operation, `warn` for `partial` and `rejected`, `error` for `error`.
+
+```ts
+ObservabilityPlugin.configure({
+  logging: { graphql: true },
+  metrics: { graphql: { maxOperationNames: 50 } },
+  tracing: { graphql: { document: true } },
+})
+```
+
+`tracing.graphql`, `metrics.graphql` and `logging.graphql` turn each part off or tune it; when all
+three are off, no wrapper is registered and operations do not pay for the hook.
 
 ## Interceptor decorators
 

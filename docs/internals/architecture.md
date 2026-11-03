@@ -2379,7 +2379,16 @@ injected into the message headers) and `schedule:run` (one span `schedule <job>`
 the root of a new trace except for manual triggers; the `schedule_*` metrics: runs, duration,
 lateness, active runs, last success, with the `job` label capped at `maxJobs` then `_OTHER`; one log
 entry per run, written inside its span), and listens to `schedule:run` for the occurrences that did
-not execute (counters, `job skipped` / `job not acquired` entries). A run vetoed by a
+not execute (counters, `job skipped` / `job not acquired` entries), and wraps `graphql:operation`
+(RFC 0005 §8.10): one `INTERNAL` span per operation, child of the active (HTTP) span, named
+`<type> <name>` (`<type>` when anonymous, `GraphQL Operation` when no operation was selected) with
+the OpenTelemetry attributes `graphql.operation.type` and `graphql.operation.name`
+(`graphql.document` only with `tracing.graphql.document: true`), status `ERROR` for the `error` and
+`rejected` outcomes; the metrics `graphql_operations_total{type, name, outcome}` and
+`graphql_operation_duration_seconds{type, name}`, `type` being `unknown` when no operation was
+selected and `name` being `anonymous` for an anonymous operation, capped at `maxOperationNames`
+(default 100) distinct names then `_OTHER`; one log entry per operation only with
+`logging.graphql` (off by default). A run vetoed by a
 `schedule:run` wrapper (§8.3) is `skipped` wherever that wrapper sits relative to the plugin's own:
 a `job skipped` entry at `warn` without `durationMs` nor `err`, counted `skipped` but neither timed
 nor recorded as a success (`last success` keeps aging, so a staleness alert keeps firing), and, when
@@ -2388,12 +2397,12 @@ before the job is `failed`. Inside a run, the logger adds
 `job` and `runId` (from the request-scoped `@znight/schedule#JobContext`; `logging.jobContext`).
 Each part can be turned off: `metrics: false`, `tracing: false`, `logging.requests` /
 `logging.messages` / `logging.jobs: false`, and per hook (`tracing.http`, `metrics.messaging`,
-`metrics.schedule`, `tracing.schedule`...). **Impl.** A hook whose parts are all off is not
+`metrics.schedule`, `tracing.schedule`, `tracing.graphql`, `metrics.graphql`...). **Impl.** A hook whose parts are all off is not
 registered (a registered `http:request` wrapper costs every request, see the fast lane of §9.1): with
 object options, `register` registers only the needed hooks; options given as a function are not
 known yet, so every hook is registered (keeping its position among plugins) and those of disabled
-parts are removed in `onBootstrap`. `@znight/schedule` is not a dependency: the hook events are
-typed by core (§8.3).
+parts are removed in `onBootstrap`. `@znight/schedule` and `@znight/graphql` are not dependencies:
+the hook events are typed by core (§8.3).
 `onStart`/`onStop` start and stop the `/metrics` server (`node:http`, default port 9464, only when
 metrics are enabled; `metrics.server: false` disables it); `onDispose` removes the wrappers, closes
 the server, flushes the tracer provider and the logger, then switches the logger to flushing every
@@ -2898,7 +2907,8 @@ interface GraphQLResolverBinding {
   406; a body past the limit is 413 with a GraphQL error body.
 - **Hook:** `graphql:operation` (§8.3) wraps every operation, and a subscription for its whole
   life; the event is built only when the hook has wrappers or listeners. `outcome` is `success`,
-  `partial`, `error` or `rejected` (rejected before execution).
+  `partial`, `error` or `rejected` (rejected before execution). `@znight/observability` wraps it
+  (spans, metrics, opt-in logs, §9.4).
 - `PubSub` (abstract, `publish(topic, payload)`, `subscribe(topic, { signal })`) is a singleton
   external; `MemoryPubSub({ bufferSize })` gives each subscriber an `EventChannel` (§9.1, RFC 0006)
   that closes on overflow, ending that subscription with `SUBSCRIPTION_OVERFLOW`.
