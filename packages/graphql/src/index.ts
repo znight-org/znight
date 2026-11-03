@@ -7,6 +7,16 @@
 
 export type { StandardSchemaV1 } from '@znight/http'
 export type { Float, ID, Int, JSONValue, ResolverOptions } from './decorators.ts'
+export type { GraphQLRequest, GraphQLResultStream } from './execution.ts'
+export type {
+  AnyPubSub,
+  GraphQLErrorMapperRef,
+  GraphQLGuardRef,
+  GraphQLHttpOptions,
+  GraphQLLimits,
+  GraphQLPluginOptions,
+  GraphQLSubscriptionOptions,
+} from './options.ts'
 export type {
   BatchLoad,
   BatchLoadClass,
@@ -47,6 +57,8 @@ export {
   GraphQLException,
   type GraphQLExceptionOptions,
 } from './errors.ts'
+export { type OrderByKeysOptions, orderByKeys } from './loaders.ts'
+export { MemoryPubSub, type MemoryPubSubOptions } from './memory-pubsub.ts'
 export {
   GRAPHQL_METADATA_VERSION,
   type GraphQLArgumentDefinition,
@@ -66,4 +78,7 @@ export {
   type GraphQLTypeDefinition,
   type GraphQLUnionTypeDefinition,
 } from './metadata.ts'
+export { type DirectExecuteOptions, GraphQLPlugin, type MaybePromise } from './plugin.ts'
 export { PubSub, type SubscribeOptions } from './pubsub.ts'
+export { GraphQLTokens } from './tokens.ts'
+export { validateArgs } from './validate-args.ts'
