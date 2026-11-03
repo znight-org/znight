@@ -258,9 +258,21 @@ The compiler writes `schema.graphql` with the generated module, byte-identical t
 `printSchema()`, and `znight generate --check` fails when it is stale. Commit it to review schema
 changes in pull requests. The other option, `number: 'Int'`, maps `number` to `Int`.
 
+## Schema-first
+
+When the `.graphql` files are the contract, `graphql.configure({ schema: 'src/**/*.graphql' })`
+makes them the schema: resolvers are bound to their fields by name (`@Query()` by method name,
+`@Resolver('Book')` + `@ResolveField()` for type fields, as in NestJS), and the compiler checks at
+build time that every field is resolved and that every resolver signature conforms to the SDL
+([`ZNIGHT067`](/reference/error-codes#znight067), [`ZNIGHT068`](/reference/error-codes#znight068)).
+GraphQL Code Generator's `typescript` output passes the checks as is. Interfaces, `extend`, custom
+scalars bound by name to `scalar<T>()` declarations and `@specifiedBy` are supported; the runtime is
+the same. See the [guide](/guide/graphql#schema-first) and
+[RFC 0007](https://github.com/znight-org/znight/blob/main/rfcs/0007-graphql-schema-first.md).
+
 ## Limitations
 
-No GraphQL interfaces (use unions), no `graphql-ws` subscriptions, `@defer` / `@stream`, trusted
+No GraphQL interfaces in code-first (use unions, or the schema-first mode), no `graphql-ws` subscriptions, `@defer` / `@stream`, trusted
 documents, cost analysis or federation in this version: they are follow-ups on the
 [roadmap](/roadmap#considered).
 
@@ -275,6 +287,8 @@ documents, cost analysis or federation in this version: they are follow-ups on t
 | [`ZNIGHT064`](/reference/error-codes#znight064) | Union members that cannot be told apart at runtime                                             |
 | [`ZNIGHT065`](/reference/error-codes#znight065) | Loaders: not `Loader<L>`, not a `BatchLoad`, a batch returning the wrong number of values      |
 | [`ZNIGHT066`](/reference/error-codes#znight066) | Boot: invalid metadata, schema or options, `HttpPlugin` missing                                |
+| [`ZNIGHT067`](/reference/error-codes#znight067) | Schema-first: the SDL files cannot be read, parsed or validated                                |
+| [`ZNIGHT068`](/reference/error-codes#znight068) | Schema-first: a field without resolver, a signature not conforming to the SDL                  |
 
 Shared codes also apply: [`ZNIGHT001`](/reference/error-codes#znight001) (a dependency, guard or
 loader without provider), [`ZNIGHT005`](/reference/error-codes#znight005) (decorator usage),

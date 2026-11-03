@@ -5,7 +5,8 @@ description: Build a GraphQL API with Znight - types as the schema, resolvers, v
 # GraphQL
 
 `@znight/graphql` serves a GraphQL API whose schema is **derived from your TypeScript types at build
-time**. This guide builds a small book catalog step by step. The [package page](/packages/graphql)
+time**. This guide builds a small book catalog step by step. When the `.graphql` files are your
+contract, the [schema-first mode](#schema-first) checks resolvers against them instead. The [package page](/packages/graphql)
 summarises the API, and the [package README](../../packages/graphql/README.md) is the complete
 reference.
 
@@ -586,7 +587,122 @@ wraps it: a span per operation under the HTTP request span, `graphql_operations_
 `graphql_operation_duration_seconds` by type and (capped) operation name, and opt-in operation logs
 (`logging: { graphql: true }`).
 
+## Schema-first {#schema-first}
+
+Code-first suits a schema owned by the server. When the `.graphql` files are the contract, shared
+with clients and with [GraphQL Code Generator](https://the-guild.dev/graphql/codegen), switch the
+compiler extension to schema-first: the SDL becomes the schema, resolvers are bound to its fields
+by name, and the compiler checks at build time that every field is resolved and that every
+resolver signature conforms to the SDL ([RFC 0007](../../rfcs/0007-graphql-schema-first.md)).
+
+```ts [znight.config.ts]
+import graphql from '@znight/graphql/compiler'
+import type { ZnightOptions } from '@znight/compiler'
+
+export default {
+  extensions: [graphql.configure({ schema: 'src/**/*.graphql' })],
+} satisfies ZnightOptions
+```
+
+The globs are relative to the project root; the files are inputs of the compile, so `znight dev`
+rebuilds when one changes or appears. The two modes do not mix: with `schema`, TypeScript types
+only get checked. The runtime is the same, and so are the generated metadata, `schemaHash` and the
+`sdl` artifact (the served schema, without custom directives).
+
+```graphql [src/catalog/catalog.graphql]
+type Book {
+  id: ID!
+  title: String!
+  author: Author!
+}
+
+extend type Query {
+  books(limit: Int = 10): [Book!]!
+}
+```
+
+```ts [src/catalog/book.resolver.ts]
+import { Args, Loader, Parent, Query, ResolveField, Resolver } from '@znight/graphql'
+
+import { AuthorsById } from './authors-by-id.loader.ts'
+import { CatalogService } from './catalog.service.ts'
+import type { Author, Book, QueryBooksArgs } from './graphql.generated.ts'
+
+@Resolver('Book')
+export class BookResolver {
+  constructor(private readonly catalog: CatalogService) {}
+
+  @Query()
+  books(@Args('limit') limit: QueryBooksArgs['limit']): Promise<Book[]> {
+    return this.catalog.list(limit ?? 10)
+  }
+
+  @ResolveField()
+  author(@Parent() book: Book, @Loader() authors: Loader<AuthorsById>): Promise<Author> {
+    return authors.load(book.authorId)
+  }
+}
+```
+
+- Root fields are bound by method name, or by the name given to `@Query('name')`, `@Mutation()` or
+  `@Subscription()`. Fields of other types need the type name: `@Resolver('Book')` +
+  `@ResolveField()` (the method name, or `@ResolveField('name')`); `@Parent()` is optional.
+- `@Args('name')` receives one argument, `@Args()` all of them; `@Args('input', Schema)` validates
+  with a Standard Schema, as in code-first. Guards, route decorators, loaders and subscriptions
+  work the same way.
+- Descriptions, deprecations and default values come from the SDL. `extend type`, enums, unions,
+  **interfaces**, input objects and `@specifiedBy` are supported. Enum values are their SDL names
+  on both sides. Union members and interface implementations are told apart by `__typename`, or
+  by `instanceof` when the resolvers return exported classes.
+- Every custom scalar is declared once in TypeScript with `scalar<T>('Name', definition)`, `T` being
+  the type of its values; `DateTime`, `BigInt` and `JSON` are built in. A custom directive is
+  ignored with a warning.
+
+**What the compiler checks.** A root field without resolver, a resolver for a field the SDL does not
+declare, an unknown argument, `@Resolver('Bok')`, or an object field that neither a resolver nor the
+returned TypeScript type provides: each is a [ZNIGHT068](/reference/error-codes#znight068) with a
+suggestion. Then the types: a resolver returning `Book | null` for `Book!`, a `string` for an
+`Int`, a value outside an enum, an argument typed `string` for a nullable `String` (it may be
+omitted), a union member the SDL does not list: one ZNIGHT068 per mismatch, on the TypeScript
+annotation, with the SDL definition next to it. SDL errors are
+[ZNIGHT067](/reference/error-codes#znight067), located in the `.graphql` file. `any`, `unknown` and
+missing annotations are not checked.
+
+**TypeScript types from the SDL.** Generate them with GraphQL Code Generator's `typescript` plugin,
+mapping the custom scalars to the types of their `scalar<T>()` declarations; its output passes the
+checks as is (`Scalars['X']['output']`, `Maybe<T>`, the `QueryXxxArgs` types, `__typename` on every
+object type):
+
+```ts [codegen.ts]
+import type { CodegenConfig } from '@graphql-codegen/cli'
+
+const config: CodegenConfig = {
+  schema: 'src/**/*.graphql',
+  generates: {
+    'src/graphql.generated.ts': {
+      plugins: ['typescript'],
+      config: {
+        scalars: { DateTime: 'Date', EventId: './events/event-id.ts#EventId' },
+        namingConvention: { enumValues: 'keep' },
+        useTypeImports: true,
+      },
+    },
+  },
+}
+
+export default config
+```
+
+`typescript-resolvers` adds its `Resolvers` types: not needed, the decorated methods are checked
+directly. Models that leave out the fields a field resolver computes (`authorId` instead of
+`author`) work too: only the fields without resolver must be properties of the returned type.
+
 ## Coming from `@nestjs/graphql` {#nestjs}
+
+Schema-first NestJS applications (`typePaths`) move with the [schema-first mode](#schema-first):
+the same `.graphql` files, the same decorators bound by name (`@Resolver('Book')`,
+`@ResolveField()`, `@Args('id')`), `@Context()` becoming `@Ctx()`. The table below maps code-first
+NestJS.
 
 | NestJS (code first)                                  | Znight                                                             |
 | ---------------------------------------------------- | ------------------------------------------------------------------ |
@@ -599,11 +715,14 @@ wraps it: a span per operation under the HTTP request span, `graphql_operations_
 | `dataloader` wiring per request in the context       | A `BatchLoad` provider and `@Loader()`                             |
 | `graphql-subscriptions` `PubSub`, `graphql-ws`       | The injectable `PubSub`, subscriptions over SSE                    |
 | `@UseGuards()` with `GqlExecutionContext`            | `GraphQLGuard.canResolve(ctx: ResolverContext)`, route decorators  |
-| Schema errors at boot or at the first request        | Schema errors at build time (`ZNIGHT060`–`ZNIGHT066`)              |
+| Schema errors at boot or at the first request        | Schema errors at build time (`ZNIGHT060`–`ZNIGHT068`)              |
 
 ## Limits {#limits}
 
-- No GraphQL interfaces yet: model polymorphic results with unions.
+- Code-first maps no TypeScript type to a GraphQL interface: use unions, or the schema-first mode,
+  which supports interfaces.
+- Schema-first: no custom directives with behaviour, no `@oneOf` inputs, no `__resolveType`
+  methods (return objects carrying `__typename`).
 - Subscriptions are over SSE only (`graphql-ws` is a follow-up), and `MemoryPubSub` serves one
   process.
 - No `@defer` / `@stream`, trusted documents, cost analysis or federation in this version.

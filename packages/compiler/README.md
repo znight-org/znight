@@ -696,6 +696,7 @@ export default {
 | `ctx.addDependency(from, to, { reason, location, lazy })`      | runtime dependency resolved by the plugin (ZNIGHT003, ZNIGHT019; with `lazy`, ZNIGHT019 only: [lazy edges](#lazy-extension-edges))                                                                                           |
 | `ctx.addRoot(cls, { reason?, location? })`                     | `cls` is an entry point of the plugin (a job host): a root of ZNIGHT019 and `prune`, auto-registered as a singleton when nothing registers it ([roots](#roots))                                                              |
 | `ctx.definitionsOf(callee)`                                    | top-level `const`s initialised with a call to `callee`, applied or not ([definitions](#definitions)); also in `validate`                                                                                                     |
+| `ctx.inputFiles(patterns)` (in `validate`)                     | non-source files the extension reads (a `.graphql` schema), matching globs relative to the root, part of `watchFiles` ([input files](#input-files))                                                                          |
 | `ctx.types`                                                    | `format`, `serialize`, `equals`, `stripNullish`, `awaited` on `TypeInfo`, and `shape(target, options)` ([type shapes](#type-shapes)); in every context                                                                       |
 | `ctx.report(diagnostic)`, `ctx.store(data)`                    | diagnostics; data for `validate` / `generate`                                                                                                                                                                                |
 | `validate(ctx)`                                                | after binding: the full `ApplicationGraph`                                                                                                                                                                                   |
@@ -899,6 +900,22 @@ scope. Registration problems (abstract class, not exported) are reported at `loc
 the extension's first decorator on the class), named after `reason`. The roots are listed in
 `ApplicationGraph.roots` (`{ token, origin, reason, location }`, sorted) and recorded in compiled
 libraries.
+
+### Input files
+
+`ctx.inputFiles(patterns)` (in `validate`) reads the non-source files an extension depends on, such
+as the `.graphql` files of `@znight/graphql`'s schema-first mode: the files matching the globs
+(relative to the project root, `!` negations allowed; `node_modules`, dot-directories and the
+generated module never match), as `{ file, relativeFile, text }`, sorted by path.
+
+```ts
+const files = ctx.inputFiles(['src/**/*.graphql'])
+// [{ file: '/app/src/books.graphql', relativeFile: 'src/books.graphql', text: 'type Book { ... }' }]
+```
+
+They are inputs of the compile: listed in `watchFiles`, and the watchers (Vite plugin, Bun preload,
+`znight generate --watch`) recompile when one changes, or when a file matching the patterns is
+created.
 
 ### Definitions
 

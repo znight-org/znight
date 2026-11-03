@@ -64,25 +64,26 @@ walks through a migration.
 
 ### Messaging, config, lifecycle, data
 
-| NestJS                                               | Znight                                                                                                       |
-| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `@MessagePattern()` / `@EventPattern()`              | `@Consumer('queue')` class + `@OnMessage(type?)` methods                                                     |
-| `@Payload()`, `@Ctx()`                               | `@Message(schema?)`, `@Ctx()`                                                                                |
-| `ConfigModule.forRoot()` + `ConfigService.get('X')`  | `@Config()` classes with `@Env('X')` properties                                                              |
-| `OnModuleInit`                                       | `OnStart` (`onStart()`)                                                                                      |
-| `OnApplicationBootstrap`                             | `OnReady` (`onReady()`)                                                                                      |
-| `OnModuleDestroy`, `BeforeApplicationShutdown`       | `OnStop` (`onStop()`)                                                                                        |
-| `OnApplicationShutdown`                              | `[Symbol.asyncDispose]()` or `@Provides({ dispose })`                                                        |
-| `app.enableShutdownHooks()`                          | On by default (`SIGINT`, `SIGTERM`)                                                                          |
-| `NestFactory.create(AppModule)` + `app.listen(3000)` | `Application.create({ metadata, plugins: [HttpPlugin.configure({ port: 3000 })] })` + `app.start()`          |
-| `Test.createTestingModule({...}).compile()`          | `TestBed.create(Class, { metadata })` / `TestApp.create()`                                                   |
-| `.overrideProvider(X).useValue(fake)`                | `overrides: [[X, fake]]`                                                                                     |
-| `ScheduleModule.forRoot()`, `@Cron()`, `@Interval()` | [`@znight/schedule`](/packages/schedule): `SchedulePlugin`, `@Cron()`, `@Interval('10s')`                    |
-| `TypeOrmModule`, `@InjectRepository(User)`           | A `@Factory()` providing the client, repositories behind interfaces ([Data access](./data-access))           |
-| `CacheModule`, `CacheInterceptor`                    | A method interceptor ([cache recipe](./aop#cache)); `@znight/cache` is planned                               |
-| `@WebSocketGateway()`                                | Planned for v0.2 ([roadmap](/roadmap#v0-2)); Server-Sent Events today                                        |
-| `@nestjs/graphql` (code first)                       | [`@znight/graphql`](/packages/graphql): the TypeScript types are the schema ([guide](/guide/graphql#nestjs)) |
-| `express-session`, `@Session()`                      | Not included: signed cookies, and cookie sessions in the [Security guide](./security#csrf)                   |
+| NestJS                                               | Znight                                                                                                                                   |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `@MessagePattern()` / `@EventPattern()`              | `@Consumer('queue')` class + `@OnMessage(type?)` methods                                                                                 |
+| `@Payload()`, `@Ctx()`                               | `@Message(schema?)`, `@Ctx()`                                                                                                            |
+| `ConfigModule.forRoot()` + `ConfigService.get('X')`  | `@Config()` classes with `@Env('X')` properties                                                                                          |
+| `OnModuleInit`                                       | `OnStart` (`onStart()`)                                                                                                                  |
+| `OnApplicationBootstrap`                             | `OnReady` (`onReady()`)                                                                                                                  |
+| `OnModuleDestroy`, `BeforeApplicationShutdown`       | `OnStop` (`onStop()`)                                                                                                                    |
+| `OnApplicationShutdown`                              | `[Symbol.asyncDispose]()` or `@Provides({ dispose })`                                                                                    |
+| `app.enableShutdownHooks()`                          | On by default (`SIGINT`, `SIGTERM`)                                                                                                      |
+| `NestFactory.create(AppModule)` + `app.listen(3000)` | `Application.create({ metadata, plugins: [HttpPlugin.configure({ port: 3000 })] })` + `app.start()`                                      |
+| `Test.createTestingModule({...}).compile()`          | `TestBed.create(Class, { metadata })` / `TestApp.create()`                                                                               |
+| `.overrideProvider(X).useValue(fake)`                | `overrides: [[X, fake]]`                                                                                                                 |
+| `ScheduleModule.forRoot()`, `@Cron()`, `@Interval()` | [`@znight/schedule`](/packages/schedule): `SchedulePlugin`, `@Cron()`, `@Interval('10s')`                                                |
+| `TypeOrmModule`, `@InjectRepository(User)`           | A `@Factory()` providing the client, repositories behind interfaces ([Data access](./data-access))                                       |
+| `CacheModule`, `CacheInterceptor`                    | A method interceptor ([cache recipe](./aop#cache)); `@znight/cache` is planned                                                           |
+| `@WebSocketGateway()`                                | Planned for v0.2 ([roadmap](/roadmap#v0-2)); Server-Sent Events today                                                                    |
+| `@nestjs/graphql` (code first)                       | [`@znight/graphql`](/packages/graphql): the TypeScript types are the schema ([guide](/guide/graphql#nestjs))                             |
+| `@nestjs/graphql` (schema first, `typePaths`)        | [`@znight/graphql`](/packages/graphql) schema-first: the same `.graphql` files, resolvers bound by name ([below](#graphql-schema-first)) |
+| `express-session`, `@Session()`                      | Not included: signed cookies, and cookie sessions in the [Security guide](./security#csrf)                                               |
 
 ## Modules → flat DI {#modules-to-flat-di}
 
@@ -283,6 +284,41 @@ constructor(private readonly payments: PaymentGateway) {}
 
 With several implementations, mark one `@Primary()` or qualify them with `@Named()` / `@Inject()`
 ([details](./dependency-injection#several-implementations-primary)).
+
+## GraphQL schema-first applications {#graphql-schema-first}
+
+A NestJS application built with `GraphQLModule.forRoot({ typePaths: ['src/**/*.graphql'] })` keeps
+its SDL files: the [schema-first mode](./graphql#schema-first) reads them at build time and binds
+the resolvers by name, like NestJS.
+
+```ts [znight.config.ts]
+import graphql from '@znight/graphql/compiler'
+import type { ZnightOptions } from '@znight/compiler'
+
+export default {
+  extensions: [graphql.configure({ schema: 'src/**/*.graphql', sdl: 'schema.graphql' })],
+} satisfies ZnightOptions
+```
+
+| NestJS schema first                                       | Znight                                                                     |
+| --------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `typePaths` of `GraphQLModule`                            | `graphql.configure({ schema })` at build time                              |
+| `@Resolver()`, `@Resolver('Event')`                       | the same (`@Resolver('Event', { scope: 'request' })` for a scope)          |
+| `@Query()`, `@Mutation('name')`, `@ResolveField('owner')` | the same, from `@znight/graphql`                                           |
+| `@Args('id')`, `@Args('input', new ZodPipe(Schema))`      | `@Args('id')`, `@Args('input', Schema)` (any Standard Schema)              |
+| `@Parent()`, `@Context()`, `@Info()`                      | `@Parent()`, `@Ctx()` (the request-scoped `GraphQLContext`), `@Info()`     |
+| loaders created in the context factory                    | `BatchLoad` providers injected with `@Loader()` (one batch per execution)  |
+| custom scalars without implementation                     | `scalar<T>('EventId', { serialize, parseValue })`, `T` the codegen mapping |
+| `__typename` set by mappers for unions                    | the same: unions and interfaces resolve from `__typename`                  |
+| `@UseGuards()`, global `APP_GUARD`                        | `@UseGuard()`, `GraphQLPlugin.configure({ guards })`, route decorators     |
+| unbound fields found at the first request                 | coverage and type conformance at build time (ZNIGHT067, ZNIGHT068)         |
+
+The first build lists, at once, every root field without resolver, every resolver whose signature
+does not match the SDL (a `Promise<Event | undefined>` for an `Event!`, an `@Args('limit') limit:
+number` for a nullable `Int` that clients may omit) and every field that neither a resolver nor the
+returned type provides. Types generated by GraphQL Code Generator (`typescript` plugin, scalars
+mapped to the `scalar<T>()` types) pass as they are. Custom directives are ignored with a warning;
+`__resolveType` methods are not supported yet: return objects carrying `__typename`.
 
 ## Bootstrap
 
