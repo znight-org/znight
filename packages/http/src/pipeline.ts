@@ -334,6 +334,7 @@ export class Pipeline {
       // a HEAD reply has no body: JSON results of an explicit `@Head` route take the general pipeline
       jsonStatus: definition.method === 'HEAD' || isBodylessStatus(json) ? undefined : json,
       emptyStatus: definition.status ?? (post ? 201 : 204),
+      responses: definition.method !== 'HEAD',
     }
   }
 
@@ -480,28 +481,44 @@ export class Pipeline {
   }
 
   /**
-   * The reply of a plain JSON value (see {@link isPlainJson}) or of `undefined`: what
-   * `serializeResult` and {@link #complete} produce for it, the headers in their final order.
-   * `undefined` when the result or the context needs the general pipeline. Throws like
-   * `JSON.stringify`.
+   * The reply of a plain JSON value (see {@link isPlainJson}), of an `HttpResponse` carrying one
+   * (see {@link fastResponseType}) or of `undefined`: what `serializeResult` and {@link #complete}
+   * produce for it, the headers in their final order. `undefined` when the result or the context
+   * needs the general pipeline. Throws like `JSON.stringify`.
    */
   #fastReply(route: FastRoute, ctx: RequestContext, result: unknown): AdapterReply | undefined {
-    const status = result === undefined ? route.emptyStatus : route.jsonStatus
+    let payload = result
+    let status = result === undefined ? route.emptyStatus : route.jsonStatus
+    let type: string | null = null
+    if (route.responses && result instanceof HttpResponse) {
+      const own = fastResponseType(result)
+      if (own === undefined) return undefined
+      type = own
+      payload = result.body
+      // `@HttpCode` > `HttpResponse.status` > the default of the route (see serializeResult)
+      if (route.plan.definition.status === undefined && result.status !== undefined) {
+        status = isBodylessStatus(result.status) ? undefined : result.status
+      }
+      // an HttpResponse without body takes the general pipeline
+      if (payload === undefined) return undefined
+    }
     // draining since the request started (`connection: close`, see #frameworkHeaders)
     if (status === undefined || ctx.hasResponseHeaders || ctx.hasCookies || this.draining) return undefined
     const requestId = ctx.requestId
     // a custom generator's id that cannot be sent is left out (see #frameworkHeaders)
     if (!this.#validIds && !isHeaderValue(requestId)) return undefined
-    if (result === undefined) {
+    if (payload === undefined) {
       const headers: Record<string, HeaderValue> = { ...this.#emptyHeaders }
       const idHeader = this.#emptyIdHeader
       if (idHeader !== undefined) headers[idHeader] = requestId
       return { status, headers, body: null }
     }
-    if (!isPlainJson(result)) return undefined
-    const json = JSON.stringify(result)
-    if (json === undefined) throw new TypeError(`Cannot serialise a ${typeof result} as a response body`)
+    if (!isPlainJson(payload)) return undefined
+    const json = JSON.stringify(payload)
+    if (json === undefined) throw new TypeError(`Cannot serialise a ${typeof payload} as a response body`)
     const headers: Record<string, HeaderValue> = { ...this.#jsonHeaders }
+    // the HttpResponse's own content type, in place (assignHeaders keeps the position of a key)
+    if (type !== null) headers['content-type'] = type
     // encoded once, its length from the bytes (see serialize.ts encodeText)
     const body = utf8(json)
     headers['content-length'] = String(body.byteLength)
@@ -1271,6 +1288,8 @@ interface FastRoute {
   readonly jsonStatus: number | undefined
   /** The status of a reply without value (`undefined` returned). */
   readonly emptyStatus: number
+  /** An `HttpResponse` carrying a plain JSON body may be served (not on a `@Head` route: no body). */
+  readonly responses: boolean
 }
 
 /** `#fastAsync` reads the body and runs the handler. */
@@ -1399,6 +1418,23 @@ function isPlainJson(value: unknown): value is object {
     return false
   }
   return typeof (value as { pipe?: unknown }).pipe !== 'function'
+}
+
+/**
+ * The content type of an `HttpResponse` the fast lane can serve: `null` without headers, its
+ * `content-type` when that is its only header (lower-case name, a value every adapter can send);
+ * `undefined` when it needs the general pipeline (other headers, cookies).
+ */
+function fastResponseType(response: HttpResponse): string | null | undefined {
+  if (response.cookies.length > 0) return undefined
+  const headers = response.headers
+  let type: string | null = null
+  for (const name of Object.keys(headers)) {
+    const value = headers[name]
+    if (name !== 'content-type' || typeof value !== 'string' || !isHeaderValue(value)) return undefined
+    type = value
+  }
+  return type
 }
 
 const ENCODER = new TextEncoder()
