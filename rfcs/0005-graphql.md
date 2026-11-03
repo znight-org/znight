@@ -7,6 +7,10 @@
 | Affects  | New `@znight/graphql`; `@znight/compiler` (type shapes additions, lazy edges, extra outputs); `@znight/http` (a body limit on plugin routes, route metadata outside controllers); `@znight/core` (one hook, error codes ZNIGHT060–066); `@znight/testing`, `@znight/observability`, `@znight/cli`; docs; examples. Builds on RFC 0001 (route decision groups), RFC 0002 (plugin routes, type shapes), RFC 0006 (SSE, `ctx.signal`, `EventChannel`) and the route metadata readers designed by RFC 0003 (made here, H3) |
 | Decision | **Ship `@znight/graphql` in v0.1, code-first only.** The compiler derives the GraphQL schema from TypeScript types at build time. Runtime on graphql-js 17, served by Znight's own GraphQL-over-HTTP transport mounted on `HttpPlugin`, subscriptions over SSE (`HttpResponse.sse`), DataLoader batching per execution, access control with the same route decorators and guards as HTTP                                                                                                                               |
 
+**Amended (2026-11-03) by [RFC 0007](./0007-graphql-schema-first.md):** an opt-in schema-first
+mode (`graphql.configure({ schema })`) lifts the "code-first only" part of the decision and the
+§3 non-goal "schema-first development"; code-first stays the default.
+
 **Acceptance (2026-11-02).** Accepted for v0.2 with the repository's error code allocation
 (ZNIGHT060–066, §6.6) and the corrections of a review against the code: plugin routes, SSE and
 type shapes already exist (§2, §6.8, §8.3, §10). The text was written when the package targeted

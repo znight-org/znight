@@ -20,6 +20,16 @@ export interface ResolverData {
   readonly scope: Scope
   /** Location of `@Resolver`. */
   readonly location: Location
+  /**
+   * `@Resolver('Event')`: the SDL object type its `@ResolveField` methods belong to (schema-first,
+   * RFC 0007), with the location of the argument.
+   */
+  readonly typeName?: { readonly name: string; readonly location: Location }
+  /**
+   * Schema-first: a class the analysis rejected (an error was reported); it only tells which fields
+   * its methods name (never bound, never a provider).
+   */
+  readonly invalid?: true
   /** Class `@UseGuard` guards. */
   readonly guards: readonly ClassRef[]
   /** One entry per field decorator of the class's methods, in source order. */

@@ -43,6 +43,7 @@ export interface GraphQLRootTypes {
 /** A named type of the schema. */
 export type GraphQLTypeDefinition =
   | GraphQLObjectTypeDefinition
+  | GraphQLInterfaceTypeDefinition
   | GraphQLInputTypeDefinition
   | GraphQLEnumTypeDefinition
   | GraphQLUnionTypeDefinition
@@ -54,8 +55,25 @@ export interface GraphQLObjectTypeDefinition {
   readonly kind: 'object'
   readonly name: string
   readonly description?: string
+  /** Interfaces the type implements (schema-first, RFC 0007), in declaration order. Absent: none. */
+  readonly interfaces?: readonly string[]
   /** Declaration order (base members first), then field resolvers by resolver token and source order. */
   readonly fields: readonly GraphQLFieldDefinition[]
+}
+
+/**
+ * An interface type (schema-first, RFC 0007; code-first emits none). Its fields have no
+ * `resolver`: graphql-js resolves the fields of the concrete object type.
+ */
+export interface GraphQLInterfaceTypeDefinition {
+  readonly kind: 'interface'
+  readonly name: string
+  readonly description?: string
+  /** Interfaces the interface implements, in declaration order. Absent: none. */
+  readonly interfaces?: readonly string[]
+  readonly fields: readonly GraphQLFieldDefinition[]
+  /** How the runtime tells the implementing object types apart (`resolveType`). */
+  readonly discriminator: GraphQLDiscriminator
 }
 
 /** An input object type. */
@@ -97,6 +115,15 @@ export interface GraphQLBuiltinScalarDefinition {
 export interface GraphQLCustomScalarDefinition {
   readonly kind: 'scalar'
   readonly name: string
+  /** Wins over the description of the definition (schema-first: the SDL's). */
+  readonly description?: string
+  /** Wins over the `specifiedByURL` of the definition (schema-first: the SDL's `@specifiedBy`). */
+  readonly specifiedByURL?: string
+  /**
+   * Schema-first (RFC 0007): `description` and `specifiedByURL` are the SDL's and replace the
+   * definition's, also when absent, so that the served schema is the SDL.
+   */
+  readonly sdl?: true
   /** `ScalarDefinition<T>` of any `T` (its methods are bivariant), or a graphql-js scalar named `name`. */
   readonly scalar: ScalarDefinition<unknown> | GraphQLScalarType
 }
@@ -141,7 +168,7 @@ export interface GraphQLEnumValueDefinition {
   readonly deprecationReason?: string
 }
 
-/** How the runtime tells the members of a union apart (`resolveType`). */
+/** How the runtime tells the members of a union or the implementations of an interface apart (`resolveType`). */
 export type GraphQLDiscriminator =
   | {
       readonly by: 'property'

@@ -32,6 +32,7 @@ import { buildModel } from './builder.ts'
 import { generateGraphQL } from './generate.ts'
 import { EXTENSION_NAME, GraphQLIds } from './ids.ts'
 import { DEFAULT_OPTIONS, resolveOptions } from './options.ts'
+import { buildSchemaFirstModel } from './schema-first.ts'
 
 export type { FieldData, FieldOperation, GraphQLData, ParamData, ResolverData } from './data.ts'
 export type { GraphQLCompilerOptions, ResolvedGraphQLCompilerOptions } from './options.ts'
@@ -41,7 +42,7 @@ const NO_ARGUMENT: DecoratorSpec = { targets: ['parameter'], params: [] }
 
 /** Decorators owned by the extension, by canonical identity (static / value arguments, §4.6). */
 const decorators: Readonly<Record<string, DecoratorSpec>> = Object.freeze({
-  [GraphQLIds.Resolver]: { targets: ['class'], params: ['static'] },
+  [GraphQLIds.Resolver]: { targets: ['class'], params: ['static', 'static'] },
   [GraphQLIds.Query]: FIELD,
   [GraphQLIds.Mutation]: FIELD,
   [GraphQLIds.Subscription]: FIELD,
@@ -74,9 +75,13 @@ function createExtension(options: ResolvedGraphQLCompilerOptions): GraphQLCompil
     name: EXTENSION_NAME,
     decorators,
     options,
-    analyzeClass: analyzeGraphQLClass,
+    analyzeClass: (cls, ctx) => analyzeGraphQLClass(cls, ctx, options),
     validate(ctx) {
-      models.set(ctx.graph.extensions, buildModel(ctx, options))
+      const schema = options.schema
+      models.set(
+        ctx.graph.extensions,
+        schema === false ? buildModel(ctx, options) : buildSchemaFirstModel(ctx, schema, options.sdl),
+      )
     },
     generate(ctx) {
       return generateGraphQL(ctx, modelOf(ctx.graph), options)

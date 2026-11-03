@@ -35,7 +35,7 @@ export type {
 export type { OperationResult } from './operators.ts'
 export type { FileOwner, PackageEntry, PackageInfo } from './packages.ts'
 export type { ParsedSource, ParseError, SourceLanguage } from './parse.ts'
-export type { ProjectChanges, RefreshResult, ResolvedIdentifier, ScopeInput } from './project.ts'
+export type { InputFile, ProjectChanges, RefreshResult, ResolvedIdentifier, ScopeInput } from './project.ts'
 export type {
   ModuleResolution,
   ModuleResolverOptions,

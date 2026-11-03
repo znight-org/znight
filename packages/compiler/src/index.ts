@@ -154,6 +154,7 @@ export type {
   DiagnosticSeverity,
   ImportRoute,
   ImportRouteFailure,
+  InputFile,
   IntersectionType,
   LiteralType,
   Location,

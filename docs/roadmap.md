@@ -17,6 +17,7 @@ may change APIs.
 | [0004](https://github.com/znight-org/znight/blob/main/rfcs/0004-schedule.md)               | `@znight/schedule`                        | Accepted (v0.1)  |
 | [0005](https://github.com/znight-org/znight/blob/main/rfcs/0005-graphql.md)                | `@znight/graphql`                         | Accepted (v0.2)  |
 | [0006](https://github.com/znight-org/znight/blob/main/rfcs/0006-http-cookies-sse.md)       | HTTP cookies and Server-Sent Events       | Accepted (v0.1)  |
+| [0007](https://github.com/znight-org/znight/blob/main/rfcs/0007-graphql-schema-first.md)   | Schema-first GraphQL                      | Accepted (v0.2)  |
 | [0008](https://github.com/znight-org/znight/blob/main/rfcs/0008-graphql-errors-as-data.md) | Errors as data in `@znight/graphql`       | Accepted (v0.2)  |
 
 ## v0.1: the first release {#v0-1}
@@ -78,8 +79,15 @@ It runs on graphql-js 17, served over HTTP by `HttpPlugin` on every adapter, wit
 over Server-Sent Events, batching with loaders, access control with the same route decorators and
 guards as HTTP, errors as data through result mappers
 ([RFC 0008](https://github.com/znight-org/znight/blob/main/rfcs/0008-graphql-errors-as-data.md)),
-and the `graphql:operation` hook. GraphQL interfaces and the follow-ups below are not part of this
-first version.
+and the `graphql:operation` hook. GraphQL interfaces in code-first and the follow-ups below are not part of
+this first version.
+
+**Schema-first** ([RFC 0007](https://github.com/znight-org/znight/blob/main/rfcs/0007-graphql-schema-first.md)),
+implemented: with `graphql.configure({ schema })`, the `.graphql` files are the schema, resolvers
+are bound by name as in NestJS, and the compiler checks the coverage of the SDL and the conformance
+of every resolver signature at build time
+([`ZNIGHT067`](/reference/error-codes#znight067)–[`ZNIGHT068`](/reference/error-codes#znight068));
+interfaces are supported in this mode.
 
 ## Planned, without a date {#planned}
 
@@ -113,7 +121,8 @@ These are tracked in the RFCs as follow-ups. None has a date.
   the lifetime of event streams; fan-out of events across instances.
 - **WebSocket follow-ups**: rooms shared across instances, a typed client generated from the
   metadata, an AsyncAPI document.
-- **GraphQL follow-ups**: GraphQL interfaces, `graphql-ws` subscriptions, `@defer` / `@stream`,
+- **GraphQL follow-ups**: GraphQL interfaces in code-first, `__resolveType` methods and custom
+  directives in schema-first, `graphql-ws` subscriptions, `@defer` / `@stream`,
   trusted documents checked at build time, query cost analysis, federation, resolver-level spans
   in `@znight/observability`, a `graphql-api` example application.
 

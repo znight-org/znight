@@ -1,5 +1,5 @@
 ---
-description: Every Znight error code (ZNIGHT001 to ZNIGHT066) with its meaning, an example that triggers it and how to fix it.
+description: Every Znight error code (ZNIGHT001 to ZNIGHT068) with its meaning, an example that triggers it and how to fix it.
 outline: [ 2, 2 ]
 ---
 
@@ -12,7 +12,8 @@ and the runtime (`ZnightError`). Messages link here: each code has its own ancho
 Codes `ZNIGHT001` to `ZNIGHT029` belong to the core, the compiler and the features of the first
 release (HTTP, messaging, configuration, observability). From `ZNIGHT030`, each package owns a block
 of ten: `ZNIGHT030`–`039` for `@znight/openapi`, `ZNIGHT040`–`049` for `@znight/schedule`,
-`ZNIGHT060`–`069` for [`@znight/graphql`](/packages/graphql) ([RFC 0005](../../rfcs/0005-graphql.md)).
+`ZNIGHT060`–`069` for [`@znight/graphql`](/packages/graphql) ([RFC 0005](../../rfcs/0005-graphql.md),
+[RFC 0007](../../rfcs/0007-graphql-schema-first.md) for schema-first).
 Codes are allocated in order inside a block, so the numbering has gaps between blocks.
 
 | Code                    | Meaning                                             | Severity                                             | Reported                   |
@@ -60,6 +61,8 @@ Codes are allocated in order inside a block, so the numbering has gaps between b
 | [ZNIGHT064](#znight064) | Unresolvable abstract type                          | error                                                | build                      |
 | [ZNIGHT065](#znight065) | Invalid loader                                      | error                                                | build, runtime             |
 | [ZNIGHT066](#znight066) | Invalid GraphQL setup                               | error                                                | startup                    |
+| [ZNIGHT067](#znight067) | Invalid GraphQL SDL                                 | error, warning                                       | build                      |
+| [ZNIGHT068](#znight068) | GraphQL schema mismatch                             | error                                                | build                      |
 
 ## Reading an error
 
@@ -245,6 +248,7 @@ A decorator is used where it is not allowed, or with arguments the compiler cann
 | Situation                                                                                            | Fix                                                                       |
 | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
 | Provider class not exported (or anonymous default export)                                            | `export class X`                                                          |
+| A type name in `@Resolver('Book')` in code-first mode                                                | Remove it, or switch to schema-first (`graphql.configure({ schema })`)    |
 | Static argument not evaluable: `@Controller(process.env.X)`                                          | Use a literal or `export const X = '...'`                                 |
 | Inline value argument not evaluable: `@Body(z.object({...}))`                                        | Extract it: `export const Schema = z.object({...})`, then `@Body(Schema)` |
 | `@Provides()` outside a `@Factory()` class                                                           | Move it to a `@Factory()` class                                           |
@@ -1224,6 +1228,7 @@ A resolver class or method is structured in a way GraphQL cannot serve.
 | Situation                                                                    | Message                                                                                                                     |
 | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | A `@ResolveField` without `@Parent()` parameter                              | `@ResolveField BookResolver.author has no @Parent() parameter`                                                              |
+| Schema-first: a `@ResolveField` in a `@Resolver()` without type name         | `@ResolveField R.title needs the type it resolves a field of: name it in @Resolver (schema-first)`                          |
 | Several `@Parent()` parameters, or `@Parent()` on a root field               | `R.twice has several @Parent() parameters`                                                                                  |
 | A `@Subscription` that does not return an async iterable                     | `@Subscription BookResolver.bookAdded must return an async iterable, not Book`                                              |
 | Resolvers, but no `@Query` in the application (GraphQL needs a query root)   | `The application has GraphQL resolvers but no @Query field: GraphQL requires a query root type`                             |
@@ -1341,6 +1346,26 @@ are not all exported`: the generated module imports them for `instanceof`.
 **How to fix**: add a discriminant property with a different literal type in each member
 (`readonly kind: 'book'`), or make every member an exported class.
 
+In [schema-first mode](/guide/graphql#schema-first), the members of a union or the
+implementations of an interface come from the SDL, and the compiler checks the TypeScript types
+the resolvers return for it: each one must be an exported class (told apart with `instanceof`) or
+declare `__typename`. graphql-codegen declares it optional: that passes the check, but the returned
+objects must carry it at runtime.
+
+```txt
+✗ ZNIGHT064: Book cannot be told apart among the members of Result at runtime: it declares no __typename and is not an exported class
+ --> src/search.resolver.ts:7:13
+  |
+7 |   search(): (Book | Author)[] {
+  |             ^^^^^^^^^^^^^^^^^
+  |
+ ::: src/book.ts:1:18
+  |
+1 | export interface Book {
+  |                  ---- Book is declared here
+  = hint: Return objects carrying __typename (declare __typename: 'Book' in the TypeScript type; graphql-codegen declares it), or return exported class instances
+```
+
 ## ZNIGHT065: Invalid loader {#znight065}
 
 A `@Loader()` parameter is typed `Loader<L>`, where `L` is a provider implementing
@@ -1409,3 +1434,108 @@ ZNIGHT066: GraphQLPlugin serves its endpoint through HttpPlugin, which is not re
 **How to fix**: follow the message. Register `HttpPlugin` (or set `http: false`), fix the option it
 names, regenerate the container module after upgrading `@znight/*` packages, and declare at least
 one `@Resolver()` with a `@Query()` when the application registers `GraphQLPlugin`.
+
+## ZNIGHT067: Invalid GraphQL SDL {#znight067}
+
+In [schema-first mode](/guide/graphql#schema-first) (`graphql.configure({ schema })`,
+[RFC 0007](../../rfcs/0007-graphql-schema-first.md)), the `.graphql` files cannot be read, parsed
+or validated. Every problem is located in the `.graphql` file.
+
+| Situation                                                                                                                             | Severity |
+| ------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| No file matches the `schema` globs (relative to the project root)                                                                     | error    |
+| A syntax error                                                                                                                        | error    |
+| A type defined twice, a field, enum value or argument declared twice (extensions included)                                            | error    |
+| An unknown type or directive (with a suggestion), an extension of a missing type                                                      | error    |
+| A directive where it does not apply, applied twice, with an unknown or a missing argument; two types for one operation in `schema {}` | error    |
+| An error of graphql-js schema validation (interfaces not implemented, union members...)                                               | error    |
+| A scalar without `scalar<T>()` declaration of its name (other than `DateTime`, `BigInt`, `JSON`)                                      | error    |
+| A `@oneOf` input object (not supported yet)                                                                                           | error    |
+| A custom directive (left out of the served schema)                                                                                    | warning  |
+| A description or another `@specifiedBy` on the built-in `DateTime`, `BigInt` or `JSON`                                                | warning  |
+
+```graphql
+type Query {
+  books: [Bok!]! # ✗ ZNIGHT067
+}
+```
+
+```txt
+✗ ZNIGHT067: Unknown type Bok (Query.books)
+ --> src/schema.graphql:2:11
+  |
+2 |   books: [Bok!]!
+  |           ^^^
+  = hint: Did you mean Book?
+```
+
+```txt
+✗ ZNIGHT067: scalar EventId has no implementation: declare it with scalar<T>('EventId', ...)
+ --> src/schema.graphql:9:8
+  |
+9 | scalar EventId
+  |        ^^^^^^^
+  = hint: export const EventIdScalar = scalar<EventId>('EventId', { serialize: value => value as EventId, parseValue: value => value as EventId }), with EventId the TypeScript type of its values (the one graphql-codegen maps it to)
+```
+
+**How to fix**: follow the message and fix the SDL. Declare every custom scalar with
+`scalar<T>('Name', definition)` in TypeScript, `T` being the type graphql-codegen maps it to.
+
+## ZNIGHT068: GraphQL schema mismatch {#znight068}
+
+In [schema-first mode](/guide/graphql#schema-first), the resolvers do not match the SDL: the
+coverage of the schema, or the types of their signatures.
+
+| Situation                                                                                          | Located on                |
+| -------------------------------------------------------------------------------------------------- | ------------------------- |
+| A root field (`Query`, `Mutation`, `Subscription`) without resolver                                | the SDL field             |
+| `@Query('x')` (or the method name) naming no field of the root type (with a suggestion)            | the decorator             |
+| `@Resolver('X')` naming no type, an interface, a non-object type, a root type with field resolvers | the `@Resolver` argument  |
+| `@ResolveField('x')` naming no field of the type, `@Args('x')` naming no argument                  | the decorator             |
+| An object field without resolver that the TypeScript type returned for its parent lacks            | the SDL field             |
+| A return, parent or argument type that does not conform to the SDL type                            | the TypeScript annotation |
+
+```graphql
+type Book {
+  id: ID!
+  title: String!
+}
+
+type Query {
+  book(id: ID!): Book!
+}
+```
+
+```ts
+@Resolver()
+export class BookResolver {
+  @Query()
+  book(@Args('id') id: string): Promise<Book | null> {
+    // ✗ ZNIGHT068
+    return Promise.resolve(id === '' ? null : { id, title: 'Dune' })
+  }
+}
+```
+
+```txt
+✗ ZNIGHT068: BookResolver.book returns Book | null, which may be null, but Query.book is Book! (non-null)
+ --> src/book.resolver.ts:7:33
+  |
+7 |   book(@Args('id') id: string): Promise<Book | null> {
+  |                                 ^^^^^^^^^^^^^^^^^^^^
+  |
+ ::: src/schema.graphql:7:3
+  |
+7 |   book(id: ID!): Book!
+  |   ---- Query.book is declared here
+  = hint: Return a value in every case, or make Query.book nullable in the SDL (Book)
+```
+
+Output positions (return types, the properties of returned objects, `@Parent()` types) must be
+assignable to the SDL type; input positions (`@Args` parameters, input objects) must accept every
+value graphql-js passes: a nullable argument without default may be omitted (`undefined`), one with
+a default may be `null`. `any`, `unknown` and missing annotations are not checked, nor arguments
+validated by a Standard Schema (their type is the schema output).
+
+**How to fix**: change the TypeScript type (graphql-codegen's types conform), or the SDL when the
+TypeScript type is right. Add the missing resolver or property the message names.

@@ -74,6 +74,7 @@ export {
   type GraphQLFieldDefinition,
   type GraphQLInputFieldDefinition,
   type GraphQLInputTypeDefinition,
+  type GraphQLInterfaceTypeDefinition,
   type GraphQLMetadata,
   type GraphQLObjectTypeDefinition,
   type GraphQLResolverBinding,

@@ -11,7 +11,11 @@ afterAll(cleanupApps)
 describe('graphql.configure()', () => {
   it('the default export is the extension with its default options', () => {
     expect(graphql).toBe(graphqlCompilerExtension)
-    expect(graphql).toMatchObject({ apiVersion: 1, name: 'graphql', options: { sdl: false, number: 'Float' } })
+    expect(graphql).toMatchObject({
+      apiVersion: 1,
+      name: 'graphql',
+      options: { sdl: false, number: 'Float', schema: false },
+    })
     expect(Object.isFrozen(graphql)).toBe(true)
   })
 
@@ -19,16 +23,30 @@ describe('graphql.configure()', () => {
     const sdl = graphql.configure({ sdl: 'schema.graphql' })
     const both = sdl.configure({ number: 'Int' })
     expect(sdl).not.toBe(graphql)
-    expect(sdl.options).toEqual({ sdl: 'schema.graphql', number: 'Float' })
-    expect(both.options).toEqual({ sdl: 'schema.graphql', number: 'Int' })
-    expect(both.configure({ sdl: false }).options).toEqual({ sdl: false, number: 'Int' })
-    expect(graphql.options).toEqual({ sdl: false, number: 'Float' })
+    expect(sdl.options).toEqual({ sdl: 'schema.graphql', number: 'Float', schema: false })
+    expect(both.options).toEqual({ sdl: 'schema.graphql', number: 'Int', schema: false })
+    expect(both.configure({ sdl: false }).options).toEqual({ sdl: false, number: 'Int', schema: false })
+    expect(graphql.options).toEqual({ sdl: false, number: 'Float', schema: false })
     expect(both.decorators).toBe(graphql.decorators)
+  })
+
+  it('takes the schema-first globs as a string or a list, false for code-first', () => {
+    const schemaFirst = graphql.configure({ schema: 'src/**/*.graphql' })
+    expect(schemaFirst.options.schema).toEqual(['src/**/*.graphql'])
+    expect(graphql.configure({ schema: ['a/*.graphql', '!a/old.graphql'] }).options.schema).toEqual([
+      'a/*.graphql',
+      '!a/old.graphql',
+    ])
+    expect(schemaFirst.configure({ sdl: 'schema.graphql' }).options.schema).toEqual(['src/**/*.graphql'])
+    expect(schemaFirst.configure({ schema: false }).options.schema).toBe(false)
   })
 
   it('rejects invalid options', () => {
     expect(() => graphql.configure(null as never)).toThrow('graphql.configure() expects an options object')
-    expect(() => graphql.configure({ schema: 'x' } as never)).toThrow('unknown option "schema"')
+    expect(() => graphql.configure({ schemas: 'x' } as never)).toThrow('unknown option "schemas"')
+    expect(() => graphql.configure({ schema: '' })).toThrow('"schema" must be a glob or a non-empty list of globs')
+    expect(() => graphql.configure({ schema: [] })).toThrow('"schema" must be a glob')
+    expect(() => graphql.configure({ schema: true as never })).toThrow('"schema" must be a glob')
     expect(() => graphql.configure({ sdl: '' })).toThrow('"sdl" must be a path relative to the project root')
     expect(() => graphql.configure({ sdl: true as never })).toThrow('"sdl" must be a path')
     expect(() => graphql.configure({ number: 'Double' as never })).toThrow(`"number" must be 'Float' or 'Int'`)

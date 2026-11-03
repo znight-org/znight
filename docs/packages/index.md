@@ -14,7 +14,7 @@ what you use.
 | [`@znight/compiler`](./compiler)           | Vite plugin, CLI/Bun integration: analysis, validation, code generation                                           | devDependency | <Badge type="tip" text="available" /> |
 | [`@znight/http`](./http)                   | Controllers, validation, guards, access decisions, files, cookies, SSE, CORS; `node:http`, Fastify, Express, Hono | dependency    | <Badge type="tip" text="available" /> |
 | [`@znight/openapi`](./openapi)             | OpenAPI 3.1 documents generated at build time; Scalar or Swagger UI                                               | dependency    | <Badge type="tip" text="available" /> |
-| [`@znight/graphql`](./graphql)             | Code-first GraphQL: schema derived from TypeScript types at build time, loaders, subscriptions over SSE           | dependency    | <Badge type="tip" text="v0.2" />      |
+| [`@znight/graphql`](./graphql)             | GraphQL: schema from TypeScript types or SDL files checked at build time, loaders, subscriptions over SSE         | dependency    | <Badge type="tip" text="v0.2" />      |
 | [`@znight/messaging`](./messaging)         | Consumers, retries, dead-letter queues; RabbitMQ, SQS, Kafka, in-memory                                           | dependency    | <Badge type="tip" text="available" /> |
 | [`@znight/schedule`](./schedule)           | Cron, interval and timeout jobs checked at build time; locks across instances                                     | dependency    | <Badge type="tip" text="available" /> |
 | [`@znight/config`](./config)               | Typed config classes from env, `.env`, JSON/YAML, Vault, AWS Secrets Manager                                      | dependency    | <Badge type="tip" text="available" /> |

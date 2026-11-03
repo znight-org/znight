@@ -25,7 +25,9 @@ import type { EntityName, Meaning, ScopeRef, SymbolResolution } from './symbols.
 import type { HeritageClause, ResolveTypeOptions, TypeParameterInfo, TypeScope } from './type-resolver.ts'
 import type { TypeInfo } from './types.ts'
 
+import fs from 'node:fs'
 import { ErrorCode } from '@znight/core'
+import { globSync } from 'tinyglobby'
 
 import { DiagnosticBag } from './diagnostics.ts'
 import { Evaluator } from './evaluator.ts'
@@ -37,9 +39,18 @@ import { PackageRegistry } from './packages.ts'
 import { dirName, isRelativeSpecifier, isResolutionConfigPath, realPath, relativePath, resolvePath } from './paths.ts'
 import { ModuleResolver } from './resolver.ts'
 import { RouteResolver } from './routes.ts'
-import { scanDirectory } from './scanner.ts'
+import { ALWAYS_EXCLUDED, scanDirectory } from './scanner.ts'
 import { SymbolResolver } from './symbols.ts'
 import { TypeResolver } from './type-resolver.ts'
+
+/** A file read with {@link Project.inputFiles}. */
+export interface InputFile {
+  /** Absolute real POSIX path. */
+  readonly file: string
+  /** Path relative to the project root (messages). */
+  readonly relativeFile: string
+  readonly text: string
+}
 
 /** Paths changed since the previous {@link Project.refresh} (absolute or relative to the root). */
 export interface ProjectChanges {
@@ -112,6 +123,10 @@ export class Project implements ProjectHost {
   readonly #loaded = new Set<string>()
   /** Relative imports that did not resolve since the last refresh: target paths without extension. */
   #missing = new Set<string>()
+  /** Globs given to {@link inputFiles} since the last refresh. */
+  #inputPatterns = new Set<string>()
+  /** {@link #inputPatterns} of the previous refresh (watchers may ask while a compile runs). */
+  #previousInputPatterns: ReadonlySet<string> = new Set()
   /** {@link #missing} of the previous refresh (watchers may ask while a compile runs). */
   #previousMissing: ReadonlySet<string> = new Set()
   #scanned: readonly string[] = []
@@ -188,6 +203,8 @@ export class Project implements ProjectHost {
     this.#loaded.clear()
     this.#previousMissing = this.#missing
     this.#missing = new Set()
+    this.#previousInputPatterns = this.#inputPatterns
+    this.#inputPatterns = new Set()
     this.#services = this.#createServices()
     return {
       files: this.#scanned.length,
@@ -260,6 +277,69 @@ export class Project implements ProjectHost {
     const target = withoutExtension(resolvePath(path, this.root))
     const candidates = target.endsWith('/index') ? [target, target.slice(0, -'/index'.length)] : [target]
     return candidates.some(candidate => this.#missing.has(candidate) || this.#previousMissing.has(candidate))
+  }
+
+  /**
+   * Non-source files an extension reads (`.graphql` schemas...): the files matching `patterns`
+   * (globs relative to the root, `!` negations allowed; `node_modules` and the generated module
+   * never match, dot-directories only when a pattern names them), read as UTF-8, sorted by path. They are inputs of the current
+   * compile ({@link loadedFiles}, hence `watchFiles`), and creating a file matching the patterns
+   * makes the watchers recompile ({@link isInputPath}). Unreadable matches are skipped.
+   */
+  inputFiles(patterns: readonly string[]): InputFile[] {
+    if (!Array.isArray(patterns) || patterns.some(pattern => typeof pattern !== 'string' || pattern.trim() === '')) {
+      throw new TypeError('[znight] inputFiles() expects an array of non-empty glob strings')
+    }
+    for (const pattern of patterns) {
+      this.#inputPatterns.add(pattern)
+    }
+    const files: InputFile[] = []
+    for (const file of this.#matchInputs(patterns)) {
+      let text: string
+      try {
+        text = fs.readFileSync(file, 'utf8')
+      } catch {
+        continue
+      }
+      this.#loaded.add(file)
+      files.push(Object.freeze({ file, relativeFile: relativePath(this.root, file), text }))
+    }
+    return files
+  }
+
+  /**
+   * `true` when `path` matches the {@link inputFiles} patterns of the current or the previous
+   * compile: creating it can change the result, even outside the `include` globs.
+   */
+  isInputPath(path: string): boolean {
+    const patterns = [...new Set([...this.#inputPatterns, ...this.#previousInputPatterns])]
+    if (patterns.length === 0) {
+      return false
+    }
+    const target = resolvePath(path, this.root)
+    const real = realPath(target) ?? target
+    return this.#matchInputs(patterns).some(file => file === real || file === target)
+  }
+
+  #matchInputs(patterns: readonly string[]): string[] {
+    const matches = globSync([...patterns], {
+      cwd: this.root,
+      ignore: [...ALWAYS_EXCLUDED],
+      absolute: true,
+      dot: false,
+      onlyFiles: true,
+      followSymbolicLinks: true,
+      expandDirectories: false,
+    })
+    const outFile = realPath(this.options.outFile) ?? this.options.outFile
+    const files = new Set<string>()
+    for (const match of matches) {
+      const file = realPath(match) ?? resolvePath(match)
+      if (file !== outFile) {
+        files.add(file)
+      }
+    }
+    return [...files].sort()
   }
 
   /**

@@ -162,9 +162,9 @@ Guide: [Schedule](/packages/schedule)
 
 | Decorator / function                                      | Target                          | Arguments / notes                                                                                                         |
 | --------------------------------------------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `@Resolver(opts?)`                                        | class                           | static `{ scope? }`; a provider (singleton by default); not on a `@Controller`                                            |
+| `@Resolver(typeOrOpts?, opts?)`                           | class                           | static `{ scope? }`; a provider (singleton by default); not on a `@Controller`; schema-first: the SDL type name first     |
 | `@Query(name?)` `@Mutation(name?)` `@Subscription(name?)` | method                          | static name (default: the method name); a root field; the explicit return type is the field type (`Promise<T>` unwrapped) |
-| `@ResolveField(name?)`                                    | method                          | static name; adds (or replaces) a field of the type of the `@Parent()` parameter                                          |
+| `@ResolveField(name?)`                                    | method                          | static name; adds (or replaces) a field of the type of the `@Parent()` parameter (schema-first: of `@Resolver('Type')`)   |
 | `@Args(name?, schema?)` / `@Args(schema)`                 | parameter                       | static name, value schema (Standard Schema); without name: the properties of the parameter type are the arguments         |
 | `@Parent()` `@Ctx()` `@Info()`                            | parameter                       | —; the parent object (field resolvers only), the `GraphQLContext`, graphql-js `GraphQLResolveInfo`                        |
 | `@Loader()`                                               | parameter                       | —; typed `Loader<L>`, `L` a provider implementing `BatchLoad<K, V>`: the DataLoader of the current execution              |

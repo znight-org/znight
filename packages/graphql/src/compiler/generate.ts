@@ -17,7 +17,7 @@ import type { GenerateContext, GenInput, GenNode, GenParam } from '@znight/compi
 import type { Token } from '@znight/core'
 import type { MetaEntry } from '@znight/http/compiler'
 import type { FieldData, GraphQLData, ParamData, ResolverData } from './data.ts'
-import type { ArgModel, FieldModel, GraphQLModel, TypeModel } from './model.ts'
+import type { ArgModel, DiscriminatorModel, FieldModel, GraphQLModel, TypeModel } from './model.ts'
 import type { ResolvedGraphQLCompilerOptions } from './options.ts'
 
 import { GRAPHQL_METADATA_VERSION } from '../metadata.ts'
@@ -106,7 +106,13 @@ function typeNode(ctx: Context, imports: Imports, type: TypeModel): GenNode {
   if (type.description !== undefined && type.kind !== 'scalar') head.push(['description', type.description])
   switch (type.kind) {
     case 'object':
-      return ctx.obj([...head, ['fields', ctx.arr(type.fields.map(field => fieldNode(ctx, imports, field)))]])
+    case 'interface': {
+      const entries: [string, GenInput][] = [...head]
+      if (type.interfaces.length > 0) entries.push(['interfaces', ctx.lit([...type.interfaces])])
+      entries.push(['fields', ctx.arr(type.fields.map(field => fieldNode(ctx, imports, field)))])
+      if (type.kind === 'interface') entries.push(['discriminator', discriminatorNode(ctx, type.discriminator)])
+      return ctx.obj(entries)
+    }
     case 'input':
       return ctx.obj([...head, ['fields', ctx.arr(type.fields.map(field => inputValueNode(ctx, field)))]])
     case 'enum':
@@ -127,34 +133,42 @@ function typeNode(ctx: Context, imports: Imports, type: TypeModel): GenNode {
           ),
         ],
       ])
-    case 'union': {
-      const discriminator = type.discriminator
-      let node: GenNode
-      if (discriminator === undefined || discriminator.by === 'typename') node = ctx.obj([['by', 'typename']])
-      else if (discriminator.by === 'property') {
-        node = ctx.obj([
-          ['by', 'property'],
-          ['property', discriminator.property],
-          ['values', ctx.obj(Object.entries(discriminator.values))],
-        ])
-      } else {
-        node = ctx.obj([
-          ['by', 'class'],
-          [
-            'classes',
-            ctx.arr(discriminator.classes.map(entry => ctx.arr([ctx.importValue(entry.identity), entry.name]))),
-          ],
-        ])
-      }
-      return ctx.obj([...head, ['members', ctx.lit([...type.members])], ['discriminator', node]])
-    }
-    case 'scalar':
+    case 'union':
+      return ctx.obj([
+        ...head,
+        ['members', ctx.lit([...type.members])],
+        ['discriminator', discriminatorNode(ctx, type.discriminator)],
+      ])
+    case 'scalar': {
       // built-in scalars carry no description (the runtime builds them, sdl.ts prints them alike);
-      // user scalars bring theirs with the imported definition
-      return type.definition === undefined
-        ? ctx.obj([...head, ['builtin', ctx.lit(true)]])
-        : ctx.obj([...head, ['scalar', ctx.importValue(type.definition)]])
+      // code-first user scalars bring theirs with the imported definition, schema-first ones take
+      // the SDL's (they win over the definition's)
+      if (type.definition === undefined) return ctx.obj([...head, ['builtin', ctx.lit(true)]])
+      const entries: [string, GenInput][] = [...head, ['scalar', ctx.importValue(type.definition)]]
+      if (type.fromSdl === true) {
+        if (type.description !== undefined) entries.push(['description', type.description])
+        if (type.specifiedByURL !== undefined) entries.push(['specifiedByURL', type.specifiedByURL])
+        entries.push(['sdl', ctx.lit(true)])
+      }
+      return ctx.obj(entries)
+    }
   }
+}
+
+/** How the runtime tells the members of a union or the implementations of an interface apart. */
+function discriminatorNode(ctx: Context, discriminator: DiscriminatorModel | undefined): GenNode {
+  if (discriminator === undefined || discriminator.by === 'typename') return ctx.obj([['by', 'typename']])
+  if (discriminator.by === 'property') {
+    return ctx.obj([
+      ['by', 'property'],
+      ['property', discriminator.property],
+      ['values', ctx.obj(Object.entries(discriminator.values))],
+    ])
+  }
+  return ctx.obj([
+    ['by', 'class'],
+    ['classes', ctx.arr(discriminator.classes.map(entry => ctx.arr([ctx.importValue(entry.identity), entry.name])))],
+  ])
 }
 
 function fieldNode(ctx: Context, imports: Imports, field: FieldModel): GenNode {

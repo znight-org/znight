@@ -60,6 +60,10 @@ export interface ResolverOptions {
  * `@Subscription` and `@ResolveField` methods are fields of the schema. Route decorators of
  * `@znight/http` (`createRouteDecorator`) on the class are the default decisions of its fields.
  *
+ * Schema-first (RFC 0007): `@Resolver('Event')` names the SDL object type its `@ResolveField`
+ * methods resolve fields of (`@Resolver('Event', { scope })` with options). Code-first rejects a
+ * type name (ZNIGHT005): the type is the one of the `@Parent()` parameter.
+ *
  * ```ts
  * @Resolver()
  * export class BookResolver {
@@ -72,9 +76,10 @@ export interface ResolverOptions {
  * }
  * ```
  *
- * @param options static: `{ scope? }`.
+ * @param typeOrOptions static: the SDL type name (schema-first), or `{ scope? }`.
+ * @param options static: `{ scope? }`, after a type name.
  */
-export function Resolver(_options?: ResolverOptions): ClassMarker {
+export function Resolver(_typeOrOptions?: string | ResolverOptions, _options?: ResolverOptions): ClassMarker {
   return classMarker
 }
 
@@ -109,7 +114,8 @@ export function Subscription(_name?: string): MethodMarker {
 
 /**
  * A field resolver: adds a field to the type of the `@Parent()` parameter (mandatory), or replaces
- * the property field of the same name.
+ * the property field of the same name. Schema-first (RFC 0007): resolves the field of the type named
+ * by `@Resolver('Type')`, `@Parent()` optional.
  *
  * @param name static: field name. Default: the method name.
  */

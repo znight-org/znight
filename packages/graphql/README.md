@@ -23,6 +23,11 @@ batching per execution and subscriptions over Server-Sent Events. The design is
 
 No `@ObjectType`, no `@Field(() => Int)`, no `reflect-metadata`, no SDL file to keep in sync.
 
+Your `.graphql` files are the contract? The opt-in [schema-first mode](#schema-first) reads them
+instead, binds resolvers to their fields by name (NestJS style) and checks at build time that every
+field is resolved and that every resolver signature conforms to the SDL
+([RFC 0007](../../rfcs/0007-graphql-schema-first.md)).
+
 **Example:** [`graphql-api`](https://github.com/znight-org/znight/tree/main/examples/graphql-api) (a
 book catalog with loaders, subscriptions over SSE, per-field access decisions and a committed
 `schema.graphql`, on Node.js and Bun).
@@ -59,6 +64,7 @@ dependencies, `dataloader` is a dependency, `@znight/testing` an optional peer (
 - [Security defaults and limits](#security-defaults-and-limits)
 - [Testing](#testing)
 - [The generated SDL and the compiler options](#the-generated-sdl-and-the-compiler-options)
+- [Schema-first](#schema-first)
 - [Observability](#observability)
 - [Performance](#performance)
 - [Diagnostics](#diagnostics)
@@ -945,6 +951,7 @@ export default {
 | -------- | --------- | ------------------------------------------------------------------------------------------------------------------- |
 | `sdl`    | `false`   | Path of the SDL artifact, relative to the root, written with the generated module and checked by `generate --check` |
 | `number` | `'Float'` | GraphQL type of `number` (`'Int'` suits applications whose numbers are counts and identifiers)                      |
+| `schema` | `false`   | Glob(s) of the `.graphql` files of the [schema-first mode](#schema-first), relative to the root                     |
 
 An invalid option is a `TypeError` when `znight.config.ts` is loaded. The SDL artifact is
 byte-identical to graphql-js `printSchema()` of the schema the plugin builds (descriptions on one
@@ -962,6 +969,161 @@ it. With Biome, exclude it in `biome.jsonc` (as this repository does for `exampl
   }
 }
 ```
+
+## Schema-first
+
+With `schema`, the SDL files are the schema ([RFC 0007](../../rfcs/0007-graphql-schema-first.md)):
+
+```ts
+import graphql from '@znight/graphql/compiler'
+import type { ZnightOptions } from '@znight/compiler'
+
+export default {
+  extensions: [graphql.configure({ schema: 'src/**/*.graphql', sdl: 'schema.graphql' })],
+} satisfies ZnightOptions
+```
+
+- **Files.** The globs (a string or a list, `!` negations allowed) are relative to the project
+  root; `node_modules` and dot-directories are excluded unless a pattern names them; the files are
+  read in path order, files without definitions skipped, and the `sdl` artifact is never read back.
+  They are inputs of the compile (`watchFiles`): editing, creating or deleting one recompiles in
+  `znight dev`, the Vite plugin and `znight generate --watch` (the Bun preload recompiles on edits,
+  and picks a new file up at its next start).
+- **One source of truth.** TypeScript types never add to the schema: JSDoc, `@gqlName`,
+  `@gqlHidden`, `@default` and `number` are ignored. Descriptions, deprecations and default values
+  come from the SDL. The runtime is the code-first one: same metadata, `schemaHash` and `sdl`
+  artifact (the served schema, semantically equal to the SDL without its custom directives).
+- **SDL.** Parsed, merged (`extend` of every kind, across files) and validated with graphql-js at
+  build time (`graphql/language`, `graphql/type`, `graphql/utilities`, loaded lazily in this mode
+  only), with the SDL rules graphql-js keeps internal (directive locations, arguments and
+  repetitions, unique names) checked too. Object types, interfaces (implementing interfaces too), unions, enums, input objects,
+  `schema { ... }` root names, `@deprecated` and `@specifiedBy` are supported. Custom directives
+  are a ZNIGHT067 warning and left out; `@oneOf` inputs are not supported yet (ZNIGHT067).
+- **Scalars.** A scalar of the SDL binds the `scalar<T>('Name', definition)` declaration of its
+  name (its description and `@specifiedBy` come from the SDL, emitted in the metadata with
+  `sdl: true`: they replace the definition's, absent ones included, so the served schema is the
+  artifact). Without one, `DateTime`, `BigInt` and `JSON` are the built-in scalars;
+  any other scalar is ZNIGHT067.
+- **Binding by name.** `@Query()`, `@Mutation()`, `@Subscription()` bind the root field named by the
+  decorator, else by the method. `@ResolveField()` binds a field of the object type named by the
+  class decorator: `@Resolver('Book')` (`@Resolver('Book', { scope: 'request' })` with a scope);
+  `@Parent()` is optional. A class may hold both. `@Args('name')` receives one argument, `@Args()`
+  every argument as an object, `@Args('name', Schema)` validates with a Standard Schema.
+- **Enums and abstract types.** An enum value is its SDL name on both sides (graphql-codegen's
+  enums compare by value, so any `namingConvention` works). Unions and interfaces resolve their
+  members with `instanceof` for the exported classes the resolvers return (a class is matched to a
+  member by its name, or its `__typename`), then from `__typename`. graphql-codegen declares
+  `__typename` optional: the check accepts it, but the returned objects must carry it.
+
+```graphql
+type Book {
+  id: ID!
+  title: String!
+  author: Author!
+}
+
+extend type Query {
+  book(id: ID!): Book
+}
+```
+
+```ts
+import { Args, Loader, Parent, Query, ResolveField, Resolver } from '@znight/graphql'
+
+@Resolver('Book')
+export class BookResolver {
+  constructor(private readonly catalog: CatalogService) {}
+
+  @Query()
+  book(@Args('id') id: QueryBookArgs['id']): Promise<Maybe<Book>> {
+    return this.catalog.find(id)
+  }
+
+  @ResolveField()
+  author(@Parent() book: BookModel, @Loader() authors: Loader<AuthorsById>): Promise<Author> {
+    return authors.load(book.authorId)
+  }
+}
+```
+
+**Coverage (ZNIGHT068).** A root field without resolver; a method naming no field (with a "did you
+mean", or the root type that declares it); `@Resolver('X')` naming no type, an interface, a
+non-object type, or a root type with field resolvers; `@Args('x')` or an `@Args()` property naming
+no argument; an object field without resolver that the TypeScript type returned for its parent
+lacks. Two methods bound to one field are ZNIGHT061; `@ResolveField` without a type name is
+ZNIGHT062.
+
+**Type conformance (ZNIGHT068).** Types are read with the compiler's type shapes. From every
+binding, the return type (`Promise<T>` unwrapped, the events of a `@Subscription`), the `@Args`
+parameters and the `@Parent()` type are compared with the SDL, following the fields without
+resolver through the properties of the returned types:
+
+| SDL                          | Output (return types, properties): assignable                             | Input (arguments, input fields): accepts every value                                              |
+| ---------------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `T!` / `T`                   | `T!` rejects `null`, `undefined`, optional properties                     | `T` without default: accept `undefined`; with one: `null` or `undefined`; a nullable item: `null` |
+| `[T]`                        | arrays, tuples, `Set`, `ReadonlySet`, `Iterable`                          | arrays                                                                                            |
+| `String`, `ID`               | strings, string literals and enums, branded strings (`ID`: numbers too)   | `string` (a literal union is narrower)                                                            |
+| `Int`, `Float`               | numbers, number literals and enums, `Int` / `Float`                       | `number`                                                                                          |
+| `Boolean`                    | `boolean`, `true`, `false`                                                | `boolean`                                                                                         |
+| `DateTime`, `BigInt`, `JSON` | `Date`; `bigint` or number; anything                                      | `Date`; `bigint`; anything                                                                        |
+| custom scalar                | the `T` of its `scalar<T>()`                                              | the `T` of its `scalar<T>()`                                                                      |
+| enum                         | literals or an enum whose values are SDL values                           | `string`, or literals / an enum covering every value                                              |
+| object                       | an object type with a conforming property for each field without resolver | –                                                                                                 |
+| union, interface             | each member matched by its `__typename` literal, else by name             | –                                                                                                 |
+| input object                 | –                                                                         | an object type whose properties are fields of the input                                           |
+
+When a nullable argument or input field is read by TypeScript types that accept `undefined` but not
+`null`, the runtime turns `null` into `undefined` (`nullAsUndefined`), as in code-first (never for
+list items). The `T` of another `scalar<T>()` declaration (a branded id for an `ID`) is accepted for
+`String` and `ID`.
+`any`, `unknown`, opaque types, missing annotations and arguments validated by a Standard Schema are
+not checked. Each mismatch is one diagnostic on the TypeScript annotation, the SDL definition
+related:
+
+```txt
+✗ ZNIGHT068: BookResolver.book returns Book | null, which may be null, but Query.book is Book! (non-null)
+ --> src/book.resolver.ts:7:33
+  |
+7 |   book(@Args('id') id: string): Promise<Book | null> {
+  |                                 ^^^^^^^^^^^^^^^^^^^^
+  |
+ ::: src/schema.graphql:7:3
+  |
+7 |   book(id: ID!): Book!
+  |   ---- Query.book is declared here
+  = hint: Return a value in every case, or make Query.book nullable in the SDL (Book)
+```
+
+**graphql-codegen.** The `typescript` plugin of GraphQL Code Generator writes the TypeScript types
+of the SDL; map every custom scalar to the `T` of its `scalar<T>()` declaration:
+
+```yaml
+# codegen.yml
+schema: src/**/*.graphql
+generates:
+  src/graphql.generated.ts:
+    plugins: [ typescript ]
+    config:
+      scalars:
+        DateTime: Date
+        EventId: ./ids.ts#EventId
+      namingConvention:
+        enumValues: keep
+      useTypeImports: true
+```
+
+Its output (`Scalars['X']['output']`, `Maybe<T>`, `InputMaybe<T>`, the `QueryXxxArgs` types,
+`__typename` on object types, intersections with interface types) passes the checks as is; the
+repository tests it with the verbatim output of graphql-codegen 7.4.6
+([`test/fixtures/codegen`](./test/fixtures/codegen)). The `typescript-resolvers` plugin is optional:
+decorated methods are checked directly. Models that replace the fields a field resolver computes
+(`authorId` instead of `author`) conform, since only the fields without resolver must be properties.
+
+**Performance.** The SDL is parsed and validated once per compile; the conformance walk visits each
+(SDL type, TypeScript declaration) pair once, on shapes the compiler caches. An SDL of about 560
+types (80 SDL files, 160 TypeScript files) compiles in about 200 ms on Bun
+(`test/compiler/schema-first-performance.test.ts`).
+Boot and execution are those of code-first.
 
 ## Observability
 
@@ -1035,6 +1197,8 @@ Build-time diagnostics carry a location, a hint and, for types, the path from th
 | ZNIGHT064 | Union members that cannot be told apart (no exported classes, no `__typename`, no literal property with a distinct value per member)                                                                                                                        |
 | ZNIGHT065 | A `@Loader()` parameter not typed `Loader<L>`, `L` not implementing `BatchLoad<K, V>`; at runtime, a batch returning another number of values than keys, invalid loader options                                                                             |
 | ZNIGHT066 | Boot: malformed or version-skewed `extensions.graphql` (every problem listed in one error), graphql-js schema validation, invalid options, no `HttpPlugin` with the HTTP transport, a scalar implemented under another name                                 |
+| ZNIGHT067 | Schema-first SDL: no file matches, syntax errors, duplicate or unknown types, fields and directives, invalid extensions, graphql-js schema validation, `@oneOf`, a scalar without `scalar()`; custom directives and built-in scalar overrides (warnings)    |
+| ZNIGHT068 | Schema-first: a field without resolver, a resolver, type or argument the SDL does not declare, a field nothing provides, a signature that does not conform to the SDL                                                                                       |
 
 ## Compiler contract
 
@@ -1052,12 +1216,27 @@ interface GraphQLMetadata {
 }
 
 type GraphQLTypeDefinition =
-  | { kind: 'object'; name: string; description?: string; fields: GraphQLFieldDefinition[] }
+  | { kind: 'object'; name: string; description?: string; interfaces?: string[]; fields: GraphQLFieldDefinition[] }
+  | {
+      kind: 'interface' // schema-first only; its fields have no resolver
+      name: string
+      description?: string
+      interfaces?: string[]
+      fields: GraphQLFieldDefinition[]
+      discriminator: GraphQLDiscriminator
+    }
   | { kind: 'input'; name: string; description?: string; fields: GraphQLInputFieldDefinition[] }
   | { kind: 'enum'; name: string; description?: string; values: GraphQLEnumValueDefinition[] }
   | { kind: 'union'; name: string; description?: string; members: string[]; discriminator: GraphQLDiscriminator }
   | { kind: 'scalar'; name: string; description?: string; builtin: true } // DateTime, BigInt, JSON
-  | { kind: 'scalar'; name: string; scalar: ScalarDefinition<unknown> | GraphQLScalarType } // imported from user code
+  | {
+      kind: 'scalar'
+      name: string
+      scalar: ScalarDefinition<unknown> | GraphQLScalarType // imported from user code
+      description?: string // wins over the definition's
+      specifiedByURL?: string
+      sdl?: true // schema-first: description and specifiedByURL replace the definition's, absent ones included
+    }
 
 interface GraphQLFieldDefinition {
   name: string
@@ -1137,12 +1316,16 @@ with field resolvers after the properties, enum values in declaration order, the
 `build` and `serve`, from sources or `dist`. Guards (`@UseGuard`) and loaders (`Loader<L>`) are
 bound with lazy edges (no ZNIGHT003). The extension imports no `graphql`, `dataloader` nor runtime
 entry; of `@znight/http` it only imports `@znight/http/compiler` (`readRouteMeta`,
-`effectiveRouteMeta`, `requiredRouteGroups`).
+`effectiveRouteMeta`, `requiredRouteGroups`). In schema-first mode only, it loads
+`graphql/language`, `graphql/type` and `graphql/utilities` lazily (never the executor). Interfaces
+are emitted by schema-first only: code-first sections, hashes and artifacts are unchanged.
 
 ## Limitations
 
-- **No GraphQL interfaces** in this version: unions cover polymorphic results. No custom
-  directives, no `@oneOf`.
+- **Code-first maps no TypeScript type to a GraphQL interface**: unions cover polymorphic results
+  (the schema-first mode supports interfaces). No custom directives, no `@oneOf`.
+- Schema-first: no `__resolveType` methods (return objects carrying `__typename`, or classes), no
+  custom internal enum values (an enum value is its SDL name).
 - **Subscriptions over SSE only.** No `graphql-ws` (WebSocket), no SSE single connection mode, no
   multipart subscriptions.
 - No `@defer` / `@stream`, no persisted or trusted documents, no query cost analysis, no response

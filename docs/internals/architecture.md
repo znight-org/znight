@@ -46,8 +46,9 @@ packages/
                   emission (/emit, /vite: `znight openapi`), validateResponse (/testing) (RFC 0002)
   schedule/       decorators, compiler extension, SchedulePlugin, SchedulerRegistry, cron engine, lock
                   stores, test clock and lock store scenarios (/testing) (RFC 0004)
-  graphql/        decorators, compiler extension (schema derived from TypeScript types), GraphQLPlugin
-                  (graphql-js 17, GraphQL over HTTP and SSE), loaders, PubSub, test helpers (/testing) (RFC 0005)
+  graphql/        decorators, compiler extension (schema derived from TypeScript types, or schema-first
+                  SDL checked at build time), GraphQLPlugin (graphql-js 17, GraphQL over HTTP and SSE),
+                  loaders, PubSub, test helpers (/testing) (RFCs 0005, 0007)
   testing/        TestBed (auto-mocking), TestApp (e2e), mocks and spies
   cli/            `znight` binary: new, generate, g, dev, build, start
 examples/         runnable example applications: rest-api, microservice, worker, monorepo (services + a
@@ -546,11 +547,13 @@ application provider, e.g. `class AppLogger implements CoreLogger`) nor package-
 | ZNIGHT044 | Job aborted: the reason of an aborted run's `ctx.signal` (`JobAbortedError`; `reason`: `timeout`, `lock-lost`, `removed`, `shutdown`); never thrown by the framework                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | error (a value)                                |
 | ZNIGHT060 | Invalid GraphQL type: a TypeScript type reached from a resolver cannot be mapped to a GraphQL type (`any`, `unknown`, `object`, `void`, functions, tuples, `Map`, `Record` and index signatures, `Uint8Array`/`Blob`/`File`, unions mixing scalars or scalars and objects, anonymous object types and unions, opaque types, `Promise` outside a return type, async iterables outside `@Subscription`), or a resolver without the explicit return type it needs (RFC 0005 §6.2)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | error                                          |
 | ZNIGHT061 | GraphQL name conflict: two declarations or two root fields share a GraphQL name, an invalid or reserved name (`Query`, `Mutation`, `Subscription`, `__*`, enum values `true`/`false`/`null`), a field resolver conflicting with a property field, two field resolvers adding one field, duplicate argument names (a name clash in hand-written metadata is ZNIGHT066 at boot)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | error                                          |
-| ZNIGHT062 | Invalid resolver: `@ResolveField` without `@Parent()`, a subscription not returning an async iterable, resolvers without any `@Query`, inherited handlers, a resolver in a compiled provider library; an unreachable field resolver (warning)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | error / warning                                |
+| ZNIGHT062 | Invalid resolver: `@ResolveField` without `@Parent()` (schema-first: without a type in `@Resolver`), a subscription not returning an async iterable, resolvers without any `@Query`, inherited handlers, a resolver in a compiled provider library; an unreachable field resolver (warning)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | error / warning                                |
 | ZNIGHT063 | Invalid GraphQL input: a declaration used as input and as output, a getter, union, set or async iterable in an input type, a cycle of non-null input fields, a default value (`@default`, parameter default) not matching its type                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | error                                          |
-| ZNIGHT064 | Unresolvable abstract type: the members of a union cannot be told apart at runtime (no class, no common literal discriminant, no `__typename`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | error                                          |
+| ZNIGHT064 | Unresolvable abstract type: the members of a union (or the implementations of an interface, schema-first) cannot be told apart at runtime (no class, no common literal discriminant, no `__typename`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | error                                          |
 | ZNIGHT065 | Invalid loader: `@Loader()` on a type that is not `Loader<L>`, `L` not implementing `BatchLoad<K, V>`; at runtime, a batch function returning another number of values than keys (every key of the batch fails)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | error                                          |
 | ZNIGHT066 | Invalid GraphQL setup (boot): malformed or version-skewed `extensions.graphql`, graphql-js schema validation failure, invalid `GraphQLPlugin` options, no `http` plugin while the HTTP transport is on, scalar name mismatch                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | error                                          |
+| ZNIGHT067 | Invalid GraphQL SDL (schema-first, RFC 0007): no `.graphql` file matches the `schema` globs, a syntax error, a type defined twice, a duplicate field, value or argument, an unknown type or directive, an extension of a missing type or of another kind, a graphql-js schema validation error, `@oneOf` inputs, a scalar without `scalar()` definition; a custom directive, a description or `@specifiedBy` on a built-in scalar (warnings)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | error / warning                                |
+| ZNIGHT068 | GraphQL schema mismatch (schema-first, RFC 0007): a root field without resolver, a resolver method naming no field, `@Resolver('X')` naming no object type, `@Args('x')` naming no argument, an object field neither a resolver nor the returned TypeScript type provides, a signature not conforming to the SDL types (nullability, lists, scalars, enums, union and interface members, input objects)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | error                                          |
 
 Codes are allocated by range (`rfcs/README.md`): `ZNIGHT001`–`029` belong to the core, the
 compiler and the features shipped in 0.1 (http, messaging, config, observability); from
@@ -730,9 +733,9 @@ literal.
 
 | Decorator / function                                      | Target                                                                                                         |
 | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `@Resolver(opts?)`                                        | class (provider) — static `{ scope? }`                                                                         |
+| `@Resolver(typeOrOpts?, opts?)`                           | class (provider) — static `{ scope? }`; schema-first: static SDL type name first (`@Resolver('Event')`)        |
 | `@Query(name?)` `@Mutation(name?)` `@Subscription(name?)` | method — static name (default: the method name); one root field per decorator                                  |
-| `@ResolveField(name?)`                                    | method — static name; a field of the type of its `@Parent()` parameter                                         |
+| `@ResolveField(name?)`                                    | method — static name; a field of the type of its `@Parent()` parameter (schema-first: of `@Resolver('Type')`)  |
 | `@Args(nameOrSchema?, schema?)`                           | param — static name, value schema (Standard Schema)                                                            |
 | `@Parent()` `@Ctx()` `@Info()` `@Loader()`                | param — the parent object, `GraphQLContext`, `GraphQLResolveInfo`, the DataLoader of the `Loader<L>` parameter |
 | `@UseGuard(...guards)`                                    | class / method of a `@Resolver` — value refs to guard classes                                                  |
@@ -743,7 +746,9 @@ A field method is a public, non-static, non-generic, non-computed instance metho
 return type, declared by its `@Resolver` class (not inherited: ZNIGHT062). Each parameter carries
 exactly one graphql parameter decorator; `Ctx` / `Query` of `@znight/http` on a resolver parameter
 is ZNIGHT005 with the import to use. `@Resolver` and `@Controller` on one class is ZNIGHT005. The
-schema mapping, naming and diagnostics are §9.7.
+schema mapping, naming and diagnostics are §9.7. In schema-first mode (RFC 0007) the return type
+annotation is optional (not checked without it), `@Parent()` is optional in a `@ResolveField`, and a
+type name in `@Resolver` is ZNIGHT005 in code-first mode.
 
 ### `@znight/messaging`
 
@@ -892,9 +897,10 @@ interface Diagnostic {
   `outFile` are ignored.
 - `watchFiles` lists every file the result depends on: the scanned sources and every other file the
   analysis read outside `node_modules` (a constant imported from `shared/`, a type of
-  `src/types.d.ts`, a workspace package), package manifests and compiled libraries; never the
-  outFile nor the extra files. Watchers also recompile when a file is created where a relative import of the last
-  compile did not resolve.
+  `src/types.d.ts`, a workspace package, the input files of the extensions, §6.5), package
+  manifests and compiled libraries; never the outFile nor the extra files. Watchers also recompile
+  when a file is created where a relative import of the last compile did not resolve, or that
+  matches the input patterns of an extension.
 - Options are validated by `normalizeOptions` (a `TypeError` prefixed `[znight]` naming the
   option); paths are absolute and POSIX, the root is a realpath.
 - **Version skew** (ZNIGHT018, located in the `package.json`): `@znight/core` and every `@znight/*`
@@ -1144,7 +1150,14 @@ interface DecoratorSpec {
   GenNode }` — `deps` are bound with §4.7 and passed as nodes (`d[i]`).
 - `ValidateContext`: `extension`, `project`, `options`, `types`, `graph` (`ApplicationGraph`),
   `stored`, `provider(token)`, `classInfo(identity)`, `binding(handle)`, `report(diagnostic)`,
-  `definitionsOf(callee)`.
+  `definitionsOf(callee)`, `inputFiles(patterns)`.
+- **Input files** (`inputFiles(patterns) → InputFile[]`, `{ file, relativeFile, text }`): the
+  non-source files an extension reads (the `.graphql` schema of `@znight/graphql`, RFC 0007),
+  matching `patterns` (globs relative to the root, `!` negations allowed; `node_modules`,
+  dot-directories and the outFile are excluded unless a pattern names them), read as UTF-8 and sorted by path (unreadable
+  matches skipped). They are inputs of the compile: part of `watchFiles`, and a file created that
+  matches the patterns of the current or the previous compile is a relevant change for the
+  watchers (`isRelevantChange`). An invalid pattern list is a `TypeError`.
 - **Type shapes** (`types.shape(target, options?) → ShapeResult`, in the analyze, validate and
   generate contexts): the structural view of a type annotation, what a value of that type looks like
   once serialised as JSON, computed from declarations (sources and `.d.ts` alike, no type checker)
@@ -2703,7 +2716,10 @@ The compiler extension (`@znight/graphql/compiler`, RFC 0005) owns `#Resolver`, 
 `#UseGuard` and `#scalar` (§5). It only `import type`s from `@znight/compiler`, never imports
 `graphql`, `dataloader` nor its runtime entry, and of `@znight/http` imports only the runtime-free
 `@znight/http/compiler` (`readRouteMeta`, `effectiveRouteMeta`, `requiredRouteGroups`; enforced by
-`tests/boundaries.test.ts`). Modules shared by both sides are import-free: the SDL printer
+`tests/boundaries.test.ts`). In schema-first mode only, it loads lazily (`createRequire`, on the
+first schema-first compile) the build-time modules of graphql-js: `graphql/language`,
+`graphql/type` and `graphql/utilities`, never the `graphql` root entry nor `graphql/execution`
+(RFC 0007 §7; graphql is a required peer). Code-first compiles never load graphql-js. Modules shared by both sides are import-free: the SDL printer
 (`sdl.ts`), type references (`type-ref.ts`), names (`names.ts`), the metadata types (`metadata.ts`)
 and `GraphQLException` (`errors.ts`).
 
@@ -2722,9 +2738,11 @@ and `GraphQLException` (`errors.ts`).
   has no resolver) and, when the option `sdl` is a path, the SDL followed by one newline through
   `GenerateContext.emitFile` (§6.5).
 - **Options**: the default export is the extension with default options; `configure({ sdl?,
-  number? })` returns a configured copy (options accumulate), which replaces the discovered
-  extension when listed in `extensions` (§6.5). `sdl`: `false` (default) or a relative path;
-  `number`: `'Float'` (default) or `'Int'`. An invalid option is a `TypeError`.
+  number?, schema? })` returns a configured copy (options accumulate), which replaces the
+  discovered extension when listed in `extensions` (§6.5). `sdl`: `false` (default) or a relative
+  path; `number`: `'Float'` (default) or `'Int'`; `schema`: `false` (default, code-first) or a glob
+  or a non-empty list of globs relative to the root (schema-first, below). An invalid option is a
+  `TypeError`.
 
 **Mapping (normative).** Output position: resolver return types (`Promise<T>` unwrapped) and fields
 of object types; input position: arguments and fields of input types.
@@ -2754,6 +2772,63 @@ discriminators are chosen in this order: every member an exported class (`instan
 first), `__typename`, a property with a distinct literal value per member; none is ZNIGHT064.
 JSDoc gives `description`, `@param`, `@deprecated`, `@default`, `@gqlHidden`, `@gqlName`.
 
+**Schema-first (RFC 0007, normative).** With `schema`, the `.graphql` files are the schema and the
+TypeScript types are only checked against them; the two modes never mix (JSDoc, `@gqlName`,
+`@gqlHidden`, `@default` and `number` are ignored).
+
+- `validate` reads the files with `ValidateContext.inputFiles(schema)` (§6.5; none is ZNIGHT067),
+  parses each with `graphql/language` (a syntax error is ZNIGHT067 at its position), checks the
+  merged document (one definition per type, unique fields, values and arguments across extensions,
+  known types and directives, directive locations, arguments and repetitions, extensions of a
+  defined type of the same kind, one `schema` definition and one type per operation: ZNIGHT067
+  with suggestions; files without definitions are skipped, and the `sdl` artifact is never read
+  back), builds it with `buildASTSchema` and validates it with
+  `validateSchema` (each error a ZNIGHT067 at its first AST node, the others related).
+- A custom directive definition is a ZNIGHT067 warning (once); the directive and its uses are left
+  out of the served schema. `@oneOf` inputs are ZNIGHT067. A scalar binds the `scalar<T>()`
+  declaration of its name (its description and `@specifiedBy` come from the SDL and are emitted in
+  the metadata with `sdl: true`, replacing the definition's, absent ones included); without one, `DateTime`, `BigInt` and `JSON` are the built-in scalars (a description
+  or another `@specifiedBy` on them is a ZNIGHT067 warning) and any other is ZNIGHT067.
+- **Binding** (by name): `@Query`, `@Mutation`, `@Subscription` bind the field of the query,
+  mutation or subscription root type (`schema { ... }` names included) named by the decorator or
+  the method; `@ResolveField` binds the field of the object type named by `@Resolver('Type')`
+  (ZNIGHT062 without it). ZNIGHT068: a root field no method names, a method naming no field (with
+  a suggestion, or the root type declaring it), `@Resolver('X')` naming no type, an interface, a
+  non-object type, or a root type holding `@ResolveField`s, `@Args('x')` naming no argument. Two
+  methods bound to one field are ZNIGHT061. A method with an analysis error still counts as
+  binding its field.
+- **Conformance**: types are read through type shapes (`members: 'instance'`, the `T` of
+  `scalar<T>()` kept). From every binding, the return type (`Promise<T>` unwrapped; the item type of
+  the async iterable of a `@Subscription`, ZNIGHT062 when it returns none), the `@Args` parameters
+  (not those validated by a Standard Schema) and the `@Parent()` type are compared with the SDL,
+  following the fields without resolver through the properties of the TypeScript types (each SDL
+  type and TypeScript declaration once). Output positions MUST be assignable: `T!` rejects `null`,
+  `undefined` and optional properties; lists accept arrays, tuples, `Set`, `ReadonlySet`,
+  `Iterable`; `String` strings, string literals and enums, branded strings; `ID` those and numbers;
+  `Int` / `Float` numbers, number literals and enums, the aliases; `Boolean` booleans; `DateTime`
+  `Date`; `BigInt` `bigint` and numbers; `JSON` anything; a custom scalar its `T` (the `T` of
+  another declaration is accepted for `String` and `ID` only); an enum literals and enums whose values
+  are SDL value names; an object type an object type with a conforming property for every field
+  without resolver (a missing one is ZNIGHT068 at the SDL field); an abstract type each TypeScript
+  member matched to a possible type by its `__typename` literal, else by its name (or, for an
+  interface, a TypeScript type named like it, checked against its fields). Input positions MUST
+  accept every value: a nullable argument or input field without default MUST accept `undefined`,
+  one with a default `null` or `undefined`, a nullable list item `null`; `[T]` needs an array; a scalar a type accepting all its
+  values (no literals); an enum every value; an input object an object type whose properties are
+  fields of the input. `any`, `unknown`, opaque types and missing annotations are not checked.
+  Each mismatch is one ZNIGHT068 on the TypeScript annotation, the SDL definition related.
+- **Model**: every named type of the schema except introspection types, specified scalars and
+  custom directives, sorted by name; fields, arguments, values and input fields in SDL order
+  (extensions after the definition, files in path order); defaults as external values
+  (`valueFromASTUntyped`); enum values `{ name, value: name }`; union members sorted; object and
+  interface types with their `interfaces`. `nullAsUndefined` is set on a nullable argument or input
+  field when every TypeScript type reading it accepts `undefined` but not `null` (mixed uses are
+  ZNIGHT068). Abstract types use the `class` discriminator, listing every exported class the
+  resolvers return for them (the runtime falls back to `__typename`), else `typename`; a member
+  that is neither a class nor declares `__typename` is ZNIGHT064 (an optional `__typename`
+  passes: the value must carry it at runtime). The SDL artifact and `schemaHash` are printed from the
+  model.
+
 **Metadata.**
 
 ```ts
@@ -2765,13 +2840,14 @@ interface GraphQLMetadata {
   groups?: Record<string, { keys: string[]; required: boolean }> // required groups, or groups of several keys
 }
 
-type GraphQLTypeDefinition = { name: string; description?: string } & ( // no description on custom scalars
-  | { kind: 'object'; fields: GraphQLFieldDefinition[] }
+type GraphQLTypeDefinition = { name: string; description?: string } & ( // no description on built-in scalars
+  | { kind: 'object'; interfaces?: string[]; fields: GraphQLFieldDefinition[] } // interfaces: schema-first
+  | { kind: 'interface'; interfaces?: string[]; fields: GraphQLFieldDefinition[]; discriminator: GraphQLDiscriminator } // schema-first; fields without resolver
   | { kind: 'input'; fields: GraphQLInputFieldDefinition[] }
   | { kind: 'enum'; values: GraphQLEnumValueDefinition[] } // { name, value: string | number, description?, deprecationReason? }
   | { kind: 'union'; members: string[]; discriminator: GraphQLDiscriminator } // members sorted
   | { kind: 'scalar'; builtin: true } // DateTime, BigInt, JSON
-  | { kind: 'scalar'; scalar: ScalarDefinition<unknown> | GraphQLScalarType } // imported from user code
+  | { kind: 'scalar'; scalar: ScalarDefinition<unknown> | GraphQLScalarType; specifiedByURL?: string; sdl?: true } // imported from user code; description and specifiedByURL win over the definition's; with sdl (schema-first) they replace them, absent ones included
 )
 
 interface GraphQLFieldDefinition {
@@ -2825,7 +2901,8 @@ interface GraphQLResolverBinding {
   with a default, one with a default the compiler cannot evaluate is nullable with
   `nullAsUndefined`.
 - `printSdl()` (`sdl.ts`) MUST print what graphql-js 17 `printSchema()` prints for the schema the
-  runtime builds from the same section; `schemaHash` and the SDL artifact derive from it.
+  runtime builds from the same section (interfaces and `implements` included); `schemaHash` and the
+  SDL artifact derive from it. Code-first never emits interfaces, so its sections are unchanged.
 - Determinism: byte-identical output in `build` and `serve`, on every OS, from sources or `dist`.
 
 **Runtime.** `GraphQLPlugin.configure(options | (container) => options)` (name `graphql`; options
@@ -2847,7 +2924,8 @@ are ZNIGHT066):
   and `GET` when `http.get` or `graphiql` is on, both named `handle` with `http.meta` and
   `http.guards`; `[]` with `http: false`. Handlers read the runtime lazily.
 - `onBootstrap` resolves the options, checks the section structurally (version, roots, names,
-  kinds, type references and positions, bindings, discriminators, scalars, groups), builds the
+  kinds, type references and positions, bindings, interfaces (an interface field has no resolver),
+  discriminators, scalars, groups), builds the
   schema with graphql-js constructors (every type in metadata order, defaults as
   `default: { value }`), validates it, and reports every problem in **one** ZNIGHT066 error. It
   resolves singleton resolvers, guards and mappers once (others per call, in the current scope),

@@ -13,7 +13,9 @@
       "!rfcs",
       // Written by the GraphQL compiler extension exactly as graphql-js prints it, and checked byte
       // for byte (`znight generate --check`, the example's schema test): never reformatted.
-      "!examples/graphql-api/schema.graphql"
+      "!examples/graphql-api/schema.graphql",
+      // Written by graphql-codegen, kept verbatim: the schema-first conformance test checks its output.
+      "!packages/graphql/test/fixtures/codegen/graphql.generated.ts"
     ]
   },
   // Markdown files may start with a YAML frontmatter block: VitePress pages (docs/) and changesets

@@ -1,0 +1,61 @@
+"""
+A branded event identifier.
+"""
+scalar EventId
+
+scalar DateTime @specifiedBy(url: "https://datatracker.ietf.org/doc/html/rfc3339")
+
+enum EventStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+interface Node {
+  id: ID!
+}
+
+type User implements Node {
+  id: ID!
+  name: String!
+}
+
+type Event implements Node {
+  id: ID!
+  eventId: EventId!
+  title: String!
+  description: String
+  status: EventStatus!
+  startsAt: DateTime!
+  tags: [String!]!
+  owner: User!
+}
+
+type ValidationRejection {
+  message: String!
+  fields: [String!]!
+}
+
+union CreateEventResult = Event | ValidationRejection
+
+input CreateEventInput {
+  title: String!
+  description: String
+  status: EventStatus = DRAFT
+  tags: [String!]
+}
+
+input EventFilter {
+  status: EventStatus
+  search: String
+}
+
+type Query {
+  event(id: EventId!): Event
+  events(filter: EventFilter, limit: Int = 20): [Event!]!
+  node(id: ID!): Node
+}
+
+type Mutation {
+  createEvent(input: CreateEventInput!): CreateEventResult!
+}

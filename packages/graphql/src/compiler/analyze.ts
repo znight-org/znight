@@ -18,7 +18,8 @@ import type {
 } from '@znight/compiler'
 import type { Scope } from '@znight/core'
 import type { MetaEntry } from '@znight/http/compiler'
-import type { FieldData, FieldOperation, GraphQLData, ParamData } from './data.ts'
+import type { FieldData, FieldOperation, GraphQLData, ParamData, ResolverData } from './data.ts'
+import type { ResolvedGraphQLCompilerOptions } from './options.ts'
 
 import { effectiveRouteMeta, readRouteMeta } from '@znight/http/compiler'
 
@@ -41,12 +42,17 @@ const SCOPES: readonly Scope[] = ['singleton', 'request', 'transient']
 /** Shape options reading `Loader<L>` parameters: the alias is kept, `L` stays a named shape. */
 const LOADER_SHAPE = Object.freeze({ keep: Object.freeze([GraphQLIds.Loader]), jsdoc: false })
 
-/** Analyses a class carrying at least one graphql decorator (class, method or parameter). */
-export function analyzeGraphQLClass(cls: ClassInfo, ctx: Context): void {
+/**
+ * Analyses a class carrying at least one graphql decorator (class, method or parameter). In
+ * schema-first mode (RFC 0007), `@Resolver('Type')` names the SDL type of the field resolvers and
+ * `@Parent()` is optional.
+ */
+export function analyzeGraphQLClass(cls: ClassInfo, ctx: Context, options: ResolvedGraphQLCompilerOptions): void {
   const resolvers = cls.decorators.filter(decorator => decorator.identity === GraphQLIds.Resolver)
   const resolver = resolvers[0]
   if (resolver === undefined) {
     reportOutsideResolver(cls, ctx)
+    storeClaims(ctx, cls, undefined, options)
     return
   }
   for (const extra of resolvers.slice(1)) {
@@ -66,6 +72,7 @@ export function analyzeGraphQLClass(cls: ClassInfo, ctx: Context): void {
       ],
       [{ message: '@Controller is applied here', location: controller.location }],
     )
+    storeClaims(ctx, cls, resolver, options)
     return
   }
   if (ctx.options.library) {
@@ -76,6 +83,7 @@ export function analyzeGraphQLClass(cls: ClassInfo, ctx: Context): void {
       `${cls.displayName} is a @Resolver in a compiled provider library: the schema is derived from the sources`,
       ['Publish the package as a source library (without library: true), so that applications compile its resolvers'],
     )
+    storeClaims(ctx, cls, resolver, options)
     return
   }
   if (cls.abstract || cls.typeParameters.length > 0) {
@@ -88,10 +96,11 @@ export function analyzeGraphQLClass(cls: ClassInfo, ctx: Context): void {
         : `@Resolver cannot be applied to the generic class ${cls.displayName}<${cls.typeParameters.join(', ')}>`,
       [cls.abstract ? 'Resolvers are instantiated: remove `abstract`' : 'Remove the type parameters of the resolver'],
     )
+    storeClaims(ctx, cls, resolver, options)
     return
   }
 
-  const scope = resolverScope(ctx, resolver)
+  const { scope, typeName } = resolverArguments(ctx, resolver, options.schema !== false)
   ctx.registerProvider(cls, { scope })
   // resolvers are entry points of the plugin: roots of ZNIGHT019 and prune
   ctx.addRoot(cls, { reason: ROOT_REASON, location: resolver.location })
@@ -105,9 +114,79 @@ export function analyzeGraphQLClass(cls: ClassInfo, ctx: Context): void {
       reportStrayMethodDecorators(cls, method, ctx)
       continue
     }
-    fields.push(...analyzeMethod(ctx, cls, method, decorators, classMeta))
+    fields.push(...analyzeMethod(ctx, cls, method, decorators, classMeta, options.schema !== false))
   }
-  ctx.store({ kind: 'resolver', host: cls, scope, location: resolver.location, guards: classGuards, fields })
+  const data: ResolverData = {
+    kind: 'resolver',
+    host: cls,
+    scope,
+    location: resolver.location,
+    guards: classGuards,
+    fields,
+    ...(typeName === undefined ? {} : { typeName }),
+  }
+  if (options.schema !== false && typeName === undefined) {
+    for (const field of fields) {
+      if (field.operation !== 'field') continue
+      error(
+        ctx,
+        Codes.InvalidResolver,
+        field.location,
+        `@ResolveField ${cls.displayName}.${field.method} needs the type it resolves a field of: name it in @Resolver (schema-first)`,
+        [
+          `@Resolver('Event') on ${cls.displayName}, where Event is the object type of the SDL declaring '${field.name}'`,
+        ],
+      )
+    }
+  }
+  ctx.store(data)
+}
+
+/**
+ * Schema-first: a class rejected above (no `@Resolver`, abstract, a controller...) still names the
+ * fields its methods resolve, stored as an `invalid` resolver, so that these fields are not also
+ * reported as missing a resolver (one diagnostic per mistake).
+ */
+function storeClaims(
+  ctx: Context,
+  cls: ClassInfo,
+  resolver: DecoratorInfo | undefined,
+  options: ResolvedGraphQLCompilerOptions,
+): void {
+  if (options.schema === false) return
+  const typeArg = resolver?.args[0]
+  const typeName =
+    typeArg?.evaluated === true && typeof typeArg.value === 'string'
+      ? { name: typeArg.value, location: typeArg.location }
+      : undefined
+  const fields: FieldData[] = []
+  for (const method of cls.methods) {
+    for (const decorator of method.decorators.filter(isFieldDecorator)) {
+      const arg = decorator.args[0]
+      fields.push({
+        method: method.name,
+        operation: FIELD_DECORATORS.get(decorator.identity as string) as FieldOperation,
+        name: arg?.evaluated === true && typeof arg.value === 'string' ? arg.value : method.name,
+        location: decorator.location,
+        methodLocation: method.location,
+        guards: [],
+        meta: [],
+        params: [],
+        complete: false,
+      })
+    }
+  }
+  if (fields.length === 0) return
+  ctx.store({
+    kind: 'resolver',
+    host: cls,
+    scope: 'singleton',
+    location: resolver?.location ?? cls.location,
+    guards: [],
+    fields,
+    invalid: true,
+    ...(typeName === undefined ? {} : { typeName }),
+  })
 }
 
 function isFieldDecorator(decorator: DecoratorInfo): boolean {
@@ -118,9 +197,47 @@ function isParameterDecorator(decorator: DecoratorInfo): boolean {
   return decorator.identity !== undefined && PARAMETER_DECORATORS.has(decorator.identity)
 }
 
-/** `@Resolver({ scope })`. */
-function resolverScope(ctx: Context, decorator: DecoratorInfo): Scope {
-  const arg = decorator.args[0]
+/** `@Resolver()`, `@Resolver({ scope })`, `@Resolver('Event')`, `@Resolver('Event', { scope })` (schema-first). */
+function resolverArguments(
+  ctx: Context,
+  decorator: DecoratorInfo,
+  schemaFirst: boolean,
+): { scope: Scope; typeName?: { readonly name: string; readonly location: Location } } {
+  const [first, second] = decorator.args
+  if (first?.evaluated !== true || typeof first.value !== 'string') {
+    if (second !== undefined) {
+      error(ctx, Codes.InvalidDecorator, second.location, '@Resolver takes the options as its only argument here', [
+        "@Resolver({ scope: 'request' }), or @Resolver('Event', { scope: 'request' }) in schema-first mode",
+      ])
+    }
+    return { scope: resolverScope(ctx, first) }
+  }
+  const scope = resolverScope(ctx, second)
+  const name = first.value
+  if (!schemaFirst) {
+    error(
+      ctx,
+      Codes.InvalidDecorator,
+      first.location,
+      `@Resolver('${name}'): naming the type is schema-first only, the code-first schema is derived from the types`,
+      [
+        'Remove the type name: @ResolveField methods add fields to the type of their @Parent() parameter',
+        "Or switch to schema-first: graphql.configure({ schema: 'src/**/*.graphql' }) in znight.config.ts",
+      ],
+    )
+    return { scope }
+  }
+  if (!isGraphQLName(name)) {
+    error(ctx, Codes.NameConflict, first.location, `'${name}' is not a valid GraphQL type name (@Resolver)`, [
+      'GraphQL names match /^[_A-Za-z][_0-9A-Za-z]*$/ and do not start with __',
+    ])
+    return { scope }
+  }
+  return { scope, typeName: { name, location: first.location } }
+}
+
+/** The `{ scope }` options of `@Resolver`. */
+function resolverScope(ctx: Context, arg: DecoratorInfo['args'][number] | undefined): Scope {
   if (arg === undefined || !arg.evaluated || arg.value === undefined) return 'singleton'
   const value = arg.value
   if (!isRecord(value)) {
@@ -171,6 +288,7 @@ function analyzeMethod(
   method: MethodInfo,
   decorators: readonly DecoratorInfo[],
   classMeta: readonly MetaEntry[],
+  schemaFirst: boolean,
 ): FieldData[] {
   const where = `${cls.displayName}.${method.name}`
   const primary = decorators[0] as DecoratorInfo
@@ -216,7 +334,8 @@ function analyzeMethod(
     }
     seen.add(key)
     let fieldComplete = complete && explicit !== undefined
-    if (operation === 'field' && parents.length === 0) {
+    // schema-first: the type is named by @Resolver('Type'), the parent is optional (NestJS)
+    if (operation === 'field' && parents.length === 0 && !schemaFirst) {
       error(ctx, Codes.InvalidResolver, decorator.location, `@ResolveField ${where} has no @Parent() parameter`, [
         `Declare the parent object first: ${method.name}(@Parent() parent: ParentType, ...)`,
       ])
