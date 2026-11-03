@@ -62,7 +62,7 @@ Every change must keep these. A change that bends one starts with an RFC (see [R
 | `@znight/openapi`       | OpenAPI 3.1 document built at compile time, served with Scalar or Swagger UI, emitted by `znight openapi` (RFC 0002)                                                             |
 | `@znight/messaging`     | Consumers, retries, dead letters; `/memory`, `/rabbitmq`, `/sqs`, `/kafka` drivers                                                                                               |
 | `@znight/schedule`      | `@Cron`, `@Interval`, `@Timeout`, `SchedulerRegistry`, lock stores, virtual clock for tests (RFC 0004)                                                                           |
-| `@znight/graphql`       | In progress (RFC 0005): code-first GraphQL, schema derived from TypeScript types at build time; resolvers, loaders, SSE subscriptions on graphql-js 17                           |
+| `@znight/graphql`       | Code-first GraphQL: schema derived from TypeScript types at build time, resolvers, loaders, guards, GraphQL over HTTP and SSE (RFC 0005)                                         |
 | `@znight/config`        | Typed config classes loaded from env, `.env`, JSON/YAML, Vault, AWS Secrets Manager                                                                                              |
 | `@znight/observability` | Pino logger, Prometheus metrics (prom-client), OpenTelemetry tracing, `@Logged`, `@Traced`, `@Metric`                                                                            |
 | `@znight/testing`       | `TestBed` (auto-mocked dependencies), `TestApp` (in-memory end-to-end tests), mocks and spies                                                                                    |
@@ -92,12 +92,12 @@ Respect them; do not reopen them in passing.
 - **Built-in sessions and server-side MVC** (a session store, templates, views) are out of scope.
   Signed cookies are built in, and `examples/secure-api` shows a cookie-session recipe.
 - **WebSocket** is deferred to v0.2 (RFC 0003); its error code block is reserved. **GraphQL** (RFC
-  0005) is accepted for v0.2 and in progress (`@znight/graphql`).
+  0005) ships as `@znight/graphql` with v0.2.
 
 ### Roadmap
 
-The roadmap page is [`docs/roadmap.md`](docs/roadmap.md): planned for v0.2, `@znight/websocket`
-(RFC 0003) and `@znight/graphql` (RFC 0005); planned without a date or an RFC yet, `@znight/cache`;
+The roadmap page is [`docs/roadmap.md`](docs/roadmap.md): v0.2 brings `@znight/graphql` (RFC 0005,
+implemented) and `@znight/websocket` (RFC 0003, planned); planned without a date or an RFC yet, `@znight/cache`;
 then what is considered and what is not planned. RFC statuses live in
 [`rfcs/README.md`](rfcs/README.md). There is no TODO list in this file: read the roadmap, the RFCs
 and the GitHub issues before starting a feature, and keep the roadmap page up to date when a
