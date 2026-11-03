@@ -1683,11 +1683,15 @@ read in the async context of the handler (request-scoped providers and tracing k
 request scope is opened with `openScope`, the handler runs in it synchronously and a plain object
 or array result is serialised as JSON (`undefined`: no body) with the headers built in their final
 order from a template computed at boot, with no promise until something is asynchronous (a body to
-read, a thenable result, both awaited in the lane). With a bodyless status (`@HttpCode(204)`,
-`304`) or on an explicit `@Head` route, only an `undefined` result is answered there. Anything else
-(a malformed or unmatched path before the request starts; a thrown error or rejection, any other
-result, headers or cookies set on the context) continues in the general pipeline in the same
-scope; replies are identical byte for byte, header order included. The lane keeps the `http:request`
+read, a thenable result, both awaited in the lane). Without `http:request` wrappers, an
+`HttpResponse` whose body is a plain object or array, with no cookie and no header other than a
+lower-case `content-type` (which replaces the JSON one in place), is served there too, with the
+status `serializeResult` gives it (`@HttpCode`, then its own status, then the route's default),
+except on an explicit `@Head` route. With a bodyless status (`@HttpCode(204)`, `304`) or on an
+explicit `@Head` route, only an `undefined` result is answered there. Anything else (a malformed or
+unmatched path before the request starts; a thrown error or rejection, any other result, headers or
+cookies set on the context) continues in the general pipeline in the same scope; replies are
+identical byte for byte, header order included. The lane keeps the `http:request`
 hooks: with listeners, the event is created when the request starts and emitted once the reply is
 ready, the lane staying synchronous; with wrappers (checked when the request starts), the handler
 runs inside `hooks.run('http:request')` in the request scope, the event is the one of the general
