@@ -10,10 +10,12 @@ export function sdlType(model: TypeModel): SdlType {
   const base = model.description === undefined ? {} : { description: model.description }
   switch (model.kind) {
     case 'object':
+    case 'interface':
       return {
-        kind: 'object',
+        kind: model.kind,
         name: model.name,
         ...base,
+        ...(model.interfaces.length === 0 ? {} : { interfaces: model.interfaces }),
         fields: model.fields.map(field => ({
           name: field.name,
           type: field.type,

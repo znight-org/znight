@@ -58,6 +58,8 @@ describe('ErrorCode', () => {
       UnresolvableAbstractType: 'ZNIGHT064',
       InvalidLoader: 'ZNIGHT065',
       InvalidGraphQLSetup: 'ZNIGHT066',
+      InvalidGraphQLSdl: 'ZNIGHT067',
+      GraphQLSchemaMismatch: 'ZNIGHT068',
     })
   })
 

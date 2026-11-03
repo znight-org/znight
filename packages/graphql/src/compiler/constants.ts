@@ -25,6 +25,10 @@ export const Codes: {
   readonly UnresolvableAbstractType: ErrorCode
   /** ZNIGHT065: `@Loader()` parameters and loader providers. */
   readonly InvalidLoader: ErrorCode
+  /** ZNIGHT067: schema-first SDL files (RFC 0007): reading, syntax, validation, unsupported constructs. */
+  readonly InvalidSdl: ErrorCode
+  /** ZNIGHT068: schema-first resolvers against the SDL (RFC 0007): coverage and type conformance. */
+  readonly SchemaMismatch: ErrorCode
 } = Object.freeze({
   InvalidDecorator: 'ZNIGHT005',
   MissingRouteDecision: 'ZNIGHT023',
@@ -34,6 +38,8 @@ export const Codes: {
   InvalidInput: 'ZNIGHT063',
   UnresolvableAbstractType: 'ZNIGHT064',
   InvalidLoader: 'ZNIGHT065',
+  InvalidSdl: 'ZNIGHT067',
+  SchemaMismatch: 'ZNIGHT068',
 })
 
 /** Root reason given to `AnalyzeContext.addRoot()`. */

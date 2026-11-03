@@ -115,12 +115,18 @@ export function builtinScalar(name: string): GraphQLScalarType | undefined {
  * `parseValue` → `coerceInputValue`, `parseLiteral` → `coerceInputLiteral` (default: `parseValue`
  * of the literal's JSON value). The definition's methods are called on the definition.
  */
-export function definitionScalar(name: string, definition: ScalarDefinition<unknown>): GraphQLScalarType {
+export function definitionScalar(
+  name: string,
+  definition: ScalarDefinition<unknown>,
+  overrides: { readonly description?: string; readonly specifiedByURL?: string } = {},
+): GraphQLScalarType {
   const parseLiteral = definition.parseLiteral
+  const description = overrides.description ?? definition.description
+  const specifiedByURL = overrides.specifiedByURL ?? definition.specifiedByURL
   return new GraphQLScalarType({
     name,
-    ...(definition.description === undefined ? {} : { description: definition.description }),
-    ...(definition.specifiedByURL === undefined ? {} : { specifiedByURL: definition.specifiedByURL }),
+    ...(description === undefined ? {} : { description }),
+    ...(specifiedByURL === undefined ? {} : { specifiedByURL }),
     coerceOutputValue: (value: unknown) => definition.serialize(value),
     coerceInputValue: (value: unknown) => definition.parseValue(value),
     coerceInputLiteral:

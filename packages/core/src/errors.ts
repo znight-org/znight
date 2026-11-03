@@ -101,7 +101,7 @@ export const ErrorCode = {
   /** A scheduled run was aborted (`ctx.signal.reason`, `JobAbortedError`); never thrown by the framework. */
   JobAborted: 'ZNIGHT044',
 
-  // ZNIGHT060–069: @znight/graphql (RFC 0005)
+  // ZNIGHT060–069: @znight/graphql (RFC 0005, RFC 0007)
   /** A TypeScript type cannot be mapped to a GraphQL type, or a resolver lacks the annotation it needs. */
   InvalidGraphQLType: 'ZNIGHT060',
   /** Two declarations or root fields share a GraphQL name, or a name is invalid or reserved. */
@@ -128,6 +128,16 @@ export const ErrorCode = {
    * `GraphQLPlugin` options, missing `HttpPlugin`, scalar name mismatch.
    */
   InvalidGraphQLSetup: 'ZNIGHT066',
+  /**
+   * Invalid schema-first SDL (RFC 0007): no `.graphql` file matches, a syntax error, a graphql-js
+   * schema validation error, a scalar without `scalar()` definition, an unsupported construct.
+   */
+  InvalidGraphQLSdl: 'ZNIGHT067',
+  /**
+   * Schema-first resolvers do not match the SDL (RFC 0007): a field without resolver, a resolver,
+   * type or argument the SDL does not declare, a signature that does not conform to the SDL types.
+   */
+  GraphQLSchemaMismatch: 'ZNIGHT068',
 } as const
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode]
@@ -177,6 +187,8 @@ export const ERROR_DESCRIPTIONS: Readonly<Record<ErrorCode, string>> = {
   ZNIGHT064: 'Unresolvable abstract type: the members of a GraphQL union cannot be told apart at runtime',
   ZNIGHT065: 'Invalid loader: not a Loader of a BatchLoad provider, or a batch returning the wrong number of values',
   ZNIGHT066: 'Invalid GraphQL setup: metadata, schema, GraphQLPlugin options or HttpPlugin missing',
+  ZNIGHT067: 'Invalid GraphQL SDL: the schema-first .graphql files cannot be read, parsed or validated',
+  ZNIGHT068: 'GraphQL schema mismatch: schema-first resolvers do not cover or conform to the SDL',
 }
 
 export interface ZnightErrorOptions extends ErrorOptions {

@@ -36,7 +36,7 @@ export interface SdlRoots {
 }
 
 /** A named type of the schema. */
-export type SdlType = SdlObjectType | SdlInputType | SdlEnumType | SdlUnionType | SdlScalarType
+export type SdlType = SdlObjectType | SdlInterfaceType | SdlInputType | SdlEnumType | SdlUnionType | SdlScalarType
 
 /** What every named type has. */
 export interface SdlNamedType {
@@ -47,6 +47,15 @@ export interface SdlNamedType {
 /** An object type (`type Book { ... }`). */
 export interface SdlObjectType extends SdlNamedType {
   readonly kind: 'object'
+  /** Implemented interfaces, in declaration order. */
+  readonly interfaces?: readonly string[]
+  readonly fields: readonly SdlField[]
+}
+
+/** An interface type (`interface Node { ... }`). */
+export interface SdlInterfaceType extends SdlNamedType {
+  readonly kind: 'interface'
+  readonly interfaces?: readonly string[]
   readonly fields: readonly SdlField[]
 }
 
@@ -168,7 +177,8 @@ class SdlPrinter {
     const head = printDescription(type.description, '', true)
     switch (type.kind) {
       case 'object':
-        return `${head}type ${type.name}${printBlock(type.fields.map((field, i) => this.#field(type.name, field, i)))}`
+      case 'interface':
+        return `${head}${type.kind === 'object' ? 'type' : 'interface'} ${type.name}${printImplements(type.interfaces)}${printBlock(type.fields.map((field, i) => this.#field(type.name, field, i)))}`
       case 'input':
         return `${head}input ${type.name}${printBlock(
           type.fields.map(
@@ -275,6 +285,11 @@ class SdlPrinter {
     }
     return { kind: 'ObjectValue', fields }
   }
+}
+
+/** graphql-js `printImplementedInterfaces`. */
+function printImplements(interfaces: readonly string[] | undefined): string {
+  return interfaces === undefined || interfaces.length === 0 ? '' : ` implements ${interfaces.join(' & ')}`
 }
 
 /** The `valueToLiteral` of the specified scalars, and graphql-js' default one for the others. */

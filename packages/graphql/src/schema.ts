@@ -24,6 +24,7 @@ import type {
   GraphQLDiscriminator,
   GraphQLFieldDefinition,
   GraphQLInputTypeDefinition,
+  GraphQLInterfaceTypeDefinition,
   GraphQLMetadata,
   GraphQLObjectTypeDefinition,
   GraphQLResolverBinding,
@@ -40,6 +41,7 @@ import {
   GraphQLID,
   GraphQLInputObjectType,
   GraphQLInt,
+  GraphQLInterfaceType,
   GraphQLList,
   GraphQLNonNull,
   GraphQLObjectType,
@@ -90,7 +92,7 @@ export function graphqlSection(metadata: ZnightMetadata): GraphQLMetadata {
 
 const OPERATIONS: ReadonlySet<string> = new Set(['query', 'mutation', 'subscription', 'field'])
 const INPUT_KINDS: ReadonlySet<string> = new Set(['input', 'enum', 'scalar'])
-const OUTPUT_KINDS: ReadonlySet<string> = new Set(['object', 'enum', 'scalar', 'union'])
+const OUTPUT_KINDS: ReadonlySet<string> = new Set(['object', 'interface', 'enum', 'scalar', 'union'])
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -172,7 +174,10 @@ export function checkGraphQLSection(section: unknown): string[] {
     if (!isRecord(type) || typeof type['name'] !== 'string') continue
     const name = type['name']
     switch (type['kind']) {
-      case 'object': {
+      case 'object':
+      case 'interface': {
+        const isInterface = type['kind'] === 'interface'
+        checkInterfaces(name, type['interfaces'], kinds, problems)
         const fields = type['fields']
         if (!Array.isArray(fields) || fields.length === 0) {
           problems.push(`${name}: fields must be a non-empty array`)
@@ -190,7 +195,25 @@ export function checkGraphQLSection(section: unknown): string[] {
           seen.add(field['name'])
           checkRef(coordinate, field['type'], OUTPUT_KINDS, 'output')
           if (field['args'] !== undefined) checkInputValues(`${coordinate} arguments`, field['args'], false)
-          if (field['resolver'] !== undefined) checkBinding(coordinate, field['resolver'], problems)
+          if (field['resolver'] === undefined) continue
+          if (isInterface)
+            problems.push(`${coordinate}: interface fields have no resolver (bind it on the object types)`)
+          else checkBinding(coordinate, field['resolver'], problems)
+        }
+        if (isInterface) {
+          const implementations = types.filter(
+            other =>
+              isRecord(other) &&
+              other['kind'] === 'object' &&
+              Array.isArray(other['interfaces']) &&
+              other['interfaces'].includes(name),
+          )
+          checkDiscriminator(
+            name,
+            type['discriminator'],
+            implementations.map(other => (other as Record<string, unknown>)['name']),
+            problems,
+          )
         }
         break
       }
@@ -258,6 +281,10 @@ export function checkGraphQLSection(section: unknown): string[] {
             )
           }
         }
+        for (const key of ['description', 'specifiedByURL'] as const) {
+          if (type[key] !== undefined && typeof type[key] !== 'string')
+            problems.push(`${name}: ${key} must be a string`)
+        }
         break
       default:
         problems.push(`${name}: unknown kind ${show(type['kind'])}`)
@@ -266,6 +293,25 @@ export function checkGraphQLSection(section: unknown): string[] {
   checkRoots(section['roots'], kinds, types, problems)
   checkGroups(section['groups'], problems)
   return problems
+}
+
+/** `interfaces` of an object or interface type: absent, or interface type names. */
+function checkInterfaces(
+  name: string,
+  interfaces: unknown,
+  kinds: ReadonlyMap<string, string>,
+  problems: string[],
+): void {
+  if (interfaces === undefined) return
+  if (!Array.isArray(interfaces)) {
+    problems.push(`${name}: interfaces must be an array of interface type names (received ${show(interfaces)})`)
+    return
+  }
+  for (const entry of interfaces) {
+    if (typeof entry !== 'string' || kinds.get(entry) !== 'interface') {
+      problems.push(`${name}: ${show(entry)} is not an interface type`)
+    }
+  }
 }
 
 function checkBinding(coordinate: string, binding: unknown, problems: string[]): void {
@@ -393,7 +439,7 @@ export function invalidSchema(problems: readonly string[]): never {
   )
 }
 
-/** A union's `resolveType`, from its discriminator: data read once, at boot. */
+/** The `resolveType` of a union or an interface, from its discriminator: data read once, at boot. */
 function typeResolver(discriminator: GraphQLDiscriminator): GraphQLTypeResolver<unknown, unknown> {
   switch (discriminator.by) {
     case 'property': {
@@ -454,7 +500,7 @@ export function buildGraphQLSchema(section: GraphQLMetadata, functions: FieldFun
     ...(value.defaultValue === undefined ? {} : { default: { value: value.defaultValue } }),
   })
   const fieldConfig = (
-    type: GraphQLObjectTypeDefinition,
+    type: GraphQLObjectTypeDefinition | GraphQLInterfaceTypeDefinition,
     field: GraphQLFieldDefinition,
   ): GraphQLFieldConfig<unknown, unknown> => {
     const config: GraphQLFieldConfig<unknown, unknown> = {
@@ -465,7 +511,7 @@ export function buildGraphQLSchema(section: GraphQLMetadata, functions: FieldFun
         ? {}
         : { args: Object.fromEntries(field.args.map(arg => [arg.name, inputValue(arg)])) }),
     }
-    if (field.resolver === undefined) return config
+    if (field.resolver === undefined || type.kind === 'interface') return config
     const resolved = functions(field.resolver, `${type.name}.${field.name}`, field, type)
     return {
       ...config,
@@ -502,7 +548,7 @@ export function buildGraphQLSchema(section: GraphQLMetadata, functions: FieldFun
 function createType(
   type: GraphQLTypeDefinition,
   fieldConfig: (
-    type: GraphQLObjectTypeDefinition,
+    type: GraphQLObjectTypeDefinition | GraphQLInterfaceTypeDefinition,
     field: GraphQLFieldDefinition,
   ) => GraphQLFieldConfig<unknown, unknown>,
   inputValue: (value: GraphQLArgumentDefinition) => GraphQLInputFieldConfig,
@@ -514,8 +560,17 @@ function createType(
       return new GraphQLObjectType({
         name: type.name,
         ...description,
+        ...interfacesOf(type, lookup),
         // thunk: object types reference each other (cycles)
         fields: () => Object.fromEntries(type.fields.map(field => [field.name, fieldConfig(type, field)])),
+      })
+    case 'interface':
+      return new GraphQLInterfaceType({
+        name: type.name,
+        ...description,
+        ...interfacesOf(type, lookup),
+        fields: () => Object.fromEntries(type.fields.map(field => [field.name, fieldConfig(type, field)])),
+        resolveType: typeResolver(type.discriminator),
       })
     case 'input':
       return new GraphQLInputObjectType({
@@ -548,10 +603,27 @@ function createType(
       })
     default: {
       if ('builtin' in type) return builtinScalar(type.name) as GraphQLScalarType
+      const overrides = {
+        ...(type.description === undefined ? {} : { description: type.description }),
+        ...(type.specifiedByURL === undefined ? {} : { specifiedByURL: type.specifiedByURL }),
+      }
       const scalar = type.scalar
-      return scalar instanceof GraphQLScalarType
-        ? scalar
-        : definitionScalar(type.name, scalar as ScalarDefinition<unknown>)
+      if (scalar instanceof GraphQLScalarType) {
+        return type.description === undefined && type.specifiedByURL === undefined
+          ? scalar
+          : new GraphQLScalarType({ ...scalar.toConfig(), ...overrides })
+      }
+      return definitionScalar(type.name, scalar as ScalarDefinition<unknown>, overrides)
     }
   }
+}
+
+/** The `interfaces` thunk of an object or interface type (none: no key, as before RFC 0007). */
+function interfacesOf(
+  type: GraphQLObjectTypeDefinition | GraphQLInterfaceTypeDefinition,
+  lookup: (name: string) => GraphQLNamedType,
+): { interfaces?: () => GraphQLInterfaceType[] } {
+  const names = type.interfaces
+  if (names === undefined || names.length === 0) return {}
+  return { interfaces: () => names.map(name => lookup(name) as GraphQLInterfaceType) }
 }

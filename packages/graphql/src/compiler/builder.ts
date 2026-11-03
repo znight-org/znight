@@ -39,17 +39,16 @@ import type {
 } from './model.ts'
 import type { ResolvedGraphQLCompilerOptions } from './options.ts'
 
-import { requiredRouteGroups } from '@znight/http/compiler'
-
 import { isGraphQLName, RESERVED_ENUM_VALUES, ROOT_TYPE_NAMES, SPECIFIED_SCALARS } from '../names.ts'
 import { schemaHash } from '../schema-hash.ts'
 import { printSdl } from '../sdl.ts'
 import { printTypeRef } from '../type-ref.ts'
+import { checkDecisions, checkLoaders } from './checks.ts'
 import { ASYNC_ITERABLES, BASE_KEEP, Codes, compareStrings, OUTPUT_ITERABLES } from './constants.ts'
 import { externalValue } from './defaults.ts'
 import { discriminatorOf } from './discriminators.ts'
 import { defaultTagValue, deprecationOf, descriptionOf, isHidden, paramDescription, tagOf } from './docs.ts'
-import { GraphQLIds, SCALAR_ALIASES } from './ids.ts'
+import { SCALAR_ALIASES } from './ids.ts'
 import { annotationLocation } from './locate.ts'
 import { readScalars, type ScalarDeclaration } from './scalars.ts'
 import { sdlType } from './sdl-view.ts'
@@ -151,7 +150,7 @@ class SchemaBuilder {
   }
 
   build(resolvers: readonly ResolverData[]): GraphQLModel | undefined {
-    this.#checkLoaders(resolvers)
+    checkLoaders(this.#ctx, resolvers, diagnostic => this.#report(diagnostic))
     this.#indexFieldResolvers(resolvers)
     const roots = new Map<Operation, ObjectModel>()
     const rootFields = new Map<string, { readonly field: FieldData; readonly resolver: ResolverData }>()
@@ -194,7 +193,7 @@ class SchemaBuilder {
     this.#reportUnreachableFieldResolvers()
     this.#checkDefaults()
     this.#checkInputCycles()
-    this.#checkDecisions(resolvers)
+    checkDecisions(this.#ctx, resolvers, diagnostic => this.#report(diagnostic))
     if (this.#errors > 0 || !hasQuery) return undefined
     return this.#assemble(roots, resolvers)
   }
@@ -261,6 +260,7 @@ class SchemaBuilder {
         root: undefined,
         classIdentity: undefined,
         properties: [],
+        interfaces: [],
       }
       roots.set(operation, root)
       this.#claim(root, undefined)
@@ -509,34 +509,6 @@ class SchemaBuilder {
     this.#fail(Codes.InvalidInput, use, `${use.coordinate} is required and cannot be deprecated`, [
       'Make it optional (?: T or T | undefined) or give it a default value before deprecating it',
     ])
-  }
-
-  /** `Loader<L>`: `L` must be a loader provider, implementing `BatchLoad<K, V>` (ZNIGHT065). */
-  #checkLoaders(resolvers: readonly ResolverData[]): void {
-    const seen = new Set<number>()
-    for (const resolver of resolvers) {
-      for (const field of resolver.fields) {
-        for (const param of field.params) {
-          if (param?.kind !== 'loader' || seen.has(param.binding.id)) continue
-          seen.add(param.binding.id)
-          const ref = this.#ctx.binding(param.binding)
-          const token = tokenOfRef(ref)
-          const provider = token === undefined ? undefined : this.#ctx.provider(token)
-          // an unbound loader is ZNIGHT001 (reported by the binding)
-          if (provider === undefined || provider.heritage.some(type => type.identity === GraphQLIds.BatchLoad)) continue
-          if (provider.kind !== 'class' || hasLoadMethod(this.#ctx, provider.classIdentity)) continue
-          this.#report({
-            code: Codes.InvalidLoader,
-            severity: 'error',
-            message: `${provider.displayName} is not a loader: Loader<${provider.displayName}> needs a provider implementing BatchLoad<K, V> (${resolver.host.displayName}.${field.method})`,
-            location: param.location,
-            hints: [
-              `export class ${provider.displayName} implements BatchLoad<ID, Value> { async load(keys: readonly ID[]): Promise<readonly (Value | Error)[]> { ... } }`,
-            ],
-          })
-        }
-      }
-    }
   }
 
   // ------------------------------------------------------------------------------ field resolvers
@@ -1029,6 +1001,7 @@ class SchemaBuilder {
           ? structure.identity
           : undefined,
       properties: properties.map(property => this.#discriminant(property)),
+      interfaces: [],
     }
     this.#models.set(key, model)
     if (!this.#claim(model, use)) return undefined
@@ -1508,37 +1481,6 @@ class SchemaBuilder {
     for (const model of inputs) if (!state.has(model.name)) visit(model)
   }
 
-  /** RFC 0001: every root field decides every required route decorator group (ZNIGHT023). */
-  #checkDecisions(resolvers: readonly ResolverData[]): void {
-    const applied: MetaEntry[] = []
-    for (const resolver of resolvers) for (const field of resolver.fields) applied.push(...field.meta)
-    const required = requiredRouteGroups(this.#ctx, applied)
-    if (required.length === 0) return
-    for (const resolver of resolvers) {
-      for (const field of resolver.fields) {
-        if (field.operation === 'field') continue
-        const decided = new Set(field.meta.map(entry => entry.group))
-        for (const group of required) {
-          if (decided.has(group.group)) continue
-          const root = ROOT_TYPE_NAMES[field.operation]
-          this.#report({
-            code: Codes.MissingRouteDecision,
-            severity: 'error',
-            message: `Root field ${root}.${field.name} (${resolver.host.displayName}.${field.method}) has no "${group.group}" decision`,
-            location: field.methodLocation,
-            hints: [`Add ${group.suggestion} to the method or to ${resolver.host.displayName}`],
-            related: [
-              {
-                message: `The "${group.group}" group is required`,
-                location: (group.decorators[0] as { definition: Location }).definition,
-              },
-            ],
-          })
-        }
-      }
-    }
-  }
-
   // ------------------------------------------------------------------------------------ assembly
 
   #assemble(roots: ReadonlyMap<Operation, ObjectModel>, resolvers: readonly ResolverData[]): GraphQLModel {
@@ -1557,21 +1499,6 @@ class SchemaBuilder {
 
 // ------------------------------------------------------------------------------------------ helpers
 
-/** The class (or one of its base classes) declares an instance `load` method. */
-function hasLoadMethod(ctx: Context, identity: string): boolean {
-  const seen = new Set<string>()
-  let current: string | undefined = identity
-  while (current !== undefined && !seen.has(current)) {
-    seen.add(current)
-    const cls: ClassInfo | undefined = ctx.classInfo(current)
-    if (cls === undefined) return true // not analysable (a compiled class): trust the type checker
-    if (cls.methods.some(method => method.name === 'load' && method.kind === 'method' && !method.static)) return true
-    if (cls.properties.some(property => property.name === 'load' && !property.static)) return true
-    current = cls.superClass?.identity
-  }
-  return false
-}
-
 /** A (nullable, until `#convert` decides) reference to a named type. */
 function refTo(name: string): Inner {
   return { ref: { kind: 'named', name, nonNull: false }, nullable: false }
@@ -1585,12 +1512,6 @@ function reachedFrom(use: Use): { readonly message: string; readonly location: L
 
 function decoratorName(operation: Operation): string {
   return ROOT_TYPE_NAMES[operation]
-}
-
-/** The token of a binding result (`undefined` when binding failed). */
-function tokenOfRef(ref: ReturnType<Context['binding']>): string | undefined {
-  if (typeof ref === 'string') return ref
-  return ref !== undefined && 'token' in ref ? ref.token : undefined
 }
 
 function describeKey(model: TypeModel): string {

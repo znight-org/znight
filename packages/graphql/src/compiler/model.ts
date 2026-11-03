@@ -55,6 +55,16 @@ export interface ObjectModel extends BaseModel {
   readonly classIdentity: string | undefined
   /** Property names of the declaration, with their literal value when they have one (discriminators). */
   readonly properties: readonly DiscriminantProperty[]
+  /** Implemented interfaces (schema-first, RFC 0007), in declaration order; empty in code-first. */
+  readonly interfaces: readonly string[]
+}
+
+/** An interface type (schema-first, RFC 0007). Its fields have no binding. */
+export interface InterfaceModel extends BaseModel {
+  readonly kind: 'interface'
+  readonly fields: FieldModel[]
+  readonly interfaces: readonly string[]
+  discriminator: DiscriminatorModel | undefined
 }
 
 /** A property of an object type's declaration, as union discriminators see it. */
@@ -104,10 +114,15 @@ export interface ScalarModel extends BaseModel {
   /** Identity of the exported `scalar<T>()` constant; `undefined` for a built-in scalar. */
   readonly definition: string | undefined
   readonly specifiedByURL: string | undefined
+  /**
+   * Schema-first: the description and `specifiedByURL` come from the SDL and are emitted in the
+   * metadata, where they win over the definition's (RFC 0007 §5.2).
+   */
+  readonly fromSdl?: true
 }
 
 /** A named type of the model. */
-export type TypeModel = ObjectModel | InputModel | EnumModel | UnionModel | ScalarModel
+export type TypeModel = ObjectModel | InterfaceModel | InputModel | EnumModel | UnionModel | ScalarModel
 
 /** The schema of the application, built once per compile. */
 export interface GraphQLModel {
