@@ -43,6 +43,7 @@ describe('GraphQLPlugin options', () => {
       http: { meta: [], guards: [], bodyLimit: '100kb', get: true },
       guards: [],
       errorMappers: [],
+      resultMappers: [],
       exposeErrors: false,
       introspection: true,
       graphiql: false,

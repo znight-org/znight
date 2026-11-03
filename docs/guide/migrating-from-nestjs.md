@@ -82,6 +82,7 @@ walks through a migration.
 | `CacheModule`, `CacheInterceptor`                    | A method interceptor ([cache recipe](./aop#cache)); `@znight/cache` is planned                               |
 | `@WebSocketGateway()`                                | Planned for v0.2 ([roadmap](/roadmap#v0-2)); Server-Sent Events today                                        |
 | `@nestjs/graphql` (code first)                       | [`@znight/graphql`](/packages/graphql): the TypeScript types are the schema ([guide](/guide/graphql#nestjs)) |
+| A Yoga/Envelop plugin turning exceptions into data   | `resultMappers` of `GraphQLPlugin`, per field ([errors as data](/guide/graphql#errors-as-data))              |
 | `express-session`, `@Session()`                      | Not included: signed cookies, and cookie sessions in the [Security guide](./security#csrf)                   |
 
 ## Modules → flat DI {#modules-to-flat-di}

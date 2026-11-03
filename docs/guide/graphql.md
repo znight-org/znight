@@ -461,6 +461,94 @@ GraphQLPlugin.configure({ errorMappers: [CatalogErrorMapper] })
 the request id, the field (`Query.book`) and the cause: stack traces and SQL never reach clients.
 Set `exposeErrors: true` in development to see the real messages.
 
+### Return errors as data {#errors-as-data}
+
+Errors a client is expected to handle (a missing book, invalid input, a forbidden action) can be
+**values** of the field rather than entries of `errors[]`: the field returns a union, and clients
+select the failures with fragments, checked by their query compiler. Declare the failures as
+members of the field's return type:
+
+```ts [src/catalog/rejections.ts]
+import type { Book } from './book.js'
+
+export interface NotFoundRejection {
+  readonly __typename: 'NotFoundRejection'
+  readonly message: string
+}
+
+export interface ValidationRejection {
+  readonly __typename: 'ValidationRejection'
+  readonly issues: readonly string[]
+}
+
+/** What `book` and `addBook` answer. */
+export type BookResult = Book | NotFoundRejection | ValidationRejection
+```
+
+```ts
+@Query()
+book(@Args('id') id: ID): Promise<BookResult> {
+  return this.catalog.get(id) // throws BookNotFoundError instead of answering null
+}
+
+@Mutation()
+addBook(@Args('input', NewBookInput) input: NewBookInput): Promise<BookResult> {
+  return this.catalog.add(input)
+}
+```
+
+Then turn errors into those values in one place, with a result mapper. `static types` lists the
+types it produces: only the fields whose union holds one of them are wrapped, decided at boot, and a
+typo fails the boot.
+
+```ts [src/shared/rejections.mapper.ts]
+import { Injectable } from '@znight/core'
+import { GraphQLErrorCode, GraphQLException, type GraphQLResultMapper } from '@znight/graphql'
+
+import { BookNotFoundError } from '../catalog/errors.js'
+import type { NotFoundRejection, ValidationRejection } from '../catalog/rejections.js'
+
+@Injectable()
+export class RejectionsMapper implements GraphQLResultMapper {
+  static readonly types = ['NotFoundRejection', 'ValidationRejection']
+
+  toResult(error: unknown): NotFoundRejection | ValidationRejection | undefined {
+    if (error instanceof BookNotFoundError) return { __typename: 'NotFoundRejection', message: error.message }
+    // a Standard Schema of @Args rejected the input
+    if (error instanceof GraphQLException && error.code === GraphQLErrorCode.BadUserInput) {
+      const issues = (error.extensions?.['issues'] ?? []) as readonly { readonly message: string }[]
+      return { __typename: 'ValidationRejection', issues: issues.map(issue => issue.message) }
+    }
+    return undefined
+  }
+}
+```
+
+```ts
+GraphQLPlugin.configure({ resultMappers: [RejectionsMapper] })
+```
+
+```graphql
+mutation {
+  addBook(input: { title: " ", isbn: "9780441013593", authorId: "1", genre: ScienceFiction }) {
+    ... on Book {
+      id
+      title
+    }
+    ... on ValidationRejection {
+      issues
+    }
+  }
+}
+```
+
+answers `{ "data": { "addBook": { "issues": ["A title is required"] } } }`, with no `errors`. Guards can be
+mapped too: a guard returning `false` is a `GraphQLException` with code `FORBIDDEN`. An error the
+mappers leave alone, or an error on a field whose union does not hold the produced type, stays in
+`errors[]`; so do errors of nested fields, unless that field returns a union of its own. Keep
+unexpected failures there: a catch-all `InternalErrorRejection` hides them unless the mapper logs
+them. The [package README](../../packages/graphql/README.md#errors-as-data) lists every rule.
+
 ## Test GraphQL code {#testing}
 
 Unit-test a resolver like any provider, with `TestBed` and a fake loader:
@@ -599,7 +687,14 @@ wraps it: a span per operation under the HTTP request span, `graphql_operations_
 | `dataloader` wiring per request in the context       | A `BatchLoad` provider and `@Loader()`                             |
 | `graphql-subscriptions` `PubSub`, `graphql-ws`       | The injectable `PubSub`, subscriptions over SSE                    |
 | `@UseGuards()` with `GqlExecutionContext`            | `GraphQLGuard.canResolve(ctx: ResolverContext)`, route decorators  |
+| A plugin rewriting exceptions into union members     | `resultMappers`, per field ([errors as data](#errors-as-data))     |
 | Schema errors at boot or at the first request        | Schema errors at build time (`ZNIGHT060`–`ZNIGHT066`)              |
+
+An Envelop or Yoga plugin that rewrites `data` from the first error of the execution (an
+`onExecuteDone` replacing the root field with a rejection) becomes a result mapper. The difference
+to plan for: result mappers work per field. The rejection replaces the field that failed, partial
+results are kept, and an error of a nested field stays in `errors[]` unless that field returns a
+union of its own.
 
 ## Limits {#limits}
 

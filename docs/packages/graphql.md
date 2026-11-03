@@ -206,6 +206,7 @@ guards. `false` is a `FORBIDDEN` error on that field. See the [guide](/guide/gra
 | `http`          | `{}`                                                                   | `false` (no transport) or `{ meta?, guards?, bodyLimit = '100kb', get = true }` |
 | `guards`        | `[]`                                                                   | Global GraphQL guards                                                           |
 | `errorMappers`  | `[]`                                                                   | `GraphQLErrorMapper`s, tried in order                                           |
+| `resultMappers` | `[]`                                                                   | `GraphQLResultMapper`s: errors as data on fields whose union holds their types  |
 | `exposeErrors`  | `false`                                                                | Unmasked messages for unexpected errors                                         |
 | `introspection` | `NODE_ENV !== 'production'`                                            | Off: introspection rejected and suggestions hidden                              |
 | `graphiql`      | `NODE_ENV === 'development'`                                           | GraphiQL on `GET path` with `accept: text/html`                                 |
@@ -225,6 +226,12 @@ the `errorMappers`, then `HttpException`s are mapped by status (`UNAUTHENTICATED
 `NOT_FOUND`...), and anything else is masked as `Unexpected error.` (`INTERNAL_SERVER_ERROR`) and
 logged once with the request id and the field. Request errors carry `GRAPHQL_PARSE_FAILED`,
 `GRAPHQL_VALIDATION_FAILED`, `BAD_USER_INPUT` or `QUERY_TOO_COMPLEX`.
+
+Errors a client is expected to handle can be **data** instead: a field returning a union
+(`Book | NotFoundRejection`) gets the value a `GraphQLResultMapper` produces for an error of its
+guards, its argument validation or its method (RFC 0008). The mapper declares the object types it
+produces (`static types`), so only the fields whose union holds one of them are wrapped, decided at
+boot. See [Return errors as data](/guide/graphql#errors-as-data).
 
 ## Testing
 
