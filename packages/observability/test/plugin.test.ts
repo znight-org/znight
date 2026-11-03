@@ -355,9 +355,17 @@ describe('ObservabilityPlugin', () => {
       publish: app.hooks.hasWrappers('messaging:publish'),
       schedule: app.hooks.hasWrappers('schedule:run'),
       scheduleListener: app.hooks.hasListeners('schedule:run'),
+      graphql: app.hooks.hasWrappers('graphql:operation'),
     })
-    const all = { http: true, messaging: true, publish: true, schedule: true, scheduleListener: true }
-    const none = { http: false, messaging: false, publish: false, schedule: false, scheduleListener: false }
+    const all = { http: true, messaging: true, publish: true, schedule: true, scheduleListener: true, graphql: true }
+    const none = {
+      http: false,
+      messaging: false,
+      publish: false,
+      schedule: false,
+      scheduleListener: false,
+      graphql: false,
+    }
     const httpOff: ObservabilityOptions = {
       logging: { destination: stream, requests: false },
       metrics: { server: false, http: false },
@@ -365,8 +373,15 @@ describe('ObservabilityPlugin', () => {
     }
     const allOff: ObservabilityOptions = {
       logging: { destination: stream, requests: false, messages: false, jobs: false },
-      metrics: { server: false, http: false, messaging: false, schedule: false },
-      tracing: { tracerProvider: provider, http: false, messaging: false, publish: false, schedule: false },
+      metrics: { server: false, http: false, messaging: false, schedule: false, graphql: false },
+      tracing: {
+        tracerProvider: provider,
+        http: false,
+        messaging: false,
+        publish: false,
+        schedule: false,
+        graphql: false,
+      },
     }
     for (const [options, expected] of [
       [{ logging: { destination: stream }, metrics: { server: false }, tracing: { tracerProvider: provider } }, all],
@@ -375,10 +390,10 @@ describe('ObservabilityPlugin', () => {
       // options given as a function: every hook until they are evaluated (onBootstrap at the latest)
       [() => httpOff, { ...all, http: false }],
       [() => allOff, none],
-      // logs only (the producer spans of messaging:publish are tracing)
+      // logs only (the producer spans of messaging:publish are tracing; GraphQL logs are opt-in)
       [
         { logging: { destination: stream, requests: { level: 'debug' } }, metrics: false, tracing: false },
-        { ...all, publish: false },
+        { ...all, publish: false, graphql: false },
       ],
     ] as const) {
       const { app } = await create(options as PluginOptions<ObservabilityOptions>)
