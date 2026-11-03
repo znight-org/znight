@@ -173,6 +173,54 @@ export class R {
     ])
   })
 
+  it('rejects records and index signatures as @Args() objects and object types (ZNIGHT060)', async () => {
+    const result = await schemaOf({
+      'src/types.ts': `export interface Bag {
+  readonly id: string
+  readonly [key: string]: string
+}
+export type Tags = Record<string, string>
+`,
+      'src/r.resolver.ts': `import { Args, Query, Resolver } from '@znight/graphql'
+import type { Bag, Tags } from './types.ts'
+
+@Resolver()
+export class R {
+  @Query()
+  search(@Args() args: Record<string, string>): string {
+    return String(args)
+  }
+
+  @Query()
+  bag(@Args() bag: Bag): string {
+    return bag.id
+  }
+
+  @Query()
+  tags(): Tags {
+    return {}
+  }
+}
+`,
+    })
+    expect(render(result)).toEqual([
+      [
+        "error ZNIGHT060 src/r.resolver.ts:7:24 @Args() parameter 'args' of Query.search cannot be a record or an index signature: GraphQL arguments are fixed",
+        "  = GraphQL objects have fixed fields: declare an interface, or use JSONValue (import type { JSONValue } from '@znight/graphql')",
+        "  = @Args('args') declares one argument named 'args'",
+      ].join('\n'),
+      [
+        "error ZNIGHT060 src/r.resolver.ts:12:20 @Args() parameter 'bag' of Query.bag cannot be a record or an index signature: GraphQL arguments are fixed",
+        "  = GraphQL objects have fixed fields: declare an interface, or use JSONValue (import type { JSONValue } from '@znight/graphql')",
+        "  = @Args('bag') declares one argument named 'bag'",
+      ].join('\n'),
+      [
+        'error ZNIGHT060 src/r.resolver.ts:17:3 Cannot map Tags, a record or an index signature, to a GraphQL type (Query.tags)',
+        "  = GraphQL objects have fixed fields: declare an interface, or use JSONValue (import type { JSONValue } from '@znight/graphql')",
+      ].join('\n'),
+    ])
+  })
+
   it('rejects a deprecated required argument (ZNIGHT063)', async () => {
     const result = await schemaOf({
       'src/r.resolver.ts': `import { Args, Query, Resolver } from '@znight/graphql'

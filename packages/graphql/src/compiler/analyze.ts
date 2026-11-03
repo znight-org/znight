@@ -249,7 +249,17 @@ function analyzeMethod(
 /** The field name: the static decorator argument, or the method name. */
 function fieldName(ctx: Context, decorator: DecoratorInfo, method: MethodInfo, where: string): string | undefined {
   const arg = decorator.args[0]
-  if (arg === undefined || (arg.evaluated && arg.value === undefined)) return method.name
+  if (arg === undefined || (arg.evaluated && arg.value === undefined)) {
+    if (isGraphQLName(method.name)) return method.name
+    error(
+      ctx,
+      Codes.NameConflict,
+      decorator.location,
+      `'${method.name}' is not a valid GraphQL field name (${where}): name the field in the decorator`,
+      ['GraphQL names match /^[_A-Za-z][_0-9A-Za-z]*$/ and do not start with __', `@${decorator.name}('validName')`],
+    )
+    return undefined
+  }
   if (!arg.evaluated) return undefined // not statically evaluable: reported by the compiler
   const value = arg.value
   if (typeof value !== 'string') {

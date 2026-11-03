@@ -251,4 +251,41 @@ export class R {
       ].join('\n'),
     ])
   })
+
+  it('rejects method names that are not valid GraphQL field names (ZNIGHT061)', async () => {
+    const result = await schemaOf({
+      'src/r.resolver.ts': `import { Query, Resolver } from '@znight/graphql'
+
+@Resolver()
+export class R {
+  @Query()
+  $search(): boolean {
+    return true
+  }
+
+  @Query()
+  __meta(): boolean {
+    return true
+  }
+
+  @Query('meta')
+  __renamed(): boolean {
+    return true
+  }
+}
+`,
+    })
+    expect(render(result)).toEqual([
+      [
+        "error ZNIGHT061 src/r.resolver.ts:5:3 '$search' is not a valid GraphQL field name (R.$search): name the field in the decorator",
+        '  = GraphQL names match /^[_A-Za-z][_0-9A-Za-z]*$/ and do not start with __',
+        "  = @Query('validName')",
+      ].join('\n'),
+      [
+        "error ZNIGHT061 src/r.resolver.ts:10:3 '__meta' is not a valid GraphQL field name (R.__meta): name the field in the decorator",
+        '  = GraphQL names match /^[_A-Za-z][_0-9A-Za-z]*$/ and do not start with __',
+        "  = @Query('validName')",
+      ].join('\n'),
+    ])
+  })
 })

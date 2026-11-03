@@ -123,6 +123,53 @@ export type U = A | B
   })
 })
 
+describe('union discriminators (regressions)', () => {
+  it('reads a literal discriminator through aliases', async () => {
+    const result = await schemaOf(
+      app(
+        'readonly T.Hit[]',
+        `export type BookKind = 'book'
+export type Kind = BookKind
+export interface Book { readonly kind: Kind; readonly title: string }
+export interface Author { readonly kind: 'author'; readonly name: string }
+export type Hit = Book | Author
+`,
+      ),
+    )
+    expect(render(result)).toEqual([])
+    expect(section(result.code)).toContain(
+      "['by']: 'property',\n            ['property']: 'kind',\n            ['values']: { ['author']: 'Author', ['book']: 'Book' },",
+    )
+  })
+
+  it('computes the discriminator when two members name one object type', async () => {
+    const types = (book: string): string => `export interface Book { readonly kind: '${book}'; readonly title: string }
+export type BookAlias = Book
+export interface Author { readonly kind: 'author'; readonly name: string }
+export type Hit = Book | BookAlias | Author
+`
+    const result = await schemaOf(app('readonly T.Hit[]', types('book')))
+    expect(render(result)).toEqual([])
+    expect(result.sdl).toContain('union Hit = Author | Book')
+    expect(section(result.code)).toContain(
+      "['by']: 'property',\n            ['property']: 'kind',\n            ['values']: { ['author']: 'Author', ['book']: 'Book' },",
+    )
+    const duplicated = await schemaOf(app('readonly T.Hit[]', types('author')))
+    expect(render(duplicated).map(line => line.split('\n')[0])).toEqual([
+      'error ZNIGHT064 src/types.ts:4:13 The members of union Hit cannot be told apart at runtime: Author and Book have no common literal property',
+    ])
+    const single = await schemaOf(
+      app(
+        'T.Only',
+        'export interface Book { readonly title: string }\nexport type BookAlias = Book\nexport type Only = Book | BookAlias\n',
+      ),
+    )
+    expect(render(single).map(line => line.split('\n')[0])).toEqual([
+      'error ZNIGHT064 src/types.ts:3:13 The members of union Only cannot be told apart at runtime: Book has no literal property',
+    ])
+  })
+})
+
 describe('custom scalars', () => {
   const SCALARS = `import { scalar } from '@znight/graphql'
 

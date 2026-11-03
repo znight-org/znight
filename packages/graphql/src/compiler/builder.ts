@@ -108,6 +108,8 @@ interface PositionUse {
 }
 
 const NAME_HINT = 'GraphQL names match /^[_A-Za-z][_0-9A-Za-z]*$/ and do not start with __'
+const RECORD_HINT =
+  "GraphQL objects have fixed fields: declare an interface, or use JSONValue (import type { JSONValue } from '@znight/graphql')"
 const ROOT_NAMES: ReadonlySet<string> = new Set(Object.values(ROOT_TYPE_NAMES))
 
 /** Builds the model; `undefined` when the application has no resolver. */
@@ -384,6 +386,15 @@ class SchemaBuilder {
         return
       }
       const properties = this.#propertiesOf(result.root)
+      if (properties === 'record') {
+        this.#fail(
+          Codes.InvalidType,
+          { ...owner, locate: () => param.typeLocation },
+          `@Args() parameter '${param.name}' of ${owner.coordinate} cannot be a record or an index signature: GraphQL arguments are fixed`,
+          [RECORD_HINT, `@Args('${param.name}') declares one argument named '${param.name}'`],
+        )
+        return
+      }
       if (properties === undefined) {
         this.#fail(
           Codes.InvalidType,
@@ -718,9 +729,7 @@ class SchemaBuilder {
             Codes.InvalidType,
             use,
             `Cannot map a record or an index signature to a GraphQL type (${use.coordinate})`,
-            [
-              "GraphQL objects have fixed fields: declare an interface, or use JSONValue (import type { JSONValue } from '@znight/graphql')",
-            ],
+            [RECORD_HINT],
           )
         }
         return this.#fail(
@@ -969,6 +978,14 @@ class SchemaBuilder {
     const name = this.#typeName(named, use)
     if (name === undefined) return undefined
     const properties = this.#propertiesOf(structure.shape)
+    if (properties === 'record') {
+      return this.#fail(
+        Codes.InvalidType,
+        use,
+        `Cannot map ${named.name}, a record or an index signature, to a GraphQL type (${use.coordinate})`,
+        [RECORD_HINT],
+      )
+    }
     if (properties === undefined) {
       return this.#fail(
         Codes.InvalidType,
@@ -1011,7 +1028,7 @@ class SchemaBuilder {
         structure.declaration === 'class' && structure.typeArgs.length === 0 && structure === named
           ? structure.identity
           : undefined,
-      properties: properties.map(discriminant),
+      properties: properties.map(property => this.#discriminant(property)),
     }
     this.#models.set(key, model)
     if (!this.#claim(model, use)) return undefined
@@ -1021,6 +1038,22 @@ class SchemaBuilder {
     }
     this.#attachFieldResolvers(model)
     return refTo(name)
+  }
+
+  /** A property as a union discriminator candidate: its literal value, through aliases (`kind: BookKind`). */
+  #discriminant(property: ShapeProperty): DiscriminantProperty {
+    let shape = property.shape
+    // `type BookKind = 'book'`, `type Kind = BookKind`; the bound only guards against alias cycles
+    for (let depth = 0; shape.kind === 'named' && depth < 32; depth++) {
+      const named = this.#named.get(shape.key)
+      if (named?.declaration !== 'alias') break
+      shape = named.shape
+    }
+    return {
+      name: property.name,
+      optional: property.optional,
+      literal: shape.kind === 'literal' ? shape.value : undefined,
+    }
   }
 
   #outputField(model: ObjectModel, property: ShapeProperty): FieldModel | undefined {
@@ -1056,11 +1089,14 @@ class SchemaBuilder {
     }
   }
 
-  /** The properties of an object structure (intersections merged, later members win). */
-  #propertiesOf(shape: Shape): readonly ShapeProperty[] | undefined {
+  /**
+   * The properties of an object structure (intersections merged, later members win), `'record'` for
+   * a record or an index signature (ZNIGHT060: GraphQL objects have fixed fields).
+   */
+  #propertiesOf(shape: Shape): readonly ShapeProperty[] | 'record' | undefined {
     switch (shape.kind) {
       case 'object':
-        return shape.properties
+        return shape.additional === undefined ? shape.properties : 'record'
       case 'named': {
         const named = this.#named.get(shape.key)
         return named === undefined || named.declaration === 'enum' ? undefined : this.#propertiesOf(named.shape)
@@ -1069,7 +1105,7 @@ class SchemaBuilder {
         const merged = new Map<string, ShapeProperty>()
         for (const member of shape.members) {
           const properties = this.#propertiesOf(member)
-          if (properties === undefined) return undefined
+          if (properties === undefined || properties === 'record') return properties
           for (const property of properties) {
             merged.delete(property.name)
             merged.set(property.name, property)
@@ -1357,12 +1393,19 @@ class SchemaBuilder {
     if (!this.#claim(model, use)) return undefined
     const trail = `${use.trail} → ${name}`
     const objects: ObjectModel[] = []
+    // a failed member is reported: no discriminator then (members that collapse into one object, as
+    // `Book | BookAlias`, are not failures)
+    let failed = false
     for (const member of members) {
       const memberUse: Use = { ...use, coordinate: name, trail, reached: trail, locate: () => alias.location }
       const converted = this.#inner(member, memberUse)
-      if (converted === undefined) continue
+      if (converted === undefined) {
+        failed = true
+        continue
+      }
       const target = converted.ref.kind === 'named' ? this.#types.get(converted.ref.name) : undefined
       if (target?.kind !== 'object') {
+        failed = true
         this.#fail(
           Codes.InvalidType,
           memberUse,
@@ -1375,7 +1418,7 @@ class SchemaBuilder {
     }
     objects.sort((a, b) => compareStrings(a.name, b.name))
     model.members = objects.map(object => object.name)
-    if (objects.length === members.length) model.discriminator = this.#discriminator(model, objects)
+    if (!failed) model.discriminator = this.#discriminator(model, objects)
     return refTo(name)
   }
 
@@ -1388,12 +1431,16 @@ class SchemaBuilder {
     const found = discriminatorOf(members, identity => this.#ctx.classInfo(identity))
     if (found !== undefined) return found
     const names = members.map(member => member.name)
-    const listed = `${names.slice(0, -1).join(', ')} and ${names.at(-1) as string}`
+    const one = names.length === 1
+    const listed = one ? (names[0] as string) : `${names.slice(0, -1).join(', ')} and ${names.at(-1) as string}`
     const allClasses = members.every(member => member.classIdentity !== undefined)
+    let why: string
+    if (allClasses) why = one ? 'is a class that is not exported' : 'are classes that are not all exported'
+    else why = one ? 'has no literal property' : 'have no common literal property'
     this.#report({
       code: Codes.UnresolvableAbstractType,
       severity: 'error',
-      message: `The members of union ${union.name} cannot be told apart at runtime: ${listed} ${allClasses ? 'are classes that are not all exported' : 'have no common literal property'}`,
+      message: `The members of union ${union.name} cannot be told apart at runtime: ${listed} ${why}`,
       ...(union.location === undefined ? {} : { location: union.location }),
       hints: [
         allClasses
@@ -1534,14 +1581,6 @@ function reachedFrom(use: Use): { readonly message: string; readonly location: L
   return use.reached === undefined || use.root === undefined
     ? []
     : [{ message: `reached from ${use.reached}`, location: use.root }]
-}
-
-function discriminant(property: ShapeProperty): DiscriminantProperty {
-  return {
-    name: property.name,
-    optional: property.optional,
-    literal: property.shape.kind === 'literal' ? property.shape.value : undefined,
-  }
 }
 
 function decoratorName(operation: Operation): string {

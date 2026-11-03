@@ -140,6 +140,13 @@ describe('§6.2 rows in both positions', () => {
     const numeric = await schemaOf(app('Level'))
     expect(numeric.code).toContain("{ ['name']: 'Low', ['value']: 1 }")
   })
+
+  it('a nullable literal union keeps its source order', async () => {
+    const result = await schemaOf(app('MaybeSort', 'MaybeSort', "export type MaybeSort = 'zeta' | 'alpha' | null"))
+    expect(render(result)).toEqual([])
+    expect(block(result.sdl, 'type Out')).toBe('value: MaybeSort')
+    expect(block(result.sdl, 'enum MaybeSort')).toBe('zeta\n  alpha')
+  })
 })
 
 describe('§6.2 output-only rows', () => {
