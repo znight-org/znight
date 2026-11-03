@@ -220,8 +220,20 @@ class ScopeCollector {
   }
 
   export(entry: ExportEntry): void {
-    if (!this.exports.has(entry.exported)) {
+    const existing = this.exports.get(entry.exported)
+    if (existing === undefined) {
       this.exports.set(entry.exported, entry)
+      return
+    }
+    // `export interface X` then `export const X` (merged declarations): the export is a value
+    if (
+      existing.kind === 'local' &&
+      entry.kind === 'local' &&
+      existing.local === entry.local &&
+      existing.typeOnly &&
+      !entry.typeOnly
+    ) {
+      this.exports.set(entry.exported, { ...existing, typeOnly: false })
     }
   }
 

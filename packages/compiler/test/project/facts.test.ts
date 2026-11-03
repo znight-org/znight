@@ -103,6 +103,19 @@ describe('exports', () => {
     expect(facts.exports.get('A')?.typeOnly).toBe(false)
   })
 
+  it('records a value export of merged declarations exported as a type first', () => {
+    // `export interface X` + `export const X` (a type and the schema of the same name): one value export
+    const merged = factsOf(`
+      export interface NewBook { readonly title: string }
+      export const NewBook = { parse: (value: unknown) => value as NewBook }
+      export type Kind = 'a' | 'b'
+      export interface Kind2 { readonly k: Kind }
+    `)
+    expect(merged.exports.get('NewBook')).toMatchObject({ kind: 'local', local: 'NewBook', typeOnly: false })
+    expect(merged.exports.get('Kind')?.typeOnly).toBe(true)
+    expect(merged.exports.get('Kind2')?.typeOnly).toBe(true)
+  })
+
   it('records aliased local exports and string export names', () => {
     expect(facts.exports.get('aliased')).toMatchObject({ kind: 'local', local: 'local' })
     expect(facts.exports.get('Hidden')).toMatchObject({ kind: 'local', local: 'Hidden' })
