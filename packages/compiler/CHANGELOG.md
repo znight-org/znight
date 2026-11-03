@@ -1,5 +1,13 @@
 # @znight/compiler
 
+## 0.2.1
+
+### Patch Changes
+
+- 1ecae4f: Schema-first GraphQL (RFC 0007): `graphql.configure({ schema: 'src/**/*.graphql' })` makes the SDL files the schema, binds resolvers by name (`@Resolver('Type')`, `@ResolveField()`), checks coverage and type conformance at build time (ZNIGHT067, ZNIGHT068) and supports GraphQL interfaces; the compiler gains `ValidateContext.inputFiles()`.
+- Updated dependencies [1ecae4f]
+  - @znight/core@0.2.1
+
 ## 0.2.0
 
 ### Patch Changes
