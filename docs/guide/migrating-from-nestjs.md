@@ -64,24 +64,25 @@ walks through a migration.
 
 ### Messaging, config, lifecycle, data
 
-| NestJS                                               | Znight                                                                                              |
-| ---------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `@MessagePattern()` / `@EventPattern()`              | `@Consumer('queue')` class + `@OnMessage(type?)` methods                                            |
-| `@Payload()`, `@Ctx()`                               | `@Message(schema?)`, `@Ctx()`                                                                       |
-| `ConfigModule.forRoot()` + `ConfigService.get('X')`  | `@Config()` classes with `@Env('X')` properties                                                     |
-| `OnModuleInit`                                       | `OnStart` (`onStart()`)                                                                             |
-| `OnApplicationBootstrap`                             | `OnReady` (`onReady()`)                                                                             |
-| `OnModuleDestroy`, `BeforeApplicationShutdown`       | `OnStop` (`onStop()`)                                                                               |
-| `OnApplicationShutdown`                              | `[Symbol.asyncDispose]()` or `@Provides({ dispose })`                                               |
-| `app.enableShutdownHooks()`                          | On by default (`SIGINT`, `SIGTERM`)                                                                 |
-| `NestFactory.create(AppModule)` + `app.listen(3000)` | `Application.create({ metadata, plugins: [HttpPlugin.configure({ port: 3000 })] })` + `app.start()` |
-| `Test.createTestingModule({...}).compile()`          | `TestBed.create(Class, { metadata })` / `TestApp.create()`                                          |
-| `.overrideProvider(X).useValue(fake)`                | `overrides: [[X, fake]]`                                                                            |
-| `ScheduleModule.forRoot()`, `@Cron()`, `@Interval()` | [`@znight/schedule`](/packages/schedule): `SchedulePlugin`, `@Cron()`, `@Interval('10s')`           |
-| `TypeOrmModule`, `@InjectRepository(User)`           | A `@Factory()` providing the client, repositories behind interfaces ([Data access](./data-access))  |
-| `CacheModule`, `CacheInterceptor`                    | A method interceptor ([cache recipe](./aop#cache)); `@znight/cache` is planned                      |
-| `@WebSocketGateway()`, `@nestjs/graphql`             | Planned for v0.2 ([roadmap](/roadmap#v0-2)); Server-Sent Events today                               |
-| `express-session`, `@Session()`                      | Not included: signed cookies, and cookie sessions in the [Security guide](./security#csrf)          |
+| NestJS                                               | Znight                                                                                                       |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `@MessagePattern()` / `@EventPattern()`              | `@Consumer('queue')` class + `@OnMessage(type?)` methods                                                     |
+| `@Payload()`, `@Ctx()`                               | `@Message(schema?)`, `@Ctx()`                                                                                |
+| `ConfigModule.forRoot()` + `ConfigService.get('X')`  | `@Config()` classes with `@Env('X')` properties                                                              |
+| `OnModuleInit`                                       | `OnStart` (`onStart()`)                                                                                      |
+| `OnApplicationBootstrap`                             | `OnReady` (`onReady()`)                                                                                      |
+| `OnModuleDestroy`, `BeforeApplicationShutdown`       | `OnStop` (`onStop()`)                                                                                        |
+| `OnApplicationShutdown`                              | `[Symbol.asyncDispose]()` or `@Provides({ dispose })`                                                        |
+| `app.enableShutdownHooks()`                          | On by default (`SIGINT`, `SIGTERM`)                                                                          |
+| `NestFactory.create(AppModule)` + `app.listen(3000)` | `Application.create({ metadata, plugins: [HttpPlugin.configure({ port: 3000 })] })` + `app.start()`          |
+| `Test.createTestingModule({...}).compile()`          | `TestBed.create(Class, { metadata })` / `TestApp.create()`                                                   |
+| `.overrideProvider(X).useValue(fake)`                | `overrides: [[X, fake]]`                                                                                     |
+| `ScheduleModule.forRoot()`, `@Cron()`, `@Interval()` | [`@znight/schedule`](/packages/schedule): `SchedulePlugin`, `@Cron()`, `@Interval('10s')`                    |
+| `TypeOrmModule`, `@InjectRepository(User)`           | A `@Factory()` providing the client, repositories behind interfaces ([Data access](./data-access))           |
+| `CacheModule`, `CacheInterceptor`                    | A method interceptor ([cache recipe](./aop#cache)); `@znight/cache` is planned                               |
+| `@WebSocketGateway()`                                | Planned for v0.2 ([roadmap](/roadmap#v0-2)); Server-Sent Events today                                        |
+| `@nestjs/graphql` (code first)                       | [`@znight/graphql`](/packages/graphql): the TypeScript types are the schema ([guide](/guide/graphql#nestjs)) |
+| `express-session`, `@Session()`                      | Not included: signed cookies, and cookie sessions in the [Security guide](./security#csrf)                   |
 
 ## Modules → flat DI {#modules-to-flat-di}
 

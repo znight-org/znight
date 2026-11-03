@@ -158,6 +158,28 @@ values are [`ZNIGHT040`](/reference/error-codes#znight040), with the faulty fiel
 
 Guide: [Schedule](/packages/schedule)
 
+## `@znight/graphql`
+
+| Decorator / function                                      | Target                          | Arguments / notes                                                                                                         |
+| --------------------------------------------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `@Resolver(opts?)`                                        | class                           | static `{ scope? }`; a provider (singleton by default); not on a `@Controller`                                            |
+| `@Query(name?)` `@Mutation(name?)` `@Subscription(name?)` | method                          | static name (default: the method name); a root field; the explicit return type is the field type (`Promise<T>` unwrapped) |
+| `@ResolveField(name?)`                                    | method                          | static name; adds (or replaces) a field of the type of the `@Parent()` parameter                                          |
+| `@Args(name?, schema?)` / `@Args(schema)`                 | parameter                       | static name, value schema (Standard Schema); without name: the properties of the parameter type are the arguments         |
+| `@Parent()` `@Ctx()` `@Info()`                            | parameter                       | —; the parent object (field resolvers only), the `GraphQLContext`, graphql-js `GraphQLResolveInfo`                        |
+| `@Loader()`                                               | parameter                       | —; typed `Loader<L>`, `L` a provider implementing `BatchLoad<K, V>`: the DataLoader of the current execution              |
+| `@UseGuard(...guards)`                                    | class / method of a `@Resolver` | value references to guard classes implementing `GraphQLGuard`; run after the global guards                                |
+| `createRouteDecorator` decorators of `@znight/http`       | class / method of a `@Resolver` | field decisions (RFC 0001 groups), read by guards with `Decorator.get(ctx: ResolverContext)`                              |
+| `scalar<T>(name, definition)`                             | an exported `const`             | `T` read by the compiler, static `name`, value `definition` (`ScalarDefinition` or graphql-js `GraphQLScalarType`)        |
+
+Every parameter of a field method carries exactly one of these parameter decorators; `Ctx` or
+`Query` imported from `@znight/http` by mistake is [`ZNIGHT005`](/reference/error-codes#znight005)
+with the import to use. Field methods are not inherited. The JSDoc tags `@param`, `@deprecated`,
+`@default`, `@gqlHidden` and `@gqlName` complete the schema. Type problems are
+[`ZNIGHT060`](/reference/error-codes#znight060)–[`ZNIGHT065`](/reference/error-codes#znight065).
+
+Guide: [GraphQL](/guide/graphql)
+
 ## `@znight/config`
 
 | Decorator          | Target   | Arguments / notes                                                                        |

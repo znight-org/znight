@@ -167,6 +167,7 @@ function sidebarGuide(): DefaultTheme.SidebarItem[] {
       items: [
         { text: 'Data access', link: '/guide/data-access' },
         { text: 'Security', link: '/guide/security' },
+        { text: 'GraphQL', link: '/guide/graphql' },
         { text: 'Scheduling', link: '/guide/scheduling' },
         { text: 'Testing', link: '/guide/testing' },
         { text: 'Deployment', link: '/guide/deployment' },
@@ -203,6 +204,7 @@ function sidebarPackages(): DefaultTheme.SidebarItem[] {
       items: [
         { text: '@znight/http', link: '/packages/http' },
         { text: '@znight/openapi', link: '/packages/openapi' },
+        { text: '@znight/graphql', link: '/packages/graphql' },
         { text: '@znight/messaging', link: '/packages/messaging' },
         { text: '@znight/schedule', link: '/packages/schedule' },
         { text: '@znight/config', link: '/packages/config' },
