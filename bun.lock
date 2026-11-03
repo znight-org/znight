@@ -380,7 +380,7 @@
     },
     "packages/graphql": {
       "name": "@znight/graphql",
-      "version": "0.1.3",
+      "version": "0.1.4",
       "dependencies": {
         "@znight/core": "workspace:*",
         "dataloader": "^2.2.3",
