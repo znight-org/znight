@@ -13,11 +13,14 @@
  *   selects GraphQL over SSE for any operation.
  *
  * Hot path (a cached query whose resolvers are synchronous): a memoised negotiation (a map lookup),
- * the body read and parsed once, one options object and one deferred abort per request, the
- * executor's synchronous result, and a single `JSON.stringify` by the serialiser. A `GET` answered
- * as `application/json` with status 200 returns the plain result, which `@znight/http` serialises
- * on its fast lane; every other answer is an `HttpResponse`, because a `POST` route answers 201 by
- * default and the statuses are explicit here.
+ * the query string read without `URLSearchParams` or the body read and parsed once, one options
+ * object and one deferred abort per request, the executor's synchronous result, and a single
+ * `JSON.stringify` by the serialiser. Every answer stays on the fast lane of `@znight/http` (no
+ * promise while the route is synchronous, headers from a template) unless the application adds
+ * CORS, guards, `http:request` listeners or wrappers: a `GET` answered as `application/json` with
+ * status 200 returns the plain result; the other answers are an `HttpResponse` with a plain JSON
+ * body, at most a `content-type` header and an explicit status (a `POST` route answers 201 by
+ * default), which the fast lane serves too.
  */
 import type { HttpContext, SseOptions } from '@znight/http'
 import type { FormattedExecutionResult } from 'graphql'
@@ -111,6 +114,55 @@ function invalidParams(params: Readonly<Record<string, unknown>>): string | unde
   return undefined
 }
 
+/** The parameters of a GraphQL `GET` request. */
+const GET_PARAMS = ['query', 'operationName', 'variables', 'extensions'] as const
+
+type GetParams = Partial<Record<(typeof GET_PARAMS)[number], string | string[]>>
+
+/** A query string component decoded like `URLSearchParams` (`+` is a space); `undefined` when malformed. */
+function decodeComponent(text: string): string | undefined {
+  if (text.indexOf('%') === -1 && text.indexOf('+') === -1) return text
+  try {
+    return decodeURIComponent(text.replaceAll('+', ' '))
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * The GraphQL parameters of a request target, read directly: `ctx.query` builds a record of every
+ * parameter through `URLSearchParams` (about 0.35 µs of a `GET` on Node.js, 0.15 µs on Bun, see
+ * `test/bench/http.bench.ts`). A repeated parameter
+ * becomes an array, like `ctx.query`. `undefined` when a component is malformed percent-encoding:
+ * the caller falls back to `ctx.query` (which keeps such sequences as they are).
+ */
+function readGetParams(url: string): GetParams | undefined {
+  const params: GetParams = {}
+  const mark = url.indexOf('?')
+  if (mark === -1) return params
+  const length = url.length
+  let start = mark + 1
+  while (start < length) {
+    let end = url.indexOf('&', start)
+    if (end === -1) end = length
+    if (end > start) {
+      let equals = url.indexOf('=', start)
+      if (equals === -1 || equals > end) equals = end
+      const name = decodeComponent(url.slice(start, equals))
+      if (name === undefined) return undefined
+      if (name === 'query' || name === 'operationName' || name === 'variables' || name === 'extensions') {
+        const value = equals === end ? '' : decodeComponent(url.slice(equals + 1, end))
+        if (value === undefined) return undefined
+        const existing = params[name]
+        if (existing === undefined) params[name] = value
+        else params[name] = typeof existing === 'string' ? [existing, value] : [...existing, value]
+      }
+    }
+    start = end + 1
+  }
+  return params
+}
+
 function isMapOrNull(value: unknown): boolean {
   return value === undefined || value === null || (typeof value === 'object' && !Array.isArray(value))
 }
@@ -179,9 +231,9 @@ export class HttpTransport {
     if (media === Media.Html) return this.#graphiql
     if (media === Media.None) return NOT_ACCEPTABLE
     if (!this.#getQueries) return GET_NOT_ALLOWED
-    const params = ctx.query
+    const params = readGetParams(ctx.url) ?? ctx.query
     const request: Record<string, unknown> = {}
-    for (const name of ['query', 'operationName', 'variables', 'extensions'] as const) {
+    for (const name of GET_PARAMS) {
       const value = params[name]
       if (value === undefined) continue
       if (typeof value !== 'string') return errorReply(media, 400, errorBody(`Repeated ${name} parameter`))
@@ -278,7 +330,7 @@ function reply(response: GraphQLResponse, media: MediaKind, get: boolean): unkno
   const result = response.result
   if (media === Media.Json) {
     if (status === 200 || status === 400) {
-      // a plain object on a GET route: 200 application/json, on the fast lane of @znight/http
+      // a plain object on a GET route: 200 application/json (a POST route would answer 201)
       return get ? result : new HttpResponse(result, JSON_200)
     }
     return errorReply(media, status, result, response.headers)

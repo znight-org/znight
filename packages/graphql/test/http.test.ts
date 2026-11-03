@@ -257,8 +257,33 @@ describe('GET', () => {
     expect(missing.json<{ errors: { message: string }[] }>().errors[0]?.message).toContain('Missing query')
     expect((await get({ query: '{ hello }', variables: '{oops' })).status).toBe(400)
     expect((await get({ query: '{ hello }', variables: '[1]' })).status).toBe(400)
-    const repeated = await library.http.inject({ method: 'GET', url: '/graphql?query=a&query=b' })
-    expect(repeated.status).toBe(400)
+    for (const url of ['/graphql?query=a&query=b', '/graphql?query=a&query=b&query=c', '/graphql?query=%ZZ&query=b']) {
+      const repeated = await library.http.inject({ method: 'GET', url })
+      expect({ url, status: repeated.status }).toEqual({ url, status: 400 })
+      expect(repeated.json<{ errors: { message: string }[] }>().errors[0]?.message).toBe('Repeated query parameter')
+    }
+  })
+
+  it('decodes the query string like URLSearchParams', async () => {
+    const cases: [url: string, data: unknown][] = [
+      ['/graphql?query={+hello+}', { hello: 'Hello world' }],
+      ['/graphql?other=1&query=%7Bhello(name%3A%22a%2Bb%26c%22)%7D&', { hello: 'Hello a+b&c' }],
+      ['/graphql?q%75ery=%7B%20hello%20%7D', { hello: 'Hello world' }],
+      ['/graphql?query=%7B%20hello%20%7D&variables=&extensions=null', undefined],
+    ]
+    for (const [url, data] of cases) {
+      const res = await library.http.inject({ method: 'GET', url })
+      expect({ url, body: res.json() }).toEqual({
+        url,
+        body: data === undefined ? { errors: [expect.objectContaining({ message: expect.any(String) })] } : { data },
+      })
+    }
+    // malformed percent-encoding: kept as is (URLSearchParams), then a parse error of the document
+    const malformed = await library.http.inject({ method: 'GET', url: '/graphql?query=%7B%20hello%ZZ%7D' })
+    expect(malformed.status).toBe(200)
+    expect(malformed.json<{ errors: { extensions: { code: string } }[] }>().errors[0]?.extensions.code).toBe(
+      'GRAPHQL_PARSE_FAILED',
+    )
   })
 
   it('answers HEAD like GET without a body', async () => {
