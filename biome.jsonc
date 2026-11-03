@@ -3,7 +3,18 @@
   "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
   "files": {
     "ignoreUnknown": false,
-    "includes": ["**/*", "!node_modules", "!dist", "!junit_reports", "!.nx", "!.yarn", "!rfcs"]
+    "includes": [
+      "**/*",
+      "!node_modules",
+      "!dist",
+      "!junit_reports",
+      "!.nx",
+      "!.yarn",
+      "!rfcs",
+      // Written by the GraphQL compiler extension exactly as graphql-js prints it, and checked byte
+      // for byte (`znight generate --check`, the example's schema test): never reformatted.
+      "!examples/graphql-api/schema.graphql"
+    ]
   },
   // Markdown files may start with a YAML frontmatter block: VitePress pages (docs/) and changesets
   // (.changeset/*.md). Without this, Biome reads a one-line frontmatter as a heading and breaks it.

@@ -46,7 +46,7 @@ And around them:
   and leaves the choice of the database library to you; [Drizzle](https://orm.drizzle.team) is the
   recommended choice for SQL. See [Data access](/guide/data-access).
 - **Caching** is a method interceptor today: the [cache recipe](/guide/aop#cache).
-- Seven [example applications](/examples), each with its tests, running on Node.js and Bun.
+- Eight [example applications](/examples), each with its tests, running on Node.js and Bun.
 
 ## v0.2: in progress {#v0-2}
 

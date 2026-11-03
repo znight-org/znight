@@ -1,0 +1,14 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`access access matrix of every root field 1`] = `
+[
+  "Query.books → anonymous: ok, reader: ok, editor: ok",
+  "Query.book → anonymous: ok, reader: ok, editor: ok",
+  "Query.search → anonymous: ok, reader: ok, editor: ok",
+  "Query.me → anonymous: UNAUTHENTICATED, reader: ok, editor: ok",
+  "Mutation.addBook → anonymous: UNAUTHENTICATED, reader: FORBIDDEN, editor: ok",
+  "Mutation.addReview → anonymous: UNAUTHENTICATED, reader: ok, editor: ok",
+  "Subscription.bookAdded → anonymous: UNAUTHENTICATED, reader: ok (streaming), editor: ok (streaming)",
+  "Subscription.reviewAdded → anonymous: UNAUTHENTICATED, reader: ok (streaming), editor: ok (streaming)",
+]
+`;

@@ -95,7 +95,7 @@ provide the database client of your choice, and Znight wires it ([Data access](.
 Znight is preparing its first release (`v0.1`). Every package is implemented and tested on Node.js
 24 and Bun: the runtime, the compiler (Vite plugin, Bun preload, CLI), HTTP (with access decisions,
 CORS and security headers, files, cookies and Server-Sent Events), OpenAPI, messaging, scheduling,
-configuration, observability and the testing utilities, with seven runnable
+configuration, observability and the testing utilities, with eight runnable
 [example applications](/examples). Code-first [GraphQL](/guide/graphql) comes with v0.2, and
 WebSocket gateways are planned next (see the [roadmap](/roadmap)). Until 1.0, minor versions may still change APIs. Feedback and contributions
 are welcome on [GitHub](https://github.com/znight-org/znight).

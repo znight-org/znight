@@ -97,6 +97,30 @@
         "vue": "3.5.44",
       },
     },
+    "examples/graphql-api": {
+      "name": "@znight-examples/graphql-api",
+      "version": "0.0.0",
+      "dependencies": {
+        "@hono/node-server": "2.1.5",
+        "@znight/config": "workspace:*",
+        "@znight/core": "workspace:*",
+        "@znight/graphql": "workspace:*",
+        "@znight/http": "workspace:*",
+        "@znight/observability": "workspace:*",
+        "graphql": "17.0.2",
+        "hono": "4.13.14",
+        "zod": "catalog:",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+        "@types/node": "catalog:",
+        "@znight/cli": "workspace:*",
+        "@znight/compiler": "workspace:*",
+        "@znight/testing": "workspace:*",
+        "typescript": "catalog:",
+        "vite": "catalog:",
+      },
+    },
     "examples/microservice": {
       "name": "@znight-examples/microservice",
       "version": "0.0.0",
@@ -1288,6 +1312,8 @@
     "@znight-benchmarks/runner": ["@znight-benchmarks/runner@workspace:benchmarks"],
 
     "@znight-benchmarks/znight": ["@znight-benchmarks/znight@workspace:benchmarks/apps/znight"],
+
+    "@znight-examples/graphql-api": ["@znight-examples/graphql-api@workspace:examples/graphql-api"],
 
     "@znight-examples/microservice": ["@znight-examples/microservice@workspace:examples/microservice"],
 

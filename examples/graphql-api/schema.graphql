@@ -1,0 +1,177 @@
+"""A writer."""
+type Author {
+  kind: String!
+  id: ID!
+  name: String!
+
+  """Year of birth, `null` when unknown."""
+  born: Int
+
+  """The books of the author in the catalog. Batched like `Book.author`."""
+  books: [Book!]!
+}
+
+"""A book of the catalog."""
+type Book {
+  kind: String!
+  id: ID!
+  title: String!
+  isbn: String!
+
+  """Year of first publication, `null` when unknown."""
+  publishedYear: Int
+  genre: Genre!
+  tags: [String!]!
+
+  """When the book entered the catalog."""
+  createdAt: DateTime!
+  category: String @deprecated(reason: "Use `tags`.")
+
+  """
+  Who wrote the book. Batched: one repository call per execution, whatever the number of books.
+  """
+  author: Author!
+
+  """
+  Reviews of the book, newest first. Batched: one repository call per execution.
+  """
+  reviews(
+    """How many reviews, newest first (at most 50)."""
+    first: Int = 5
+  ): [Review!]!
+}
+
+"""A page of results."""
+type BookPage {
+  items: [Book!]!
+
+  """How many results match, across every page."""
+  total: Int!
+
+  """`true` when a following page exists."""
+  hasMore: Boolean!
+}
+
+"""Sort orders of the book list."""
+enum BookSort {
+  title
+  newest
+}
+
+scalar DateTime @specifiedBy(url: "https://datatracker.ietf.org/doc/html/rfc3339")
+
+"""An e-mail address, lower-cased."""
+scalar EmailAddress @specifiedBy(url: "https://html.spec.whatwg.org/multipage/input.html#valid-e-mail-address")
+
+"""Literary genres."""
+enum Genre {
+  Fantasy
+  ScienceFiction
+  Mystery
+}
+
+type Mutation {
+  """Adds a book to the catalog."""
+  addBook(input: NewBookInput!): Book!
+
+  """Reviews a book."""
+  addReview(input: NewReviewInput!): Review!
+}
+
+"""
+A new book. The interface is the GraphQL input type, the schema of the same name validates it.
+"""
+input NewBookInput {
+  title: String!
+
+  """ISBN-10 or ISBN-13; spaces and hyphens are ignored."""
+  isbn: String!
+  authorId: String!
+  genre: Genre!
+  publishedYear: Int
+  tags: [String!]
+}
+
+"""A new review, signed with the reviewer's e-mail address."""
+input NewReviewInput {
+  bookId: ID!
+
+  """From 1 to 5."""
+  rating: Int!
+  comment: String
+  reviewer: EmailAddress!
+}
+
+type Query {
+  """The caller of the request."""
+  me: Viewer!
+
+  """Books of the catalog, filtered, sorted and paginated."""
+  books(
+    """Case-insensitive search in titles."""
+    search: String
+    genre: Genre
+    sort: BookSort = title
+
+    """Page size, at most 100."""
+    limit: Int = 20
+    offset: Int = 0
+  ): BookPage!
+
+  """One book, `null` when there is none."""
+  book(
+    """The id of the book."""
+    id: ID!
+  ): Book
+
+  """
+  Books whose title, and authors whose name, contain the text: books first.
+  """
+  search(
+    """Case-insensitive; an empty text finds nothing."""
+    text: String!
+  ): [SearchResult!]!
+}
+
+"""A reader's review of a book."""
+type Review {
+  id: ID!
+
+  """From 1 to 5."""
+  rating: Int!
+  comment: String
+
+  """Who wrote it."""
+  reviewer: EmailAddress!
+  createdAt: DateTime!
+}
+
+"""Roles granted by the API keys."""
+enum Role {
+  reader
+  editor
+}
+
+"""A search hit: a book or an author."""
+union SearchResult = Author | Book
+
+type Subscription {
+  """Books added from now on, optionally of one genre."""
+  bookAdded(
+    """Only books of this genre."""
+    genre: Genre
+  ): Book!
+
+  """Reviews of one book, from now on."""
+  reviewAdded(
+    """The reviewed book."""
+    bookId: ID!
+  ): Review!
+}
+
+"""The caller, as the API sees them."""
+type Viewer {
+  name: String!
+  email: EmailAddress!
+  roles: [Role!]!
+}

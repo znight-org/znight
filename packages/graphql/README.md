@@ -23,6 +23,10 @@ batching per execution and subscriptions over Server-Sent Events. The design is
 
 No `@ObjectType`, no `@Field(() => Int)`, no `reflect-metadata`, no SDL file to keep in sync.
 
+**Example:** [`graphql-api`](https://github.com/znight-org/znight/tree/main/examples/graphql-api) (a
+book catalog with loaders, subscriptions over SSE, per-field access decisions and a committed
+`schema.graphql`, on Node.js and Bun).
+
 ```sh
 # bun
 bun add @znight/core @znight/http @znight/graphql graphql

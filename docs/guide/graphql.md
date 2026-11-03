@@ -9,6 +9,17 @@ time**. This guide builds a small book catalog step by step. The [package page](
 summarises the API, and the [package README](../../packages/graphql/README.md) is the complete
 reference.
 
+::: info The graphql-api example
+The catalog of this guide is a complete application:
+[`examples/graphql-api`](https://github.com/znight-org/znight/tree/main/examples/graphql-api), running
+on Node.js 24 and Bun (Hono). Its [resolvers](../../examples/graphql-api/src/catalog/book.resolver.ts),
+[loaders](../../examples/graphql-api/src/catalog/authors-by-id.loader.ts),
+[access guard](../../examples/graphql-api/src/auth/access.guard.ts) and committed
+[`schema.graphql`](../../examples/graphql-api/schema.graphql) are the full versions of the snippets
+below, and its tests cover each section: batching, the access matrix of every root field,
+subscriptions, GraphQL over HTTP and the build-time diagnostics.
+:::
+
 ## Set up {#setup}
 
 ```sh
