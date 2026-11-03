@@ -273,3 +273,15 @@ export function typecheckSanity(app: TempApp, file: string): string[] {
     app.write(file, original)
   }
 }
+
+/** Codes of the schema-first diagnostics (RFC 0007) and the codes they reuse. */
+export const SCHEMA_FIRST_CODES: readonly string[] = [...GRAPHQL_CODES, 'ZNIGHT067', 'ZNIGHT068']
+
+/** Analyses `files` in schema-first mode (`schema: 'src/**\/*.graphql'` unless given). */
+export function analyzeSchemaFirst(
+  files: Readonly<Record<string, string>>,
+  options: GraphQLCompilerOptions = {},
+): Promise<GraphQLAnalysis> {
+  const extension = graphql.configure({ schema: 'src/**/*.graphql', ...options }) as unknown as CompilerExtension
+  return analyzeApp(tempApp(files).root, {}, extension)
+}

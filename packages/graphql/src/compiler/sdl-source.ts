@@ -149,8 +149,20 @@ export function loadSdl(
     return undefined
   }
   for (const problem of type.validateSchema(schema)) {
-    const node = problem.nodes?.find(candidate => candidate.loc !== undefined)
-    fail(`Invalid schema: ${problem.message}`, node)
+    const [node, ...others] = (problem.nodes ?? []).filter(candidate => candidate.loc !== undefined)
+    errors++
+    const location = locator.locate(node)
+    const related = others.flatMap(other => {
+      const at = locator.locate(other)
+      return at === undefined ? [] : [{ message: 'see also', location: at }]
+    })
+    report({
+      code: Codes.InvalidSdl,
+      severity: 'error',
+      message: `Invalid schema: ${problem.message}`,
+      ...(location === undefined ? {} : { location }),
+      ...(related.length === 0 ? {} : { related }),
+    })
   }
   if (errors > 0) return undefined
   return { schema, customDirectives, locate: node => locator.locate(node) }
