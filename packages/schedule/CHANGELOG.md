@@ -1,5 +1,14 @@
 # @znight/schedule
 
+## 0.1.4
+
+### Patch Changes
+
+- Updated dependencies [c21ef01]
+- Updated dependencies [c21ef01]
+  - @znight/compiler@0.1.4
+  - @znight/core@0.1.4
+
 ## 0.1.3
 
 ### Patch Changes

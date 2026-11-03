@@ -43,8 +43,10 @@ export interface ObservabilityPluginInstance extends Plugin {
  *
  * - `register`: provides `Logger`, `Tracer`, `MetricsRegistry` and the `@Logged` / `@Traced` /
  *   `@Metric` interceptors, wraps the `http:request`, `messaging:message` and `schedule:run` hooks
- *   (spans → RED metrics → logs), listens to `schedule:run` (run counters) and routes the framework
- *   logs through the logger;
+ *   (spans → RED metrics → logs) and `messaging:publish` (producer spans), listens to `schedule:run`
+ *   (run counters) and routes the framework logs through the logger; a hook whose features are all
+ *   disabled is not registered (options given as a function: removed in `onBootstrap`, once they
+ *   are evaluated);
  * - `onStart`: starts the `/metrics` server; `onStop`: closes it;
  * - `onDispose`: flushes the tracer provider and the logger transports; entries logged afterwards
  *   (the application's final `Application stopped`) are flushed as soon as they are written.
@@ -69,7 +71,8 @@ class ObservabilityPluginImpl implements ObservabilityPluginInstance {
   readonly #options: PluginOptions<ObservabilityOptions>
   #context: PluginContext | undefined
   #kit: ObservabilityKit | undefined
-  #unhook: (() => void)[] = []
+  /** What removes each hook of the plugin, by the kit feature it serves. */
+  readonly #unhook = new Map<HookedFeature, () => void>()
 
   constructor(options: PluginOptions<ObservabilityOptions>) {
     this.#options = options
@@ -125,32 +128,42 @@ class ObservabilityPluginImpl implements ObservabilityPluginInstance {
     external(ObservabilityTokens.TracedInterceptor, kit => kit.tracedInterceptor)
     external(ObservabilityTokens.MetricInterceptor, kit => kit.metricInterceptor)
 
-    // registered now (outermost position among plugins), resolved per call
-    this.#unhook.push(
-      ctx.hooks.wrap('http:request', (event, next) => {
+    // registered now (outermost position among plugins), resolved per call; only for the features the
+    // options enable (all of them until options given as a function are evaluated, see #prune)
+    const hooks = ctx.hooks
+    this.#hook('http', () =>
+      hooks.wrap('http:request', (event, next) => {
         const wrapper = this.#kit?.http
         return wrapper === undefined ? next() : wrapper(event, next)
       }),
-      ctx.hooks.wrap('messaging:message', (event, next) => {
+    )
+    this.#hook('messaging', () =>
+      hooks.wrap('messaging:message', (event, next) => {
         const wrapper = this.#kit?.messaging
         return wrapper === undefined ? next() : wrapper(event, next)
       }),
-      ctx.hooks.wrap('messaging:publish', (event, next) => {
+    )
+    this.#hook('publish', () =>
+      hooks.wrap('messaging:publish', (event, next) => {
         const wrapper = this.#kit?.publish
         return wrapper === undefined ? next() : wrapper(event, next)
       }),
-      ctx.hooks.wrap('schedule:run', (event, next) => {
+    )
+    this.#hook('schedule', () =>
+      hooks.wrap('schedule:run', (event, next) => {
         const wrapper = this.#kit?.schedule
         return wrapper === undefined ? next() : wrapper(event, next)
       }),
-      ctx.hooks.on('schedule:run', event => {
+    )
+    this.#hook('scheduleListener', () =>
+      hooks.on('schedule:run', event => {
         this.#kit?.scheduleListener?.(event)
       }),
     )
   }
 
   onBootstrap(ctx: PluginContext): void {
-    this.#ensureKit(ctx)
+    this.#prune(this.#ensureKit(ctx))
   }
 
   async onStart(ctx: PluginContext): Promise<void> {
@@ -166,8 +179,8 @@ class ObservabilityPluginImpl implements ObservabilityPluginInstance {
 
   async onDispose(): Promise<void> {
     const kit = this.#kit
-    for (const unhook of this.#unhook) unhook()
-    this.#unhook = []
+    for (const unhook of this.#unhook.values()) unhook()
+    this.#unhook.clear()
     this.#context = undefined
     if (kit === undefined) return
     // the application still logs once its plugins are disposed ("Application stopped", "The
@@ -178,11 +191,32 @@ class ObservabilityPluginImpl implements ObservabilityPluginInstance {
     await kit.logger.flush()
   }
 
+  /**
+   * Adds the hook of a feature, unless the options are known and disable it: a hook registered for
+   * nothing would still cost every operation it wraps (an `http:request` wrapper takes requests out
+   * of the fast lane of `@znight/http`).
+   */
+  #hook(feature: HookedFeature, add: () => () => void): void {
+    if (this.#kit === undefined || this.#kit[feature] !== undefined) this.#unhook.set(feature, add())
+  }
+
+  /** Removes the hooks of the features disabled by options evaluated after `register`. */
+  #prune(kit: ObservabilityKit): void {
+    for (const [feature, unhook] of this.#unhook) {
+      if (kit[feature] !== undefined) continue
+      unhook()
+      this.#unhook.delete(feature)
+    }
+  }
+
   #ensureKit(ctx: PluginContext): ObservabilityKit {
     this.#kit ??= buildKit(resolveOptions(this.#options, ctx.container), ctx)
     return this.#kit
   }
 }
+
+/** The features of the kit served by a hook of the plugin. */
+type HookedFeature = 'http' | 'messaging' | 'publish' | 'schedule' | 'scheduleListener'
 
 /**
  * A runtime definition returning an object owned by the plugin. Transient: created on injection

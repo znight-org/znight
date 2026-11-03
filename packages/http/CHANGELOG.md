@@ -1,5 +1,16 @@
 # @znight/http
 
+## 0.1.4
+
+### Patch Changes
+
+- b6d42bc: The fast lane of the request pipeline now serves requests with `http:request` listeners or wrappers instead of sending them through the general pipeline, with the same replies and the same hook events (applications with `@znight/observability` get it).
+- c21ef01: `RouteMetaCarrier` (route decorators read metadata from any carrier), `readRouteMeta`, `effectiveRouteMeta` and `requiredRouteGroups` exported from `@znight/http/compiler`, and a per-route `bodyLimit` on plugin routes.
+- Updated dependencies [c21ef01]
+- Updated dependencies [c21ef01]
+  - @znight/compiler@0.1.4
+  - @znight/core@0.1.4
+
 ## 0.1.3
 
 ### Patch Changes
