@@ -91,14 +91,15 @@ Respect them; do not reopen them in passing.
   (entities, columns, repositories, queries) are explicitly **not** on the roadmap.
 - **Built-in sessions and server-side MVC** (a session store, templates, views) are out of scope.
   Signed cookies are built in, and `examples/secure-api` shows a cookie-session recipe.
-- **WebSocket** is deferred to v0.2 (RFC 0003); its error code block is reserved. **GraphQL** (RFC
-  0005) ships as `@znight/graphql` with v0.2.
+- **WebSocket** (RFC 0003) is accepted and planned, with no target version: do not tie it to a
+  release; its error code block is reserved. **GraphQL** (RFC 0005) ships as `@znight/graphql` with
+  v0.2.
 
 ### Roadmap
 
 The roadmap page is [`docs/roadmap.md`](docs/roadmap.md): v0.2 brings `@znight/graphql` (RFC 0005,
-implemented) and `@znight/websocket` (RFC 0003, planned); planned without a date or an RFC yet, `@znight/cache`;
-then what is considered and what is not planned. RFC statuses live in
+implemented); planned without a date, `@znight/websocket` (RFC 0003, accepted) and `@znight/cache`
+(no RFC yet); then what is considered and what is not planned. RFC statuses live in
 [`rfcs/README.md`](rfcs/README.md). There is no TODO list in this file: read the roadmap, the RFCs
 and the GitHub issues before starting a feature, and keep the roadmap page up to date when a
 decision changes.

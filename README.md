@@ -420,10 +420,10 @@ with `bun run docs:dev`.
   ([RFC 0005](./rfcs/0005-graphql.md)), or schema-first, with resolvers checked against the SDL
   ([RFC 0007](./rfcs/0007-graphql-schema-first.md)): implemented in
   [`@znight/graphql`](./packages/graphql), see the [GraphQL guide](./docs/guide/graphql.md).
-- **WebSocket** gateways served by the HTTP plugin ([RFC 0003](./rfcs/0003-websocket.md)).
 
-Also planned, without a date yet: a dedicated **cache** package. Today, caching is a method
-interceptor: see the [recipe](./docs/guide/aop.md#cache).
+Planned, without a date yet: **WebSocket** gateways served by the HTTP plugin
+([RFC 0003](./rfcs/0003-websocket.md), accepted), and a dedicated **cache** package. Today, caching
+is a method interceptor: see the [recipe](./docs/guide/aop.md#cache).
 
 Later: a dedicated security package will be reconsidered once real applications show what belongs
 in it ([RFC 0001](./rfcs/0001-security.md)). Until then, security lives in `@znight/http` and in the

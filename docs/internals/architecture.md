@@ -559,7 +559,7 @@ Codes are allocated by range (`rfcs/README.md`): `ZNIGHT001`–`029` belong to t
 compiler and the features shipped in 0.1 (http, messaging, config, observability); from
 `ZNIGHT030`, each first-party package reserves a block of ten in the `@znight/core` catalogue
 (`030`–`039` `@znight/openapi`, `040`–`049` `@znight/schedule`, `050`–`059` `@znight/websocket`,
-reserved for v0.2, and `060`–`069` `@znight/graphql`, RFC 0005). Codes are allocated in order
+reserved by RFC 0003, and `060`–`069` `@znight/graphql`, RFC 0005). Codes are allocated in order
 inside a block and never change meaning. A package uses its block for its own failure modes, with
 one catch-all code for invalid usage and options, and reuses a lower code when the meaning is the
 same (a decorator on the wrong target is always ZNIGHT005). Third-party packages get no `ZNIGHT`
