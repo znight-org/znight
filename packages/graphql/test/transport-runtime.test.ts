@@ -2,8 +2,8 @@
  * Runs `fixtures/transport-check.ts` in a Node.js 24 process and a Bun process: the GraphQL
  * endpoint passes the graphql-http audits (GraphQL-over-HTTP draft) and serves GraphQL over SSE to
  * the graphql-sse client the same way on every adapter (node, fastify, express, hono), over a real
- * socket, on both runtimes. The graphql-http handler mounted as a driver on the engine (RFC 0009)
- * passes the same audits.
+ * socket, on both runtimes. The graphql-http handler mounted as a driver on the engine and the Yoga
+ * driver (RFC 0009) pass the same audits; Yoga serves the engine's subscriptions over its own SSE.
  */
 import { fileURLToPath } from 'node:url'
 
@@ -17,6 +17,7 @@ interface AdapterResult {
   readonly statuses: Record<string, string>
   readonly sse: Record<string, unknown>
   readonly driver: { readonly audits: number; readonly notOk: readonly string[] } & Record<string, unknown>
+  readonly yoga: { readonly audits: number; readonly notOk: readonly string[] } & Record<string, unknown>
 }
 
 type Results = Record<string, AdapterResult>
@@ -90,6 +91,20 @@ for (const runtime of ['node', 'bun']) {
           ],
         },
       })
+      // the Yoga driver: conformant, the engine's results and masking, Yoga's SSE (complete on shutdown)
+      expect(reference.yoga.audits).toBeGreaterThanOrEqual(60)
+      expect(reference.yoga.notOk).toEqual([])
+      expect(reference.yoga['hello']).toEqual(reference.driver['hello'])
+      expect(reference.yoga['fail']).toEqual(reference.driver['fail'])
+      expect(reference.yoga['framing']).toBe(
+        ':\n\nevent: next\ndata: {"data":{"countdown":2}}\n\nevent: next\ndata: {"data":{"countdown":1}}\n\nevent: complete\ndata:\n\n',
+      )
+      expect(reference.yoga['client']).toEqual([
+        { data: { countdown: 3 } },
+        { data: { countdown: 2 } },
+        { data: { countdown: 1 } },
+      ])
+      expect(reference.yoga['shutdown']).toEqual({ next: true, complete: true })
       for (const [adapter, observed] of Object.entries(results)) {
         expect({ adapter, observed }).toEqual({ adapter, observed: reference })
       }
