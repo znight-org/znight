@@ -1,5 +1,5 @@
 ---
-description: What Znight v0.1 contains, what v0.2 brings (GraphQL), what is planned without a date (WebSocket gateways, a cache package), what is being considered, and what is deliberately not planned.
+description: What Znight v0.1 contains, what v0.2 brings (GraphQL), what is planned without a date (WebSocket gateways, a cache package), what is being considered (application events among others), and what is deliberately not planned.
 ---
 
 # Roadmap
@@ -21,6 +21,7 @@ may change APIs.
 | [0008](https://github.com/znight-org/znight/blob/main/rfcs/0008-graphql-errors-as-data.md)      | Errors as data in `@znight/graphql`       | Accepted (v0.2)    |
 | [0009](https://github.com/znight-org/znight/blob/main/rfcs/0009-graphql-drivers.md)             | GraphQL drivers (`@znight/graphql`)       | Proposed           |
 | [0010](https://github.com/znight-org/znight/blob/main/rfcs/0010-custom-parameter-decorators.md) | Custom parameter decorators               | Proposed           |
+| [0011](https://github.com/znight-org/znight/blob/main/rfcs/0011-application-events.md)          | Application events (`@znight/events`)     | Proposed           |
 
 ## v0.1: the first release {#v0-1}
 
@@ -118,6 +119,14 @@ These are tracked in the RFCs as follow-ups. None has a date.
   authenticator and a password hasher extracted from the guide's recipes, with no change to the
   route decision API.
 
+- **Application events** ([RFC 0011](https://github.com/znight-org/znight/blob/main/rfcs/0011-application-events.md),
+  proposed): an `@znight/events` package in the spirit of Spring and Micronaut application events.
+  Events are classes, listeners are provider methods marked `@OnEvent()` whose parameter type is the
+  event, discovered and checked at build time, with inline listeners (in the publisher's request
+  scope, errors reach the publisher) and detached ones (after the publication, in their own scope,
+  errors reported). It covers what `@nestjs/cqrs`'s `EventBus` and `@nestjs/event-emitter` are used
+  for; `@znight/messaging` stays the tool for durable, out-of-process delivery. Until it lands, a
+  multi-injected handler interface does the job.
 - **Custom parameter decorators**: a `@CurrentUser()` of your own, defined once with
   `createParamDecorator` and usable on HTTP routes, GraphQL fields and message handlers, with its
   target, data argument and value type checked at build time and resolvers that may be providers
