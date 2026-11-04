@@ -8,6 +8,7 @@ import type { ObservabilityOptions } from './options.ts'
 import { ErrorCode, resolveOptions, ZnightError } from '@znight/core'
 
 import { flushEachEntry } from '../logging/logger.ts'
+import { bindStaticLoggers } from '../logging/static.ts'
 import { ObservabilityTokens } from '../tokens.ts'
 import { buildKit, type ObservabilityKit } from './kit.ts'
 import { validateInterceptorOptions } from './validate.ts'
@@ -46,10 +47,12 @@ export interface ObservabilityPluginInstance extends Plugin {
  *   `graphql:operation` hooks (spans → metrics → logs) and `messaging:publish` (producer spans),
  *   listens to `schedule:run` (run counters) and routes the framework logs through the logger; a
  *   hook whose features are all disabled is not registered (options given as a function: removed in
- *   `onBootstrap`, once they are evaluated);
+ *   `onBootstrap`, once they are evaluated); once the logger exists, `getLogger()` loggers write
+ *   through it;
  * - `onStart`: starts the `/metrics` server; `onStop`: closes it;
  * - `onDispose`: flushes the tracer provider and the logger transports; entries logged afterwards
- *   (the application's final `Application stopped`) are flushed as soon as they are written.
+ *   (the application's final `Application stopped`) are flushed as soon as they are written;
+ *   `getLogger()` loggers stop preferring this application.
  *
  * Options may be a function of the container (`ObservabilityPlugin.configure(c => ({ logging: {
  * level: c.get(AppConfig).logLevel } }))`): it is evaluated when the first observability provider is
@@ -73,6 +76,8 @@ class ObservabilityPluginImpl implements ObservabilityPluginInstance {
   #kit: ObservabilityKit | undefined
   /** What removes each hook of the plugin, by the kit feature it serves. */
   readonly #unhook = new Map<HookedFeature, () => void>()
+  /** Stops routing the `getLogger()` loggers to this application's logger. */
+  #unbindStaticLoggers: (() => void) | undefined
 
   constructor(options: PluginOptions<ObservabilityOptions>) {
     this.#options = options
@@ -189,6 +194,8 @@ class ObservabilityPluginImpl implements ObservabilityPluginInstance {
     this.#unhook.clear()
     this.#context = undefined
     if (kit === undefined) return
+    this.#unbindStaticLoggers?.()
+    this.#unbindStaticLoggers = undefined
     // the application still logs once its plugins are disposed ("Application stopped", "The
     // application stopped with errors"): deliver those entries too, not only what is buffered now
     flushEachEntry(kit.logger)
@@ -216,8 +223,12 @@ class ObservabilityPluginImpl implements ObservabilityPluginInstance {
   }
 
   #ensureKit(ctx: PluginContext): ObservabilityKit {
-    this.#kit ??= buildKit(resolveOptions(this.#options, ctx.container), ctx)
-    return this.#kit
+    if (this.#kit !== undefined) return this.#kit
+    const kit = buildKit(resolveOptions(this.#options, ctx.container), ctx)
+    this.#kit = kit
+    // the getLogger() loggers write through this logger from now on (entries buffered so far included)
+    this.#unbindStaticLoggers = bindStaticLoggers(kit.logger, ctx.container)
+    return kit
   }
 }
 

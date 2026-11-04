@@ -2441,6 +2441,18 @@ the final `Application stopped` / `The application stopped with errors` entries 
   clashing with the reserved attributes are kept, never overwritten: an HTTP status code in `status`
   becomes `http.status_code`, another `status`, a `message` next to the log message and a
   `timestamp` next to the log time go under `attributes.*`).
+- **Static loggers** (`getLogger(name, bindings?)`, outside DI; the injected `Logger` stays the
+  default): the plugin registers its logger and container in a process-wide registry (shared by
+  every copy of the package, `Symbol.for('@znight/observability#StaticLoggers')`) as soon as its
+  logger is built, and removes them in `onDispose`. Each call writes through a child of the target
+  logger with `{ logger: name, ...bindings }` (created once per target, held weakly), the target
+  being, in this order: the registered application whose request scope is active (checked only when
+  several are registered), the one registered last, the logger set with `setFallbackLogger()`, the
+  logger of the application removed last while it is still reachable (weak reference). With no
+  target, entries are buffered, the first `STATIC_LOG_BUFFER_SIZE` (1000) kept with the call time
+  (`loggedAt`, ISO 8601) and the others counted; the buffer is written, at the target's level, to
+  the next registered logger or fallback, followed by a `warn` entry with `dropped` when some were
+  dropped. A disabled level allocates nothing. `getLogger('')` throws ZNIGHT005.
 - Metrics (`prom-client`, optional peer) are enabled by default only when it is installed;
   `metrics: false` runs `@Metric` methods unmeasured. HTTP labels use the route pattern (`unmatched`
   when none), never the raw path. The messaging `type` label is `unmatched` when no handler matched
