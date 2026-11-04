@@ -7,6 +7,12 @@
 | Affects  | New package `@znight/events` (marker decorator `@OnEvent`, compiler extension `@znight/events/compiler`, `EventsPlugin`, injectable `EventPublisher`, `@znight/events/testing`). `@znight/core`: two hooks (`events:publish`, `events:listener`) and their event types, one error code (`ZNIGHT070`, block `070`–`079`). `@znight/observability`: spans, metrics and logs for both hooks. `@znight/testing`: listener hosts as default `TestApp` roots. Specification §4.8, §5, §7, §8.3, a new §9.8, §10. Docs, guide, migration guide                                                                                                                                                                             |
 | Decision | **In-process application events, in the spirit of Spring and Micronaut, not a clone of `@nestjs/cqrs`.** Events are plain class instances. Listeners are provider methods marked `@OnEvent()`; the event type is the type of the method's parameter, read at build time, and the event → listeners registry is generated into the metadata. `EventPublisher.publish(event)` runs the inline listeners in order, in the publisher's request scope, and rejects with the first error; `detached` listeners and `emit(event)` run in the background, in scopes of their own, with errors reported, never thrown. `@znight/messaging` stays the tool for durable, out-of-process delivery, and a recipe bridges the two |
 
+**Owner decisions (2026-11-04).** Every open question of §13 takes its recommended answer: a
+`@znight/events` package, `@OnEvent`, inline by default, transaction recipes before a port, stop at
+the first inline error and rethrow it unchanged, no typed publishers in v1, a messaging relay recipe
+before `@Externalized`, no concurrency limit for detached listeners in v1, request-scoped detached
+listeners allowed in a fresh scope, and the `070`–`079` block with ZNIGHT070 only.
+
 ## 1. Summary
 
 Znight has no in-process event mechanism. `Hooks` is an instrumentation bus for plugins, not a
@@ -772,7 +778,9 @@ The wishlist migration needs M2 and M3.
   it runs the rest of a failed operation, and an `AggregateError` hides the domain error from error
   mappers. Listeners that want isolation are detached.
 
-## 13. Open questions (with recommended answers)
+## 13. Open questions (decided: the recommended answers)
+
+The owner took every recommended answer on 2026-11-04 (see the decisions under the header table).
 
 1. **Package or core?** Recommended: package `@znight/events` (§5.1).
 2. **Decorator name: `@OnEvent` or `@EventListener`?** Recommended: `@OnEvent`, consistent with
