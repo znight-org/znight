@@ -275,7 +275,8 @@ if (withYoga) {
   check('GET /graphql (yoga)', await consumed(getYoga(requests.get)), 200, 'application/json')
   check('POST /graphql (yoga)', await consumed(postYoga(requests.postGraphQL)), 200, GRAPHQL_RESPONSE)
   const direct = await yoga.fetch(yogaRequest(), {} as never)
-  if ((await direct.json()).data?.hello !== 'Hello world') throw new Error('yoga.fetch(): unexpected reply')
+  if (((await direct.json()) as { data?: { hello?: string } }).data?.hello !== 'Hello world')
+    throw new Error('yoga.fetch(): unexpected reply')
   yogaCases.push(
     [
       'yoga.fetch() (no HttpPlugin, prebuilt Request)',

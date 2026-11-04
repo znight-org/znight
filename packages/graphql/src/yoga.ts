@@ -171,7 +171,7 @@ class Driver implements YogaDriver {
     return this.#yoga
   }
 
-  /** `POST` on the path, and `GET` when queries over `GET` or GraphiQL are on (the router answers 405 otherwise). */
+  /** `GET` and `POST` on the path (`GET` answers 405 when neither queries over `GET` nor GraphiQL apply). */
   routes(context: GraphQLDriverRoutesContext): readonly GraphQLDriverRoute[] {
     return [
       { method: 'GET', path: context.path, name: 'yoga', handler: this.#getHandler },
