@@ -21,7 +21,8 @@ Today `@znight/graphql` serves its schema with its own GraphQL-over-HTTP and SSE
 decision D3). It is small, conformant (the `graphql-http` audits run in the tests) and fast, but it
 is the only way in: an application that needs an Apollo Server plugin, Apollo usage reporting, an
 Envelop plugin of the Yoga ecosystem, automatic persisted queries or a GraphQL IDE other than
-GraphiQL has nowhere to plug it. NestJS users are used to choosing (`driver: ApolloDriver`,
+GraphiQL has nowhere to plug it, except the guide's Yoga recipe, copied into the application
+(§2.3). NestJS users are used to choosing (`driver: ApolloDriver`,
 `MercuriusDriver`, `YogaDriver`) and will look for the same switch.
 
 This RFC adds that switch without giving away what makes Znight's GraphQL Znight's:
@@ -128,13 +129,30 @@ level spans.
 | Query cost analysis, depth limits                                 | **Engine**       | Validation rules, the same for every transport (Znight already has depth, aliases, directives and tokens limits)                                                            |
 | `graphql-jit` (Mercurius)                                         | **Engine**       | It replaces `execute`; Znight's resolvers, guards and loaders are wired into graphql-js resolve functions, so JIT is an engine decision, measured separately (RFC 0005 §8.12) |
 
-Without drivers, the first group is simply out of reach, and today's escape hatch does not help:
-`http: false` + `plugin.schema` gives another server a schema whose resolvers expect Znight's
-`GraphQLContext` as `contextValue` (`ctx.loader()`, `ctx.signal`, `@Ctx()`), find nothing in the
-request scope (`GraphQLTokens.Context` is set by the executor), and skip masking, limits, the
-document cache and the hook. `plugin.execute()` takes a query text, so a server that parses and
-validates itself cannot use it either. A recipe alone cannot fix that: the missing piece is a public
-engine API (§4.2).
+Today's escape hatch is the "Serve the schema with GraphQL Yoga" recipe of the GraphQL guide
+(`docs/guide/graphql.md#yoga`, tested by `packages/graphql/test/recipes/yoga.controller.ts`): with
+`http: false`, a controller hands its requests to Yoga, and a Yoga plugin (`onExecute` /
+`onSubscribe`, `setExecuteFn` / `setSubscribeFn`) sends every operation back to `plugin.execute()` /
+`plugin.subscribe()` with the query text from Yoga's params. Executing `plugin.schema` directly with
+the server's `execute` does not work: the resolvers expect Znight's `GraphQLContext` as
+`contextValue` (`ctx.loader()`, `ctx.signal`, `@Ctx()`), the request scope entry the executor sets,
+and its masking. The recipe keeps all of that, and shows the direction is sound, but each
+application has to copy it and it pays for being built on an API meant for direct calls:
+
+- every operation is parsed and validated twice, by Yoga and again by `GraphQLPlugin` (its
+  document cache only makes repeated texts cheap);
+- the hook reports `transport: 'direct'`, so observability cannot tell the server's traffic apart;
+- `plugin.execute()` returns plain formatted errors, enough for Yoga's JSON but not for servers that
+  require `GraphQLError` instances (Apollo Server wraps anything else);
+- the `GraphQLRequest` is rebuilt from the server's params, so a plugin that changed the parsed
+  document (persisted operations resolved to a document, a rewriting plugin) is not what runs;
+- Yoga is created lazily in the controller, never disposed on shutdown, and the engine does not end
+  the subscriptions it serves to Yoga when the application stops;
+- the controller copies headers and buffers the body into a new `Request` on every adapter, even
+  Hono's, whose native request is already one.
+
+A public engine API (§4.2) taking the parsed document removes the double work and the mismatches,
+and driver packages remove the copying.
 
 ### 2.4 Why keep Znight's engine
 
@@ -734,7 +752,7 @@ subpath of Znight. ZNIGHT069 stays free.
 
 | Alternative                                                                                 | Verdict                                                                                                                                                                                                                                                                       |
 | ------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A1. Status quo plus recipes (`http: false`, a controller returning `yoga.fetch(...)`)      | Does not work today: the escape hatch has no context bridge (§2.3). Its smallest working form is "engine API + recipes, no driver packages": milestone M1 alone. Kept as the fallback if the owner wants less surface (Q1)                                                    |
+| A1. Status quo plus recipes (the guide's Yoga recipe on `plugin.execute()`)                 | Works for Yoga today, with the costs listed in §2.3 (double parse and validation, `transport: 'direct'`, no `GraphQLError`s, the server's document ignored, no shutdown), and every application copies it. Its smallest improvement is "engine API + recipes, no driver packages": milestone M1 alone. Rejected by the owner (Q1) in favour of driver packages |
 | A2. Yoga only                                                                               | Simplest, Fetch-based, closest to Znight's protocol. But Apollo Server is what most NestJS GraphQL applications run, and its plugins and usage reporting have no Yoga equivalent. The contract stays generic; Yoga ships first                                              |
 | A3. The driver owns schema and execution (NestJS model)                                     | Rejected (§2.4): loses build-time binding, field guards and ZNIGHT023, loaders per execution, errors as data, masking defaults and the single hook; every guarantee would depend on the driver                                                                               |
 | A4. Transport adapters at the HTTP level (a generic `HttpPlugin.mount(path, fetchHandler)`) | Useful beyond GraphQL (an auth library's Fetch handler...), but it does not solve the context bridge, which is the hard part, and plugin routes already accept a Web `Response`. Kept as a possible `@znight/http` follow-up; the GraphQL bridge helper stays internal (Q10) |
@@ -766,7 +784,7 @@ Milestones (one developer, days):
 | Milestone                  | Content                                                                                                                                                                                                                             | Days |
 | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
 | M1. Engine and contract    | `GraphQLEngine` (`parse`, `validate`, `rules`, `execute`, `subscribe`), `plugin.engine`, `GraphQLDriver`, the `driver` option, the built-in transport behind the contract with no hot path change (benchmarks before and after), `GraphQLOperationEvent.driver` in core, shutdown of every engine stream, a `graphql-http` test driver (its `createHandler` on the engine) running the audits; specification §8.3 and §9.7, README, guide | 4    |
-| M2. Yoga                   | `@znight/graphql/yoga`, the Fetch bridge, adapters × runtimes matrix, SSE subscriptions, `executeOperation` / `subscribeOperation`, the `graphql-http` audits through Yoga, conformance suite (exported for third-party drivers), docs (driver page, NestJS mapping), benchmark | 4    |
+| M2. Yoga                   | `@znight/graphql/yoga`, the Fetch bridge, adapters × runtimes matrix, SSE subscriptions, `executeOperation` / `subscribeOperation`, the `graphql-http` audits through Yoga, conformance suite (exported for third-party drivers), docs (driver page, NestJS mapping; the guide's Yoga recipe becomes `yogaDriver()`), benchmark | 4    |
 | M3. Apollo Server (once it accepts graphql 17) | `@znight/graphql/apollo`, the gateway executor, the `HTTPGraphQLRequest` bridge (`complete` and `chunked` bodies), landing pages, drain, docs, benchmark                              | 4    |
 | M4. On demand              | Mercurius if Q8 changes; the engine follow-ups that every driver inherits: `graphql-ws` on `@znight/websocket`, incremental delivery, federation (each with its own RFC)                                                                | —    |
 

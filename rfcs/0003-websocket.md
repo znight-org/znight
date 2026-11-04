@@ -1,11 +1,15 @@
-# RFC 0003: `@znight/websocket` for v0.1
+# RFC 0003: `@znight/websocket`
 
 |          |                                                                                                                                                                                                                                                                                |
 | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Status   | Deferred (target version not defined)                                                                                                                                                                                                                                          |
+| Status   | Accepted                                                                                                                                                                                                                                                                       |
 | Date     | 2026-10-26                                                                                                                                                                                                                                                                     |
 | Affects  | New `@znight/websocket` (runtime, compiler extension, transports), `@znight/http` (upgrade routes, adapter capability, two compiler exports), `@znight/core` (two hooks, two error codes), `@znight/testing`, `@znight/observability`, CLI, docs                               |
 | Decision | Gateways served **by `HttpPlugin`'s server**: the handshake is an HTTP request (same scope, hooks, guards, CORS/proxy settings), then a transport takes the socket: **`ws`** on every `node:http` adapter (Node and Bun), **native `Bun.serve()`** with `honoAdapter()` on Bun |
+
+**Acceptance (2026-11-04).** Accepted, without a target version: `@znight/websocket` is planned, not
+scheduled for a release (see the roadmap). The text was written when the package targeted v0.1:
+below, "v0.1" means the first release of `@znight/websocket` and "v0.2" its follow-ups.
 
 ## 1. Summary
 

@@ -29,7 +29,7 @@ what you use.
 | Security           | Built into [`@znight/http`](./http): access decisions checked at build time and at boot, CORS, security headers, trusted proxies; recipes in the [Security guide](/guide/security) |
 | A database, an ORM | The client of your choice, provided by a `@Factory()`; Drizzle recommended for SQL ([Data access](/guide/data-access))                                                             |
 | Caching            | A method interceptor ([recipe](/guide/aop#cache)); `@znight/cache` is on the [roadmap](/roadmap#znight-cache)                                                                      |
-| WebSockets         | Planned, version not defined ([roadmap](/roadmap#planned)); [Server-Sent Events](./http#server-sent-events) today                                                                  |
+| WebSockets         | Planned, `@znight/websocket` ([roadmap](/roadmap#znight-websocket)); [Server-Sent Events](./http#server-sent-events) today                                                         |
 
 ## How a feature package is built
 

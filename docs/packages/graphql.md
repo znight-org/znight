@@ -181,7 +181,11 @@ curl -N -H 'accept: text/event-stream' -H 'content-type: application/json' \
 ```
 
 A client that leaves aborts `ctx.signal`; on shutdown the stream ends without `complete` so clients
-reconnect elsewhere; `subscriptions.maxActive` caps the number of streams (503 beyond).
+reconnect elsewhere; `subscriptions.maxActive` caps the number of streams (503 beyond). The
+`PubSub` carries events from producers (mutations, jobs, consumers) to every open subscription; the
+in-memory default serves one instance, and several instances need a shared one through the `pubsub`
+option: see [what the PubSub is for](/guide/graphql#pubsub) and the
+[Redis recipe](/guide/graphql#custom-pubsub).
 
 ## Access control
 
@@ -217,7 +221,8 @@ guards. `false` is a `FORBIDDEN` error on that field. See the [guide](/guide/gra
 | `enforcement`   | `'error'`                                                              | Field decisions not enforced by a guard: fail the boot or `'warn'`              |
 
 The instance exposes `schema`, `printSchema()`, `execute(request)`, `subscribe(request)`, `pubsub`
-and `activeSubscriptions`, for custom transports and controllers calling GraphQL.
+and `activeSubscriptions`, for custom transports and controllers calling GraphQL, such as
+[GraphQL Yoga behind a controller](/guide/graphql#yoga).
 
 ## Errors
 
