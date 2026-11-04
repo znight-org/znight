@@ -77,6 +77,8 @@ walks through a migration.
 | `NestFactory.create(AppModule)` + `app.listen(3000)` | `Application.create({ metadata, plugins: [HttpPlugin.configure({ port: 3000 })] })` + `app.start()`                                      |
 | `Test.createTestingModule({...}).compile()`          | `TestBed.create(Class, { metadata })` / `TestApp.create()`                                                                               |
 | `.overrideProvider(X).useValue(fake)`                | `overrides: [[X, fake]]`                                                                                                                 |
+| `new Logger(X.name)` (`@nestjs/common`)              | An injected `Logger`, or `getLogger(X.name)` outside DI ([below](#logger-to-getlogger))                                                  |
+| `Logger.overrideLogger(false)` in specs              | `setFallbackLogger(new Logger({ level: 'silent' }))` once, in the test preload ([below](#logger-to-getlogger))                           |
 | `ScheduleModule.forRoot()`, `@Cron()`, `@Interval()` | [`@znight/schedule`](/packages/schedule): `SchedulePlugin`, `@Cron()`, `@Interval('10s')`                                                |
 | `TypeOrmModule`, `@InjectRepository(User)`           | A `@Factory()` providing the client, repositories behind interfaces ([Data access](./data-access))                                       |
 | `CacheModule`, `CacheInterceptor`                    | A method interceptor ([cache recipe](./aop#cache)); `@znight/cache` is planned                                                           |
@@ -262,6 +264,52 @@ Register the guard globally (`HttpPlugin.configure({ guards: [AuthGuard] })`, th
 typed and visible in the dependency graph. The [Security guide](./security) has the complete
 recipes: JWT and OIDC with `jose`, API keys, policies, rate limiting, CSRF.
 
+## `new Logger(X.name)` → `getLogger()` {#logger-to-getlogger}
+
+NestJS code often creates its loggers statically, in a field initialiser, and specs silence them
+with `Logger.overrideLogger(false)`:
+
+```ts
+// NestJS
+@Injectable()
+export class AddAttendeeUseCase {
+  private readonly logger = new Logger(AddAttendeeUseCase.name)
+  constructor(private readonly events: EventRepository) {}
+}
+```
+
+In Znight the `Logger` of [`@znight/observability`](/packages/observability#logging) is injected
+like any provider, and it is the recommended form: it is visible in the dependency graph and a
+`TestBed` hands a mock. Injecting it adds a constructor parameter, though, which breaks every spec
+calling `new AddAttendeeUseCase(...)` with positional arguments. `getLogger()` keeps the static form
+while you migrate, or for classes the container does not create:
+
+```ts
+// Znight
+import { Injectable } from '@znight/core'
+import { getLogger } from '@znight/observability'
+
+@Injectable()
+export class AddAttendeeUseCase {
+  private readonly logger = getLogger(AddAttendeeUseCase.name)
+  constructor(private readonly events: EventRepository) {}
+}
+```
+
+Its entries go through the application logger (level, redaction, transports, `requestId` inside a
+request), with a `logger` field holding the name; entries written before the application exists
+are buffered and written once it does. In specs that create no application, replace the
+`Logger.overrideLogger(false)` calls with one line in the test preload:
+
+```ts
+import { Logger, setFallbackLogger } from '@znight/observability'
+
+setFallbackLogger(new Logger({ level: 'silent' }))
+```
+
+A `TestApp` still writes the entries to its own logger: configure `ObservabilityPlugin` with
+`logging: { level: 'silent' }`, or capture them with `logging: { destination }`.
+
 ## Interfaces without tokens
 
 NestJS needs tokens because interfaces disappear at runtime:
@@ -359,4 +407,4 @@ await app.start()
 7. **Lifecycle hooks**: rename (`onModuleInit` → `onStart`, ...).
 8. **Build** and fix the `ZNIGHT` diagnostics: they point to every wiring problem at once, with hints.
 9. **Tests**: `Test.createTestingModule` becomes `TestBed` or `TestApp`; `overrideProvider` becomes
-   `overrides`.
+   `overrides`; `Logger.overrideLogger(false)` becomes one `setFallbackLogger()` in the preload.

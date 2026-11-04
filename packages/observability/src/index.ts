@@ -40,6 +40,12 @@ export {
   logMessages,
   type MessageLogOptions,
 } from './logging/requests.ts'
+export {
+  getLogger,
+  STATIC_LOG_BUFFER_SIZE,
+  type StaticLogger,
+  setFallbackLogger,
+} from './logging/static.ts'
 export { type ConsoleTransportOptions, consoleTransport, type LogTransport } from './logging/transport.ts'
 export {
   DEFAULT_DURATION_BUCKETS,

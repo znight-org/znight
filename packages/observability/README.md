@@ -131,6 +131,49 @@ Every entry is enriched automatically:
 
 You can create a `Logger` outside of an application: `new Logger({ level: 'debug' })`.
 
+### Static loggers: `getLogger()`
+
+Inject the `Logger` in providers: it is the default, visible in the dependency graph and mocked by
+`TestBed`. For code the container does not create (module-level functions, plain classes) or to
+migrate static loggers (NestJS `new Logger(X.name)`, SLF4J `LoggerFactory.getLogger(X.class)`)
+without changing constructors, `getLogger(name, bindings?)` returns a logger usable anywhere,
+including at module load or in a field initialiser, before any application exists:
+
+```ts
+import { getLogger } from '@znight/observability'
+
+export class UserImporter {
+  private readonly logger = getLogger(UserImporter.name)
+
+  import(rows: readonly unknown[]): void {
+    this.logger.info('Importing users', { count: rows.length })
+  }
+}
+
+const audit = getLogger('audit', { component: 'security' }) // bindings written in every entry
+audit.child({ tenant: 'acme' }).warn('Access denied')
+```
+
+A `StaticLogger` has the logging methods of `Logger` (`trace` ... `fatal`, `log`, `isLevelEnabled`,
+`child`) and its `name`; it is not a `Logger` (no `level`, `flush`, `pino`).
+
+| Situation                                      | Where the entries go                                                                                                                                                                            |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| One application running                        | Its logger, as a child with `{ logger: name, ...bindings }`: same level, redaction, transports, `requestId` / scope fields inside a request, `job` / `runId` inside a run, `traceId` / `spanId` |
+| Several applications (tests)                   | The application whose request scope is active, otherwise the one created last                                                                                                                   |
+| Before any application                         | Buffered, then written by the first application once its logger exists (the first `STATIC_LOG_BUFFER_SIZE` = 1000 entries, with the time of the call in `loggedAt`; a warning counts the rest)  |
+| After every application stopped                | The logger of the last one, as long as that application is referenced (a `main.ts` keeps it until the process exits); otherwise buffered again                                                  |
+| No application running, `setFallbackLogger(l)` | `l` (entries buffered so far included): silence or capture logs of tests that create no application                                                                                             |
+
+"Running" means from the moment `ObservabilityPlugin` builds its logger (during `Application.create()`)
+until the application is disposed. A disabled level costs the lookup of the application and pino's
+level check, without allocation; before any application exists every level is buffered (and
+`isLevelEnabled()` returns `true`), the application's level applies when the buffer is written. The
+child logger of each application is created on first use and keeps the level the application logger
+had then (pino semantics: changing `logger.level` later does not change existing children). Every copy
+of the package loaded in the process shares the same routing. Class names survive the Vite build of a
+server application (no minification by default); with a minifier, pass a string literal.
+
 ### Logger options
 
 `ObservabilityPlugin.configure({ logging })` accepts every option below plus the request-log
@@ -635,6 +678,12 @@ For `graphql:operation`, `traceGraphQLOperations(tracer)`, `measureGraphQLOperat
 ## Testing
 
 - Capture logs with `destination`: `logging: { destination: { write: line => lines.push(JSON.parse(line)) } }`.
+  Entries of `getLogger()` loggers go there too while the application runs; silence them with
+  `logging: { level: 'silent' }`.
+- Tests that create no application (plain unit tests, `TestBed`): `getLogger()` entries would be
+  buffered for the next application of the process. Set a fallback once, in the test preload:
+  `setFallbackLogger(new Logger({ level: 'silent' }))` to silence them (the equivalent of NestJS
+  `Logger.overrideLogger(false)`), or `setFallbackLogger(new Logger({ destination }))` to capture them.
 - Record spans with `@opentelemetry/sdk-trace-base`'s `InMemorySpanExporter`:
   `tracing: { tracerProvider: new BasicTracerProvider({ spanProcessors: [new SimpleSpanProcessor(exporter)] }) }`
   (plus an `AsyncLocalStorageContextManager` for nesting).
@@ -698,7 +747,7 @@ What the compiler emits, and what the runtime relies on:
 | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ZNIGHT001` | An optional peer (`prom-client`, `pino-pretty`) is required but not installed; `MetricsRegistry` injected while metrics are unavailable (wrapped in `ZNIGHT015`) |
 | `ZNIGHT004` | The same plugin instance is used by two running applications                                                                                                     |
-| `ZNIGHT005` | Invalid option (level, decorator options, metric conflict, port...)                                                                                              |
+| `ZNIGHT005` | Invalid option (level, decorator options, metric conflict, port...), `getLogger()` without a name                                                                |
 | `ZNIGHT006` | `datadogTransport()` without API key                                                                                                                             |
 
 Instrumentation never changes the outcome of your code: a failing log destination, metric or span is

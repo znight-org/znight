@@ -79,6 +79,31 @@ writes one entry per HTTP request (`request completed`) and per message delivery
 logger on shutdown, and entries written after that (the final `Application stopped`) are flushed
 as soon as they are written, so they are delivered before the process exits.
 
+### Static loggers
+
+Inject the `Logger` by default. For code outside dependency injection, or to migrate static loggers
+(NestJS `new Logger(X.name)`) without changing constructors, `getLogger()` returns a logger usable
+anywhere, even at module load, before any application exists:
+
+```ts
+import { getLogger } from '@znight/observability'
+
+export class UserImporter {
+  private readonly logger = getLogger(UserImporter.name)
+
+  import(rows: readonly unknown[]): void {
+    this.logger.info('Importing users', { count: rows.length })
+  }
+}
+```
+
+Its entries go through the logger of the running application (the one whose request scope is
+active when several run, otherwise the latest), as a child with `{ logger: name }`: same level,
+redaction, transports and request context. Entries written before the application exists are
+buffered (the first 1000) and written once it does. In tests that create no application,
+`setFallbackLogger(new Logger({ level: 'silent' }))` in the test preload silences them. The
+[package README](../../packages/observability/README.md) details the routing rules.
+
 ## Metrics
 
 When the optional peer `prom-client` is installed, the plugin records RED metrics (rate, errors,
