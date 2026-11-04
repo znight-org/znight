@@ -6,6 +6,7 @@
  *   `GraphQLPlugin.execute()`;
  * - `subscribeOperation()` streams an operation over GraphQL over SSE in memory, or through
  *   `GraphQLPlugin.subscribe()` without HTTP transport;
+ * - `describeDriverConformance()` describes the conformance scenarios of a GraphQL driver (RFC 0009);
  * - `fakeLoader()` builds a `Loader<L>` whose `load` / `loadMany` are spies of the running test
  *   framework (`bun:test`, Vitest, Jest, or the built-in spy of `@znight/testing`).
  *
@@ -22,6 +23,8 @@ import { parseSseStream } from '@znight/http'
 import { resolveMockFn } from '@znight/testing'
 
 import { endpointOf, executorOf, type GraphQLPlugin } from './plugin.ts'
+
+export { type ConformanceTestApi, type DriverConformanceOptions, describeDriverConformance } from './conformance.ts'
 
 /** An operation for {@link executeOperation} and {@link subscribeOperation}. */
 export interface OperationRequest {
