@@ -3042,8 +3042,12 @@ below; absent: the built-in transport); unknown keys and invalid values are ZNIG
 - `@znight/graphql/testing` (optional peer `@znight/testing`): `executeOperation(app, request)`
   (`POST` through `app.inject()`, or `plugin.execute()` without HTTP transport),
   `subscribeOperation(app, request)` (SSE through `app.injectStream()`, or `plugin.subscribe()`;
-  resolves once the subscription is established; `next()` times out, 2 s by default) and
-  `fakeLoader<L>(values)`.
+  resolves once the subscription is established; `next()` times out, 2 s by default),
+  `fakeLoader<L>(values)` and `describeDriverConformance({ driver, test, adapters?,
+  subscriptions? })` (the driver conformance scenarios of RFC 0009 §12, with the caller's
+  `describe` / `it` / `beforeAll` / `afterAll` and `node:assert`).
+- `@znight/graphql/yoga` (optional peer `graphql-yoga` 6, loaded by this entry only; the root and
+  `/testing` entries never import it): `yogaDriver(options?)` and `yogaContext(ctx)`, see below.
 
 **Engine and drivers (normative, RFC 0009).** `plugin.engine` (after bootstrap) is the
 `GraphQLEngine` of the plugin: graphql-js-shaped functions, bound, that any GraphQL server calls.
@@ -3111,6 +3115,30 @@ interface GraphQLDriver {
 - The built-in transport is the default driver (`builtin`): its handlers call the internal
   executor directly, never the engine functions, so an application without driver runs the same
   per-request code as before RFC 0009.
+- **The Yoga driver** (`yogaDriver()`, `name: 'yoga'`) is route-mounted: `GET` and `POST` on
+  `path`. `start()` creates the Yoga server with `schema: engine.schema`, `graphqlEndpoint:
+  settings.path`, `graphiql` from `settings.ide` (GraphiQL options from the driver options),
+  `maskedErrors: false`, `cors: false`, `maxRequestBodySize` from `settings.http.bodyLimit`,
+  `parserAndValidationCache: false`, `landingPage: false`, Yoga's request id from
+  `HttpContext.requestId`, the runtime's Fetch API, `disposeOnProcessTerminate: false` and
+  `logging: false` unless set; the options Znight owns (`schema`, `context`, `graphqlEndpoint`,
+  `maskedErrors`, `cors`, `fetchAPI`, `maxRequestBodySize`, `parserAndValidationCache`,
+  `requestId`, `healthCheckEndpoint`, `landingPage`, `disposeOnProcessTerminate`, a non-object
+  `graphiql`) are ZNIGHT066 when `yogaDriver()` is called. An Envelop plugin installed before the
+  application's plugins sets the engine's `parse`, `validate`, `execute` and `subscribe`
+  (`transport: 'sse'`) as Yoga's (Envelop's `useEngine`): Yoga's default `specifiedRules` reach
+  `validate` as the default rules. A guard plugin installed after them refuses an operation that
+  did not reach the engine (a plugin replacing the execution): its result becomes a ZNIGHT066 error
+  (`INTERNAL_SERVER_ERROR`), logged once. A route handler calls `yoga.fetch(request, { znight:
+  ctx })` with the Fetch bridge's request: on `honoAdapter()`, the native `Request` when its body
+  was not read and is a `GET`, or declares a `content-length` within the body limit; otherwise a
+  `Request` built from the method, the absolute URL (`protocol`, `host` header, raw target), the
+  headers, `ctx.signal` and the body of `ctx.rawBody()` (so the body limit is `HttpPlugin`'s 413).
+  A `Response` that is not an instance of the global `Response` of the moment (`@hono/node-server`
+  replaces it when listening) is rebuilt on it with the same status, headers and body. `GET`
+  without `http.get` answers 405 (`allow: POST`) unless it asks for GraphiQL (`accept: text/html`)
+  with `graphiql` on. `stop()` awaits `yoga.dispose()`. `yogaContext(ctx)` returns
+  `ctx.serverContext` when it is Yoga's context of the driver (ZNIGHT066 otherwise).
 
 **Impl.** Two concurrent `plugin.execute()` calls in one request scope share the scope's
 `GraphQLContext` entry (`@Ctx()` gets the right one). The SDL of a `GraphQLScalarType` definition

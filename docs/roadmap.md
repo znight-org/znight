@@ -137,8 +137,9 @@ These are tracked in the RFCs as follow-ups. None has a date.
   cookies; a hook measuring the lifetime of event streams; fan-out of events across instances.
 - **WebSocket follow-ups**: rooms shared across instances, a typed client generated from the
   metadata, an AsyncAPI document.
-- **GraphQL follow-ups**: drivers to serve the schema with GraphQL Yoga or Apollo Server
-  ([RFC 0009](https://github.com/znight-org/znight/blob/main/rfcs/0009-graphql-drivers.md), accepted, in progress),
+- **GraphQL follow-ups**: an Apollo Server driver once Apollo Server accepts graphql-js 17 (the
+  engine and the GraphQL Yoga driver are in place,
+  [RFC 0009](https://github.com/znight-org/znight/blob/main/rfcs/0009-graphql-drivers.md)),
   GraphQL interfaces in code-first, `__resolveType` methods and custom
   directives in schema-first, `graphql-ws` subscriptions, `@defer` / `@stream`,
   trusted documents checked at build time, query cost analysis, federation, resolver-level spans

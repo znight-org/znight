@@ -44,7 +44,8 @@ npm install -D @znight/compiler vite
 
 Runs on Node.js >= 24 and Bun >= 1.3 (ESM only). `@znight/http` and `graphql` 17 are required peer
 dependencies, `dataloader` is a dependency, `@znight/testing` an optional peer (for
-`@znight/graphql/testing`).
+`@znight/graphql/testing`), `graphql-yoga` 6 an optional peer (for the Yoga driver,
+`@znight/graphql/yoga`).
 
 ## Contents
 
@@ -812,10 +813,9 @@ ZNIGHT066.
 `request` is `{ query, operationName?, variables?, extensions? }`; `options` is `{ signal?,
 requestId? }`. A direct execution has no HTTP guards of its own: inside a controller, it runs in the
 route's request scope, after the route's guards. With `http: false`, a controller can hand its
-requests to another GraphQL server that delegates the execution to `execute()` and `subscribe()`:
-the guide's [Serve the schema with GraphQL Yoga](../../docs/guide/graphql.md#yoga) recipe keeps
-guards, loaders, the request scope and error formatting. A [driver](#drivers-and-the-engine) does
-the same without the copying, on the parsed document.
+requests to another GraphQL server that delegates the execution to `execute()` and `subscribe()`;
+a [driver](#drivers-and-the-engine) does it without the copying, on the parsed document (GraphQL
+Yoga: [`yogaDriver()`](#graphql-yoga)).
 
 ```ts
 const plugin = app.getPlugin<GraphQLPlugin>('graphql')
@@ -876,14 +876,16 @@ serves the same schema with another GraphQL server, for its protocol features an
 (RFC 0009): Znight stays the engine, the driver owns the transport.
 
 ```ts
-GraphQLPlugin.configure({ guards: [AccessGuard], driver: myDriver })
+import { yogaDriver } from '@znight/graphql/yoga'
+
+GraphQLPlugin.configure({ guards: [AccessGuard], driver: yogaDriver() })
 ```
 
 Resolvers, guards, loaders, result mappers, request-scoped providers and tests do not change: the
 server calls `plugin.engine`, which runs the compiled schema with everything this README describes.
-**GraphQL Yoga** (`@znight/graphql/yoga`) is the first driver and comes next; **Apollo Server**
-follows once it accepts graphql-js 17. Until then, a driver is a small object, and the engine plugs
-into any graphql-js-shaped server as it is.
+**GraphQL Yoga** is the first driver ([`@znight/graphql/yoga`](#graphql-yoga)); **Apollo Server**
+follows once it accepts graphql-js 17. Any other graphql-js-shaped server takes the engine as it
+is: a driver is a small object, checked with the [conformance suite](#driver-conformance).
 
 **The engine.** `plugin.engine` (after bootstrap, and the first argument of `driver.start()`):
 
@@ -972,9 +974,78 @@ export function graphqlHttpDriver(): GraphQLDriver {
 - **Cost.** Without `driver`, the plugin runs the built-in transport's handlers, which call the
   internal executor directly: an application without driver pays nothing for the abstraction.
 
-`executeOperation()` of `@znight/graphql/testing` sends its requests to the driver's routes like to
-the built-in endpoint. The repository's tests run the `graphql-http` audits against the driver
-above on the four adapters, on Node.js and Bun.
+`executeOperation()` and `subscribeOperation()` of `@znight/graphql/testing` send their requests to
+the driver's routes like to the built-in endpoint. The repository's tests run the `graphql-http`
+audits against the driver above and the Yoga driver on the four adapters, on Node.js and Bun.
+
+### GraphQL Yoga
+
+`@znight/graphql/yoga` serves the schema with [GraphQL Yoga](https://the-guild.dev/graphql/yoga-server)
+6 (`graphql-yoga`, an optional peer dependency loaded by this entry only):
+
+```ts
+import { GraphQLPlugin } from '@znight/graphql'
+import { yogaDriver } from '@znight/graphql/yoga'
+
+GraphQLPlugin.configure({ driver: yogaDriver({ plugins: [usePersistedOperations({ getPersistedOperation })] }) })
+```
+
+| Export                             | What                                                                                                                       |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `yogaDriver(options?)`             | The driver (`name: 'yoga'`); `driver.yoga` is the Yoga server once started                                                 |
+| `YogaDriverOptions`                | Yoga's options without those Znight owns (below); `graphiql` takes GraphiQL's options                                      |
+| `yogaContext(ctx)`                 | Yoga's context of an operation (`request`, `params`, what plugins added, `znight`: the `HttpContext`), ZNIGHT066 otherwise |
+| `YogaContext`, `YogaServerContext` | Their types                                                                                                                |
+
+- **The engine is Yoga's engine.** The driver installs Envelop's `useEngine` with the engine's
+  `parse`, `validate`, `execute` and `subscribe`, before the application's plugins: one document
+  cache (Yoga's `parserAndValidationCache` is off), the engine's limits and introspection rule,
+  rejected documents observed by the hook, one `graphql:operation` event per operation with
+  `driver: 'yoga'` (`transport: 'sse'` for subscriptions). Plugins wrapping the execution
+  (`useResponseCache`) call the engine; an operation executed by a plugin that replaces it
+  (`useGraphQlJit`) fails with ZNIGHT066, logged once: its resolvers would not get the
+  `GraphQLContext`.
+- **Owned options**, refused with ZNIGHT066 (a type error first): `schema`, `context`,
+  `graphqlEndpoint` (`path`), `maskedErrors` (the engine masks once: Yoga's is off),
+  `cors` (`HttpPlugin`'s), `maxRequestBodySize` (`http.bodyLimit`), `parserAndValidationCache`,
+  `requestId` (Yoga uses `HttpContext.requestId`), `healthCheckEndpoint`, `landingPage`,
+  `fetchAPI` (the runtime's own) and `disposeOnProcessTerminate` (the application stops Yoga).
+  Yoga's `logging` is off unless set.
+- **Routes.** `GET` and `POST` on `path`. `GET` serves Yoga's GraphiQL with `graphiql` on, and
+  queries with `http.get` on (405 with `allow: POST` otherwise).
+- **The Fetch bridge.** On `honoAdapter()` the native Web `Request` is handed to Yoga as is (a `GET`,
+  or a body with a `content-length` within the limit); otherwise a `Request` is built from
+  `HttpContext` with the body read by `ctx.rawBody()`, so a body past `http.bodyLimit` is
+  `HttpPlugin`'s 413 on every adapter. Yoga's `Response` is sent as is by `HttpPlugin`.
+- **Subscriptions** use Yoga's SSE; the engine caps them (`subscriptions.maxActive`) and ends them on
+  shutdown, when Yoga sends `complete` (not the built-in transport's `retry` hint). `stop()` awaits
+  `yoga.dispose()` (the plugins' `onDispose`).
+- **Cost.** Yoga's request parsing, its plugin chain and the Web objects cost about 13 to 18 µs per
+  request on Bun and 27 to 45 µs on Node.js in the in-process benchmark (`test/bench/http.bench.ts`),
+  against about 1.6 µs and 5.5 µs for the built-in transport.
+
+### Driver conformance
+
+`describeDriverConformance()` of `@znight/graphql/testing` describes the scenarios every driver
+passes (RFC 0009 §12), with the test framework's own functions (`bun:test`, Vitest, Jest,
+`node:test`) and `node:assert`: queries, mutations, a field guard reading a request-scoped
+provider, loaders batching, request-scoped providers per request, result mappers, masking,
+introspection off, limits, HTTP guards on the endpoint, the hook, and over SSE (unless
+`subscriptions: false`) events, completion, client abort, `maxActive` and shutdown.
+
+```ts
+import { describeDriverConformance } from '@znight/graphql/testing'
+import { yogaDriver } from '@znight/graphql/yoga'
+import { expressAdapter } from '@znight/http/express'
+import { honoAdapter } from '@znight/http/hono'
+import { afterAll, beforeAll, describe, it } from 'bun:test'
+
+describeDriverConformance({
+  driver: () => yogaDriver(), // a new driver per application; () => undefined for the built-in transport
+  test: { describe, it, beforeAll, afterAll },
+  adapters: { express: () => expressAdapter(), hono: () => honoAdapter() },
+})
+```
 
 ## Security defaults and limits
 
@@ -1456,8 +1527,8 @@ are emitted by schema-first only: code-first sections, hashes and artifacts are 
   custom internal enum values (an enum value is its SDL name).
 - **Subscriptions over SSE only.** No `graphql-ws` (WebSocket), no SSE single connection mode, no
   multipart subscriptions.
-- **Drivers**: the engine and the driver contract are in place; the GraphQL Yoga driver
-  (`@znight/graphql/yoga`) comes next, Apollo Server once it accepts graphql-js 17.
+- **Drivers**: the built-in transport and GraphQL Yoga (`@znight/graphql/yoga`); Apollo Server once it
+  accepts graphql-js 17. Yoga plugins that replace the execution (`useGraphQlJit`) are refused.
 - No `@defer` / `@stream`, no persisted or trusted documents, no query cost analysis, no response
   cache, no federation or schema stitching, no file uploads (use an HTTP upload route), no operation
   batching.
