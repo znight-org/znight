@@ -551,7 +551,7 @@ application provider, e.g. `class AppLogger implements CoreLogger`) nor package-
 | ZNIGHT063 | Invalid GraphQL input: a declaration used as input and as output, a getter, union, set or async iterable in an input type, a cycle of non-null input fields, a default value (`@default`, parameter default) not matching its type                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | error                                          |
 | ZNIGHT064 | Unresolvable abstract type: the members of a union (or the implementations of an interface, schema-first) cannot be told apart at runtime (no class, no common literal discriminant, no `__typename`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | error                                          |
 | ZNIGHT065 | Invalid loader: `@Loader()` on a type that is not `Loader<L>`, `L` not implementing `BatchLoad<K, V>`; at runtime, a batch function returning another number of values than keys (every key of the batch fails)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | error                                          |
-| ZNIGHT066 | Invalid GraphQL setup (boot): malformed or version-skewed `extensions.graphql`, graphql-js schema validation failure, invalid `GraphQLPlugin` options, no `http` plugin while the HTTP transport is on, scalar name mismatch                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | error                                          |
+| ZNIGHT066 | Invalid GraphQL setup (boot): malformed or version-skewed `extensions.graphql`, graphql-js schema validation failure, invalid `GraphQLPlugin` options (an invalid `driver`, SSE options with a driver), no `http` plugin while the HTTP transport is on, a route-mounted driver with `http: false`, a driver failing to start, scalar name mismatch; at runtime, `GraphQLEngine.execute()` / `subscribe()` with another schema (RFC 0009)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | error                                          |
 | ZNIGHT067 | Invalid GraphQL SDL (schema-first, RFC 0007): no `.graphql` file matches the `schema` globs, a syntax error, a type defined twice, a duplicate field, value or argument, an unknown type or directive, an extension of a missing type or of another kind, a graphql-js schema validation error, `@oneOf` inputs, a scalar without `scalar()` definition; a custom directive, a description or `@specifiedBy` on a built-in scalar (warnings)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | error / warning                                |
 | ZNIGHT068 | GraphQL schema mismatch (schema-first, RFC 0007): a root field without resolver, a resolver method naming no field, `@Resolver('X')` naming no object type, `@Args('x')` naming no argument, an object field neither a resolver nor the returned TypeScript type provides, a signature not conforming to the SDL types (nullability, lists, scalars, enums, union and interface members, input objects)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | error                                          |
 
@@ -1518,7 +1518,10 @@ class Hooks {
   - `GraphQLOperationEvent`: `operationType` (`query` / `mutation` / `subscription`, `undefined`
     when the request was rejected before an operation was selected), `operationName` (`undefined`
     when anonymous), `documentId` (SHA-256 hex of the query text, `undefined` without one),
-    `transport` (`http` / `sse` / `direct`), `requestId`, `context` (the `GraphQLContext`),
+    `transport` (`http` / `sse` / `ws` / `direct`; `ws` is reserved for `graphql-ws`), `driver`
+    (the GraphQL driver that received the operation, RFC 0009: `builtin` for the built-in
+    transport and direct calls, `yoga`, `apollo` or a third party's name), `requestId`, `context`
+    (the `GraphQLContext`),
     `startTime`, `outcome?` (`success` / `partial` / `error` / `rejected`) and `errors?`
     (`{ message, code, path? }[]`, as sent to the client), both set before `run` resolves. One event
     per operation; a subscription has one event for its whole life, settled when it ends.
@@ -2920,11 +2923,11 @@ interface GraphQLResolverBinding {
 **Runtime.** `GraphQLPlugin.configure(options | (container) => options)` (name `graphql`; options
 `path` (`'/graphql'`), `http` (`false` or `{ meta, guards, bodyLimit = '100kb', get = true }`),
 `guards`, `errorMappers`, `resultMappers` (RFC 0008), `exposeErrors` (`false`), `introspection`
-(`NODE_ENV !== 'production'`), `graphiql` (`NODE_ENV === 'development'`), `limits` (`maxTokens`
+(`NODE_ENV !== 'production'`), `graphiql` (`NODE_ENV === 'development'`; with a driver, the driver's IDE), `limits` (`maxTokens`
 2 000, `maxDepth` 12, `maxAliases` 30, `maxDirectives` 50, each `false`-able), `documentCache`
 (1 000), `subscriptions` (`false` or `{ maxActive = 10 000, bufferSize = 100, heartbeat?,
-maxDuration? }`), `pubsub`, `enforcement` (`'error'` | `'warn'`); unknown keys and invalid values
-are ZNIGHT066):
+maxDuration? }`), `pubsub`, `enforcement` (`'error'` | `'warn'`), `driver` (a `GraphQLDriver`,
+below; absent: the built-in transport); unknown keys and invalid values are ZNIGHT066):
 
 - `register` refuses a second running application (ZNIGHT004), validates static options and checks
   that a plugin named `http` exists unless `http: false` (ZNIGHT066), declares `GraphQLContext`
@@ -2932,9 +2935,11 @@ are ZNIGHT066):
   owns; a deferred delegate when options are a function) and the plugin. `initRoots(context)`
   returns the classes of `guards`, `errorMappers` and `resultMappers` and the resolver, guard and
   loader tokens of the section (§10).
-- `httpRoutes(context)` (`PluginHttpRoutes`, §9.1) returns `POST` on `path` with `http.bodyLimit`,
-  and `GET` when `http.get` or `graphiql` is on, both named `handle` with `http.meta` and
-  `http.guards`; `[]` with `http: false`. Handlers read the runtime lazily.
+- `httpRoutes(context)` (`PluginHttpRoutes`, §9.1) returns the routes of the driver with
+  `http.meta` and `http.guards`, and `http.bodyLimit` on the routes that are not `GET`/`HEAD`; `[]`
+  with `http: false` or a driver without `routes`. The built-in transport's are `POST` on `path`,
+  and `GET` when `http.get` or `graphiql` is on, both named `handle`. Handlers read the runtime
+  lazily.
 - `onBootstrap` resolves the options, checks the section structurally (version, roots, names,
   kinds, type references and positions, bindings, interfaces (an interface field has no resolver),
   discriminators, scalars, groups), builds the
@@ -2947,10 +2952,11 @@ are ZNIGHT066):
   mapper class that is not a provider is ZNIGHT001. The `types` of every result mapper (a class's
   `static types`, an instance's `types` property or its class's) MUST be a non-empty array of names of
   object types of the section, ZNIGHT066 otherwise (every problem in one error).
-- `onStart` logs `GraphQL endpoint ready` (path, types, schema hash); `onStop` aborts the direct
-  subscriptions (`plugin.subscribe()`); requests and SSE streams that came over HTTP are drained
-  and closed by `HttpPlugin.onStop` (RFC 0006: streams end without `complete`). `onDispose` closes
-  the `MemoryPubSub` the plugin created and clears the document cache.
+- `onStart` logs `GraphQL endpoint ready` (path, types, schema hash); `onStop` aborts the plugin's
+  signal, ends the subscriptions it owns (`plugin.subscribe()` and `engine.subscribe()`), then
+  awaits `driver.stop()`; requests and SSE streams of the built-in transport are drained and
+  closed by `HttpPlugin.onStop` (RFC 0006: streams end without `complete`). `onDispose` closes the
+  `MemoryPubSub` the plugin created and clears the document cache.
 - **Resolver pipeline (normative, per call):** the resolver instance (the singleton, or
   `container.get(token)` in the current scope), then guards, global ones only on root fields and
   on field resolvers whose `meta` is not empty, then class and method `@UseGuard` (each resolved
@@ -3025,7 +3031,8 @@ are ZNIGHT066):
   event stream is a request error (400; 200 in `application/json`); an unacceptable `accept` is
   406; a body past the limit is 413 with a GraphQL error body.
 - **Hook:** `graphql:operation` (§8.3) wraps every operation, and a subscription for its whole
-  life; the event is built only when the hook has wrappers or listeners. `outcome` is `success`,
+  life, with `driver` set (`builtin` for the built-in transport and direct calls); the event is
+  built only when the hook has wrappers or listeners. `outcome` is `success`,
   `partial`, `error` or `rejected` (rejected before execution). `@znight/observability` wraps it
   (spans, metrics, opt-in logs, §9.4).
 - `PubSub` (abstract, `publish(topic, payload)`, `subscribe(topic, { signal })`) is a singleton
@@ -3036,6 +3043,73 @@ are ZNIGHT066):
   `subscribeOperation(app, request)` (SSE through `app.injectStream()`, or `plugin.subscribe()`;
   resolves once the subscription is established; `next()` times out, 2 s by default) and
   `fakeLoader<L>(values)`.
+
+**Engine and drivers (normative, RFC 0009).** `plugin.engine` (after bootstrap) is the
+`GraphQLEngine` of the plugin: graphql-js-shaped functions, bound, that any GraphQL server calls.
+
+```ts
+interface GraphQLEngine {
+  readonly schema: GraphQLSchema
+  readonly settings: GraphQLEngineSettings // { path (prefix included), introspection, ide, exposeErrors, maxTokens, subscriptions: false | { maxActive }, http: false | { get, bodyLimit } }
+  parse(source: string | Source): DocumentNode
+  validate(schema: GraphQLSchema, document: DocumentNode, rules?: readonly ValidationRule[]): readonly GraphQLError[]
+  readonly rules: readonly ValidationRule[] // the limits (when any is on), NoSchemaIntrospectionCustomRule (introspection off)
+  execute(args: ExecutionArgs, options?: EngineExecuteOptions): PromiseOrValue<ExecutionResult>
+  subscribe(
+    args: ExecutionArgs,
+    options?: EngineExecuteOptions,
+  ): PromiseOrValue<AsyncGenerator<ExecutionResult, void, void> | ExecutionResult>
+}
+interface EngineExecuteOptions {
+  transport?: 'http' | 'sse' | 'ws'
+  signal?: AbortSignal
+  requestId?: string
+}
+interface GraphQLDriver {
+  readonly name: string // GraphQLOperationEvent.driver; 'builtin' is reserved
+  routes?(context: { path: string; endpoint: string }): readonly GraphQLDriverRoute[] // Pick<PluginRoute, 'method' | 'path' | 'name' | 'handler'>
+  start(engine: GraphQLEngine, context: { logger; container; http: HttpPlugin | undefined }): void | Promise<void>
+  stop?(): void | Promise<void>
+}
+```
+
+- `parse` goes through the document cache (a validated text returns its cached `DocumentNode`),
+  else graphql-js `parse` with `maxTokens`, then the depth, aliases and directives limits; it
+  throws a `GraphQLError` with `GRAPHQL_PARSE_FAILED` or `QUERY_TOO_COMPLEX`. `validate` runs
+  `rules` (default `specifiedRules`; a copy of it counts as the default) plus the engine's rules
+  (the limits rule is skipped for documents `parse` checked), with `hideSuggestions` when
+  introspection is off; with the default rules on the engine's schema, a cached document is not
+  validated again and a valid one enters the cache. Its errors carry `GRAPHQL_VALIDATION_FAILED`
+  (or the limit's code). Documents rejected by `parse` or `validate` are observed by the hook
+  (`rejected`, `transport: 'http'`).
+- `execute` and `subscribe` trust the document to be valid; `args.schema` MUST be the engine's
+  (ZNIGHT066 otherwise). The operation runs in the current request scope (the HTTP scope of a
+  route-mounted driver), else in a scope of its own (for a subscription, its whole life); the
+  `GraphQLContext` is seeded in it and passed as `contextValue`; `args.contextValue` is
+  `GraphQLContext.serverContext`; `transport` defaults to `'http'`; the signal is
+  `options.signal`, else `args.abortSignal`, else the HTTP request's (followed by an execution only
+  once it is pending, like the built-in transport). Resolver pipelines, loaders (renewed per
+  subscription event), error mappers, result mappers and masking are those of the built-in
+  transport; errors are returned as `GraphQLError` instances with the formatted message,
+  `locations`, `path` and `extensions` and no `originalError`; variable errors give a result
+  without `data` (`BAD_USER_INPUT`); operation selection errors and a subscription given to
+  `execute` are `BAD_REQUEST` results. `subscribe` gives a query or a mutation its single result,
+  a subscription that cannot start a single error result, a subscription past `maxActive` a
+  `SERVICE_UNAVAILABLE` result (the cap is shared with every transport), and `subscriptions:
+  false` a `BAD_REQUEST` result. One `graphql:operation` event per operation, with the driver's
+  name.
+- The `driver` option MUST be an object with a non-empty `name` other than `builtin`, a `start`
+  function, and `routes` and `stop` functions when present; with a driver,
+  `subscriptions.heartbeat` and `.maxDuration` are ZNIGHT066 (the driver's keep-alives apply), and
+  a driver with `routes` and `http: false` is ZNIGHT066. `routes()` is called once, possibly before
+  `start()` (handlers MUST NOT use the engine before the first request). `onBootstrap` builds the
+  engine and awaits `driver.start()`; a throw or rejection fails the boot with ZNIGHT066 (`the
+  <name> driver failed to start`, the original error as `cause`). A driver without routes is
+  server-mounted: it attaches itself to `context.http.adapter` and runs outside the HTTP
+  pipeline.
+- The built-in transport is the default driver (`builtin`): its handlers call the internal
+  executor directly, never the engine functions, so an application without driver runs the same
+  per-request code as before RFC 0009.
 
 **Impl.** Two concurrent `plugin.execute()` calls in one request scope share the scope's
 `GraphQLContext` entry (`@Ctx()` gets the right one). The SDL of a `GraphQLScalarType` definition
