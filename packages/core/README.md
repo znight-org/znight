@@ -430,5 +430,5 @@ The catalogue is shared by the compiler and every first-party package. `ZNIGHT00
 belong to the core, the compiler and the features of the first release (`ZNIGHT023`, a missing
 route decision, is reported by `@znight/http`). From `ZNIGHT030`, each package owns a block of ten:
 `ZNIGHT030`–`039` `@znight/openapi`, `ZNIGHT040`–`049` `@znight/schedule`, `ZNIGHT060`–`069`
-`@znight/graphql` (RFC 0005, planned for v0.2; `050`–`059` are reserved for `@znight/websocket`).
+`@znight/graphql` (RFC 0005; `050`–`059` are reserved for `@znight/websocket`, RFC 0003).
 Inside a block, codes are allocated in order; third-party packages get no `ZNIGHT` code.
