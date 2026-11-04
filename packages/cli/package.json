@@ -1,6 +1,6 @@
 {
   "name": "@znight/cli",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Znight CLI: scaffold projects, generate code, run dev server and builds",
   "license": "MIT",
   "author": "Ugho STEPHAN",
