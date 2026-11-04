@@ -233,6 +233,13 @@ describe('a route-mounted driver', () => {
     expect(res.data).toEqual({ hello: 'Hello Ada' })
   })
 
+  it('stops when the application is disposed without having started', async () => {
+    const driver = graphqlHttpDriver()
+    const app = await create({ driver })
+    await app.app.stop()
+    expect(driver.events).toEqual(['routes', 'start', 'stop'])
+  })
+
   it('stops after the engine ended its subscriptions', async () => {
     const driver = graphqlHttpDriver()
     const app = await create({ driver })

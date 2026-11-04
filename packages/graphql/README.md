@@ -958,7 +958,8 @@ export function graphqlHttpDriver(): GraphQLDriver {
   `context.http.adapter` in `start()` and runs outside the pipeline.
 - **Lifecycle.** `onBootstrap` builds the engine, then awaits `start(engine, { logger, container,
   http })`; a failure fails the boot (ZNIGHT066, the original error as `cause`). `onStop` ends the
-  engine's subscriptions, then awaits `stop()`.
+  engine's subscriptions, then awaits `stop()` (`onDispose` does, for an application that never
+  started).
 - **Options.** The engine options (`guards`, `errorMappers`, `resultMappers`, `exposeErrors`,
   `introspection`, `limits`, `documentCache`, `subscriptions: false`, `maxActive`, `bufferSize`,
   `pubsub`, `enforcement`) apply to every driver. `path`, `http` and `graphiql` are read by the

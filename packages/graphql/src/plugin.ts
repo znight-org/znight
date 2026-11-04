@@ -269,7 +269,21 @@ export class GraphQLPlugin implements Plugin, PluginHttpRoutes {
     }
   }
 
-  onDispose(): void {
+  onDispose(): void | Promise<void> {
+    if (!this.#started) {
+      this.#release()
+      return
+    }
+    // disposed without having started (onStop did not run): the driver started in onBootstrap stops here
+    this.#started = false
+    this.#stop?.abort(new Error('The application is stopping'))
+    const driver = this.#driver
+    return Promise.resolve(this.#runtime?.executor.stopStreams())
+      .then(() => driver?.stop?.())
+      .finally(() => this.#release())
+  }
+
+  #release(): void {
     this.#active = false
     this.#ownPubSub?.close()
     this.#ownPubSub = undefined

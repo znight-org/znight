@@ -2956,7 +2956,8 @@ below; absent: the built-in transport); unknown keys and invalid values are ZNIG
   signal, ends the subscriptions it owns (`plugin.subscribe()` and `engine.subscribe()`), then
   awaits `driver.stop()`; requests and SSE streams of the built-in transport are drained and
   closed by `HttpPlugin.onStop` (RFC 0006: streams end without `complete`). `onDispose` closes the
-  `MemoryPubSub` the plugin created and clears the document cache.
+  `MemoryPubSub` the plugin created and clears the document cache; for an application disposed
+  without having started (no `onStop`), it first ends those subscriptions and stops the driver.
 - **Resolver pipeline (normative, per call):** the resolver instance (the singleton, or
   `container.get(token)` in the current scope), then guards, global ones only on root fields and
   on field resolvers whose `meta` is not empty, then class and method `@UseGuard` (each resolved
