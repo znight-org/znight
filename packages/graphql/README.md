@@ -61,6 +61,7 @@ dependencies, `dataloader` is a dependency, `@znight/testing` an optional peer (
   - [Errors as data](#errors-as-data)
 - [Plugin options](#plugin-options)
 - [GraphQL over HTTP and SSE](#graphql-over-http-and-sse)
+- [Drivers and the engine](#drivers-and-the-engine)
 - [Security defaults and limits](#security-defaults-and-limits)
 - [Testing](#testing)
 - [The generated SDL and the compiler options](#the-generated-sdl-and-the-compiler-options)
@@ -521,13 +522,14 @@ Built-in scalars appear in the schema only when used: `String`, `Float`, `Int`, 
 | Member                            | What                                                                                                                 |
 | --------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | `requestId`                       | Id of the request carrying the operation (`HttpContext.requestId` over HTTP, a UUID or `requestId` option otherwise) |
-| `transport`                       | `'http'`, `'sse'` or `'direct'` (`plugin.execute()` / `subscribe()`)                                                 |
+| `transport`                       | `'http'`, `'sse'` or `'direct'` (`plugin.execute()` / `subscribe()`); `'ws'` is reserved for `graphql-ws`            |
 | `http`                            | The `HttpContext` of the request, `undefined` for direct executions outside a request                                |
 | `operationType` / `operationName` | `'query'`, `'mutation'` or `'subscription'`; the selected operation name                                             |
 | `document` / `variables`          | The parsed document (shared by the document cache: never mutate it) and the coerced variables                        |
 | `signal`                          | Over HTTP, the request's `ctx.signal`: client gone, SSE stream closed; passed to graphql-js as `abortSignal`         |
 | `state`                           | A `Map` for per-operation storage                                                                                    |
 | `loader(Class \| token)`          | The DataLoader of the current execution for a loader                                                                 |
+| `serverContext`                   | With a [driver](#drivers-and-the-engine), the context its server gave the engine; `undefined` otherwise              |
 
 - Resolvers receive it with `@Ctx()`; request-scoped providers inject `GraphQLContext`, singletons
   `Lazy<GraphQLContext>`, exactly like `HttpContext`.
@@ -786,12 +788,13 @@ ZNIGHT066.
 | `resultMappers` | `[]`                                                                   | `GraphQLResultMapper` classes or instances, tried in order: errors as data on the fields whose union holds one of their `types` ([Errors as data](#errors-as-data))      |
 | `exposeErrors`  | `false`                                                                | Unmasked messages for unexpected errors (development)                                                                                                                    |
 | `introspection` | `NODE_ENV !== 'production'`                                            | Off: graphql-js `NoSchemaIntrospectionCustomRule`, and suggestions are hidden                                                                                            |
-| `graphiql`      | `NODE_ENV === 'development'`                                           | `GET path` with `accept: text/html` serves GraphiQL                                                                                                                      |
+| `graphiql`      | `NODE_ENV === 'development'`                                           | `GET path` with `accept: text/html` serves GraphiQL; with a `driver`, the driver's IDE                                                                                   |
 | `limits`        | `{ maxTokens: 2000, maxDepth: 12, maxAliases: 30, maxDirectives: 50 }` | Request limits (introspection fields exempt from `maxDepth`); `false` disables one                                                                                       |
 | `documentCache` | `1000`                                                                 | Distinct documents kept parsed and validated (LRU); `0` disables                                                                                                         |
 | `subscriptions` | `{ maxActive: 10_000, bufferSize: 100 }`                               | `false` disables subscriptions over SSE. `heartbeat` (ms or `false`) and `maxDuration` (ms) are passed to `HttpResponse.sse()` (default: the `HttpPlugin` `sse` options) |
 | `pubsub`        | a `MemoryPubSub`                                                       | The `PubSub` provided to the container                                                                                                                                   |
 | `enforcement`   | `'error'`                                                              | How the boot check of field decisions reports a problem: `'error'` fails the boot (ZNIGHT023), `'warn'` logs                                                             |
+| `driver`        | the built-in transport                                                 | The GraphQL server serving the schema ([Drivers and the engine](#drivers-and-the-engine)); `heartbeat` and `maxDuration` are refused with one (ZNIGHT066)                |
 
 `HttpPlugin` must be registered unless `http: false` (ZNIGHT066). The plugin instance exposes:
 
@@ -803,6 +806,7 @@ ZNIGHT066.
 | `subscribe(request, options?)` | A stream of results, one per event, until the source ends, `options.signal` aborts, `return()` is called or the application stops |
 | `pubsub`                       | The `PubSub` of the application                                                                                                   |
 | `activeSubscriptions`          | Active subscriptions, every transport                                                                                             |
+| `engine`                       | The `GraphQLEngine` drivers call (after bootstrap): [Drivers and the engine](#drivers-and-the-engine)                             |
 | `initRoots()` / `httpRoutes()` | The `PluginInitRoots` contract (`TestApp`) and the `PluginHttpRoutes` contract of `@znight/http`                                  |
 
 `request` is `{ query, operationName?, variables?, extensions? }`; `options` is `{ signal?,
@@ -810,7 +814,8 @@ requestId? }`. A direct execution has no HTTP guards of its own: inside a contro
 route's request scope, after the route's guards. With `http: false`, a controller can hand its
 requests to another GraphQL server that delegates the execution to `execute()` and `subscribe()`:
 the guide's [Serve the schema with GraphQL Yoga](../../docs/guide/graphql.md#yoga) recipe keeps
-guards, loaders, the request scope and error formatting.
+guards, loaders, the request scope and error formatting. A [driver](#drivers-and-the-engine) does
+the same without the copying, on the parsed document.
 
 ```ts
 const plugin = app.getPlugin<GraphQLPlugin>('graphql')
@@ -818,7 +823,8 @@ const result = await plugin?.execute({ query: '{ books { total } }' })
 ```
 
 `onStart` logs `GraphQL endpoint ready` with the path, the number of types and the schema hash
-(`GraphQL schema ready` with `http: false`). On shutdown, `onStop` ends the direct subscriptions;
+(`GraphQL schema ready` with `http: false`). On shutdown, `onStop` ends the direct subscriptions
+and those of the engine, then stops the driver;
 `HttpPlugin` drains the requests in flight and closes the SSE streams (their `ctx.signal` aborts with
 `'shutdown'`, then the stream ends with a jittered `retry` and **no** `complete` event, so clients
 reconnect to another instance). Plugin order does not matter.
@@ -862,6 +868,112 @@ the four adapters, on Node.js and Bun.
 Adapters need nothing specific. With Express, do not mount `express.json()` before Znight routes
 (the body would be consumed). In tests, `TestApp.inject()` runs queries and mutations through every
 adapter in memory and `injectStream()` / `injectSse()` stream subscriptions.
+
+## Drivers and the engine
+
+The built-in GraphQL-over-HTTP and SSE endpoint is the default and the fastest path. A **driver**
+serves the same schema with another GraphQL server, for its protocol features and its plugins
+(RFC 0009): Znight stays the engine, the driver owns the transport.
+
+```ts
+GraphQLPlugin.configure({ guards: [AccessGuard], driver: myDriver })
+```
+
+Resolvers, guards, loaders, result mappers, request-scoped providers and tests do not change: the
+server calls `plugin.engine`, which runs the compiled schema with everything this README describes.
+**GraphQL Yoga** (`@znight/graphql/yoga`) is the first driver and comes next; **Apollo Server**
+follows once it accepts graphql-js 17. Until then, a driver is a small object, and the engine plugs
+into any graphql-js-shaped server as it is.
+
+**The engine.** `plugin.engine` (after bootstrap, and the first argument of `driver.start()`):
+
+| Member                          | What                                                                                                                                                                                                                        |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schema`                        | The executable schema; its resolvers are Znight's pipelines                                                                                                                                                                 |
+| `settings`                      | The resolved options a server needs: `path` (prefix included), `introspection`, `ide` (`graphiql`), `exposeErrors`, `maxTokens`, `subscriptions` (`false` or `{ maxActive }`), `http` (`false` or `{ get, bodyLimit }`)     |
+| `parse(source)`                 | graphql-js `parse` through the document cache, with `maxTokens` and the depth, aliases and directives limits; throws a `GraphQLError` (`GRAPHQL_PARSE_FAILED`, `QUERY_TOO_COMPLEX`)                                         |
+| `validate(schema, doc, rules?)` | graphql-js `validate` with `rules` (default `specifiedRules`) plus the engine's, suggestions hidden without introspection; a valid document is cached (default rules), its errors carry `GRAPHQL_VALIDATION_FAILED`         |
+| `rules`                         | The engine's own rules (the limits, `NoSchemaIntrospectionCustomRule` without introspection), for servers that validate themselves                                                                                          |
+| `execute(args, options?)`       | A validated query or mutation, in the current request scope (or one of its own): the `GraphQLContext` is the `contextValue`, `args.contextValue` its `serverContext`; errors mapped and masked, as `GraphQLError` instances |
+| `subscribe(args, options?)`     | A validated subscription: a stream of results (loaders renewed per event), or a single error result; the `maxActive` cap is shared with every transport, and the plugin ends the stream when the application stops          |
+
+`options` is `{ transport?: 'http' | 'sse' | 'ws', signal?, requestId? }`; the signal defaults to
+`args.abortSignal`, then to the HTTP request's. The functions are bound and have graphql-js's
+signatures, so they fit `graphql-http`, `graphql-sse`, `graphql-ws` and Envelop's `useEngine` as
+they are. Every operation produces one `graphql:operation` event with the driver's name, and
+documents rejected by `parse` or `validate` are observed too.
+
+**The driver contract.** A `GraphQLDriver` has a `name` (`builtin` is reserved), optional
+`routes()`, `start(engine, context)` and an optional `stop()`:
+
+```ts
+import type { HttpContext } from '@znight/http'
+import type { GraphQLDriver } from '@znight/graphql'
+
+import { HttpResponse } from '@znight/http'
+import { createHandler, type Handler } from 'graphql-http'
+
+/** graphql-http's handler on the engine: GraphQL over HTTP served by the reference implementation. */
+export function graphqlHttpDriver(): GraphQLDriver {
+  let handler: Handler<HttpContext> | undefined
+  return {
+    name: 'graphql-http',
+    routes: ({ path }) => {
+      const handle = async (ctx: HttpContext) => {
+        const body = ctx.method === 'POST' ? new TextDecoder().decode(await ctx.rawBody()) : null
+        const [text, init] = await (handler as Handler<HttpContext>)({
+          method: ctx.method,
+          url: ctx.url,
+          headers: { get: name => ctx.header(name.toLowerCase()) ?? null },
+          body,
+          raw: ctx,
+          context: undefined,
+        })
+        return new HttpResponse(text ?? undefined, { status: init.status, headers: init.headers ?? {} })
+      }
+      return [
+        { method: 'GET', path, name: 'graphql', handler: handle },
+        { method: 'POST', path, name: 'graphql', handler: handle },
+      ]
+    },
+    start(engine) {
+      handler = createHandler<HttpContext>({
+        schema: engine.schema,
+        parse: engine.parse,
+        validate: engine.validate,
+        execute: args => engine.execute(args),
+      })
+    },
+  }
+}
+```
+
+- **Routes.** A route-mounted driver returns its routes: `GraphQLPlugin.httpRoutes()` gives them to
+  `HttpPlugin` with the `http` option's `meta` and `guards`, and its `bodyLimit` on the routes that
+  are not `GET`. They run in the HTTP pipeline like the built-in endpoint (request id, request
+  scope, `http:request` hooks, global and endpoint guards, route decisions, CORS, security headers,
+  drain), so the engine finds the request scope: `GraphQLContext.http` is the request, and HTTP
+  guards and GraphQL guards see the same request-scoped providers. `routes()` is called once,
+  possibly before `start()`. A driver without routes is server-mounted: it attaches itself to
+  `context.http.adapter` in `start()` and runs outside the pipeline.
+- **Lifecycle.** `onBootstrap` builds the engine, then awaits `start(engine, { logger, container,
+  http })`; a failure fails the boot (ZNIGHT066, the original error as `cause`). `onStop` ends the
+  engine's subscriptions, then awaits `stop()`.
+- **Options.** The engine options (`guards`, `errorMappers`, `resultMappers`, `exposeErrors`,
+  `introspection`, `limits`, `documentCache`, `subscriptions: false`, `maxActive`, `bufferSize`,
+  `pubsub`, `enforcement`) apply to every driver. `path`, `http` and `graphiql` are read by the
+  driver through its routes and `engine.settings`. `subscriptions.heartbeat` and `maxDuration`
+  configure the built-in SSE transport only: with a driver they are ZNIGHT066 (use the driver's
+  keep-alives). A driver with routes needs `HttpPlugin` and refuses `http: false` (ZNIGHT066).
+- **Errors.** The engine maps and masks errors once; a driver turns its server's own masking off.
+  Request errors raised by the server itself (malformed JSON, a persisted query not found) are the
+  server's.
+- **Cost.** Without `driver`, the plugin runs the built-in transport's handlers, which call the
+  internal executor directly: an application without driver pays nothing for the abstraction.
+
+`executeOperation()` of `@znight/graphql/testing` sends its requests to the driver's routes like to
+the built-in endpoint. The repository's tests run the `graphql-http` audits against the driver
+above on the four adapters, on Node.js and Bun.
 
 ## Security defaults and limits
 
@@ -1141,8 +1253,9 @@ Boot and execution are those of code-first.
 ## Observability
 
 Every operation goes through the `graphql:operation` hook of `@znight/core` (`GraphQLOperationEvent`:
-`operationType`, `operationName`, `documentId` (SHA-256 of the query text), `transport`,
-`requestId`, `context`, `startTime`, then `outcome` (`success`, `partial`, `error`, `rejected`) and
+`operationType`, `operationName`, `documentId` (SHA-256 of the query text), `transport`, `driver`
+(`builtin`, or the name of the [driver](#drivers-and-the-engine)), `requestId`, `context`,
+`startTime`, then `outcome` (`success`, `partial`, `error`, `rejected`) and
 `errors` with their codes). A subscription produces one event for its whole life. The event is built
 only when the hook has wrappers or listeners, so it costs nothing otherwise.
 
@@ -1341,6 +1454,8 @@ are emitted by schema-first only: code-first sections, hashes and artifacts are 
   custom internal enum values (an enum value is its SDL name).
 - **Subscriptions over SSE only.** No `graphql-ws` (WebSocket), no SSE single connection mode, no
   multipart subscriptions.
+- **Drivers**: the engine and the driver contract are in place; the GraphQL Yoga driver
+  (`@znight/graphql/yoga`) comes next, Apollo Server once it accepts graphql-js 17.
 - No `@defer` / `@stream`, no persisted or trusted documents, no query cost analysis, no response
   cache, no federation or schema stitching, no file uploads (use an HTTP upload route), no operation
   batching.

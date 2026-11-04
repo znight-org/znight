@@ -219,10 +219,12 @@ guards. `false` is a `FORBIDDEN` error on that field. See the [guide](/guide/gra
 | `subscriptions` | `{ maxActive: 10_000, bufferSize: 100 }`                               | `false`, or caps, buffer, `heartbeat`, `maxDuration`                            |
 | `pubsub`        | a `MemoryPubSub`                                                       | The `PubSub` of the application                                                 |
 | `enforcement`   | `'error'`                                                              | Field decisions not enforced by a guard: fail the boot or `'warn'`              |
+| `driver`        | the built-in transport                                                 | Another GraphQL server for the schema ([drivers](/guide/graphql#drivers))       |
 
 The instance exposes `schema`, `printSchema()`, `execute(request)`, `subscribe(request)`, `pubsub`
 and `activeSubscriptions`, for custom transports and controllers calling GraphQL, such as
-[GraphQL Yoga behind a controller](/guide/graphql#yoga).
+[GraphQL Yoga behind a controller](/guide/graphql#yoga), and `engine`: the graphql-js-shaped
+`parse`, `validate`, `execute` and `subscribe` that [drivers](/guide/graphql#drivers) call.
 
 ## Errors
 

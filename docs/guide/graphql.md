@@ -1,5 +1,5 @@
 ---
-description: Build a GraphQL API with Znight - types as the schema, resolvers, validated arguments, loaders against N+1 queries, subscriptions over SSE and a PubSub shared across instances, access control, errors, tests, production settings and serving the schema with GraphQL Yoga.
+description: Build a GraphQL API with Znight - types as the schema, resolvers, validated arguments, loaders against N+1 queries, subscriptions over SSE and a PubSub shared across instances, access control, errors, tests, production settings, GraphQL drivers and serving the schema with GraphQL Yoga.
 ---
 
 # GraphQL
@@ -909,6 +909,38 @@ wraps it: a span per operation under the HTTP request span, `graphql_operations_
 `graphql_operation_duration_seconds` by type and (capped) operation name, and opt-in operation logs
 (`logging: { graphql: true }`).
 
+## Choose a driver {#drivers}
+
+The built-in endpoint (GraphQL over HTTP and SSE, GraphiQL) is the default and the fastest path.
+A **driver** serves the same schema with another GraphQL server when you need its protocol
+features or its plugin ecosystem (persisted operations, response caching, usage reporting):
+Znight stays the engine, the driver owns the transport
+([RFC 0009](../../rfcs/0009-graphql-drivers.md)).
+
+```ts
+GraphQLPlugin.configure({ guards: [AccessGuard], driver: myDriver })
+```
+
+Nothing of this guide changes with a driver: the server calls `plugin.engine`, whose `parse`,
+`validate`, `execute` and `subscribe` run the compiled schema with its guards, loaders, request
+scope, error and result mappers, masking, limits and the `graphql:operation` hook (with the
+driver's name). The driver's routes run in the HTTP pipeline like the built-in endpoint, so HTTP
+guards, CORS, `http.meta` decisions and the drain apply, and `executeOperation()` reaches them in
+tests. What differs is the server's: its protocol choices, its IDE (`graphiql: true` serves it),
+its subscription transports and its keep-alive options (`subscriptions.heartbeat` and
+`maxDuration` belong to the built-in SSE transport).
+
+| Driver                 | Status                                                                       |
+| ---------------------- | ---------------------------------------------------------------------------- |
+| Built-in (no `driver`) | The default: GraphQL over HTTP and SSE, the fastest                          |
+| GraphQL Yoga           | Next: `yogaDriver()` from `@znight/graphql/yoga`, replacing the recipe below |
+| Apollo Server          | Once Apollo Server accepts graphql-js 17                                     |
+| Your own               | A `GraphQLDriver`: `name`, `routes()`, `start(engine)`, `stop()`             |
+
+The engine and the driver contract are described in the
+[package README](../../packages/graphql/README.md#drivers-and-the-engine), with a complete driver
+built on `graphql-http`.
+
 ## Serve the schema with GraphQL Yoga {#yoga}
 
 The built-in endpoint covers GraphQL over HTTP and SSE. To serve the API with
@@ -1007,7 +1039,8 @@ providers, argument validation, error and result mappers, masking, limits, and t
 - An operation is parsed by Yoga, then again by `GraphQLPlugin` (its document cache makes repeated
   documents cheap), and validated by both.
 - Apollo Server cannot take this route today: it needs graphql-js 16, while `@znight/graphql` runs
-  on graphql-js 17. Pluggable GraphQL servers are being designed (RFC 0009).
+  on graphql-js 17. The [engine and the driver contract](#drivers) are in place, and the Yoga
+  driver, which replaces this recipe without its double parsing, comes next.
 
 The controller is tested in the repository on a compiled application:
 [`yoga.controller.ts`](../../packages/graphql/test/recipes/yoga.controller.ts) and its tests.
