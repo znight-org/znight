@@ -5,6 +5,7 @@ export default defineConfig({
     index: 'src/index.ts',
     compiler: 'src/compiler/index.ts',
     testing: 'src/testing.ts',
+    yoga: 'src/yoga.ts',
   },
   format: 'esm',
   platform: 'node',

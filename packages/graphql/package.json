@@ -11,7 +11,7 @@
     "directory": "packages/graphql"
   },
   "bugs": "https://github.com/znight-org/znight/issues",
-  "keywords": ["znight", "graphql", "code-first", "dataloader", "subscriptions", "sse"],
+  "keywords": ["znight", "graphql", "code-first", "dataloader", "subscriptions", "sse", "yoga"],
   "type": "module",
   "sideEffects": false,
   "engines": {
@@ -32,6 +32,11 @@
       "@znight/source": "./src/testing.ts",
       "types": "./dist/testing.d.mts",
       "default": "./dist/testing.mjs"
+    },
+    "./yoga": {
+      "@znight/source": "./src/yoga.ts",
+      "types": "./dist/yoga.d.mts",
+      "default": "./dist/yoga.mjs"
     },
     "./package.json": "./package.json"
   },
@@ -54,13 +59,17 @@
     "@znight/http": "workspace:^",
     "@znight/compiler": "workspace:^",
     "@znight/testing": "workspace:^",
-    "graphql": "^17.0.2"
+    "graphql": "^17.0.2",
+    "graphql-yoga": "^6.0.1"
   },
   "peerDependenciesMeta": {
     "@znight/compiler": {
       "optional": true
     },
     "@znight/testing": {
+      "optional": true
+    },
+    "graphql-yoga": {
       "optional": true
     }
   },

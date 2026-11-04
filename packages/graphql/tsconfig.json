@@ -4,7 +4,11 @@
     "isolatedDeclarations": true,
     "declaration": true,
     "erasableSyntaxOnly": true,
-    "types": ["node"]
+    "types": ["node"],
+    "paths": {
+      // see types/whatwg-fetch.d.ts
+      "@whatwg-node/fetch": ["./types/whatwg-fetch.d.ts"]
+    }
   },
   "include": ["src"]
 }
