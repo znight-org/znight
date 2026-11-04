@@ -40,18 +40,19 @@ export function graphqlHttpDriver(): GraphQLHttpDriver {
     context: undefined as GraphQLDriverContext | undefined,
     routes({ path }: { path: string }) {
       events.push('routes')
-      const handle = (ctx: HttpContext): Promise<HttpResponse<string | undefined>> => {
+      const handle = async (ctx: HttpContext): Promise<HttpResponse<string | undefined>> => {
         if (handler === undefined) throw new Error('the graphql-http driver is not started')
-        return handler({
+        // read here, so that a body past the route's limit is HttpPlugin's 413 (graphql-http would answer 400)
+        const body = ctx.method === 'POST' ? UTF8.decode(await ctx.rawBody()) : null
+        const [text, init] = await handler({
           method: ctx.method,
           url: ctx.url,
           headers: { get: name => ctx.header(name.toLowerCase()) ?? null },
-          body: () => ctx.rawBody().then(bytes => UTF8.decode(bytes)),
+          body,
           raw: ctx,
           context: undefined,
-        }).then(
-          ([body, init]) => new HttpResponse(body ?? undefined, { status: init.status, headers: init.headers ?? {} }),
-        )
+        })
+        return new HttpResponse(text ?? undefined, { status: init.status, headers: init.headers ?? {} })
       }
       return [
         { method: 'GET' as const, path, name: 'graphqlHttp', handler: handle },
