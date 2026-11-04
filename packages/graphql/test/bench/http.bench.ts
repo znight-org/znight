@@ -16,8 +16,12 @@
  * - the endpoint: `GET /graphql?query=...` and `POST /graphql`, answered as `application/json` and
  *   as `application/graphql-response+json`.
  *
+ * - the Yoga driver (RFC 0009 §6, informative): the same endpoint served by `yogaDriver()`, whose
+ *   `Request` is built from `HttpContext` (the Node-style adapters' path; `honoAdapter()` hands its
+ *   native `Request` over), and `yoga.fetch()` alone on a prebuilt `Request`, without `HttpPlugin`.
+ *
  * Read "endpoint - floor" as the GraphQL cost of a request on the HTTP pipeline, and compare it
- * with the bare graphql-js line. Not run by `bun test` (no `.test.ts` suffix). From
+ * with the bare graphql-js line. `BENCH_YOGA=0` leaves the Yoga cases out. Not run by `bun test` (no `.test.ts` suffix). From
  * `packages/graphql`:
  *
  * ```sh
@@ -49,6 +53,7 @@ import { testToken } from '@znight/testing'
 import { execute, parse } from 'graphql'
 
 import { GraphQLPlugin } from '../../src/index.ts'
+import { yogaDriver } from '../../src/yoga.ts'
 import { bind, field, graphqlMetadata } from '../support/app.ts'
 
 if (process.env['ABORT_REASON'] === '1') {
@@ -188,9 +193,18 @@ async function bench(cases: readonly Case[], iterations: number, rounds: number)
   return new Map([...samples].map(([name, values]) => [name, median(values)]))
 }
 
+/** A streamed reply (a driver's Web `Response`) read to its end, as an adapter would send it. */
+async function consumed(reply: AdapterReply | Promise<AdapterReply>): Promise<AdapterReply> {
+  const settled = await reply
+  const body = settled.body
+  if (!(body instanceof ReadableStream)) return settled
+  const bytes = new Uint8Array(await new Response(body).arrayBuffer())
+  return { ...settled, body: bytes, text: new TextDecoder().decode(bytes) }
+}
+
 /** Checks a reply once before measuring: the benchmark must measure correct answers. */
 function check(name: string, reply: AdapterReply, status: number, type: string): void {
-  const body = reply.body instanceof Uint8Array ? new TextDecoder().decode(reply.body) : String(reply.text)
+  const body = reply.text ?? (reply.body instanceof Uint8Array ? new TextDecoder().decode(reply.body) : '')
   const contentType = String(reply.headers['content-type'])
   if (reply.status !== status || !contentType.startsWith(type) || JSON.parse(body).data?.hello !== 'Hello world') {
     throw new Error(`${name}: unexpected reply ${reply.status} ${contentType} ${body}`)
@@ -234,6 +248,44 @@ check('GET /graphql (graphql-response)', await getGraphQL(requests.getGraphQL), 
 check('POST /graphql', await postGraphQL(requests.post), 200, 'application/json')
 check('POST /graphql (graphql-response)', await postGraphQL(requests.postGraphQL), 200, GRAPHQL_RESPONSE)
 
+// the same application served by the Yoga driver
+const withYoga = process.env['BENCH_YOGA'] !== '0'
+const yogaAdapter = new RecordingAdapter()
+const driver = yogaDriver()
+const yogaApp = withYoga
+  ? await Application.create({
+      metadata: benchMetadata(),
+      plugins: [HttpPlugin.configure({ port: 0, adapter: yogaAdapter }), GraphQLPlugin.configure({ driver })],
+      logger: { debug() {}, info() {}, warn() {}, error() {} },
+      shutdown: { signals: false },
+    })
+  : undefined
+const yogaCases: Case[] = []
+if (withYoga) {
+  const getYoga = yogaAdapter.handler('GET', '/graphql')
+  const postYoga = yogaAdapter.handler('POST', '/graphql')
+  const yoga = driver.yoga
+  if (yoga === undefined) throw new Error('the Yoga driver did not start')
+  const yogaRequest = (): Request =>
+    new Request('http://localhost/graphql', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: GRAPHQL_RESPONSE },
+      body: BODY,
+    })
+  check('GET /graphql (yoga)', await consumed(getYoga(requests.get)), 200, 'application/json')
+  check('POST /graphql (yoga)', await consumed(postYoga(requests.postGraphQL)), 200, GRAPHQL_RESPONSE)
+  const direct = await yoga.fetch(yogaRequest(), {} as never)
+  if ((await direct.json()).data?.hello !== 'Hello world') throw new Error('yoga.fetch(): unexpected reply')
+  yogaCases.push(
+    [
+      'yoga.fetch() (no HttpPlugin, prebuilt Request)',
+      async () => (await yoga.fetch(yogaRequest(), {} as never)).text(),
+    ],
+    ['GET  /graphql yoga driver', () => consumed(getYoga(requests.get))],
+    ['POST /graphql yoga driver graphql-response+json', () => consumed(postYoga(requests.postGraphQL))],
+  )
+}
+
 const results = await bench(
   [
     ['graphql-js execute() + JSON.stringify (bare)', () => JSON.stringify(execute({ schema, document }))],
@@ -245,11 +297,13 @@ const results = await bench(
     ['POST /floor (controller, @Body, @HttpCode(200))', () => postFloor(requests.postFloor)],
     ['POST /graphql application/json', () => postGraphQL(requests.post)],
     ['POST /graphql application/graphql-response+json', () => postGraphQL(requests.postGraphQL)],
+    ...yogaCases,
   ],
   20_000,
   9,
 )
 await app.stop()
+await yogaApp?.stop()
 
 const runtime = typeof Bun === 'undefined' ? `Node.js ${process.version}` : `Bun ${Bun.version}`
 const patched = process.env['ABORT_REASON'] === '1' ? ', ABORT_REASON=1' : ''
