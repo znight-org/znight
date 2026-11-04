@@ -3103,8 +3103,8 @@ interface GraphQLDriver {
   `subscriptions.heartbeat` and `.maxDuration` are ZNIGHT066 (the driver's keep-alives apply), and
   a driver with `routes` and `http: false` is ZNIGHT066. `routes()` is called once, possibly before
   `start()` (handlers MUST NOT use the engine before the first request). `onBootstrap` builds the
-  engine and awaits `driver.start()`; a throw or rejection fails the boot with ZNIGHT066 (`the
-  <name> driver failed to start`, the original error as `cause`). A driver without routes is
+  engine and awaits `driver.start()`; a throw or rejection fails the boot with ZNIGHT066
+  (`the yoga driver failed to start`, the original error as `cause`). A driver without routes is
   server-mounted: it attaches itself to `context.http.adapter` and runs outside the HTTP
   pipeline.
 - The built-in transport is the default driver (`builtin`): its handlers call the internal
