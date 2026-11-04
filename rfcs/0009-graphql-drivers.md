@@ -9,9 +9,11 @@
 
 **Owner decisions (2026-11-04).** Q1: engine API first, then GraphQL Yoga as a driver package, then
 Apollo Server once it accepts graphql-js 17. Q2: resolvers keep `GraphQLContext`; the server's
-context is reachable as `GraphQLContext.serverContext`. Q8: no Mercurius driver is planned. Q12:
-graphql-js 17 only; the Apollo driver waits for Apollo Server. The other open questions keep their
-recommended answers until the owner settles them.
+context is reachable as `GraphQLContext.serverContext`. Q3: the engine parses and validates when
+the server allows it (Yoga), the server does with the engine's rules otherwise (Apollo), never
+both. Q8: no Mercurius driver is planned. Q12: graphql-js 17 only; the Apollo driver waits for
+Apollo Server. The other open questions keep their recommended answers until the owner settles
+them.
 
 ## 1. Summary
 
@@ -746,7 +748,7 @@ subpath of Znight. ZNIGHT069 stays free.
 | --- | -------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Q1  | Ship driver packages, or only the engine API with recipes?                                  | Decided (2026-11-04): **Engine API (M1), then Yoga (M2) as a package, Apollo (M3) when it accepts graphql 17.** Lifecycle, options mapping, masking, shutdown and adapter coverage are where recipes go wrong; a tested driver is cheaper for users than a recipe they copy |
 | Q2  | Do resolvers see the driver's context?                                                       | Decided (2026-11-04): **Not as `contextValue`**: resolvers keep `GraphQLContext`. Expose it as `GraphQLContext.serverContext: unknown`, with typed readers in each entry (`yogaContext(ctx)`, `apolloContext(ctx)`) for the rare resolver that needs it                               |
-| Q3  | Who parses and validates with a driver?                                                      | **The engine when the server allows it** (Yoga `useEngine`: one cache, same limits, rejections observed by the hook); otherwise the server, with `engine.rules` and `maxTokens` (Apollo). Never both                                                      |
+| Q3  | Who parses and validates with a driver?                                                      | Decided (2026-11-04): **The engine when the server allows it** (Yoga `useEngine`: one cache, same limits, rejections observed by the hook); otherwise the server, with `engine.rules` and `maxTokens` (Apollo). Never both                                                      |
 | Q4  | Who masks errors?                                                                            | **The engine, once.** Driver factories turn server masking off; a server's `formatError` sees masked errors                                                                                                                                                  |
 | Q5  | Subscriptions and `graphql-ws`?                                                              | **The driver's own transports for now** (Yoga SSE), with the engine's cap and shutdown; `graphql-ws` as an engine add-on on `@znight/websocket` (RFC 0003, accepted, in project), shared by every driver and the built-in transport                       |
 | Q6  | `@defer` / `@stream`?                                                                        | **A follow-up RFC**: engine-side `executeIncrementally` (graphql-js 17 `experimentalExecuteIncrementally`) behind an option, framed by drivers that speak incremental delivery and later by the built-in transport. The contract reserves the method name |
