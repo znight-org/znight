@@ -3,6 +3,8 @@
  * of every adapter. Prints, per adapter, the graphql-http audits that are not `ok`, the statuses of
  * a fixed list of requests (CSRF, negotiation, GET rules), and what GraphQL over SSE does with the
  * graphql-sse client (results, client disconnect) and on the wire (framing, heartbeats, shutdown).
+ * Then the same audits against a driver (RFC 0009): `graphql-http`'s own handler on top of
+ * `GraphQLEngine`, mounted as the driver's routes, and two operations through it.
  */
 import type { HttpAdapter } from '@znight/http'
 
@@ -13,6 +15,7 @@ import { nodeAdapter } from '@znight/http/node'
 import { auditServer } from 'graphql-http'
 import { createClient } from 'graphql-sse'
 
+import { graphqlHttpDriver } from '../support/graphql-http-driver.ts'
 import { observed, startLibrary } from '../support/library.ts'
 
 const ADAPTERS: readonly [string, () => HttpAdapter][] = [
@@ -155,18 +158,43 @@ async function sse(adapter: () => HttpAdapter): Promise<Record<string, unknown>>
   return result
 }
 
+async function audit(url: string): Promise<{ audits: number; notOk: string[] }> {
+  const audits = await auditServer({ url })
+  return {
+    audits: audits.length,
+    notOk: audits
+      .filter(audit => audit.status !== 'ok')
+      .map(audit => `${audit.id} ${audit.status} ${audit.name}: ${'reason' in audit ? audit.reason : ''}`),
+  }
+}
+
+/** The graphql-http driver on the engine: the audits, a query, and a resolver error (masked by the engine). */
+async function driver(adapter: () => HttpAdapter): Promise<Record<string, unknown>> {
+  const app = await startLibrary({ adapter: adapter(), graphql: { driver: graphqlHttpDriver() } })
+  try {
+    const post = async (query: string): Promise<unknown> => {
+      const response = await fetch(app.url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/graphql-response+json' },
+        body: JSON.stringify({ query }),
+      })
+      return { status: response.status, body: await response.json() }
+    }
+    return { ...(await audit(app.url)), hello: await post('{ hello }'), fail: await post('{ fail }') }
+  } finally {
+    await app.stop()
+  }
+}
+
 const results: Record<string, unknown> = {}
 for (const [name, adapter] of ADAPTERS) {
   const app = await startLibrary({ adapter: adapter() })
   try {
-    const audits = await auditServer({ url: app.url })
     results[name] = {
-      audits: audits.length,
-      notOk: audits
-        .filter(audit => audit.status !== 'ok')
-        .map(audit => `${audit.id} ${audit.status} ${audit.name}: ${'reason' in audit ? audit.reason : ''}`),
+      ...(await audit(app.url)),
       statuses: await statuses(app.url),
       sse: await sse(adapter),
+      driver: await driver(adapter),
     }
   } finally {
     await app.stop()

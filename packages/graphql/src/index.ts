@@ -7,6 +7,13 @@
 
 export type { StandardSchemaV1 } from '@znight/http'
 export type { Float, ID, Int, JSONValue, ResolverOptions } from './decorators.ts'
+export type {
+  GraphQLDriver,
+  GraphQLDriverContext,
+  GraphQLDriverRoute,
+  GraphQLDriverRoutesContext,
+} from './driver.ts'
+export type { EngineExecuteOptions, GraphQLEngine, GraphQLEngineSettings } from './engine.ts'
 export type { GraphQLRequest, GraphQLResultStream } from './execution.ts'
 export type {
   AnyPubSub,
