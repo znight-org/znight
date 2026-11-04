@@ -43,6 +43,7 @@ export const SemanticAttributes = {
   ZNIGHT_SCHEDULE_ABORTED: 'znight.schedule.aborted',
   /** Znight specific: GraphQL operations (`@znight/graphql`). */
   ZNIGHT_GRAPHQL_TRANSPORT: 'znight.graphql.transport',
+  ZNIGHT_GRAPHQL_DRIVER: 'znight.graphql.driver',
   ZNIGHT_GRAPHQL_DOCUMENT_ID: 'znight.graphql.document_id',
   ZNIGHT_GRAPHQL_OUTCOME: 'znight.graphql.outcome',
   ZNIGHT_GRAPHQL_ERROR_CODES: 'znight.graphql.error_codes',

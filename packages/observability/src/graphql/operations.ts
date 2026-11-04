@@ -72,7 +72,8 @@ export const UNKNOWN_OPERATION_TYPE = 'unknown'
  * carrying it), named after the OpenTelemetry GraphQL conventions: `<type> <name>`, `<type>` for an
  * anonymous operation, `GraphQL Operation` when none was selected. Attributes:
  * `graphql.operation.type`, `graphql.operation.name`, `graphql.document` (opt-in, `document: true`),
- * `znight.request.id`, `znight.graphql.transport`, `.document_id`, `.outcome` and `.error_codes`. The
+ * `znight.request.id`, `znight.graphql.transport`, `.driver` (only for a driver other than the
+ * built-in transport, RFC 0009), `.document_id`, `.outcome` and `.error_codes`. The
  * status is `ERROR` for the `error` and `rejected` outcomes (`partial` responses carry data and keep
  * it unset). A subscription's span covers its whole life.
  */
@@ -90,6 +91,9 @@ export function traceGraphQLOperations(
       [Attr.ZNIGHT_REQUEST_ID]: event.requestId,
       [Attr.ZNIGHT_GRAPHQL_TRANSPORT]: event.transport,
     }
+    // the built-in transport is the default: only another driver (RFC 0009) is recorded
+    const driver = event.driver
+    if (driver !== undefined && driver !== 'builtin') attributes[Attr.ZNIGHT_GRAPHQL_DRIVER] = driver
     if (event.operationType !== undefined) attributes[Attr.GRAPHQL_OPERATION_TYPE] = event.operationType
     if (event.operationName !== undefined) attributes[Attr.GRAPHQL_OPERATION_NAME] = event.operationName
     if (event.documentId !== undefined) attributes[Attr.ZNIGHT_GRAPHQL_DOCUMENT_ID] = event.documentId

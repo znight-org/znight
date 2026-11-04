@@ -53,6 +53,7 @@ describe('GraphQLPlugin options', () => {
       bufferSize: 100,
       pubsub: undefined,
       enforcement: 'error',
+      driver: undefined,
     })
     expect(resolveGraphQLOptions({}, { NODE_ENV: 'production' })).toMatchObject({
       introspection: false,

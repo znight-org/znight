@@ -522,7 +522,8 @@ One `INTERNAL` span per operation of `@znight/graphql`, child of the active span
 of the HTTP request carrying it), named after the OpenTelemetry GraphQL semantic conventions:
 `query Books`, `mutation` (anonymous operation), `GraphQL Operation` (rejected before an operation
 was selected). Attributes: `graphql.operation.type`, `graphql.operation.name`, `znight.request.id`,
-`znight.graphql.transport`, `.document_id` (SHA-256 of the query text), `.outcome` and
+`znight.graphql.transport`, `.driver` (only when a GraphQL driver other than the built-in transport
+received the operation, RFC 0009), `.document_id` (SHA-256 of the query text), `.outcome` and
 `.error_codes` (the distinct `extensions.code` of the response errors). The `error` and `rejected`
 outcomes set the status to `ERROR` (`error.type`: the first error code); a `partial` response keeps
 it unset, and an execution that threw records the exception. A subscription's span covers its
