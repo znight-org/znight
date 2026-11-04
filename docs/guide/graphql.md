@@ -1,5 +1,5 @@
 ---
-description: Build a GraphQL API with Znight - types as the schema, resolvers, validated arguments, loaders against N+1 queries, subscriptions over SSE, access control, errors, tests and production settings.
+description: Build a GraphQL API with Znight - types as the schema, resolvers, validated arguments, loaders against N+1 queries, subscriptions over SSE and a PubSub shared across instances, access control, errors, tests, production settings and serving the schema with GraphQL Yoga.
 ---
 
 # GraphQL
@@ -284,7 +284,7 @@ author(@Parent() book: Book, @Loader() authors: Loader<AuthorsById>): Promise<Au
 ## Stream with subscriptions {#subscriptions}
 
 Subscriptions use Server-Sent Events: plain HTTP through the same route, adapters and proxies, no
-WebSocket server. Publish events through the injectable `PubSub`:
+WebSocket server. Publish events through the injectable `PubSub` ([what it is for](#pubsub)):
 
 ```ts [src/catalog/catalog.events.ts]
 import type { Book } from './book.js'
@@ -325,18 +325,252 @@ curl -N -H 'accept: text/event-stream' -H 'content-type: application/json' \
   -d '{"query":"subscription { bookAdded(genre: Fantasy) { title } }"}' http://localhost:3000/graphql
 ```
 
-- Always pass `ctx.signal` to `subscribe()`: it aborts when the client leaves, when the application
-  shuts down and after `subscriptions.maxDuration`.
-- The generator starts with the subscription: it has subscribed to the PubSub by the time the client
-  is connected, so an event published right after reaches it, provided it calls `subscribe()` before
-  its first `await` (subscribe first, then await anything else).
-- The default `MemoryPubSub` buffers 100 events per subscriber (`subscriptions.bufferSize`). A
-  subscriber that falls behind ends with a `SUBSCRIPTION_OVERFLOW` error instead of growing memory.
-- With several instances, events published on one must reach subscribers on all: give the `pubsub`
-  option an implementation backed by Redis or your broker (`publish(topic, payload)`,
-  `subscribe(topic, { signal })`).
+### What the PubSub is for {#pubsub}
+
+A subscription is a request that stays open: the client sends `subscription { bookAdded { title } }`
+once, and the answer is an event stream that lasts as long as the subscription. The events are born
+elsewhere, at moments the stream does not choose: a mutation adds a book, a scheduled job notices a
+change, a message consumer receives one from another service. The producer does not know which
+streams are open, and the streams cannot call the producer. The `PubSub` is the mailbox between them:
+
+```txt
+mutation addBook ─┐                                          ┌─▶ stream of client 1: bookAdded
+@Cron job ────────┼─▶ publish('bookAdded', book) ─▶ PubSub ──┼─▶ stream of client 2: bookAdded
+message consumer ─┘                                          └─▶ stream of client 3: bookAdded(genre: Fantasy)
+```
+
+- **Producers publish** with `publish(topic, payload)`, from any provider that injects `PubSub`:
+  resolvers, services, `@Cron` jobs, message consumers.
+- **Every open subscription subscribes** with `subscribe(topic, { signal })` and receives what is
+  published on that topic **from then on**. Nothing is stored or replayed: an event published before
+  the subscription started, or while a client was disconnected, is not delivered. A client that
+  reconnects queries the current state again.
+- **Topics are typed** by the `Events` interface: `PubSub<CatalogEvents>` accepts only the topics it
+  declares, checks the payload of `publish()` and types what `subscribe()` yields. The application
+  has **one** `PubSub`, a singleton provided by `GraphQLPlugin`: every provider that injects
+  `PubSub<SomeEvents>` gets the same instance, the type parameter only types its API.
+- **Filtering is the subscription's job**: `bookAdded(genre: Fantasy)` subscribes to `bookAdded` and
+  skips the other genres in the generator.
+- **Always pass `ctx.signal`** to `subscribe()`: it aborts when the client leaves, when the
+  application shuts down and after `subscriptions.maxDuration`, and the subscription then leaves the
+  topic. Without it, the generator only notices with the next event.
+- **Subscribe first, then await.** The generator starts with the subscription: it has subscribed to
+  the PubSub by the time the client is connected, so an event published right after reaches it,
+  provided it calls `subscribe()` before its first `await`.
+- **Every subscriber has a bounded buffer.** A client reading slower than events are published
+  piles them up; the default `MemoryPubSub` keeps 100 events per subscriber
+  (`subscriptions.bufferSize`), and a subscriber that falls further behind ends with a
+  `SUBSCRIPTION_OVERFLOW` error instead of growing the memory of the server.
 - On shutdown, streams end **without** the `complete` event, which GraphQL-over-SSE clients treat
   as a lost connection: they reconnect to another instance.
+
+### One instance or several {#pubsub-instances}
+
+The default `MemoryPubSub` lives in the memory of the process: what one instance publishes reaches
+the streams open **on that instance** only. That is enough for one instance. With several replicas
+behind a load balancer, the mutation runs on one of them while the subscribers are spread across
+all of them, and most would never hear of the new book.
+
+Several instances need a `PubSub` they share through a server: Redis pub/sub, NATS, Postgres
+`LISTEN`/`NOTIFY`, your message broker. Znight does not ship one: extend `PubSub` (two methods) and
+give an instance to the `pubsub` option. Resolvers do not change: they keep injecting
+`PubSub<CatalogEvents>`. An implementation:
+
+- `publish(topic, payload)` hands the event to the server and resolves once it is sent;
+- `subscribe(topic, { signal })` returns an `AsyncIterableIterator` **synchronously** (start
+  listening right away) that yields the events of the topic until `signal` aborts or `return()` is
+  called, then releases what it holds;
+- gives every subscriber a bounded buffer, ending with `SUBSCRIPTION_OVERFLOW` (a
+  `GraphQLException` with `GraphQLErrorCode.SubscriptionOverflow`) when it overflows;
+- sends payloads that survive the trip: serializable data, not class instances or functions.
+
+`GraphQLPlugin` closes the `MemoryPubSub` it created; a `PubSub` you pass is yours to close.
+
+### Write your own PubSub {#custom-pubsub}
+
+A Redis `PubSub` for [ioredis](https://github.com/redis/ioredis): each instance publishes to a Redis
+channel per topic (`graphql:bookAdded`), listens to the channels its own subscribers need, once per
+topic, and fans every message out to them through a bounded
+[`EventChannel`](../../packages/http/README.md#eventchannel) per subscriber. A connection in
+subscriber mode runs no other command, hence two connections.
+
+```ts [src/graphql/redis-pubsub.ts]
+import type { SubscribeOptions } from '@znight/graphql'
+
+import { GraphQLErrorCode, GraphQLException, PubSub } from '@znight/graphql'
+import { EventChannel } from '@znight/http'
+
+/** The connection that publishes (an ioredis `Redis` fits). */
+export interface RedisPublisher {
+  publish(channel: string, message: string): Promise<unknown>
+}
+
+/** A connection dedicated to subscriptions (another ioredis `Redis`, e.g. `publisher.duplicate()`). */
+export interface RedisSubscriber {
+  subscribe(channel: string): Promise<unknown>
+  unsubscribe(channel: string): Promise<unknown>
+  on(event: 'message', listener: (channel: string, message: string) => void): unknown
+}
+
+export interface RedisPubSubOptions {
+  readonly publisher: RedisPublisher
+  readonly subscriber: RedisSubscriber
+  /** Prefix of the Redis channels, so that applications can share a Redis. Default `'graphql:'`. */
+  readonly prefix?: string
+  /** Events buffered per subscriber; one that falls further behind ends with SUBSCRIPTION_OVERFLOW. Default 100. */
+  readonly bufferSize?: number
+}
+
+/**
+ * Every instance publishes to Redis and subscribes to the Redis channels its own subscribers need,
+ * once per topic, then fans each message out to them. Payloads travel as JSON.
+ */
+export class RedisPubSub<Events extends object = Record<string, unknown>> extends PubSub<Events> {
+  readonly #publisher: RedisPublisher
+  readonly #subscriber: RedisSubscriber
+  readonly #prefix: string
+  readonly #bufferSize: number
+  /** The local subscribers of each Redis channel. */
+  readonly #channels = new Map<string, Set<EventChannel<unknown>>>()
+  #closed = false
+
+  constructor(options: RedisPubSubOptions) {
+    super()
+    this.#publisher = options.publisher
+    this.#subscriber = options.subscriber
+    this.#prefix = options.prefix ?? 'graphql:'
+    this.#bufferSize = options.bufferSize ?? 100
+    this.#subscriber.on('message', (channel, message) => this.#deliver(channel, message))
+  }
+
+  async publish<K extends keyof Events & string>(topic: K, payload: Events[K]): Promise<void> {
+    await this.#publisher.publish(this.#prefix + topic, JSON.stringify(payload))
+  }
+
+  subscribe<K extends keyof Events & string>(
+    topic: K,
+    options: SubscribeOptions = {},
+  ): AsyncIterableIterator<Events[K]> {
+    // a bounded queue per subscriber, closed when the signal aborts (client gone, shutdown)
+    const events = new EventChannel<Events[K]>({
+      capacity: this.#bufferSize,
+      overflow: 'drop-newest',
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
+    })
+    if (this.#closed) events.close()
+    else this.#add(this.#prefix + topic, events as EventChannel<unknown>)
+    const iterator = events[Symbol.asyncIterator]()
+    return {
+      next: () => iterator.next(),
+      return: () => {
+        events.close()
+        return Promise.resolve({ done: true, value: undefined })
+      },
+      [Symbol.asyncIterator]() {
+        return this
+      },
+    }
+  }
+
+  /** Ends every subscription and unsubscribes from Redis. The connections are yours to close. */
+  close(): void {
+    this.#closed = true
+    for (const subscribers of [...this.#channels.values()]) {
+      for (const events of [...subscribers]) events.close()
+    }
+  }
+
+  #add(channel: string, events: EventChannel<unknown>): void {
+    let subscribers = this.#channels.get(channel)
+    if (subscribers === undefined) {
+      const created = new Set<EventChannel<unknown>>()
+      subscribers = created
+      this.#channels.set(channel, created)
+      // the first local subscriber of the topic: listen to its Redis channel
+      this.#subscriber.subscribe(channel).catch((error: unknown) => {
+        for (const subscriber of [...created]) subscriber.fail(error)
+      })
+    }
+    const set = subscribers
+    set.add(events)
+    events.onClose(() => {
+      set.delete(events)
+      if (set.size > 0 || this.#channels.get(channel) !== set) return
+      // the last one left: stop listening
+      this.#channels.delete(channel)
+      this.#subscriber.unsubscribe(channel).catch(() => {})
+    })
+  }
+
+  #deliver(channel: string, message: string): void {
+    const subscribers = this.#channels.get(channel)
+    if (subscribers === undefined) return
+    let payload: unknown
+    try {
+      payload = JSON.parse(message)
+    } catch {
+      return // not a message of this PubSub
+    }
+    for (const events of subscribers) {
+      if (!events.push(payload)) {
+        events.fail(
+          new GraphQLException('The subscriber fell behind the events: the subscription ended', {
+            code: GraphQLErrorCode.SubscriptionOverflow,
+          }),
+        )
+      }
+    }
+  }
+}
+```
+
+Give it to the `pubsub` option, and close it with the connections once everything else has stopped:
+a plugin listed first is disposed last, after the requests and the streams are drained.
+
+```ts [src/main.ts]
+import { Application } from '@znight/core'
+import { GraphQLPlugin } from '@znight/graphql'
+import { HttpPlugin } from '@znight/http'
+import Redis from 'ioredis'
+
+import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
+import { RedisPubSub } from './graphql/redis-pubsub.js'
+
+const publisher = new Redis(process.env['REDIS_URL'] ?? 'redis://localhost:6379')
+const subscriber = publisher.duplicate()
+const pubsub = new RedisPubSub({ publisher, subscriber })
+
+const app = await Application.create({
+  metadata: __ZNIGHT_METADATA__,
+  plugins: [
+    {
+      name: 'redis',
+      async onDispose() {
+        pubsub.close()
+        await Promise.all([publisher.quit(), subscriber.quit()])
+      },
+    },
+    HttpPlugin.configure({ port: 3000 }),
+    GraphQLPlugin.configure({ pubsub }),
+  ],
+})
+await app.start()
+```
+
+- **Payloads travel as JSON.** A `Date` arrives as an ISO string (the built-in `DateTime` scalar
+  serializes those too), a class instance as a plain object. Publish data, or ids the subscription
+  reloads.
+- **Redis pub/sub delivers at most once.** It stores nothing: an instance that is down or
+  reconnecting misses what is published meanwhile, and so does a subscription during the round trip
+  of its first `SUBSCRIBE` (later subscriptions of the same topic on the same instance share it). When
+  every event matters, publish ids and let the client query what changed, or use Redis Streams or
+  your broker with a replay.
+- `prefix` keeps applications sharing a Redis apart; another PubSub's messages are ignored.
+- The other shared stores follow the same shape: NATS subjects, Postgres `LISTEN`/`NOTIFY`
+  channels (payloads up to 8 000 bytes), a fan-out exchange of your broker.
+
+The recipe is tested in the repository against an in-memory Redis and, with Docker, a real one:
+[`redis-pubsub.ts`](../../packages/graphql/test/recipes/redis-pubsub.ts) and its tests.
 
 ## Protect fields {#authorization}
 
@@ -675,6 +909,109 @@ wraps it: a span per operation under the HTTP request span, `graphql_operations_
 `graphql_operation_duration_seconds` by type and (capped) operation name, and opt-in operation logs
 (`logging: { graphql: true }`).
 
+## Serve the schema with GraphQL Yoga {#yoga}
+
+The built-in endpoint covers GraphQL over HTTP and SSE. To serve the API with
+[GraphQL Yoga](https://the-guild.dev/graphql/yoga-server) instead (its protocol support, its
+GraphiQL, its envelop plugins), turn the endpoint off and hand the requests of a controller to Yoga.
+Yoga parses and validates the operation against `plugin.schema`; the execution goes back to
+`GraphQLPlugin` through `execute()` and `subscribe()`, in the request scope of the route:
+
+```ts [src/graphql/yoga.controller.ts]
+import type { GraphQLPlugin, GraphQLRequest } from '@znight/graphql'
+import type { ExecutionArgs } from 'graphql'
+import type { Plugin, YogaInitialContext, YogaServerInstance } from 'graphql-yoga'
+
+import { Controller, Ctx, Get, type HttpContext, Post } from '@znight/http'
+import { createYoga } from 'graphql-yoga'
+
+type Yoga = YogaServerInstance<Record<string, unknown>, Record<string, unknown>>
+
+/** The operation Yoga received, as `GraphQLPlugin` takes it, and the signal of the request. */
+function operation(args: ExecutionArgs): [GraphQLRequest, { signal: AbortSignal }] {
+  const { params, request } = args.contextValue as YogaInitialContext
+  return [{ ...params, query: params.query ?? '' }, { signal: request.signal }]
+}
+
+/** Yoga parses and validates; Znight executes: guards, loaders, request scope, errors and hooks. */
+function executeWithZnight(graphql: GraphQLPlugin): Plugin {
+  return {
+    onExecute({ setExecuteFn }) {
+      setExecuteFn(async args => (await graphql.execute(...operation(args))) as never)
+    },
+    onSubscribe({ setSubscribeFn }) {
+      setSubscribeFn(args => graphql.subscribe(...operation(args)) as never)
+    },
+  }
+}
+
+@Controller('/graphql')
+export class YogaController {
+  #yoga: Yoga | undefined
+
+  constructor(private readonly graphql: GraphQLPlugin) {}
+
+  @Get()
+  get(@Ctx() ctx: HttpContext): Promise<Response> {
+    return this.#handle(ctx)
+  }
+
+  @Post()
+  post(@Ctx() ctx: HttpContext): Promise<Response> {
+    return this.#handle(ctx)
+  }
+
+  async #handle(ctx: HttpContext): Promise<Response> {
+    const headers = new Headers()
+    for (const [name, value] of Object.entries(ctx.headers)) if (value !== undefined) headers.set(name, value)
+    const url = new URL(ctx.url, `${ctx.protocol}://${ctx.header('host') ?? 'localhost'}`)
+    const request = new Request(url.href, {
+      method: ctx.method,
+      headers,
+      ...(ctx.method === 'GET' ? {} : { body: await ctx.rawBody() }),
+      signal: ctx.signal,
+    })
+    // the schema exists once the application booted: Yoga is created on the first request
+    this.#yoga ??= createYoga({
+      schema: this.graphql.schema,
+      graphqlEndpoint: '/graphql',
+      maskedErrors: false, // GraphQLPlugin already masks unexpected errors
+      logging: false, // requests and operations are logged by Znight (@znight/observability)
+      plugins: [executeWithZnight(this.graphql)],
+    })
+    return this.#yoga.fetch(request)
+  }
+}
+```
+
+```ts [src/main.ts (excerpt)]
+GraphQLPlugin.configure({ http: false }) // no built-in endpoint: the controller serves /graphql
+```
+
+```sh
+npm install graphql-yoga
+```
+
+Why Yoga does not execute the schema itself: its resolvers expect Znight's `GraphQLContext`
+(`@Ctx()`, `@Loader()`, `ctx.signal`), the request scope and the error formatting of
+`GraphQLPlugin`, none of which Yoga's context provides. Delegating the execution keeps everything of
+this guide: GraphQL guards (whose `ctx.http` is the request of the route), loaders, request-scoped
+providers, argument validation, error and result mappers, masking, limits, and the
+`graphql:operation` hook (with `transport: 'direct'`). What to know:
+
+- The route is a controller route: HTTP guards, CORS and access decisions apply to it like to any
+  other (a required group needs a decision on the controller, `@Public()` for instance).
+- Yoga plugins that work on the request, the parsed document, the validation or the result apply;
+  those that wrap resolvers or replace the execution do not, and Yoga's `context` option does not
+  reach the resolvers (use request-scoped providers).
+- An operation is parsed by Yoga, then again by `GraphQLPlugin` (its document cache makes repeated
+  documents cheap), and validated by both.
+- Apollo Server cannot take this route today: it needs graphql-js 16, while `@znight/graphql` runs
+  on graphql-js 17. Pluggable GraphQL servers are being designed (RFC 0009).
+
+The controller is tested in the repository on a compiled application:
+[`yoga.controller.ts`](../../packages/graphql/test/recipes/yoga.controller.ts) and its tests.
+
 ## Schema-first {#schema-first}
 
 Code-first suits a schema owned by the server. When the `.graphql` files are the contract, shared
@@ -821,6 +1158,6 @@ union of its own.
 - Schema-first: no custom directives with behaviour, no `@oneOf` inputs, no `__resolveType`
   methods (return objects carrying `__typename`).
 - Subscriptions are over SSE only (`graphql-ws` is a follow-up), and `MemoryPubSub` serves one
-  process.
+  process ([write your own](#custom-pubsub) for several).
 - No `@defer` / `@stream`, trusted documents, cost analysis or federation in this version.
 - Types must be written: return types and property types are read from annotations.

@@ -40,7 +40,8 @@
   "scripts": {
     "build": "tsdown",
     "typecheck": "tsc --noEmit && tsc --noEmit -p test",
-    "test": "bun test --conditions=@znight/source test"
+    "test": "bun test --conditions=@znight/source test",
+    "test:integration": "ZNIGHT_INTEGRATION=1 bun test --conditions=@znight/source --timeout 180000 test/recipes/redis-pubsub.integration.test.ts"
   },
   "publishConfig": {
     "access": "public"
@@ -64,12 +65,16 @@
     }
   },
   "devDependencies": {
-    "@znight/http": "workspace:*",
+    "@testcontainers/redis": "12.2.1",
     "@znight/compiler": "workspace:*",
+    "@znight/http": "workspace:*",
     "@znight/testing": "workspace:*",
     "graphql": "17.0.2",
     "graphql-http": "1.23.1",
     "graphql-sse": "2.6.3",
+    "graphql-yoga": "6.0.1",
+    "ioredis": "6.0.0",
+    "testcontainers": "12.2.1",
     "valibot": "1.5.0",
     "zod": "catalog:"
   },

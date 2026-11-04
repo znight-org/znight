@@ -425,8 +425,11 @@ curl -N -H 'accept: text/event-stream' -H 'content-type: application/json' \
 # data: {"data":{"bookAdded":{"title":"The Hobbit"}}}
 ```
 
-`PubSub<Events>` is an injectable abstract class (singleton, provided by `GraphQLPlugin`), where
-`Events` maps topics to payload types:
+The events of a subscription are born elsewhere (a mutation, a scheduled job, a message consumer),
+while the stream stays open. `PubSub<Events>` is the mailbox between them: producers
+`publish(topic, payload)`, every open subscription `subscribe(topic, { signal })`s and receives what
+is published on the topic from then on (nothing is stored or replayed). It is an injectable abstract
+class (singleton, provided by `GraphQLPlugin`), where `Events` maps topics to payload types:
 
 ```ts
 /** Topics of the application PubSub and their payloads. */
@@ -443,8 +446,14 @@ for await (const book of this.events.subscribe('bookAdded', { signal: ctx.signal
   subscriber (`subscriptions.bufferSize`, 100 events). A subscriber that falls behind gets a final
   `SUBSCRIPTION_OVERFLOW` error and its stream ends, rather than losing events silently or buffering
   without bound. The plugin closes the `MemoryPubSub` it created when the application is disposed.
-- Several instances need a shared implementation (Redis, a broker): pass any object with
-  `publish(topic, payload)` and `subscribe(topic, { signal })` as the `pubsub` option.
+- `MemoryPubSub` reaches the subscribers of its own process only. Several instances need a shared
+  implementation (Redis pub/sub, NATS, Postgres `LISTEN`/`NOTIFY`, a broker): extend `PubSub` and
+  pass an instance as the `pubsub` option. `subscribe()` returns its iterator synchronously, ends
+  when `signal` aborts or `return()` is called, buffers a bounded number of events per subscriber
+  (`SUBSCRIPTION_OVERFLOW` beyond), and payloads must survive serialization. The plugin does not
+  close a `PubSub` it did not create. The guide's
+  [Write your own PubSub](../../docs/guide/graphql.md#custom-pubsub) recipe is a tested Redis
+  implementation (ioredis).
 - `subscribe()` ends when its `signal` aborts: the client left, the application shuts down, the
   stream reached `subscriptions.maxDuration`, or (`plugin.subscribe()`) its `return()` was called.
   Always pass `ctx.signal`.
@@ -797,7 +806,11 @@ ZNIGHT066.
 | `initRoots()` / `httpRoutes()` | The `PluginInitRoots` contract (`TestApp`) and the `PluginHttpRoutes` contract of `@znight/http`                                  |
 
 `request` is `{ query, operationName?, variables?, extensions? }`; `options` is `{ signal?,
-requestId? }`. A direct execution has no HTTP guards.
+requestId? }`. A direct execution has no HTTP guards of its own: inside a controller, it runs in the
+route's request scope, after the route's guards. With `http: false`, a controller can hand its
+requests to another GraphQL server that delegates the execution to `execute()` and `subscribe()`:
+the guide's [Serve the schema with GraphQL Yoga](../../docs/guide/graphql.md#yoga) recipe keeps
+guards, loaders, the request scope and error formatting.
 
 ```ts
 const plugin = app.getPlugin<GraphQLPlugin>('graphql')
@@ -1332,7 +1345,7 @@ are emitted by schema-first only: code-first sections, hashes and artifacts are 
   cache, no federation or schema stitching, no file uploads (use an HTTP upload route), no operation
   batching.
 - `MemoryPubSub` serves one process; a multi-instance `PubSub` is the application's (`pubsub`
-  option).
+  option, Redis recipe in the guide).
 - Types must be written: the compiler reads annotations, it never infers return or property types.
 - The SDL artifact and `schemaHash` see the `description` and `specifiedByURL` of a
   `ScalarDefinition` written as literals only; a graphql-js `GraphQLScalarType` (`graphql-scalars`)
