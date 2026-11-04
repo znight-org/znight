@@ -1299,8 +1299,9 @@ on Node.js, use `node --conditions=@znight/source` instead of `bun`):
   `GraphQLPlugin.execute()` over graphql-js `execute()` for a cached 50-field query (target: under
   10 %; measured 0–9 % on Bun 1.4, 1–7 % on Node.js 24).
 - `bun --conditions=@znight/source test/bench/http.bench.ts`: the endpoint through the `HttpPlugin`
-  pipeline in process (`GET` and `POST`, both JSON media types), next to bare graphql-js and to a
-  controller route answering a constant. `ABORT_REASON=1` removes the cost graphql-js 17.0 adds to
+  pipeline in process (`GET` and `POST`, both JSON media types), next to bare graphql-js, to a
+  controller route answering a constant, and to `GraphQLEngine.execute()` (what a driver calls: on
+  a cached `{ hello }`, within 2 % of `plugin.execute()`). `ABORT_REASON=1` removes the cost graphql-js 17.0 adds to
   every execution (a `DOMException` built when it aborts its own `AbortController`, about 3 µs on
   Node.js): compare with other servers at the same graphql-js version.
 

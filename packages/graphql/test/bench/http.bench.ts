@@ -11,6 +11,8 @@
  *   and `@HttpCode(200)`), the cheapest JSON request of the pipeline (its fast lane);
  * - bare graphql-js: `execute()` of the parsed document on the same schema, then `JSON.stringify`;
  * - `GraphQLPlugin.execute()`: the executor without HTTP (document cache, context, formatting);
+ * - `GraphQLEngine.execute()`: what a driver calls (RFC 0009), on a document the engine parsed and
+ *   validated, without HTTP;
  * - the endpoint: `GET /graphql?query=...` and `POST /graphql`, answered as `application/json` and
  *   as `application/graphql-response+json`.
  *
@@ -206,6 +208,9 @@ const graphql = app.getPlugin<GraphQLPlugin>('graphql') as GraphQLPlugin
 
 const schema = graphql.schema
 const document = parse(QUERY)
+const engine = graphql.engine
+const engineDocument = engine.parse(QUERY)
+if (engine.validate(schema, engineDocument).length > 0) throw new Error('the engine refused the query')
 const getFloor = adapter.handler('GET', '/floor')
 const postFloor = adapter.handler('POST', '/floor')
 const getGraphQL = adapter.handler('GET', '/graphql')
@@ -233,6 +238,7 @@ const results = await bench(
   [
     ['graphql-js execute() + JSON.stringify (bare)', () => JSON.stringify(execute({ schema, document }))],
     ['GraphQLPlugin.execute() (no HTTP)', () => graphql.execute({ query: QUERY })],
+    ['GraphQLEngine.execute() (no HTTP, a driver)', () => engine.execute({ schema, document: engineDocument })],
     ['GET  /floor (controller, plain object)', () => getFloor(requests.getFloor)],
     ['GET  /graphql application/json', () => getGraphQL(requests.get)],
     ['GET  /graphql application/graphql-response+json', () => getGraphQL(requests.getGraphQL)],
