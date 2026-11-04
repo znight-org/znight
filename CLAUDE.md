@@ -364,7 +364,7 @@ and docs updated with the code.
   [`docs/contributing/index.md`](docs/contributing/index.md).
 - Roadmap: [`docs/roadmap.md`](docs/roadmap.md); RFCs: [`rfcs/README.md`](rfcs/README.md) (0001
   security, 0002 openapi, 0003 websocket, 0004 schedule, 0005 graphql, 0006 cookies and SSE, 0007
-  graphql schema-first).
+  graphql schema-first, 0008 graphql errors as data, 0009 graphql drivers).
 - Guides (`docs/guide/`): introduction, getting-started, project-structure, dependency-injection,
   scopes, lifecycle, plugins, aop, compiler, data-access, testing, security, scheduling,
   deployment, migrating-from-nestjs.

@@ -12,6 +12,7 @@ Design documents for significant changes. Each RFC is discussed before implement
 | [0006](./0006-http-cookies-sse.md)       | HTTP cookies and Server-Sent Events       | Accepted (v0.1)    |
 | [0007](./0007-graphql-schema-first.md)   | Schema-first GraphQL (`@znight/graphql`)  | Accepted (v0.2)    |
 | [0008](./0008-graphql-errors-as-data.md) | Errors as data in `@znight/graphql`       | Accepted (v0.2)    |
+| [0009](./0009-graphql-drivers.md)        | GraphQL drivers (`@znight/graphql`)       | Proposed           |
 
 ## Error code allocation
 
