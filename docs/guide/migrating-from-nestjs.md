@@ -80,7 +80,7 @@ walks through a migration.
 | `ScheduleModule.forRoot()`, `@Cron()`, `@Interval()` | [`@znight/schedule`](/packages/schedule): `SchedulePlugin`, `@Cron()`, `@Interval('10s')`                                                |
 | `TypeOrmModule`, `@InjectRepository(User)`           | A `@Factory()` providing the client, repositories behind interfaces ([Data access](./data-access))                                       |
 | `CacheModule`, `CacheInterceptor`                    | A method interceptor ([cache recipe](./aop#cache)); `@znight/cache` is planned                                                           |
-| `@WebSocketGateway()`                                | Planned for v0.2 ([roadmap](/roadmap#v0-2)); Server-Sent Events today                                                                    |
+| `@WebSocketGateway()`                                | Planned, version not defined ([roadmap](/roadmap#planned)); Server-Sent Events today                                                     |
 | `@nestjs/graphql` (code first)                       | [`@znight/graphql`](/packages/graphql): the TypeScript types are the schema ([guide](/guide/graphql#nestjs))                             |
 | `@nestjs/graphql` (schema first, `typePaths`)        | [`@znight/graphql`](/packages/graphql) schema-first: the same `.graphql` files, resolvers bound by name ([below](#graphql-schema-first)) |
 | A Yoga/Envelop plugin turning exceptions into data   | `resultMappers` of `GraphQLPlugin`, per field ([errors as data](/guide/graphql#errors-as-data))                                          |
