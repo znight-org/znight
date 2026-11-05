@@ -562,7 +562,9 @@ export const CurrentUser = createParamDecorator<User>({
 The resolver runs after the guards (it sees what they stored) and before the method; what it
 throws fails the field like the method would (`errors[]`, or a result mapper). A custom parameter
 is not a GraphQL argument: it never appears in the schema. Resolver classes implementing
-`ParamResolver` are resolved in the operation scope.
+`ParamResolver` are resolved in the operation scope. Custom parameters belong to the field
+resolvers of the schema, so they work the same through the built-in transport, `plugin.execute()`
+and a driver such as `yogaDriver()` (RFC 0009).
 
 ## Authorization
 

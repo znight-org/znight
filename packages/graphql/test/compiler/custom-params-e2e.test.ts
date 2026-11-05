@@ -1,7 +1,8 @@
 /**
  * End to end: custom parameter decorators (RFC 0010) on GraphQL resolvers, code-first. One
  * definition serves HTTP routes and GraphQL fields; function and class resolvers, data arguments,
- * guards sharing the `ResolverContext`, errors in `errors[]`. The generated module type-checks.
+ * guards sharing the `ResolverContext`, errors in `errors[]`, through the built-in transport and
+ * the Yoga driver (RFC 0009). The generated module type-checks.
  */
 import type { CompileResult } from '@znight/compiler'
 import type { ZnightMetadata } from '@znight/core'
@@ -16,6 +17,7 @@ import { TestApp } from '@znight/testing'
 
 import { GraphQLPlugin } from '../../src/index.ts'
 import { executeOperation } from '../../src/testing.ts'
+import { yogaDriver } from '../../src/yoga.ts'
 import { captureLogger } from '../support/app.ts'
 import { analyzeSchemaFirst, cleanupApps, compileApp, render, tempApp, typecheck } from './helpers.ts'
 import { afterAll, beforeAll, describe, expect, test as it } from 'bun:test'
@@ -167,6 +169,7 @@ describe('custom parameter decorators on GraphQL resolvers (e2e)', () => {
   let result: CompileResult
   let section: GraphQLMetadata
   let test: TestApp
+  let yoga: TestApp
   let calls: string[]
 
   beforeAll(async () => {
@@ -183,9 +186,18 @@ describe('custom parameter decorators on GraphQL resolvers (e2e)', () => {
       plugins: [HttpPlugin.configure({ port: 0, host: '127.0.0.1' }), GraphQLPlugin.configure()],
       logger: captureLogger(),
     })
+    yoga = await TestApp.create({
+      metadata: generated.__ZNIGHT_METADATA__,
+      plugins: [
+        HttpPlugin.configure({ port: 0, host: '127.0.0.1' }),
+        GraphQLPlugin.configure({ driver: yogaDriver() }),
+      ],
+      logger: captureLogger(),
+    })
   }, 60_000)
 
   afterAll(async () => {
+    await yoga?.close()
     await test?.close()
     cleanupApps()
   })
@@ -254,6 +266,31 @@ describe('custom parameter decorators on GraphQL resolvers (e2e)', () => {
       'loaded 2 Query.loaded',
       'loaded 2 Query.loaded',
     ])
+  })
+
+  it('resolves custom parameters through the Yoga driver', async () => {
+    calls.splice(0)
+    const post = (query: string, headers: Record<string, string> = {}) =>
+      yoga.inject({
+        method: 'POST',
+        url: '/graphql',
+        headers: { 'content-type': 'application/json', accept: 'application/graphql-response+json', ...headers },
+        body: JSON.stringify({ query }),
+      })
+    const ok = await post('{ me guarded echo(text: "hi") loaded constant }', { 'x-user': 'ada' })
+    expect(ok.json()).toEqual({
+      data: {
+        me: 'ada',
+        guarded: 'ada field:Query.guarded',
+        echo: 'hi echo:Query.echo',
+        loaded: true,
+        constant: 'constant',
+      },
+    })
+    expect(calls.slice(0, 2)).toEqual(['current Query.me false', 'current Query.guarded true'])
+    const denied = (await post('{ me }')).json() as { data: unknown; errors?: unknown[] }
+    expect(denied.data).toBeNull()
+    expect(denied.errors?.[0]).toMatchObject({ message: 'Not authenticated', extensions: { code: 'UNAUTHENTICATED' } })
   })
 
   it('serves the same decorator on an HTTP route', async () => {
