@@ -193,6 +193,42 @@ export class Handler {
     }
   })
 
+  it('accepts a parameter whose function property the injected class declares as a method', async () => {
+    const app = tempApp({
+      ...FAKE,
+      'src/user.ts': `export class User {
+  id = ''
+  hasRole(role: string): boolean {
+    return role === 'admin'
+  }
+}
+export interface Principal { readonly id: string; readonly hasRole: (role: string) => boolean }
+`,
+      'src/decorators.ts': `import { createParamDecorator } from '@znight/core'
+import { User } from './user.ts'
+export const CurrentUser = createParamDecorator<User>({ fake: () => new User() })
+`,
+      'src/handler.ts': `import { Handle, Handlers } from '@acme/fake'
+import { CurrentUser } from './decorators.ts'
+import type { Principal } from './user.ts'
+@Handlers()
+export class Handler {
+  @Handle()
+  run(@CurrentUser() principal: Principal): void {}
+}
+`,
+    })
+    const uses = new Map<string, ParamDecoratorUse | undefined>()
+    try {
+      const result = await analyzeRoot(app.root, { extensions: [fakeExtension(uses)] })
+      expect(renderDiagnostics(result.root, result.diagnostics)).toBe('')
+      const use = uses.get('run.principal')
+      expect(use?.ok && use.cast).toBe(true)
+    } finally {
+      app.cleanup()
+    }
+  })
+
   it('costs nothing without definitions', async () => {
     const app = tempApp({
       ...FAKE,
@@ -288,6 +324,72 @@ export class Handler {
       expect(check('date', 'date')).toBe(true)
       expect(check('account', 'labelled')).toBe(true)
       expect(types.assignable(params.get('text')?.type as never, params.get('id')?.type as never)).toBe(true)
+    } finally {
+      app.cleanup()
+    }
+  })
+
+  it('does not reject a function property of the target that the source declares as a method', async () => {
+    const app = tempApp({
+      ...FAKE,
+      'src/types.ts': `export class User {
+  id = ''
+  hasRole(role: string): boolean {
+    return role === this.id
+  }
+}
+export class Plain { id = '' }
+export class Child extends User {}
+export interface Principal { readonly id: string; readonly hasRole: (role: string) => boolean }
+export interface WithMethod { readonly id: string; isAdmin(): boolean }
+export interface WithOptional { readonly id: string; readonly isAdmin?: () => boolean }
+export class Admin { private secret = 1; id = '' }
+export class Guarded { #token = ''; id = '' }
+export interface Missing { readonly id: string; readonly name: string }
+`,
+      'src/handler.ts': `import { Handle, Handlers } from '@acme/fake'
+import type { Admin, Child, Guarded, Missing, Plain, Principal, User, WithMethod, WithOptional } from './types.ts'
+@Handlers()
+export class Handler {
+  @Handle()
+  run(
+    user: User, plain: Plain, child: Child, principal: Principal, withMethod: WithMethod, withOptional: WithOptional,
+    admin: Admin, guarded: Guarded, missing: Missing, inline: { readonly id: string; isAdmin(): boolean },
+  ): void {}
+}
+`,
+    })
+    let helpers: TypeHelpers | undefined
+    const params = new Map<string, import('../../src/index.ts').ParameterInfo>()
+    const extension: CompilerExtension = {
+      apiVersion: 1,
+      name: 'fake',
+      decorators: {
+        '@acme/fake#Handlers': { targets: ['class'], params: [] },
+        '@acme/fake#Handle': { targets: ['method'], params: [] },
+      },
+      analyzeClass(cls, ctx) {
+        helpers = ctx.types
+        for (const param of cls.methods[0]?.params ?? []) params.set(param.name, param)
+      },
+    }
+    try {
+      const result = await analyzeRoot(app.root, { extensions: [extension] })
+      expect(result.diagnostics).toEqual([])
+      const types = helpers as TypeHelpers
+      const check = (source: string, target: string): boolean | undefined =>
+        types.assignable({ parameter: params.get(source) as never }, { parameter: params.get(target) as never })
+      // a function property of the target may be a method of the source (left out of its shape)
+      expect(check('user', 'principal')).toBeUndefined()
+      expect(check('child', 'principal')).toBeUndefined()
+      expect(check('user', 'withOptional')).toBe(true)
+      // a source without methods certainly lacks it
+      expect(check('plain', 'principal')).toBe(false)
+      expect(check('user', 'missing')).toBe(false)
+      // the same declaration is still assignable to itself
+      expect(check('user', 'user')).toBe(true)
+      expect(check('admin', 'admin')).toBe(true)
+      expect(check('user', 'plain')).toBe(true)
     } finally {
       app.cleanup()
     }

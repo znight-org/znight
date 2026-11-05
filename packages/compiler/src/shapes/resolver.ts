@@ -24,6 +24,7 @@ import type {
   TSEnumMember,
   TSInterfaceDeclaration,
   TSMappedType,
+  TSMethodSignature,
   TSSignature,
   TSTupleElement,
   TSType,
@@ -57,10 +58,12 @@ import {
   literal,
   mergeObjects,
   object,
+  omittedMembers,
   orderedUnion,
   overrideProperties,
   serializeShape,
   union,
+  withOmitted,
   withOrigin,
   withoutUndefined,
 } from './shape.ts'
@@ -1050,13 +1053,18 @@ export class ShapeResolver {
     const base = mergeObjects(bases, toObject)
     const mine = mergeObjects(own, toObject)
     const additional = mine.additional ?? base.additional
-    return object(overrideProperties(base.properties, mine.properties), additional)
+    return withOmitted(object(overrideProperties(base.properties, mine.properties), additional), [
+      ...omittedMembers(base),
+      ...omittedMembers(mine),
+    ])
   }
 
   /** Members of an interface body or object literal type. */
   #members(members: readonly TSSignature[], context: Context): Shape {
     const properties: ShapeProperty[] = []
     let additional: Shape | undefined
+    // method signatures (and accessor signatures the options leave out) are members of an instance
+    const omitted: string[] = []
     for (const member of members) {
       switch (member.type) {
         case 'TSPropertySignature': {
@@ -1095,15 +1103,17 @@ export class ShapeResolver {
             properties.push(
               this.#getter(name, member.returnType?.typeAnnotation, !settable, member, member.key, context),
             )
+          } else if (!this.#options.instance || member.kind !== 'set' || !hasGetterSignature(members, member)) {
+            // a method signature is left out (a setter signature goes with its getter)
+            omitted.push(propertyName(member.key, member.computed) ?? '[computed]')
           }
           break
         }
         default:
-          // methods and accessors are not serialised data
           break
       }
     }
-    return object(properties, additional)
+    return withOmitted(object(properties, additional), omitted)
   }
 
   #property(
@@ -1246,7 +1256,8 @@ export class ShapeResolver {
         ),
       )
     }
-    return object(overrideProperties(base?.properties ?? [], properties), base?.additional)
+    const omitted = [...(base === undefined ? [] : omittedMembers(base)), ...omittedClassMembers(node, properties)]
+    return withOmitted(object(overrideProperties(base?.properties ?? [], properties), base?.additional), omitted)
   }
 
   /**
@@ -1472,7 +1483,7 @@ export class ShapeResolver {
     }
     const structure = this.#toObject(shape)
     if (structure) {
-      return object(structure.properties.map(map), structure.additional)
+      return withOmitted(object(structure.properties.map(map), structure.additional), omittedMembers(structure))
     }
     return shape
   }
@@ -1485,7 +1496,8 @@ export class ShapeResolver {
     if (!structure) {
       return shape.kind === 'opaque' ? shape : this.#opaqueAt(node, context, 'unsupported')
     }
-    return object(structure.properties.filter(keep), structure.additional)
+    // `Pick` and `Omit` may keep members the structure leaves out
+    return withOmitted(object(structure.properties.filter(keep), structure.additional), omittedMembers(structure))
   }
 
   /**
@@ -2242,4 +2254,49 @@ function unwrapExpression(expression: Expression): Expression {
     current = current.expression
   }
   return current
+}
+
+/** `true` when `members` declare a getter signature of the same name as the setter signature `setter`. */
+function hasGetterSignature(members: readonly TSSignature[], setter: TSMethodSignature): boolean {
+  const name = propertyName(setter.key, setter.computed)
+  return members.some(
+    other =>
+      other.type === 'TSMethodSignature' && other.kind === 'get' && propertyName(other.key, other.computed) === name,
+  )
+}
+
+/**
+ * The instance members of a class its shape leaves out: methods, accessors and fields that are not
+ * among `properties` (`private`, `protected` and `#private` members included), and parameter
+ * properties that are not either.
+ */
+function omittedClassMembers(node: Class, properties: readonly ShapeProperty[]): string[] {
+  const kept = new Set(properties.map(property => property.name))
+  const omitted: string[] = []
+  for (const member of node.body.body) {
+    if (member.type === 'StaticBlock' || member.type === 'TSIndexSignature' || member.static) {
+      continue
+    }
+    if (member.type === 'MethodDefinition' && member.kind === 'constructor') {
+      for (const param of member.value.params) {
+        if (param.type !== 'TSParameterProperty') {
+          continue
+        }
+        const pattern = param.parameter.type === 'AssignmentPattern' ? param.parameter.left : param.parameter
+        const name = pattern.type === 'Identifier' ? pattern.name : '[computed]'
+        if (!kept.has(name)) {
+          omitted.push(name)
+        }
+      }
+      continue
+    }
+    const name =
+      member.key.type === 'PrivateIdentifier'
+        ? `#${member.key.name}`
+        : (propertyName(member.key, member.computed) ?? '[computed]')
+    if (!kept.has(name)) {
+      omitted.push(name)
+    }
+  }
+  return omitted
 }

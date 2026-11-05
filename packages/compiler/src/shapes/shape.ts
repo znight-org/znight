@@ -42,6 +42,32 @@ export function object(properties: readonly ShapeProperty[], additional?: Shape)
   return additional === undefined ? { kind: 'object', properties } : { kind: 'object', properties, additional }
 }
 
+/**
+ * Instance members of classes and interfaces that their object shapes leave out (methods, method
+ * signatures, setters without getter, `private`, `protected` and `#private` members), directly or
+ * through a base, by name (`#name` for `#private` members, `[computed]` for computed keys).
+ * Internal: read by the assignability check (RFC 0010), which must not decide on members it cannot
+ * see.
+ */
+const OMITTED = new WeakMap<ObjectShape, ReadonlySet<string>>()
+
+/** Records the members `shape` leaves out (those it has as properties excepted); returns `shape`. */
+export function withOmitted(shape: ObjectShape, names: Iterable<string>): ObjectShape {
+  const kept = new Set(shape.properties.map(property => property.name))
+  const omitted = new Set([...names].filter(name => !kept.has(name)))
+  if (omitted.size > 0) {
+    OMITTED.set(shape, omitted)
+  }
+  return shape
+}
+
+/** The members an object shape leaves out ({@link withOmitted}), empty for other shapes. */
+export function omittedMembers(shape: Shape): ReadonlySet<string> {
+  return (shape.kind === 'object' ? OMITTED.get(shape) : undefined) ?? NONE
+}
+
+const NONE: ReadonlySet<string> = new Set()
+
 /** Normalised union. */
 export function union(members: readonly Shape[]): Shape {
   const flat: Shape[] = []
@@ -154,7 +180,10 @@ export function mergeObjects(
         additional === undefined ? current.additional : intersection([additional, current.additional], toObject)
     }
   }
-  return object([...properties.values()], additional)
+  return withOmitted(
+    object([...properties.values()], additional),
+    objects.flatMap(current => [...omittedMembers(current)]),
+  )
 }
 
 /** Object properties with `extends`/override semantics: later properties replace earlier ones in place. */

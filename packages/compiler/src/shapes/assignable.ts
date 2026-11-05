@@ -4,9 +4,14 @@
  * when a value of the source certainly is not, `undefined` when it cannot be decided (`any`,
  * `unknown`, opaque parts, schemas, kept references, intersections on the source side...). It is
  * structural like TypeScript, without methods (shapes read the `instance` members: fields and
- * getters), and is meant for checks that must never reject valid code: callers report only `false`.
+ * getters): a property of the target that the source declares as a member its shape leaves out (a
+ * method `hasRole()` for `hasRole: () => boolean`) is not decided. It is meant for checks that must
+ * never reject valid code: callers report only `false`.
  */
-import type { NamedShape, Shape, ShapeOptions, ShapeProperty, ShapeResult, ShapeTarget } from '../extensions/api.ts'
+import type { NamedShape, Shape, ShapeOptions, ShapeResult, ShapeTarget } from '../extensions/api.ts'
+import type { ObjectShape } from './shape.ts'
+
+import { omittedMembers } from './shape.ts'
 
 /** Shape options of the comparison: what reading an instance gives. */
 export const ASSIGNABLE_SHAPE_OPTIONS: ShapeOptions = Object.freeze({ members: 'instance', jsdoc: false })
@@ -108,25 +113,24 @@ class Comparison {
         }
         return isPrimitive(source) ? false : undefined
       case 'object':
-        if (source.kind === 'object') return this.#object(source.properties, source.additional, target, depth)
+        if (source.kind === 'object') return this.#object(source, target, depth)
         return isPrimitive(source) || source.kind === 'array' ? false : undefined
       default:
         return undefined
     }
   }
 
-  #object(
-    properties: readonly ShapeProperty[],
-    additional: Shape | undefined,
-    target: Extract<Shape, { kind: 'object' }>,
-    depth: number,
-  ): Verdict {
+  #object(source: ObjectShape, target: ObjectShape, depth: number): Verdict {
+    const { properties, additional } = source
     const verdicts: Verdict[] = []
     const byName = new Map(properties.map(property => [property.name, property]))
     for (const wanted of target.properties) {
       const found = byName.get(wanted.name)
       if (found === undefined) {
-        verdicts.push(wanted.optional || (additional === undefined ? false : undefined))
+        // a member the source shape leaves out (a method `hasRole(): boolean` for `hasRole: () => boolean`)
+        // is not compared
+        if (omittedMembers(source).has(wanted.name)) verdicts.push(undefined)
+        else verdicts.push(wanted.optional || (additional === undefined ? false : undefined))
         continue
       }
       if (found.optional && !wanted.optional) {

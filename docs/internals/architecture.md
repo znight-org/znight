@@ -1200,8 +1200,9 @@ interface DecoratorSpec {
   and getters, no methods). `true` when every value of the source is a value of the target, `false`
   when one certainly is not (a missing required property, `undefined` or `null` the target does not
   accept, another primitive or literal), `undefined` when it cannot be decided (`any`, `unknown`,
-  opaque parts, schemas, kept references, intersections on the source side). Recursive types are
-  compared coinductively. Extensions report only `false`.
+  opaque parts, schemas, kept references, intersections on the source side, a property of the target
+  that the source declares as a member its shape leaves out, such as a method for a function-typed
+  property). Recursive types are compared coinductively. Extensions report only `false`.
 - **Type shapes** (`types.shape(target, options?) → ShapeResult`, in the analyze, validate and
   generate contexts): the structural view of a type annotation, what a value of that type looks like
   once serialised as JSON, computed from declarations (sources and `.d.ts` alike, no type checker)

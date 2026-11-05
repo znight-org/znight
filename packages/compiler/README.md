@@ -968,8 +968,8 @@ lookup.
 `ctx.types.assignable(source, target)` compares two types (or shape targets, such as
 `{ parameter }`) conservatively through their shapes: `true`, `false` when a value of the source is
 certainly not a value of the target (a missing property, `undefined` or `null` not accepted, another
-primitive), `undefined` when it cannot be decided (`any`, `unknown`, opaque parts). Report only
-`false`.
+primitive), `undefined` when it cannot be decided (`any`, `unknown`, opaque parts, a property the
+source declares as a method). Report only `false`.
 
 ## Compiler contract
 
