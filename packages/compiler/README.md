@@ -969,7 +969,8 @@ lookup.
 `{ parameter }`) conservatively through their shapes: `true`, `false` when a value of the source is
 certainly not a value of the target (a missing property, `undefined` or `null` not accepted, another
 primitive), `undefined` when it cannot be decided (`any`, `unknown`, opaque parts, a property the
-source declares as a method). Report only `false`.
+source declares as a method, a target declaring methods or private members, which the shapes leave
+out). Report only `false`.
 
 ## Compiler contract
 

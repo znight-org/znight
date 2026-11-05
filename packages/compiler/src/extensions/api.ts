@@ -630,7 +630,8 @@ export interface TypeHelpers {
    * fields and getters, no methods): `true` when every value of `source` is a value of `target`,
    * `false` when one certainly is not (a missing required property, `undefined` or `null` the target
    * does not accept, another primitive), `undefined` when it cannot be decided (`any`, `unknown`,
-   * opaque parts, schemas, kept references, a property the source declares as a method). A
+   * opaque parts, schemas, kept references, a property the source declares as a method, a target
+   * declaring methods or `private` members, which shapes leave out). A
    * {@link TypeInfo} is compared as `{ type }`; a parameter as `{ parameter }` is more precise
    * (aliases and object literal types are kept). Report only `false`.
    */

@@ -193,7 +193,7 @@ export class Handler {
     }
   })
 
-  it('accepts a parameter whose function property the injected class declares as a method', async () => {
+  it('casts what members left out of the shapes leave undecided, without rejecting it', async () => {
     const app = tempApp({
       ...FAKE,
       'src/user.ts': `export class User {
@@ -203,6 +203,8 @@ export class Handler {
   }
 }
 export interface Principal { readonly id: string; readonly hasRole: (role: string) => boolean }
+export class Admin { private secret = 1; id = '' }
+export interface WithMethod { readonly id: string; isAdmin(): boolean }
 `,
       'src/decorators.ts': `import { createParamDecorator } from '@znight/core'
 import { User } from './user.ts'
@@ -210,11 +212,16 @@ export const CurrentUser = createParamDecorator<User>({ fake: () => new User() }
 `,
       'src/handler.ts': `import { Handle, Handlers } from '@acme/fake'
 import { CurrentUser } from './decorators.ts'
-import type { Principal } from './user.ts'
+import type { Admin, Principal, User, WithMethod } from './user.ts'
 @Handlers()
 export class Handler {
   @Handle()
-  run(@CurrentUser() principal: Principal): void {}
+  run(
+    @CurrentUser() principal: Principal,
+    @CurrentUser() admin: Admin,
+    @CurrentUser() withMethod: WithMethod,
+    @CurrentUser() user: User,
+  ): void {}
 }
 `,
     })
@@ -222,8 +229,14 @@ export class Handler {
     try {
       const result = await analyzeRoot(app.root, { extensions: [fakeExtension(uses)] })
       expect(renderDiagnostics(result.root, result.diagnostics)).toBe('')
-      const use = uses.get('run.principal')
-      expect(use?.ok && use.cast).toBe(true)
+      // undecided (methods, private members): the generated argument is cast
+      const casts = [...uses].map(([key, use]) => [key, use?.ok && use.cast])
+      expect(casts).toEqual([
+        ['run.principal', true],
+        ['run.admin', true],
+        ['run.withMethod', true],
+        ['run.user', false],
+      ])
     } finally {
       app.cleanup()
     }
@@ -329,7 +342,7 @@ export class Handler {
     }
   })
 
-  it('does not reject a function property of the target that the source declares as a method', async () => {
+  it('never decides on members the instance shapes leave out (methods, private members)', async () => {
     const app = tempApp({
       ...FAKE,
       'src/types.ts': `export class User {
@@ -386,6 +399,14 @@ export class Handler {
       // a source without methods certainly lacks it
       expect(check('plain', 'principal')).toBe(false)
       expect(check('user', 'missing')).toBe(false)
+      // methods and private members of the target are not compared: never `true`
+      expect(check('user', 'withMethod')).toBeUndefined()
+      expect(check('plain', 'inline')).toBeUndefined()
+      expect(check('user', 'admin')).toBeUndefined()
+      expect(check('user', 'guarded')).toBeUndefined()
+      expect(check('plain', 'child')).toBeUndefined()
+      // still decided when the target certainly lacks something
+      expect(check('plain', 'missing')).toBe(false)
       // the same declaration is still assignable to itself
       expect(check('user', 'user')).toBe(true)
       expect(check('admin', 'admin')).toBe(true)

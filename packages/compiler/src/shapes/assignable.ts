@@ -5,8 +5,10 @@
  * `unknown`, opaque parts, schemas, kept references, intersections on the source side...). It is
  * structural like TypeScript, without methods (shapes read the `instance` members: fields and
  * getters): a property of the target that the source declares as a member its shape leaves out (a
- * method `hasRole()` for `hasRole: () => boolean`) is not decided. It is meant for checks that must
- * never reject valid code: callers report only `false`.
+ * method `hasRole()` for `hasRole: () => boolean`) is not decided, and a target leaving members out
+ * (methods, `private` members) is never `true`. It is meant for checks that must never reject valid
+ * code, and whose `true` lets generated code pass the value without a cast: callers report only
+ * `false`.
  */
 import type { NamedShape, Shape, ShapeOptions, ShapeResult, ShapeTarget } from '../extensions/api.ts'
 import type { ObjectShape } from './shape.ts'
@@ -143,6 +145,8 @@ class Comparison {
       for (const property of properties) verdicts.push(this.compare(property.shape, target.additional, depth + 1))
       if (additional !== undefined) verdicts.push(this.compare(additional, target.additional, depth + 1))
     }
+    // members of the target its shape leaves out (methods, `private` members) are not compared
+    if (omittedMembers(target).size > 0) verdicts.push(undefined)
     return all(verdicts)
   }
 }

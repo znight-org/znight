@@ -1202,7 +1202,11 @@ interface DecoratorSpec {
   accept, another primitive or literal), `undefined` when it cannot be decided (`any`, `unknown`,
   opaque parts, schemas, kept references, intersections on the source side, a property of the target
   that the source declares as a member its shape leaves out, such as a method for a function-typed
-  property). Recursive types are compared coinductively. Extensions report only `false`.
+  property). Members the shapes leave out are never compared: a target declaring methods or
+  `private`, `protected` or `#private` members is never `true` (unless it is the source's own
+  declaration), so the uses of RFC 0010 cast the argument instead of producing a generated module
+  that does not type-check. Recursive types are compared coinductively. Extensions report only
+  `false`.
 - **Type shapes** (`types.shape(target, options?) → ShapeResult`, in the analyze, validate and
   generate contexts): the structural view of a type annotation, what a value of that type looks like
   once serialised as JSON, computed from declarations (sources and `.d.ts` alike, no type checker)
