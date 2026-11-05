@@ -96,18 +96,31 @@ export class MixedResolver extends Mixed {
   }
 }
 
+/** \`resolve()\` reads nothing from the message. */
+export class ConstantResolver {
+  resolve(): string {
+    return 'constant'
+  }
+}
+
 export const MessageId = createParamDecorator<string>({ messaging: IdResolver })
+export const Constant = createParamDecorator<string>({ messaging: ConstantResolver })
 export const MessageType = createParamDecorator<string>({ messaging: TypeResolver })
 export const MixedId = createParamDecorator<string>({ messaging: MixedResolver })
 `,
   'src/orders.ts': `import { Consumer, OnMessage } from '@znight/messaging'
-import { calls, MessageId, MessageType, MixedId } from './resolvers.ts'
+import { calls, Constant, MessageId, MessageType, MixedId } from './resolvers.ts'
 
 @Consumer({ queue: 'orders' })
 export class OrderConsumer {
   @OnMessage('order.placed')
   placed(@MessageId() id: string, @MessageType() type: string, @MixedId() mixed: string): void {
     calls.push({ id, type, mixed })
+  }
+
+  @OnMessage('order.cancelled')
+  cancelled(@Constant() value: string): void {
+    calls.push({ value })
   }
 }
 `,
@@ -198,13 +211,15 @@ describe('custom parameter decorators on message handlers', () => {
     }
   }, 60_000)
 
-  it('calls inherited, arrow function and unanalysable resolve methods', async () => {
+  it('calls inherited, arrow function, unanalysable and parameterless resolve methods', async () => {
     const app = tempApp(RESOLVE_FORMS)
     const compiled = await compiler.compile({ root: app.root, conditions: ['@znight/source'] })
     expect(compiled.diagnostics.filter(diagnostic => diagnostic.severity === 'error')).toEqual([])
     const code = compiled.code
     expect(code).toContain('await x[0].resolve(m)')
     expect(code).toContain('await x[1].resolve(m)')
+    // a resolve() without parameter: the message is not read (\`_m\`, noUnusedParameters)
+    expect(code).toContain('async (c: OrderConsumer, _m: InboundMessage, x: readonly [ConstantResolver]) =>')
     expect(code).toContain(
       '(await (x[2] as { resolve(message: unknown, data: unknown): unknown }).resolve(m, undefined)) as never',
     )
@@ -223,8 +238,9 @@ describe('custom parameter decorators on message handlers', () => {
     await application.start()
     try {
       driver.send('orders', { id: 'm1', type: 'order.placed', payload: {} })
+      driver.send('orders', { id: 'm2', type: 'order.cancelled', payload: {} })
       await driver.idle()
-      expect(calls).toEqual([{ id: 'm1', type: 'order.placed', mixed: 'mixed:m1' }])
+      expect(calls).toEqual([{ id: 'm1', type: 'order.placed', mixed: 'mixed:m1' }, { value: 'constant' }])
     } finally {
       await application.stop()
     }

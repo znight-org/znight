@@ -110,9 +110,14 @@ function invokeNode(
   if (params.length === 0) {
     return ctx.arrow([['c', consumerType()]], c => ctx.call(ctx.member(c, handler.method)))
   }
+  // `_m` when only class resolvers whose `resolve()` takes no parameter need arguments (`noUnusedParameters`)
+  const readsMessage = params.some(
+    param =>
+      param.kind !== 'undefined' && (param.kind !== 'custom' || param.resolver === undefined || param.arity !== 0),
+  )
   const arrowParams: [string, GenNode][] = [
     ['c', consumerType()],
-    ['m', helpers.inboundMessage()],
+    [readsMessage ? 'm' : '_m', helpers.inboundMessage()],
   ]
   if (resolvers.length > 0) {
     const types = resolvers.map(ref => ctx.importType(ref))

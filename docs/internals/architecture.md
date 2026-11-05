@@ -1736,7 +1736,9 @@ the instance of `paramResolvers[i]`; the data argument is left out when the clas
 declares fewer parameters), cast with `as never` when the compiler could not check the value type.
 Like a validation, it may return a thenable: it gets the `const aN` / `if (isThenable(aN)) return
 (async () => ...)()` treatment of validated arguments, so a route stays synchronous while every
-resolver returns a value. `invoke` takes `x` (typed as the tuple of the resolver classes) only when
+resolver returns a value. `ctx` is named `_ctx` when no argument reads it (only class resolvers
+whose `resolve()` takes no parameter: generated code type-checks with `noUnusedParameters`).
+`invoke` takes `x` (typed as the tuple of the resolver classes) only when
 `paramResolvers` is present; the plugin then calls it with the instances, resolved once at boot when
 they are all singletons (one frozen array), otherwise in the request scope on every call. Routes
 without custom parameters are generated and served exactly as before. Pipeline order: guards → body
@@ -2265,7 +2267,8 @@ interface MessageHandlerDefinition {
 m.payload)` (the arrow becomes `async`), `@Headers()` → `m.headers`, `@Headers('x')` →
 `messageHeader(m, 'x')`, `@Ctx()` → `m`, a custom parameter decorator (§8.6) → `await
 (D.resolvers.messaging as ParamFunctionOf<typeof D, 'messaging'>)(m, data)` or `await
-x[i].resolve(m, data)` (arguments as in §8.6; the arrow becomes `async`; `x` is declared only with `paramResolvers`, whose
+x[i].resolve(m, data)` (arguments as in §8.6; the arrow becomes `async`; `m` is named `_m` when no
+argument reads it, `x` is declared only with `paramResolvers`, whose
 instances the runtime resolves in the delivery scope on every call). **Impl.** messaging awaits
 custom parameters instead of the `isThenable` fallback of HTTP and GraphQL: the delivery already
 awaits `invoke`, and handlers without custom parameters are unchanged. A resolver error fails the
@@ -3026,7 +3029,8 @@ interface GraphQLResolverBinding {
 - **Custom parameters** (RFC 0010, §8.6): a parameter decorated with a custom parameter decorator
   that has a `graphql` resolver. The binding gets `context: true` and, for class resolvers,
   `paramResolvers` (tokens in order of first use); `invoke` gains `f` (the field's
-  `ResolverContext`) and `x` (the resolver instances), each declared only when used. The argument is
+  `ResolverContext`, not read by a class resolver whose `resolve()` takes no parameter) and `x`
+  (the resolver instances), each declared only when used. The argument is
   `(D.resolvers.graphql as ParamFunctionOf<typeof D, 'graphql'>)(f, data)` or `x[i].resolve(f,
   data)` (data left out when the class's `resolve` declares one parameter, §8.6), evaluated like a
   validated argument (`const vN`, `isThenable` fallback). The pipeline builds the `ResolverContext`

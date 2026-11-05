@@ -273,9 +273,10 @@ function invokeNode(
   resolvers: readonly ClassRef[],
 ): GenNode {
   const params: [string, GenNode][] = [['c', ctx.importType(controller.identity)]]
-  // `ctx` is declared only when used (generated code type-checks with `noUnusedParameters`)
+  // `ctx` is declared only when used (generated code type-checks with `noUnusedParameters`), and as
+  // `_ctx` before `x` when only class resolvers whose `resolve()` takes no parameter need arguments
   if (route.params.length > 0 || route.bodySchema !== undefined) {
-    params.push(['ctx', helpers.context()])
+    params.push([readsContext(route) ? 'ctx' : '_ctx', helpers.context()])
   }
   // `x`: the instances of the parameter resolvers (RFC 0010), only for routes that have some
   if (resolvers.length > 0) {
@@ -287,6 +288,14 @@ function invokeNode(
     return invokeArrow(ctx, params, route, (c, http, x) => [c, http, withResolvers(x)])
   }
   return invokeArrow(ctx, params, route, (c, http) => [c, http, helpers])
+}
+
+/** `true` when an argument (or the body validation) reads the context: all but a `resolve()` without parameter. */
+function readsContext(route: HttpRouteData): boolean {
+  return (
+    route.bodySchema !== undefined ||
+    route.params.some(param => param.custom?.resolver === undefined || param.custom.arity !== 0)
+  )
 }
 
 /** The provider classes resolving custom parameters, in order of first use (`x[i]`). */

@@ -96,6 +96,13 @@ export class MixedResolver extends Mixed {
   }
 }
 
+/** \`resolve()\` reads nothing from the context. */
+export class ConstantResolver {
+  resolve(): string {
+    return 'constant'
+  }
+}
+
 export function userOf(ctx: HttpContext): User {
   const user = ctx.state.get('user') as User | undefined
   if (user === undefined) throw new UnauthorizedException()
@@ -106,7 +113,15 @@ export function userOf(ctx: HttpContext): User {
 const DECORATORS = `
 import { createParamDecorator } from '@znight/core'
 import { validate } from '@znight/http'
-import { LoadedUserResolver, LocaleResolver, MixedResolver, RoleResolver, TokenResolver, userOf } from './resolvers.ts'
+import {
+  ConstantResolver,
+  LoadedUserResolver,
+  LocaleResolver,
+  MixedResolver,
+  RoleResolver,
+  TokenResolver,
+  userOf,
+} from './resolvers.ts'
 import { calls, type User } from './user.ts'
 import type { StandardSchemaV1 } from '@znight/http'
 
@@ -132,6 +147,7 @@ export const Locale = createParamDecorator<string, string>({ http: LocaleResolve
 export const Role = createParamDecorator<string>({ http: RoleResolver })
 export const Token = createParamDecorator<string>({ http: TokenResolver })
 export const Mixin = createParamDecorator<string>({ http: MixedResolver })
+export const Constant = createParamDecorator<string>({ http: ConstantResolver })
 export const Header = createParamDecorator<unknown, { readonly name: string; readonly schema: StandardSchemaV1 }>({
   http: (ctx, { name, schema }) => validate(schema, ctx.header(name), \`header "\${name}"\`),
 })
@@ -167,7 +183,19 @@ const CONTROLLER = `
 import type { CanActivate, HttpContext } from '@znight/http'
 import { Injectable } from '@znight/core'
 import { Body, Controller, Get, Post, Query, UseGuard } from '@znight/http'
-import { AsyncUser, Claim, CurrentUser, Header, LoadedUser, Locale, Mixin, OptionalUser, Role, Token } from './decorators.ts'
+import {
+  AsyncUser,
+  Claim,
+  Constant,
+  CurrentUser,
+  Header,
+  LoadedUser,
+  Locale,
+  Mixin,
+  OptionalUser,
+  Role,
+  Token,
+} from './decorators.ts'
 import { Named, TenantHeader } from './schemas.ts'
 import { calls, type User } from './user.ts'
 
@@ -230,6 +258,11 @@ export class CustomController {
   @Get('/tenant')
   tenant(@Header(TenantHeader) tenant: unknown) {
     return { tenant }
+  }
+
+  @Get('/constant')
+  constant(@Constant() value: string) {
+    return { value }
   }
 
   @Get('/inherited')
@@ -302,6 +335,13 @@ describe.skipIf(typeof compile !== 'function')('custom parameter decorators on H
     expect(code).toContain("const a1 = x[1].resolve(ctx, 'en')")
     // resolve(ctx) declares no data parameter: none is passed
     expect(code).toContain('const a0 = x[0].resolve(ctx)')
+    // a resolve() without parameter: the context is not read (\`_ctx\`, noUnusedParameters)
+    expect(code).toContain(
+      [
+        "              ['invoke']: (c: CustomController, _ctx: HttpContext, x: readonly [ConstantResolver]) => {",
+        '                const a0 = x[0].resolve()',
+      ].join('\n'),
+    )
     // also when it is inherited or an arrow function property; cast when it cannot be read
     expect(code).toContain(
       '(c: CustomController, ctx: HttpContext, x: readonly [RoleResolver, TokenResolver, MixedResolver]) => {',
@@ -395,6 +435,11 @@ describe.skipIf(typeof compile !== 'function')('custom parameter decorators on H
     const invalid = await send({ method: 'POST', url: '/custom/validated-first', body: { name: 'bad' } })
     expect(invalid.status).toBe(400)
     expect(await calls()).toEqual(['name'])
+  })
+
+  it('calls a resolve() without parameter', async () => {
+    const response = await send({ method: 'GET', url: '/custom/constant' })
+    expect(response.json()).toEqual({ value: 'constant' })
   })
 
   it('calls inherited, arrow function and unanalysable resolve methods', async () => {

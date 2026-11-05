@@ -605,7 +605,9 @@ decorator (`createParamDecorator`, RFC 0010) → `await (D.resolvers.messaging a
 D, 'messaging'>)(m, data)` or `await x[i].resolve(m, data)` for a provider class (`x`: the
 instances of `paramResolvers`, resolved in the delivery scope); an optional parameter without
 decorator → `undefined` (trailing ones are omitted). The invoker is `async` only when it awaits a
-validation or a custom parameter, and its `m` parameter is omitted when no argument uses it (`noUnusedParameters`).
+validation or a custom parameter, and its `m` parameter is omitted when the handler has no
+argument, `_m` when no argument reads it (only class resolvers whose `resolve()` takes no
+parameter), so that it type-checks with `noUnusedParameters`.
 Consumers are sorted by token, handlers keep their declaration order (inherited handlers first), and
 `options` / `errorHandler` / `type` / `retry` are omitted when absent. Example:
 

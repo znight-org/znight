@@ -87,7 +87,15 @@ export class CoordinateResolver extends Mixed {
   }
 }
 
+/** \`resolve()\` reads nothing from the context. */
+export class ConstantResolver {
+  resolve(): string {
+    return 'constant'
+  }
+}
+
 export const FieldName = createParamDecorator<string>({ graphql: FieldNameResolver })
+export const Constant = createParamDecorator<string>({ graphql: ConstantResolver })
 export const Coordinate = createParamDecorator<string>({ graphql: CoordinateResolver })
 `,
   'src/guard.ts': `import type { GraphQLGuard, ResolverContext } from '@znight/graphql'
@@ -102,7 +110,7 @@ export class MarkGuard implements GraphQLGuard {
 }
 `,
   'src/me.resolver.ts': `import { Args, Query, Resolver, UseGuard } from '@znight/graphql'
-import { Coordinate, CurrentUser, FieldName, LoadedUser, Prefixed } from './current-user.ts'
+import { Constant, Coordinate, CurrentUser, FieldName, LoadedUser, Prefixed } from './current-user.ts'
 import { MarkGuard } from './guard.ts'
 import type { User } from './user.ts'
 
@@ -127,6 +135,11 @@ export class MeResolver {
   @Query()
   loaded(@LoadedUser() first: User, @LoadedUser() second: User): boolean {
     return first.id === second.id
+  }
+
+  @Query()
+  constant(@Constant() value: string): string {
+    return value
   }
 
   @Query()
@@ -192,6 +205,10 @@ describe('custom parameter decorators on GraphQL resolvers (e2e)', () => {
     expect(result.code).toContain("CurrentUser.resolvers.graphql as ParamFunctionOf<typeof CurrentUser, 'graphql'>")
     expect(result.code).toContain('x: readonly [LoadedUserResolver]')
     expect(result.code).toContain('const v0 = x[0].resolve(f)')
+    // a resolve() without parameter: \`f\` is not declared (noUnusedParameters)
+    expect(result.code).toContain(
+      '(r: MeResolver, _p: unknown, _a: GraphQLArgs, _c: GraphQLContext, _i: GraphQLResolveInfo, _f: ResolverContext, x: readonly [ConstantResolver]) => {',
+    )
     // an inherited resolve method is read; an unreadable one is cast
     expect(result.code).toContain(
       'const v1 = (x[1] as { resolve(ctx: unknown, data: unknown): unknown }).resolve(f, undefined) as never',
@@ -214,9 +231,9 @@ describe('custom parameter decorators on GraphQL resolvers (e2e)', () => {
   })
 
   it('calls inherited and unanalysable resolve methods', async () => {
-    const res = await executeOperation(test, { query: '{ inherited }' })
+    const res = await executeOperation(test, { query: '{ inherited constant }' })
     expect(res.errors).toBeUndefined()
-    expect(res.data).toEqual({ inherited: 'inherited Query.inherited' })
+    expect(res.data).toEqual({ inherited: 'inherited Query.inherited', constant: 'constant' })
   })
 
   it('reports resolver errors in errors[]', async () => {

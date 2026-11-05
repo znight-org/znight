@@ -261,7 +261,8 @@ function usedParameters(field: FieldData): readonly boolean[] {
   for (const param of field.params) {
     switch (param?.kind) {
       case 'custom':
-        f = true
+        // a class resolver whose `resolve()` takes no parameter does not read `f`
+        f ||= param.resolver === undefined || param.arity !== 0
         x ||= param.resolver !== undefined
         break
       case 'parent':
