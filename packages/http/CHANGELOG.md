@@ -1,5 +1,14 @@
 # @znight/http
 
+## 0.3.0
+
+### Patch Changes
+
+- 75f4b8c: `PluginHttpRoutes.onHttpDrain()`: `HttpPlugin` tells the plugins serving routes that it starts draining, whatever the plugin order, so they end the streams it does not know of. The engine's subscriptions end there, and a route-mounted GraphQL driver stops once the drain is over (requests in flight are served, a stopped driver answers 503). The Yoga driver takes `application/json` `POST` bodies only (415 otherwise, like the built-in transport: no CSRF through forms), masks errors thrown outside the engine, and refuses Yoga's `batching` and `multipart` options (ZNIGHT066).
+- Updated dependencies [75f4b8c]
+  - @znight/core@0.3.0
+  - @znight/compiler@0.3.0
+
 ## 0.2.2
 
 ### Patch Changes
