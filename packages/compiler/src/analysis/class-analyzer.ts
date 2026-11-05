@@ -332,7 +332,10 @@ export class ClassAnalyzer {
       if (pattern.type === 'AssignmentPattern') {
         hasDefault = true
         defaultValue = pattern.right
-        decorators = [...decorators, ...(pattern.decorators ?? [])]
+        if (pattern !== param) {
+          // a parameter property (`private x = 1`): its decorators may sit on the inner pattern
+          decorators = [...decorators, ...(pattern.decorators ?? [])]
+        }
         pattern = pattern.left
       }
       if (!rest) {

@@ -940,6 +940,37 @@ type argument written as a type reference without type arguments, its canonical 
 [type shapes](#type-shapes), these identities make shapes return a `reference` wherever the type
 is used, so that an extension can match it by alias.
 
+### Custom parameter decorators
+
+A transport extension reads the custom parameter decorators of its handlers (RFC 0010,
+`createParamDecorator` of `@znight/core`) with `ctx.paramDecorator(param, transport, cls)`:
+
+```ts
+for (const param of method.params) {
+  const custom = ctx.paramDecorator(param, 'http', cls)
+  if (custom === undefined) continue // no custom decorator: read the extension's own decorators
+  if (!custom.ok) continue // already reported (ZNIGHT005)
+  // custom.identity / custom.name: the decorator const (importValue(custom.identity))
+  // custom.data: the data argument (ArgInfo) or undefined
+  // custom.resolver: { kind: 'function', async } | { kind: 'class', ref, async }
+  // custom.cast: the value type could not be checked: cast the argument with `as never`
+}
+```
+
+The compiler checks the definition (exported, type argument, object literal of resolvers), the use
+(called, not on a rest parameter, a resolver for `transport`, at most one data argument that the
+generated module can emit) and the value type against the parameter, and binds a class resolver
+with a lazy edge from `cls`. Every problem is a ZNIGHT005 on the use with the definition as related
+location. Uses that no extension claims (constructor parameters, methods that are not handlers) are
+reported at the end of the analysis. Without any definition in the project, the call is a map
+lookup.
+
+`ctx.types.assignable(source, target)` compares two types (or shape targets, such as
+`{ parameter }`) conservatively through their shapes: `true`, `false` when a value of the source is
+certainly not a value of the target (a missing property, `undefined` or `null` not accepted, another
+primitive), `undefined` when it cannot be decided (`any`, `unknown`, opaque parts). Report only
+`false`.
+
 ## Compiler contract
 
 The generated module calls **no helper of `@znight/compiler`**: it imports `@znight/core` (types),

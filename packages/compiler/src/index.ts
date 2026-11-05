@@ -65,6 +65,8 @@ export type {
   LifecycleHookName,
   MethodInfo,
   NamedShape,
+  ParamDecoratorResolver,
+  ParamDecoratorUse,
   ParameterInfo,
   ParameterPropertyInfo,
   PropertyInfo,
