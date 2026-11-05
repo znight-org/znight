@@ -18,23 +18,23 @@ dependencies. Notes are kept in memory: the data layer is the subject of the
 
 ## What it shows
 
-| Feature                                                                                                   | Where                                                                                                                                |
-| --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| Access decisions `@Public` / `@Authenticated` / `@Roles`: one required group, the nearest decision wins   | [`auth/access.ts`](src/auth/access.ts), the controllers                                                                              |
-| Deny by default: a guard with `static enforces`, checked at boot (ZNIGHT023)                              | [`auth/auth.guard.ts`](src/auth/auth.guard.ts), [`http.ts`](src/http.ts)                                                             |
-| JWT / OIDC resource server: pinned algorithm, issuer, audience, clock skew, remote JWKS, RFC 6750, 503    | [`auth/token-verifier.ts`](src/auth/token-verifier.ts), [`auth/jwks-keys.ts`](src/auth/jwks-keys.ts)                                 |
-| API keys: SHA-256 digests, constant-time comparison, rotation                                             | [`auth/api-keys.ts`](src/auth/api-keys.ts)                                                                                           |
-| Several strategies (bearer, API key, session cookie) with merged challenges                               | [`auth/authenticator.ts`](src/auth/authenticator.ts)                                                                                 |
-| The caller in a request-scoped provider, read through `Lazy<T>`                                           | [`auth/current-user.ts`](src/auth/current-user.ts), [`auth/me.controller.ts`](src/auth/me.controller.ts)                             |
-| A policy as a guard (ownership, 404 rather than 403)                                                      | [`notes/note-owner.policy.ts`](src/notes/note-owner.policy.ts), [`notes/note.controller.ts`](src/notes/note.controller.ts)           |
-| Password hashing with scrypt (PHC strings, rehash, bounded concurrency), sign-in without user enumeration | [`security/password-hasher.ts`](src/security/password-hasher.ts), [`session/accounts.ts`](src/session/accounts.ts)                   |
-| Cookie sessions on signed `__Host-` cookies                                                               | [`session/session-cookies.ts`](src/session/session-cookies.ts), [`session/session.controller.ts`](src/session/session.controller.ts) |
-| CSRF: fetch metadata, then a double-submit token bound to the session                                     | [`security/csrf.guard.ts`](src/security/csrf.guard.ts)                                                                               |
-| Rate limiting as a decision of its own (`@RateLimit`, `RateLimitGuard`)                                   | [`security/rate-limit.ts`](src/security/rate-limit.ts)                                                                               |
-| Webhook signatures over the raw body, idempotent processing                                               | [`security/webhook-signature.guard.ts`](src/security/webhook-signature.guard.ts), [`webhooks/`](src/webhooks)                        |
-| CORS with credentials, security headers, trusted proxies, cookie secrets                                  | [`http.ts`](src/http.ts)                                                                                                             |
-| `@Secret` configuration, redacted logs                                                                    | [`config/`](src/config), [`main.ts`](src/main.ts)                                                                                    |
-| Unit tests (`TestBed`), HTTP tests (`TestApp`) against real tokens and a real key set, build checks, e2e  | [`test/`](test)                                                                                                                      |
+| Feature                                                                                                   | Where                                                                                                                                                        |
+| --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Access decisions `@Public` / `@Authenticated` / `@Roles`: one required group, the nearest decision wins   | [`auth/access.ts`](src/auth/access.ts), the controllers                                                                                                      |
+| Deny by default: a guard with `static enforces`, checked at boot (ZNIGHT023)                              | [`auth/auth.guard.ts`](src/auth/auth.guard.ts), [`http.ts`](src/http.ts)                                                                                     |
+| JWT / OIDC resource server: pinned algorithm, issuer, audience, clock skew, remote JWKS, RFC 6750, 503    | [`auth/token-verifier.ts`](src/auth/token-verifier.ts), [`auth/jwks-keys.ts`](src/auth/jwks-keys.ts)                                                         |
+| API keys: SHA-256 digests, constant-time comparison, rotation                                             | [`auth/api-keys.ts`](src/auth/api-keys.ts)                                                                                                                   |
+| Several strategies (bearer, API key, session cookie) with merged challenges                               | [`auth/authenticator.ts`](src/auth/authenticator.ts)                                                                                                         |
+| The caller in a request-scoped provider (`Lazy<T>`), and as a handler parameter (`@CurrentUser()`)        | [`auth/request-user.ts`](src/auth/request-user.ts), [`auth/current-user.ts`](src/auth/current-user.ts), [`auth/me.controller.ts`](src/auth/me.controller.ts) |
+| A policy as a guard (ownership, 404 rather than 403)                                                      | [`notes/note-owner.policy.ts`](src/notes/note-owner.policy.ts), [`notes/note.controller.ts`](src/notes/note.controller.ts)                                   |
+| Password hashing with scrypt (PHC strings, rehash, bounded concurrency), sign-in without user enumeration | [`security/password-hasher.ts`](src/security/password-hasher.ts), [`session/accounts.ts`](src/session/accounts.ts)                                           |
+| Cookie sessions on signed `__Host-` cookies                                                               | [`session/session-cookies.ts`](src/session/session-cookies.ts), [`session/session.controller.ts`](src/session/session.controller.ts)                         |
+| CSRF: fetch metadata, then a double-submit token bound to the session                                     | [`security/csrf.guard.ts`](src/security/csrf.guard.ts)                                                                                                       |
+| Rate limiting as a decision of its own (`@RateLimit`, `RateLimitGuard`)                                   | [`security/rate-limit.ts`](src/security/rate-limit.ts)                                                                                                       |
+| Webhook signatures over the raw body, idempotent processing                                               | [`security/webhook-signature.guard.ts`](src/security/webhook-signature.guard.ts), [`webhooks/`](src/webhooks)                                                |
+| CORS with credentials, security headers, trusted proxies, cookie secrets                                  | [`http.ts`](src/http.ts)                                                                                                                                     |
+| `@Secret` configuration, redacted logs                                                                    | [`config/`](src/config), [`main.ts`](src/main.ts)                                                                                                            |
+| Unit tests (`TestBed`), HTTP tests (`TestApp`) against real tokens and a real key set, build checks, e2e  | [`test/`](test)                                                                                                                                              |
 
 ## Run it
 
@@ -207,7 +207,7 @@ src/
 │  ├─ token-verifier.ts            # jwtVerify with pinned options; 401 invalid_token or 503
 │  ├─ jwks-keys.ts                 # createRemoteJWKSet (AUTH_JWKS_URL) or a key set on disk (AUTH_JWKS_FILE)
 │  ├─ api-keys.ts                  # hashed keys, timingSafeEqual
-│  ├─ principal.ts, current-user.ts, me.controller.ts
+│  ├─ principal.ts, request-user.ts, current-user.ts, me.controller.ts
 ├─ session/                        # accounts (password sign-in), signed session cookies, /session routes
 ├─ security/                       # PasswordHasher, RateLimit + RateLimitGuard, CsrfGuard, WebhookSignatureGuard
 ├─ notes/                          # NoteController, NoteOwnerPolicy, NoteService, NoteRepository (in memory)
@@ -264,7 +264,8 @@ a pull request that changes who can call what changes it.
 
 [`AuthGuard`](src/auth/auth.guard.ts) is a global guard: it lets `@Public()` routes through, asks
 [`Authenticator`](src/auth/authenticator.ts) for the caller of every other request (`401` with every
-challenge, or `503`), records it in the request-scoped [`CurrentUser`](src/auth/current-user.ts) and
+challenge, or `503`), records it in the request-scoped [`RequestUser`](src/auth/request-user.ts) (handlers receive it with
+the custom parameter decorator [`@CurrentUser()`](src/auth/current-user.ts)) and
 checks the roles of `@Roles` routes (`false`: `403`). The authenticator tries, in this order, and the
 first credentials the request carries decide:
 

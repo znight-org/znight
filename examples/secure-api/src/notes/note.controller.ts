@@ -1,5 +1,4 @@
-import type { Lazy } from '@znight/core'
-import type { CurrentUser } from '../auth/current-user.js'
+import type { Principal } from '../auth/principal.js'
 import type { NoteService } from './note.service.js'
 
 import {
@@ -16,6 +15,7 @@ import {
 } from '@znight/http'
 
 import { Authenticated, Roles } from '../auth/access.js'
+import { CurrentUser } from '../auth/current-user.js'
 import { RateLimit } from '../security/rate-limit.js'
 import { type Note, NoteInput } from './note.js'
 import { NoteOwnerPolicy } from './note-owner.policy.js'
@@ -28,23 +28,20 @@ import { NoteOwnerPolicy } from './note-owner.policy.js'
 @Controller('/notes')
 @Authenticated()
 export class NoteController {
-  constructor(
-    private readonly notes: NoteService,
-    private readonly user: Lazy<CurrentUser>,
-  ) {}
+  constructor(private readonly notes: NoteService) {}
 
-  /** GET /notes: the notes of the caller. */
+  /** GET /notes: the notes of the caller (`@CurrentUser()`: a custom parameter decorator). */
   @Get()
-  list(): Promise<Note[]> {
-    return this.notes.listOwnedBy(this.user.get().principal.id)
+  list(@CurrentUser() user: Principal): Promise<Note[]> {
+    return this.notes.listOwnedBy(user.id)
   }
 
   /** POST /notes: 201 with a `location`; 403 without the editor role, 429 above 30 per minute. */
   @Post()
   @Roles(['editor'])
   @RateLimit({ points: 30, duration: 60 })
-  async create(@Body(NoteInput) input: NoteInput): Promise<HttpResponse<Note>> {
-    const note = await this.notes.create(this.user.get().principal.id, input)
+  async create(@CurrentUser() user: Principal, @Body(NoteInput) input: NoteInput): Promise<HttpResponse<Note>> {
+    const note = await this.notes.create(user.id, input)
     return HttpResponse.created(note, `/notes/${note.id}`)
   }
 

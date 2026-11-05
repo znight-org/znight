@@ -4,7 +4,7 @@ import type { Principal } from '../src/auth/principal.js'
 import { TestBed } from '@znight/testing'
 
 import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
-import { CurrentUser } from '../src/auth/current-user.js'
+import { RequestUser } from '../src/auth/request-user.js'
 import { CsrfGuard } from '../src/security/csrf.guard.js'
 import { SessionCookies } from '../src/session/session-cookies.js'
 import { describe, expect, test as it } from 'bun:test'
@@ -19,17 +19,17 @@ function request(method: string, headers: Record<string, string> = {}): HttpCont
 
 /**
  * A unit test with `TestBed`: `CorsConfig` is built from `config` values, `SessionCookies` is
- * auto-mocked, and the request-scoped `CurrentUser` is a real instance given with `provide` (the
- * guard receives `{ get: () => user }` for its `Lazy<CurrentUser>`).
+ * auto-mocked, and the request-scoped `RequestUser` is a real instance given with `provide` (the
+ * guard receives `{ get: () => user }` for its `Lazy<RequestUser>`).
  */
 async function setup(via?: Principal['via']) {
-  const user = new CurrentUser()
+  const user = new RequestUser()
   const principal: Principal = { id: 'u-1', roles: ['editor'], via: via ?? 'session' }
   if (via !== undefined) user.authenticate(principal)
   const { instance, mocks } = await TestBed.create(CsrfGuard, {
     metadata,
     config: { cors: { origins: [FRONT_END] } },
-    provide: [[CurrentUser, user]],
+    provide: [[RequestUser, user]],
   })
   mocks.get(SessionCookies).read.mockReturnValue({ principal, csrfToken: TOKEN, expiresAt: new Date() })
   return instance

@@ -1,10 +1,9 @@
-import type { Lazy } from '@znight/core'
-import type { CurrentUser } from './current-user.js'
 import type { Principal } from './principal.js'
 
 import { Controller, Ctx, Get, type HttpContext } from '@znight/http'
 
 import { Authenticated } from './access.js'
+import { CurrentUser } from './current-user.js'
 
 /** The caller as the API sees it. */
 export interface Me extends Principal {
@@ -19,12 +18,9 @@ export interface Me extends Principal {
 @Controller('/me')
 @Authenticated()
 export class MeController {
-  // a singleton: the request-scoped CurrentUser is read through Lazy (injecting it directly is ZNIGHT003)
-  constructor(private readonly user: Lazy<CurrentUser>) {}
-
   /** GET /me: whoever authenticated, with a token, an API key or a session cookie. */
   @Get()
-  whoami(@Ctx() ctx: HttpContext): Me {
-    return { ...this.user.get().principal, ip: ctx.ip }
+  whoami(@CurrentUser() user: Principal, @Ctx() ctx: HttpContext): Me {
+    return { ...user, ip: ctx.ip }
   }
 }
