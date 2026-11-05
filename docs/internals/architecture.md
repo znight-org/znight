@@ -2244,13 +2244,20 @@ interface MessageHandlerDefinition {
   method: string
   type?: string // exact or `*` pattern; absent = default handler
   retry?: { attempts: number; backoff: 'fixed' | 'exponential'; delay: number; maxDelay?: number } // normalised
-  invoke: (consumer: any, message: InboundMessage) => unknown
+  paramResolvers?: Token[] // class resolvers of custom parameters, in order of first use (RFC 0010)
+  invoke: (consumer: any, message: InboundMessage, x?: readonly object[]) => unknown
 }
 ```
 
 `invoke` maps parameters: `@Message()` → `m.payload`, `@Message(S)` → `await validateMessage(S,
 m.payload)` (the arrow becomes `async`), `@Headers()` → `m.headers`, `@Headers('x')` →
-`messageHeader(m, 'x')`, `@Ctx()` → `m`.
+`messageHeader(m, 'x')`, `@Ctx()` → `m`, a custom parameter decorator (§8.6) → `await
+(D.resolvers.messaging as ParamFunctionOf<typeof D, 'messaging'>)(m, data)` or `await
+x[i].resolve(m, data)` (the arrow becomes `async`; `x` is declared only with `paramResolvers`, whose
+instances the runtime resolves in the delivery scope on every call). **Impl.** messaging awaits
+custom parameters instead of the `isThenable` fallback of HTTP and GraphQL: the delivery already
+awaits `invoke`, and handlers without custom parameters are unchanged. A resolver error fails the
+delivery like a handler error (retries, `@OnError`, dead letters).
 
 Delivery state machine (at-least-once; handlers must be idempotent and may deduplicate on
 `message.id`):

@@ -377,7 +377,7 @@ function analyzeMethod(cls: ClassInfo, method: MethodInfo, ctx: Context): Member
   if (onMessage.length > 0) {
     const policy: RetryPolicyData | undefined =
       retry[0] === undefined ? undefined : normalizeRetryDecorator(retry[0], where, ctx)
-    const params = analyzeHandlerParams(method, where, ctx)
+    const params = analyzeHandlerParams(cls, method, where, ctx)
     handlers = onMessage.flatMap(decorator => {
       const type = messageType(decorator, where, ctx)
       if (type === false) return []
@@ -503,12 +503,43 @@ function checkErrorHandler(method: MethodInfo, decorator: DecoratorInfo, where: 
 
 // ---------------------------------------------------------------------------------------- parameters
 
-function analyzeHandlerParams(method: MethodInfo, where: string, ctx: Context): readonly HandlerParamData[] {
-  return Object.freeze(method.params.map(param => analyzeHandlerParam(param, where, ctx)))
+function analyzeHandlerParams(
+  cls: ClassInfo,
+  method: MethodInfo,
+  where: string,
+  ctx: Context,
+): readonly HandlerParamData[] {
+  return Object.freeze(method.params.map(param => analyzeHandlerParam(cls, param, where, ctx)))
 }
 
-function analyzeHandlerParam(param: ParameterInfo, where: string, ctx: Context): HandlerParamData {
+function analyzeHandlerParam(cls: ClassInfo, param: ParameterInfo, where: string, ctx: Context): HandlerParamData {
   const decorators = parameterDecorators(param)
+  // custom parameter decorators (RFC 0010); compilers before it have no paramDecorator
+  const custom = typeof ctx.paramDecorator === 'function' ? ctx.paramDecorator(param, 'messaging', cls) : undefined
+  if (custom !== undefined) {
+    for (const other of decorators) {
+      ctx.report({
+        code: INVALID_DECORATOR,
+        severity: 'error',
+        message: `Parameter '${param.name}' of ${where} has several parameter decorators (@${custom.decorator.name} and @${other.name})`,
+        location: other.location,
+        hints: ['Keep a single parameter decorator'],
+      })
+    }
+    if (!custom.ok || decorators.length > 0) return { kind: 'undefined' }
+    const data = custom.data
+    return {
+      kind: 'custom',
+      identity: custom.identity,
+      name: custom.name,
+      data: data === undefined ? undefined : { value: data.ref ?? (data.value as StaticValue) },
+      resolver: custom.resolver.kind === 'class' ? custom.resolver.ref : undefined,
+      ...(custom.resolver.kind === 'class' && custom.resolver.arity !== undefined
+        ? { arity: custom.resolver.arity }
+        : {}),
+      cast: custom.cast,
+    }
+  }
   const decorator = decorators[0]
   if (decorator === undefined) {
     const foreign = foreignParameterDecorator(param)

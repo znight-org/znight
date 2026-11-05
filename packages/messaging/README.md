@@ -112,6 +112,21 @@ Handler selection: exact type, then patterns (declaration order), then the defau
 message no handler matches is dead-lettered with reason `no-handler` (or acknowledged by `@OnError`).
 A queue is consumed by a single `@Consumer` class per application.
 
+Handler parameters can also use a custom parameter decorator defined with `createParamDecorator`
+(`@znight/core`, RFC 0010) when it has a `messaging` resolver, which receives the `InboundMessage`:
+
+```ts
+import { createParamDecorator } from '@znight/core'
+
+export const Tenant = createParamDecorator<string>({
+  messaging: message => message.headers['x-tenant'] ?? 'default',
+})
+
+// @OnMessage('order.placed') placed(@Message(Order) order: Order, @Tenant() tenant: string) { ... }
+```
+
+A resolver error fails the delivery like a handler error (retries, `@OnError`, dead letters).
+
 ## Delivery semantics
 
 Delivery is **at-least-once**. A message can be handled more than once: redelivery after a crash, a
@@ -566,7 +581,8 @@ interface MessagingMetadata {
       method: string
       type?: string // @OnMessage(type)
       retry?: { attempts: number; backoff: 'fixed' | 'exponential'; delay: number; maxDelay?: number } // @Retry, defaults filled
-      invoke: (consumer: any, message: InboundMessage) => unknown
+      paramResolvers?: Token[] // class resolvers of custom parameters (RFC 0010), passed to invoke as `x`
+      invoke: (consumer: any, message: InboundMessage, x?: readonly object[]) => unknown
     }[]
     errorHandler?: string // @OnError method name, called as consumer[errorHandler](error, message)
   }[]
@@ -584,9 +600,12 @@ Helpers generated code may call (exported from `@znight/messaging`, stable):
 Parameter extraction in `invoke`: `@Message()` → `m.payload as never` (no schema, ZNIGHT017 when the
 type is not primitive); `@Message(S)` → `await validateMessage(S, m.payload)` (the invoker is then
 `async`); `@Headers()` → `m.headers`; `@Headers('x')` → `messageHeader(m, 'x')`; `@Ctx()` → `m`
-(`m as InboundMessage<never>` when the parameter narrows the payload type); an optional parameter
-without decorator → `undefined` (trailing ones are omitted). The invoker is `async` only when it
-awaits a validation, and its `m` parameter is omitted when no argument uses it (`noUnusedParameters`).
+(`m as InboundMessage<never>` when the parameter narrows the payload type); a custom parameter
+decorator (`createParamDecorator`, RFC 0010) → `await (D.resolvers.messaging as ParamFunctionOf<typeof
+D, 'messaging'>)(m, data)` or `await x[i].resolve(m, data)` for a provider class (`x`: the
+instances of `paramResolvers`, resolved in the delivery scope); an optional parameter without
+decorator → `undefined` (trailing ones are omitted). The invoker is `async` only when it awaits a
+validation or a custom parameter, and its `m` parameter is omitted when no argument uses it (`noUnusedParameters`).
 Consumers are sorted by token, handlers keep their declaration order (inherited handlers first), and
 `options` / `errorHandler` / `type` / `retry` are omitted when absent. Example:
 

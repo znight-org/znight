@@ -2,7 +2,7 @@
  * Data stored by the extension during analysis (`ctx.store()`), read back by `validate` and
  * `generate`. Plain data only (plus the `ValueRef`s of schemas), in source order.
  */
-import type { Location, StaticValue, ValueRef } from '@znight/compiler'
+import type { ClassRef, Location, StaticValue, ValueRef } from '@znight/compiler'
 import type { Token } from '@znight/core'
 
 /** A normalized `@Retry` policy (`MessageHandlerDefinition.retry`). */
@@ -27,6 +27,24 @@ export type HandlerParamData =
   | { readonly kind: 'message'; readonly narrow: boolean }
   /** Optional parameter without messaging decorator, or invalid parameter (reported): `undefined`. */
   | { readonly kind: 'undefined' }
+  /**
+   * A custom parameter decorator (`createParamDecorator`, RFC 0010): `await
+   * (D.resolvers.messaging as ParamFunctionOf<typeof D, 'messaging'>)(m, data)` or `await x[i].resolve(m, data)`.
+   */
+  | {
+      readonly kind: 'custom'
+      /** Canonical identity of the decorator `const` (imported by the generated module). */
+      readonly identity: string
+      readonly name: string
+      /** The data argument (a value, possibly holding references, or a reference); `undefined` without argument. */
+      readonly data: { readonly value: StaticValue } | undefined
+      /** The class resolver; `undefined` for a function resolver. */
+      readonly resolver: ClassRef | undefined
+      /** Parameters of the class resolver's own `resolve` (`undefined`: inherited, or a function). */
+      readonly arity?: number
+      /** The value type could not be checked against the parameter. */
+      readonly cast: boolean
+    }
 
 /** One `@OnMessage` decorator of a method. */
 export interface HandlerData {

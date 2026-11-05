@@ -50,12 +50,18 @@ export interface MessageHandlerDefinition {
   /** `@Retry` policy, normalized. Default: the plugin's `defaults.retry`. */
   readonly retry?: RetryPolicy
   /**
+   * Provider classes resolving custom parameters (`ParamResolver`, RFC 0010), in order of first use:
+   * the runtime resolves them in the delivery scope and passes the instances to `invoke` (`x`).
+   * Absent when there is none.
+   */
+  readonly paramResolvers?: readonly Token[]
+  /**
    * Calls the handler: extracts and validates the parameters from the message
    * (`@Message(schema)` → `validateMessage(schema, m.payload)`, `@Headers(name)` →
-   * `messageHeader(m, name)`, `@Ctx()` → `m`).
+   * `messageHeader(m, name)`, `@Ctx()` → `m`, a custom parameter → its resolver, awaited).
    */
-  // biome-ignore lint/suspicious/noExplicitAny: generated invokers receive the concrete consumer class
-  readonly invoke: (consumer: any, message: InboundMessage) => unknown
+  // biome-ignore lint/suspicious/noExplicitAny: generated invokers receive the concrete consumer class and resolver tuple
+  readonly invoke: (consumer: any, message: InboundMessage, resolvers?: any) => unknown
 }
 
 declare module '@znight/core' {

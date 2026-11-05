@@ -1,3 +1,10 @@
+declare module '@znight/core' {
+  /** Custom parameter decorators (`createParamDecorator`) resolve handler parameters from the {@link InboundMessage}. */
+  interface ParamContexts {
+    messaging: InboundMessage
+  }
+}
+
 /**
  * A message being handled by a consumer. It is the value of the request-scoped external
  * `@znight/messaging#InboundMessage` during a delivery (inject it into request-scoped providers, or
