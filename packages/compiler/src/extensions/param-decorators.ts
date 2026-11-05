@@ -148,7 +148,7 @@ export class ParamDecoratorIndex {
         return failed
       }
       const resolve = ctx.classInfo(ref.identity)?.methods.find(member => member.name === 'resolve' && !member.static)
-      resolver = Object.freeze({ kind: 'class', ref, async: resolve?.async === true })
+      resolver = Object.freeze({ kind: 'class', ref, async: resolve?.async === true, arity: resolve?.params.length })
     } else {
       resolver = Object.freeze({ kind: 'function', async: entry.async })
     }

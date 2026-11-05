@@ -791,7 +791,16 @@ export type ParamDecoratorResolver =
    * The class of a provider implementing `ParamResolver`, bound with a lazy edge from the handler's
    * class: the plugin resolves it in the scope of the call and generated code calls `resolve(ctx, data)`.
    */
-  | { readonly kind: 'class'; readonly ref: ClassRef; readonly async: boolean }
+  | {
+      readonly kind: 'class'
+      readonly ref: ClassRef
+      readonly async: boolean
+      /**
+       * Number of parameters of the class's own `resolve` method (`undefined` when it is inherited):
+       * generated code passes at most that many arguments (`resolve(ctx)` ignores the data).
+       */
+      readonly arity: number | undefined
+    }
 
 /**
  * A use of a custom parameter decorator (RFC 0010) on a handler parameter, read for one transport

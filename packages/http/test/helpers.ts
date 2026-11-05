@@ -56,7 +56,7 @@ export function route(
   handler: string,
   path: string,
   // biome-ignore lint/suspicious/noExplicitAny: mimics generated invoke functions
-  invoke: (controller: any, ctx: HttpContext) => unknown,
+  invoke: (controller: any, ctx: HttpContext, resolvers: any) => unknown,
   extra: Partial<HttpRouteDefinition> = {},
 ): HttpRouteDefinition {
   return {

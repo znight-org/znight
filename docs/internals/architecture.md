@@ -1693,7 +1693,8 @@ interface HttpRouteDefinition {
       | 'files'
       | 'cookie'
       | 'signedCookie'
-    name? // param / query key / header name / multipart field (file, files) / cookie name
+      | 'custom' // a custom parameter decorator (RFC 0010, §8.6)
+    name? // param / query key / header name / multipart field (file, files) / cookie name / decorator name (custom)
     type? // readable form, only for coerced values
     optional?
     schema?: boolean
@@ -1710,9 +1711,26 @@ interface HttpRouteDefinition {
   }[]
   rawResponse?: boolean // @Res()
   sse?: { heartbeat?: number; retry?: number; maxDuration?: number } // @Sse (GET); heartbeat 0: none
-  invoke: (controller: any, ctx: HttpContext) => unknown
+  paramResolvers?: Token[] // class resolvers of custom parameters, in order of first use (RFC 0010)
+  invoke: (controller: any, ctx: HttpContext, x?: readonly object[]) => unknown
 }
 ```
+
+**Custom parameters** (RFC 0010, §8.6). A parameter decorated with a custom parameter decorator
+is `{ index, source: 'custom', name: '<decorator>' }` (plus `optional`). Its argument is computed in
+`invoke`, in parameter order with the others: `(D.resolvers.http as ParamFunctionOf<typeof D,
+'http'>)(ctx, data)` for a function resolver, `x[i].resolve(ctx, data)` for a class resolver (`x[i]`
+the instance of `paramResolvers[i]`; the data argument is left out when the class's own `resolve`
+declares fewer parameters), cast with `as never` when the compiler could not check the value type.
+Like a validation, it may return a thenable: it gets the `const aN` / `if (isThenable(aN)) return
+(async () => ...)()` treatment of validated arguments, so a route stays synchronous while every
+resolver returns a value. `invoke` takes `x` (typed as the tuple of the resolver classes) only when
+`paramResolvers` is present; the plugin then calls it with the instances, resolved once at boot when
+they are all singletons (one frozen array), otherwise in the request scope on every call. Routes
+without custom parameters are generated and served exactly as before. Pipeline order: guards → body
+parsing (only for `@Body()` and uploads: a resolver needing the body awaits `ctx.parseBody()`) →
+interceptors → `invoke`; a resolver error is handled like a handler error (exception mappers,
+`HttpException`s). `@znight/openapi` does not document custom parameters (§9.5).
 
 `invoke` extracts, coerces and validates every argument with the helpers exported by `@znight/http`
 (`coerce.string|number|integer|boolean|bigint|date|enum|array|optional`, failures → 400; numbers are
@@ -2554,8 +2572,10 @@ The compiler extension (`@znight/openapi/compiler`, RFC 0002) reads the data sto
 `@znight/http/compiler` (`graph.extensions`: routes, parameters with their coercion plans and
 `defaultValue`, uploads, `sse`, effective metadata and groups), the JSDoc (`doc`), the decorator
 type arguments (`typeArgs`) and the type shapes of the compiler (`ctx.types.shape()`, §6.5), and
-generates `metadata.extensions.openapi` (format 1). Everything is JSON except the `schema` values of
-the slots (Standard Schemas imported by the generated module):
+generates `metadata.extensions.openapi` (format 1). Custom parameters (`source: 'custom'`, RFC
+0010) are not request parameters: they are left out of `parameters` and `requestBody` (a decorator
+reading a header or a cookie is documented with `@ApiHeader` / `@ApiSecurity`). Everything is JSON
+except the `schema` values of the slots (Standard Schemas imported by the generated module):
 
 ```ts
 interface OpenApiMetadata {

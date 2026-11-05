@@ -26,6 +26,8 @@ export type HttpParamSource =
   | 'files'
   | 'cookie'
   | 'signedCookie'
+  /** A custom parameter decorator (`createParamDecorator`, RFC 0010); `name` is the decorator's name. */
+  | 'custom'
 
 /** A handler parameter (informational: extraction, coercion and validation happen in `invoke`). */
 export interface HttpParamDefinition {
@@ -114,11 +116,18 @@ export interface HttpRouteDefinition {
    */
   readonly sse?: HttpSseDefinition
   /**
-   * Calls the handler: extracts, coerces and validates every argument from the context, then calls
-   * the method on the controller instance. May return a promise.
+   * Provider classes resolving custom parameters (`ParamResolver`, RFC 0010), in order of first use:
+   * the plugin resolves them in the request scope and passes the instances to `invoke` as `x`
+   * (`x[i]` is the instance of `paramResolvers[i]`). Absent when the route has none.
    */
-  // biome-ignore lint/suspicious/noExplicitAny: generated functions take the concrete controller class
-  readonly invoke: (controller: any, ctx: HttpContext) => unknown
+  readonly paramResolvers?: readonly Token[]
+  /**
+   * Calls the handler: extracts, coerces and validates every argument from the context (custom
+   * parameters included), then calls the method on the controller instance. May return a promise.
+   * `resolvers` is passed when the route has {@link paramResolvers}.
+   */
+  // biome-ignore lint/suspicious/noExplicitAny: generated functions take the concrete controller class and resolver tuple
+  readonly invoke: (controller: any, ctx: HttpContext, resolvers?: any) => unknown
 }
 
 /** A controller: a provider whose methods are routes. */

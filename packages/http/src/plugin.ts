@@ -965,6 +965,7 @@ function buildRegistrations(
       const body = bodyPlan(route, options.bodyLimit, options.uploads)
       const parseBody = body.upload || route.params.some(param => param.source === 'body')
       const chain = guards.map(guard => guard.resolvable)
+      const invoke = routeInvoke(container, route, lookup, where)
       // computed once every group is declared (guards of every chain, plugin routes), then frozen
       let meta: RouteMeta | undefined
       const effective = (): RouteMeta => {
@@ -977,6 +978,7 @@ function buildRegistrations(
         path,
         plan: (method: string): RoutePlan => ({
           definition: route,
+          invoke,
           path,
           info: Object.freeze({
             method,
@@ -1048,6 +1050,7 @@ function buildRegistrations(
       path,
       plan: (method: string): RoutePlan => ({
         definition,
+        invoke: definition.invoke,
         path,
         info: Object.freeze({ method, path: path.path, controller: route.plugin, handler: route.name, meta }),
         controller: instance,
@@ -1260,6 +1263,9 @@ function assertRoute(route: HttpRouteDefinition, where: string): void {
   }
   if (route.uploads !== undefined) assertUploads(route, where)
   if (route.sse !== undefined) assertSse(route, where)
+  if (route.paramResolvers !== undefined && !Array.isArray(route.paramResolvers)) {
+    throw new ZnightError(ErrorCode.InvalidRoute, `Invalid route ${where}: paramResolvers must be an array of tokens`)
+  }
 }
 
 function assertSse(route: HttpRouteDefinition, where: string): void {
@@ -1335,6 +1341,33 @@ function describeValue(value: unknown): string {
 // -------------------------------------------------------------------------------------------------
 // Provider resolution
 // -------------------------------------------------------------------------------------------------
+
+/**
+ * The `invoke` of a route plan: the generated `invoke` itself, unless the route has parameter
+ * resolvers (RFC 0010), whose instances are passed as its third argument: one frozen array resolved
+ * at bootstrap when they are all singletons, otherwise an array resolved in the request scope.
+ */
+function routeInvoke(
+  container: Container,
+  route: HttpRouteDefinition,
+  lookup: <T>(token: Token, what: string) => Resolvable<T>,
+  where: string,
+): RoutePlan['invoke'] {
+  const invoke = route.invoke
+  const tokens = route.paramResolvers
+  if (tokens === undefined || tokens.length === 0) return invoke
+  const resolvers = tokens.map(token => lookup<object>(token, `parameter resolver of ${where}`))
+  if (resolvers.every(resolver => 'instance' in resolver)) {
+    const instances = Object.freeze(resolvers.map(resolver => (resolver as { readonly instance: object }).instance))
+    return (controller, ctx) => invoke(controller, ctx, instances)
+  }
+  return (controller, ctx) =>
+    invoke(
+      controller,
+      ctx,
+      resolvers.map(resolver => ('instance' in resolver ? resolver.instance : container.get(resolver.token))),
+    )
+}
 
 /**
  * Singletons (and registered values) are resolved once at bootstrap; request-scoped and transient

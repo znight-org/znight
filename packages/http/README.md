@@ -236,6 +236,36 @@ the server's time zone) answer `400`. A missing required value answers `400 Miss
 `| undefined`, default value) receive `undefined` when absent, so default values apply:
 `@Query('page') page = 1`. A repeated query key for a scalar parameter is a `400`.
 
+### Custom parameter decorators
+
+`createParamDecorator` from `@znight/core` defines your own parameter decorators, such as a
+`@CurrentUser()` reading what an authentication guard stored (RFC 0010). The `http` resolver
+receives the `HttpContext` and the data argument of the use:
+
+```ts
+import { createParamDecorator } from '@znight/core'
+import { UnauthorizedException } from '@znight/http'
+import type { User } from './user.ts'
+
+export const CurrentUser = createParamDecorator<User>({
+  http: ctx => {
+    const user = ctx.state.get('user') as User | undefined
+    if (user === undefined) throw new UnauthorizedException()
+    return user
+  },
+})
+
+// @Get('/me') me(@CurrentUser() user: User) { return user }
+```
+
+The resolver runs inside `invoke`, after the guards and the interceptors, in parameter order with
+the other arguments; what it throws is answered like a handler error. It may return a promise (the
+route then awaits it), or be the class of a provider implementing `ParamResolver` (constructor
+injection, any scope: a request-scoped resolver is created once per request). The compiler checks
+every use: the decorator must have an `http` resolver, be the only parameter decorator of the
+parameter, and inject a type the parameter accepts. Custom parameters are not documented by
+`@znight/openapi`: document the header or cookie they read with `@ApiHeader` or `@ApiSecurity`.
+
 ## Validation
 
 Any library implementing [Standard Schema v1](https://standardschema.dev) works, without adapter:
@@ -2144,8 +2174,12 @@ Rules:
   stream (an `HttpResponse` or a Web `Response` is sent as usual). Only on `GET` routes; invalid
   values are ZNIGHT007 at boot.
 - Param sources (`HttpParamSource`): `param`, `query`, `body`, `headers`, `request`, `response`,
-  `context`, `file`, `files`, `cookie` and `signedCookie` (`name`: the cookie name; absent for
-  `@Cookie()`). A route with a `signedCookie` parameter fails the boot without `cookies.secrets`
+  `context`, `file`, `files`, `cookie`, `signedCookie` (`name`: the cookie name; absent for
+  `@Cookie()`) and `custom` (a custom parameter decorator, `name`: the decorator's name).
+- `paramResolvers` (`Token[]`, omitted when empty): the provider classes resolving custom
+  parameters (`ParamResolver`), in order of first use. `invoke` then takes a third parameter `x`,
+  the instances in that order; the plugin resolves them once at boot when they are all singletons,
+  otherwise in the request scope of each call. A route with a `signedCookie` parameter fails the boot without `cookies.secrets`
   (ZNIGHT006).
 - Guards, interceptors and controllers referenced by tokens must be providers (the compiler
   registers injectable helper classes, §6.5 `resolveClassRef`). Request-scoped guards/interceptors
@@ -2205,6 +2239,14 @@ expressions of the table below are `validate(S, ...)` calls in both forms.
 | `@UploadedFiles('f') f: File[]`         | `uploads.files(ctx, 'f')` · optional: `uploads.optionalFiles(ctx, 'f')`       |
 | `@UploadedFile()` / `@UploadedFiles()`  | the same helpers with `undefined` as field (any field)                        |
 | `@Ctx()`                                | `ctx`                                                                         |
+| custom, function resolver               | `(D.resolvers.http as ParamFunctionOf<typeof D, 'http'>)(ctx, data)`          |
+| custom, class resolver                  | `x[i].resolve(ctx, data)` (`data` left out when `resolve` declares one param) |
+
+Custom parameters (`createParamDecorator`, RFC 0010) are treated like validated arguments: the
+resolver may return a thenable, so each one is followed by the `isThenable` fallback, and the route
+stays synchronous while the resolvers return values. `data` is the literal data argument or an
+imported reference (`undefined` without argument). The cast `as never` is added when the compiler
+could not check the value type against the parameter.
 
 `coerce.X` by declared type (`T`):
 

@@ -3,9 +3,10 @@
  * (README, "Compiler contract"). Controllers are sorted by token, routes keep their source order and
  * every route gets an `invoke(c, ctx)` arrow extracting, coercing and validating its arguments.
  */
-import type { ClassRef, GenerateContext, GenInput, GenNode, ValueRef } from '@znight/compiler'
+import type { ClassRef, GenerateContext, GenInput, GenNode, StaticValue, ValueRef } from '@znight/compiler'
 import type {
   CoercionPlan,
+  CustomParamData,
   HttpControllerData,
   HttpParamData,
   HttpRouteData,
@@ -17,6 +18,7 @@ import type {
 
 import { compareStrings } from '../path.ts'
 import { HTTP_PACKAGE } from './model.ts'
+import { isValueRef } from './route-decorators.ts'
 
 type Context = GenerateContext<HttpControllerData>
 
@@ -33,6 +35,9 @@ interface Helpers {
   isThenable(): GenNode
   uploads(): GenNode
   context(): GenNode
+  paramFunctionOf(): GenNode
+  /** The resolver instances of the route being generated (`x`), with the index of each token. */
+  readonly resolvers?: { readonly x: GenNode; readonly index: ReadonlyMap<string, number> }
 }
 
 /** Generates `metadata.extensions.http` (`undefined` when the application has no controller). */
@@ -102,6 +107,7 @@ function createHelpers(ctx: Context): Helpers {
   let isThenable: GenNode | undefined
   let uploads: GenNode | undefined
   let context: GenNode | undefined
+  let paramFunctionOf: GenNode | undefined
   return {
     coerce: () => {
       coerce ??= ctx.importFrom(HTTP_PACKAGE, 'coerce')
@@ -122,6 +128,10 @@ function createHelpers(ctx: Context): Helpers {
     context: () => {
       context ??= ctx.importFrom(HTTP_PACKAGE, 'HttpContext', { type: true })
       return context
+    },
+    paramFunctionOf: () => {
+      paramFunctionOf ??= ctx.importFrom('@znight/core', 'ParamFunctionOf', { type: true })
+      return paramFunctionOf
     },
   }
 }
@@ -169,7 +179,11 @@ function routeNode(ctx: Context, helpers: Helpers, controller: HttpControllerDat
   if (route.sse !== undefined) {
     entries.push(['sse', sseNode(ctx, route.sse)])
   }
-  entries.push(['invoke', invokeNode(ctx, helpers, controller, route)])
+  const resolvers = paramResolvers(route)
+  if (resolvers.length > 0) {
+    entries.push(['paramResolvers', tokens(ctx, resolvers)])
+  }
+  entries.push(['invoke', invokeNode(ctx, helpers, controller, route, resolvers)])
   return ctx.obj(entries)
 }
 
@@ -251,12 +265,54 @@ function tokens(ctx: Context, refs: readonly ClassRef[]): GenNode {
  * `@Body()` parameter reads the body in `invoke`: that arrow is `async` and `await`s every
  * `validate()`.
  */
-function invokeNode(ctx: Context, helpers: Helpers, controller: HttpControllerData, route: HttpRouteData): GenNode {
+function invokeNode(
+  ctx: Context,
+  helpers: Helpers,
+  controller: HttpControllerData,
+  route: HttpRouteData,
+  resolvers: readonly ClassRef[],
+): GenNode {
   const params: [string, GenNode][] = [['c', ctx.importType(controller.identity)]]
   // `ctx` is declared only when used (generated code type-checks with `noUnusedParameters`)
   if (route.params.length > 0 || route.bodySchema !== undefined) {
     params.push(['ctx', helpers.context()])
   }
+  // `x`: the instances of the parameter resolvers (RFC 0010), only for routes that have some
+  if (resolvers.length > 0) {
+    const tuple = resolvers.map(ref => ctx.importType(ref))
+    params.push(['x', ctx.code`readonly [${joinNodes(ctx, tuple)}]`])
+    const index = new Map(resolvers.map((ref, position) => [ref.token, position]))
+    const withResolvers = (x: GenNode | undefined): Helpers =>
+      x === undefined ? helpers : { ...helpers, resolvers: { x, index } }
+    return invokeArrow(ctx, params, route, (c, http, x) => [c, http, withResolvers(x)])
+  }
+  return invokeArrow(ctx, params, route, (c, http) => [c, http, helpers])
+}
+
+/** The provider classes resolving custom parameters, in order of first use (`x[i]`). */
+function paramResolvers(route: HttpRouteData): ClassRef[] {
+  const found = new Map<string, ClassRef>()
+  for (const param of route.params) {
+    const resolver = param.custom?.resolver
+    if (resolver !== undefined && !found.has(resolver.token)) {
+      found.set(resolver.token, resolver)
+    }
+  }
+  return [...found.values()]
+}
+
+/** `a, b, c`. */
+function joinNodes(ctx: Context, nodes: readonly GenNode[]): GenNode {
+  return nodes.slice(1).reduce((joined, node) => ctx.code`${joined}, ${node}`, nodes[0] as GenNode)
+}
+
+/** The arrow of {@link invokeNode}; `bind` maps the arrow parameters to the controller, the context and the helpers. */
+function invokeArrow(
+  ctx: Context,
+  params: readonly [string, GenNode][],
+  route: HttpRouteData,
+  bind: (...params: GenNode[]) => readonly [GenNode, GenNode | undefined, Helpers],
+): GenNode {
   // arguments in evaluation order (handler parameter order); a hole is passed as `undefined`
   const slots: (HttpParamData | undefined)[] = []
   for (const param of route.params) {
@@ -266,7 +322,8 @@ function invokeNode(ctx: Context, helpers: Helpers, controller: HttpControllerDa
   if (bodySchema !== undefined) {
     return ctx.arrow(
       params,
-      (c, http) => {
+      (...bound) => {
+        const [c, http, helpers] = bind(...bound)
         const call = handlerCall(
           ctx,
           c,
@@ -281,17 +338,26 @@ function invokeNode(ctx: Context, helpers: Helpers, controller: HttpControllerDa
       { async: true },
     )
   }
-  const last = slots.findLastIndex(param => param?.schema !== undefined)
-  return ctx.arrow(params, (c, http) =>
-    last === -1
+  const last = slots.findLastIndex(param => param !== undefined && isDeferred(param))
+  return ctx.arrow(params, (...bound) => {
+    const [c, http, helpers] = bind(...bound)
+    return last === -1
       ? handlerCall(
           ctx,
           c,
           route,
           Array.from(slots, param => plainArgument(ctx, helpers, http as GenNode, param)),
         )
-      : validatingBlock(ctx, helpers, route, slots, last, c, http as GenNode),
-  )
+      : validatingBlock(ctx, helpers, route, slots, last, c, http as GenNode)
+  })
+}
+
+/**
+ * `true` for an argument whose expression may return a thenable: a validation with a schema, or a
+ * custom parameter (its resolver may return a promise).
+ */
+function isDeferred(param: HttpParamData): boolean {
+  return param.schema !== undefined || param.custom !== undefined
 }
 
 /** `c.handler(args)`. */
@@ -346,7 +412,7 @@ function validatingBlock(
         const param = slots[index] as HttpParamData
         const name = local.get(index) as GenNode
         statements.push(ctx.code`const ${name} = ${plainArgument(ctx, helpers, http, param)}`)
-        if (param.schema !== undefined) {
+        if (isDeferred(param)) {
           const rest = Array.from(slots, (other, position) => {
             if (position < index) {
               return evaluated(position)
@@ -369,7 +435,7 @@ function validatingBlock(
 /** An argument evaluated in an `async` arrow: its validation, if any, is `await`ed. */
 function awaitedArgument(ctx: Context, helpers: Helpers, http: GenNode, param: HttpParamData | undefined): GenNode {
   const node = plainArgument(ctx, helpers, http, param)
-  return param?.schema === undefined ? node : ctx.code`await ${node}`
+  return param === undefined || !isDeferred(param) ? node : ctx.code`await ${node}`
 }
 
 /** An argument as an expression (`validate()` not awaited); `undefined` for a hole. */
@@ -435,7 +501,36 @@ function argumentNode(ctx: Context, helpers: Helpers, http: GenNode, param: Http
       }
       return coercion(ctx, helpers, param.coercion ?? { plan: { kind: 'raw' }, cast: false }, value, label)
     }
+    case 'custom':
+      return customArgument(ctx, helpers, http, param.custom as CustomParamData)
   }
+}
+
+/**
+ * A custom parameter (RFC 0010): `(D.resolvers.http as ParamFunctionOf<typeof D, 'http'>)(ctx, data)`
+ * for a function resolver, `x[i].resolve(ctx, data)` for a class resolver; cast with `as never` when
+ * the value type could not be checked against the parameter.
+ */
+function customArgument(ctx: Context, helpers: Helpers, http: GenNode, custom: CustomParamData): GenNode {
+  const data = custom.data === undefined ? ctx.lit(undefined) : dataNode(ctx, custom.data.value)
+  let call: GenNode
+  if (custom.resolver === undefined) {
+    const decorator = ctx.importValue(custom.identity)
+    const callee = ctx.code`${ctx.member(decorator, 'resolvers', 'http')} as ${helpers.paramFunctionOf()}<typeof ${decorator}, 'http'>`
+    call = ctx.call(callee, [http, data])
+  } else {
+    const resolvers = helpers.resolvers as NonNullable<Helpers['resolvers']>
+    const index = resolvers.index.get(custom.resolver.token) as number
+    // a `resolve(ctx)` that ignores the data gets no data argument (TypeScript checks the arity)
+    const args = [http, data].slice(0, custom.arity ?? 2)
+    call = ctx.code`${resolvers.x}[${index}].resolve(${args.length === 0 ? ctx.code`` : joinNodes(ctx, args)})`
+  }
+  return custom.cast ? ctx.code`${call} as never` : call
+}
+
+/** The data argument of a custom parameter: a literal (references imported) or a reference. */
+function dataNode(ctx: Context, value: StaticValue): GenNode {
+  return isValueRef(value) ? ctx.ref(value) : ctx.lit(value as Parameters<Context['lit']>[0])
 }
 
 /** `validate(schema, value, location)` (the value, or a promise when the schema validates asynchronously). */

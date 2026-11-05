@@ -556,6 +556,85 @@ const scoped = controller(t('ScopedController'), '/scoped', [route('get', '/', (
 const audit = controller(t('AuditController'), '/audit', [route('get', '/', (c: AuditController) => c.get())])
 
 // -------------------------------------------------------------------------------------------------
+// Custom parameters (RFC 0010): hand-written like the generated invoke
+// -------------------------------------------------------------------------------------------------
+
+export const paramStats = { resolvers: 0 }
+
+/** A request-scoped parameter resolver: one instance per request. */
+export class ScopedUserResolver {
+  readonly #instance = ++paramStats.resolvers
+  readonly #state: RequestState
+  constructor(state: RequestState) {
+    this.#state = state
+  }
+  resolve(ctx: HttpContext): { readonly user: string; readonly instance: number; readonly same: boolean } {
+    return { user: ctx.header('x-user') ?? 'anonymous', instance: this.#instance, same: this.#state.ctx === ctx }
+  }
+}
+
+/** A singleton parameter resolver with a data argument. */
+export class LocaleResolver {
+  resolve(ctx: HttpContext, fallback: string): string {
+    return ctx.header('accept-language') ?? fallback
+  }
+}
+
+const userOf = (ctx: HttpContext): string => {
+  const user = ctx.header('x-user')
+  if (user === undefined) throw new UnauthorizedException()
+  return user
+}
+
+export class ParamsController {
+  user(user: string) {
+    return { user }
+  }
+  async(user: string) {
+    return { user, async: true }
+  }
+  scoped(first: unknown, second: unknown, locale: string) {
+    return { first, second, locale }
+  }
+}
+
+const params = controller(t('ParamsController'), '/params', [
+  route('user', '/user', (c: ParamsController, ctx: HttpContext) => c.user(userOf(ctx)), {
+    params: [{ index: 0, source: 'custom', name: 'CurrentUser' }],
+  }),
+  route(
+    'async',
+    '/async',
+    (c: ParamsController, ctx: HttpContext) => {
+      const a0 = Promise.resolve().then(() => userOf(ctx))
+      return (async () => c.async(await a0))()
+    },
+    { params: [{ index: 0, source: 'custom', name: 'AsyncUser' }] },
+  ),
+  route(
+    'scoped',
+    '/scoped',
+    (c: ParamsController, ctx: HttpContext, x: readonly [ScopedUserResolver, LocaleResolver]) =>
+      c.scoped(x[0].resolve(ctx), x[0].resolve(ctx), x[1].resolve(ctx, 'en')),
+    {
+      params: [
+        { index: 0, source: 'custom', name: 'ScopedUser' },
+        { index: 1, source: 'custom', name: 'ScopedUser' },
+        { index: 2, source: 'custom', name: 'Locale' },
+      ],
+      paramResolvers: [t('ScopedUserResolver'), t('LocaleResolver')],
+    },
+  ),
+  route(
+    'locale',
+    '/locale',
+    (c: ParamsController, ctx: HttpContext, x: readonly [LocaleResolver]) =>
+      c.scoped(null, null, x[0].resolve(ctx, 'en')),
+    { params: [{ index: 0, source: 'custom', name: 'Locale' }], paramResolvers: [t('LocaleResolver')] },
+  ),
+])
+
+// -------------------------------------------------------------------------------------------------
 // Routing features
 // -------------------------------------------------------------------------------------------------
 
@@ -686,8 +765,11 @@ export function sampleMetadata(): ZnightMetadata {
       [t('AuditService')]: provider(AuditService, [{ lazy: HTTP_CONTEXT }]),
       [t('AuditController')]: provider(AuditController, [t('AuditService')]),
       [t('MiscController')]: provider(MiscController),
+      [t('ScopedUserResolver')]: provider(ScopedUserResolver, [t('RequestState')], 'request'),
+      [t('LocaleResolver')]: provider(LocaleResolver),
+      [t('ParamsController')]: provider(ParamsController),
     },
-    [users, body, status, guarded, errors, scoped, audit, misc],
+    [users, body, status, guarded, errors, scoped, audit, misc, params],
   )
 }
 
