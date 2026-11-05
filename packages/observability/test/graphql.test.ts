@@ -29,6 +29,7 @@ function operation(overrides: Partial<GraphQLOperationEvent> = {}): GraphQLOpera
     operationName: 'Books',
     documentId: 'a1b2c3',
     transport: 'http',
+    driver: 'builtin',
     requestId: 'req-1',
     // `GraphQLContext.document` is a graphql-js `DocumentNode`, whose `loc.source.body` is the query
     context: { document: { kind: 'Document', loc: { source: { body: QUERY } } } },
@@ -145,6 +146,16 @@ describe('tracing.graphql', () => {
       'znight.graphql.outcome': 'success',
     })
     expect(span?.status.code).toBe(SpanStatusCode.UNSET)
+    await app.stop()
+  })
+
+  it('records the GraphQL driver of the operation, unless it is the built-in transport', async () => {
+    const { app } = await create(tracingOnly)
+    await execute(app, operation({ operationName: 'ViaYoga', driver: 'yoga' }))
+    await execute(app, operation({ operationName: 'BuiltIn' }))
+    const spans = exporter.getFinishedSpans()
+    expect(spans.find(span => span.name === 'query ViaYoga')?.attributes['znight.graphql.driver']).toBe('yoga')
+    expect(spans.find(span => span.name === 'query BuiltIn')?.attributes).not.toHaveProperty('znight.graphql.driver')
     await app.stop()
   })
 

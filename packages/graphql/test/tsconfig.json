@@ -4,8 +4,8 @@
     "types": ["bun"],
     "noPropertyAccessFromIndexSignature": false,
     "paths": {
-      // see support/whatwg-fetch.d.ts
-      "@whatwg-node/fetch": ["./support/whatwg-fetch.d.ts"]
+      // see ../types/whatwg-fetch.d.ts
+      "@whatwg-node/fetch": ["../types/whatwg-fetch.d.ts"]
     }
   },
   "include": ["."],

@@ -3,7 +3,7 @@
  * health or metrics endpoints), registered on every adapter in the same pipeline as the compiled
  * controllers.
  */
-import type { Container, Plugin } from '@znight/core'
+import type { Container, CoreLogger, Plugin } from '@znight/core'
 import type { HttpContext } from './context.ts'
 import type { RouteMetaEntry } from './decorators.ts'
 import type { HttpMethod } from './metadata.ts'
@@ -71,6 +71,14 @@ export interface PluginHttpRoutesContext {
  */
 export interface PluginHttpRoutes {
   httpRoutes(context: PluginHttpRoutesContext): readonly PluginRoute[]
+  /**
+   * Called once when `HttpPlugin` starts draining (its `onStop`, whatever the plugin order), after
+   * it stopped accepting connections and started closing its event streams: end the long-lived
+   * responses `HttpPlugin` does not know of (a stream another server produced), so that the drain
+   * does not wait for them until `drainTimeoutMs`. Requests still in flight are served. The drain
+   * waits for a returned promise too (within `drainTimeoutMs`); a failure is logged.
+   */
+  onHttpDrain?(): void | Promise<void>
 }
 
 /** A validated plugin route (internal). */
@@ -120,6 +128,31 @@ export function collectPluginRoutes(
     for (const route of routes as unknown[]) collected.push(validateRoute(plugin, name, route, context.prefix))
   }
   return collected
+}
+
+/**
+ * Calls `onHttpDrain()` on every other plugin implementing it, in plugin order: the promises the
+ * drain waits for (they never reject: a failure is logged).
+ */
+export function drainPlugins(plugins: readonly Plugin[], self: Plugin, logger: CoreLogger): Promise<void>[] {
+  const pending: Promise<void>[] = []
+  for (const plugin of plugins) {
+    if (plugin === self) continue
+    const drain = (plugin as Plugin & Partial<PluginHttpRoutes>).onHttpDrain
+    if (typeof drain !== 'function') continue
+    const failed = (error: unknown): void => {
+      logger.error(`HttpPlugin: onHttpDrain() of the plugin "${String(plugin.name)}" failed`, { err: error })
+    }
+    try {
+      const result: unknown = drain.call(plugin)
+      if (typeof (result as PromiseLike<void> | undefined)?.then === 'function') {
+        pending.push(Promise.resolve(result as PromiseLike<void>).then(undefined, failed))
+      }
+    } catch (error) {
+      failed(error)
+    }
+  }
+  return pending
 }
 
 function validateRoute(instance: object, plugin: string, value: unknown, prefix: string): CollectedPluginRoute {

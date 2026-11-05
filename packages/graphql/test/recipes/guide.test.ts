@@ -22,7 +22,7 @@ describe.skipIf(!existsSync(GUIDE))('the GraphQL guide', () => {
 
   it.each([
     ['src/graphql/redis-pubsub.ts', 'redis-pubsub.ts'],
-    ['src/graphql/yoga.controller.ts', 'yoga.controller.ts'],
+    ['src/graphql/yoga.plugins.ts', 'yoga.plugins.ts'],
   ])('shows %s as is', (title, file) => {
     const source = readFileSync(join(import.meta.dir, file), 'utf8')
     const code = source.slice(source.indexOf('\nimport ') + 1).trimEnd()
@@ -32,6 +32,6 @@ describe.skipIf(!existsSync(GUIDE))('the GraphQL guide', () => {
 
   it('links to the files of the recipes', () => {
     expect(guide).toContain('](../../packages/graphql/test/recipes/redis-pubsub.ts)')
-    expect(guide).toContain('](../../packages/graphql/test/recipes/yoga.controller.ts)')
+    expect(guide).toContain('](../../packages/graphql/test/recipes/yoga.plugins.ts)')
   })
 })

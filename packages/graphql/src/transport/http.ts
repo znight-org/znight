@@ -90,13 +90,22 @@ const GET_NOT_ALLOWED = errorReply(
   Object.freeze({ allow: 'POST' }),
 )
 
-/** `content-type` values of JSON bodies seen most often, compared before parsing. */
-function isJsonRequest(contentType: string | undefined): boolean {
+/**
+ * Whether a `POST` body is JSON (`application/json`, UTF-8): the only body the endpoint takes (and
+ * the Yoga driver), so that a cross-site request, which cannot send it without a CORS preflight,
+ * never executes an operation. `content-type` values seen most often are compared before parsing.
+ */
+export function isJsonRequest(contentType: string | undefined): boolean {
   if (contentType === 'application/json' || contentType === 'application/json; charset=utf-8') return true
   // parsed once per distinct value (memoised by @znight/http)
   const media = parseMediaType(contentType)
   if (media === undefined || media.type !== 'application/json') return false
   return media.charset === undefined || media.charset === 'utf-8' || media.charset === 'utf8'
+}
+
+/** The 415 of a `POST` body that is not JSON, in the negotiated JSON type. */
+export function notJson(media: MediaKind): HttpResponse<FormattedExecutionResult> {
+  return errorReply(media, 415, errorBody('Send GraphQL requests as application/json (content-type: application/json)'))
 }
 
 /** Why the parameters of a request are invalid, `undefined` when they are valid. */
@@ -211,13 +220,7 @@ export class HttpTransport {
     const negotiated = this.#post.choose(headers['accept'])
     const media = (negotiated & MEDIA) as MediaKind
     if (media === Media.None) return NOT_ACCEPTABLE
-    if (!isJsonRequest(headers['content-type'])) {
-      return errorReply(
-        media,
-        415,
-        errorBody('Send GraphQL requests as application/json (content-type: application/json)'),
-      )
-    }
+    if (!isJsonRequest(headers['content-type'])) return notJson(media)
     const encoding = headers['content-encoding']
     if (encoding !== undefined && encoding.trim().toLowerCase() !== 'identity' && encoding.trim() !== '') {
       return errorReply(media, 415, errorBody(`Unsupported content encoding "${encoding}"`))

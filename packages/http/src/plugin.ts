@@ -56,7 +56,7 @@ import {
   randomRequestId,
   type SseSettings,
 } from './pipeline.ts'
-import { collectPluginRoutes } from './plugin-routes.ts'
+import { collectPluginRoutes, drainPlugins } from './plugin-routes.ts'
 import { resolveTrustProxy } from './proxy.ts'
 import { RouteTable } from './router.ts'
 import { resolveSecurityHeaders } from './security-headers.ts'
@@ -552,6 +552,8 @@ export class HttpPlugin implements Plugin {
     runtime.pipeline.draining = true
     // event streams never end by themselves: let their sources finish, then send them a jittered retry
     runtime.pipeline.closeStreams('shutdown')
+    // the streams other plugins serve on their routes (a GraphQL driver's subscriptions)
+    const drains = drainPlugins(ctx.app.plugins, this, ctx.logger)
     const timeoutMs = runtime.options.drainTimeoutMs
     let timer: ReturnType<typeof setTimeout> | undefined
     // no timer for Infinity; larger delays than setTimeout supports are clamped (they would fire at once)
@@ -561,7 +563,9 @@ export class HttpPlugin implements Plugin {
       }
     })
     try {
-      const drained = Promise.all([runtime.adapter.close(), runtime.pipeline.whenIdle()]).then(() => 'drained' as const)
+      const drained = Promise.all([runtime.adapter.close(), runtime.pipeline.whenIdle(), ...drains]).then(
+        () => 'drained' as const,
+      )
       if ((await Promise.race([drained, timeout])) === 'timeout') {
         ctx.logger.warn(`HTTP server: closing ${runtime.pipeline.inflight} in-flight request(s) after ${timeoutMs} ms`)
         await runtime.adapter.close({ force: true })

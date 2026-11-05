@@ -8,7 +8,7 @@ import type { CanActivate, HttpContext, HttpInterceptor, HttpPluginOptions, Plug
 import { Application, ErrorCode, silentLogger, ZnightError, type ZnightMetadata } from '@znight/core'
 
 import { createRouteDecorator, HttpPlugin } from '../src/index.ts'
-import { ADAPTERS, caught, controller, createApp, metadata, provider, route, t } from './helpers.ts'
+import { ADAPTERS, caught, controller, createApp, memoryLogger, metadata, provider, route, t } from './helpers.ts'
 import { describe, expect, it } from 'bun:test'
 
 const Public = createRouteDecorator('public', { group: 'access', required: true })
@@ -317,5 +317,88 @@ describe('HttpPlugin.prefix', () => {
     } finally {
       await app.stop()
     }
+  })
+})
+
+describe('onHttpDrain()', () => {
+  /** A plugin serving a stream that only ends when the plugin is told HttpPlugin drains. */
+  function streaming(): Plugin & { started: boolean; drained: number } {
+    let close: (() => void) | undefined
+    const plugin = {
+      name: 'streaming',
+      started: false,
+      drained: 0,
+      httpRoutes: (): readonly PluginRoute[] => [
+        {
+          method: 'GET',
+          path: '/feed',
+          name: 'feed',
+          handler: () => {
+            plugin.started = true
+            const body = new ReadableStream<Uint8Array>({
+              start: controller => {
+                controller.enqueue(new TextEncoder().encode('data: 1\n\n'))
+                close = () => controller.close()
+              },
+            })
+            return new Response(body, { headers: { 'content-type': 'application/octet-stream' } })
+          },
+        },
+      ],
+      onHttpDrain: () => {
+        plugin.drained++
+        close?.()
+      },
+    }
+    return plugin
+  }
+
+  for (const order of ['before', 'after'] as const) {
+    it(`ends the streams of a plugin when HttpPlugin drains (plugin registered ${order} HttpPlugin)`, async () => {
+      const plugin = streaming()
+      const http = HttpPlugin.configure({ port: 0, drainTimeoutMs: 5_000 })
+      const app = await Application.create({
+        metadata: homeMetadata(),
+        plugins: order === 'before' ? [plugin, http] : [http, plugin],
+        logger: silentLogger,
+        shutdown: { signals: false },
+      })
+      await app.start()
+      const response = http.inject({ method: 'GET', url: '/feed' })
+      while (!plugin.started) await new Promise(resolve => setTimeout(resolve, 1))
+      const started = performance.now()
+      await app.stop()
+      // without onHttpDrain(), the drain would wait drainTimeoutMs for the stream
+      expect(performance.now() - started).toBeLessThan(2_000)
+      expect(plugin.drained).toBe(1)
+      expect((await response).body).toBe('data: 1\n\n')
+    })
+  }
+
+  it('logs a failing onHttpDrain() and still drains', async () => {
+    const logger = memoryLogger()
+    const failing: Plugin = {
+      name: 'failing',
+      onHttpDrain: () => Promise.reject(new Error('boom')),
+    } as Plugin
+    const throwing: Plugin = {
+      name: 'throwing',
+      onHttpDrain: () => {
+        throw new Error('bang')
+      },
+    } as Plugin
+    const app = await Application.create({
+      metadata: homeMetadata(),
+      plugins: [failing, HttpPlugin.configure({ port: 0 }), throwing],
+      logger,
+      shutdown: { signals: false },
+    })
+    await app.start()
+    await app.stop()
+    const errors = logger.entries.filter(entry => entry.level === 'error').map(entry => entry.message)
+    expect(errors.sort()).toEqual([
+      'HttpPlugin: onHttpDrain() of the plugin "failing" failed',
+      'HttpPlugin: onHttpDrain() of the plugin "throwing" failed',
+    ])
   })
 })

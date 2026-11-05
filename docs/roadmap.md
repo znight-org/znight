@@ -19,7 +19,7 @@ may change APIs.
 | [0006](https://github.com/znight-org/znight/blob/main/rfcs/0006-http-cookies-sse.md)            | HTTP cookies and Server-Sent Events       | Accepted (v0.1)    |
 | [0007](https://github.com/znight-org/znight/blob/main/rfcs/0007-graphql-schema-first.md)        | Schema-first GraphQL                      | Accepted (v0.2)    |
 | [0008](https://github.com/znight-org/znight/blob/main/rfcs/0008-graphql-errors-as-data.md)      | Errors as data in `@znight/graphql`       | Accepted (v0.2)    |
-| [0009](https://github.com/znight-org/znight/blob/main/rfcs/0009-graphql-drivers.md)             | GraphQL drivers (`@znight/graphql`)       | Proposed           |
+| [0009](https://github.com/znight-org/znight/blob/main/rfcs/0009-graphql-drivers.md)             | GraphQL drivers (`@znight/graphql`)       | Accepted (planned) |
 | [0010](https://github.com/znight-org/znight/blob/main/rfcs/0010-custom-parameter-decorators.md) | Custom parameter decorators               | Proposed           |
 | [0011](https://github.com/znight-org/znight/blob/main/rfcs/0011-application-events.md)          | Application events (`@znight/events`)     | Proposed           |
 
@@ -137,8 +137,9 @@ These are tracked in the RFCs as follow-ups. None has a date.
   cookies; a hook measuring the lifetime of event streams; fan-out of events across instances.
 - **WebSocket follow-ups**: rooms shared across instances, a typed client generated from the
   metadata, an AsyncAPI document.
-- **GraphQL follow-ups**: drivers to serve the schema with GraphQL Yoga or Apollo Server
-  ([RFC 0009](https://github.com/znight-org/znight/blob/main/rfcs/0009-graphql-drivers.md), proposed),
+- **GraphQL follow-ups**: an Apollo Server driver once Apollo Server accepts graphql-js 17 (the
+  engine and the GraphQL Yoga driver are in place,
+  [RFC 0009](https://github.com/znight-org/znight/blob/main/rfcs/0009-graphql-drivers.md)),
   GraphQL interfaces in code-first, `__resolveType` methods and custom
   directives in schema-first, `graphql-ws` subscriptions, `@defer` / `@stream`,
   trusted documents checked at build time, query cost analysis, federation, resolver-level spans

@@ -3,8 +3,12 @@
  * of every adapter. Prints, per adapter, the graphql-http audits that are not `ok`, the statuses of
  * a fixed list of requests (CSRF, negotiation, GET rules), and what GraphQL over SSE does with the
  * graphql-sse client (results, client disconnect) and on the wire (framing, heartbeats, shutdown).
+ * Then the same audits against drivers (RFC 0009): `graphql-http`'s own handler on top of
+ * `GraphQLEngine`, mounted as the driver's routes, and the Yoga driver, with operations and (Yoga)
+ * GraphQL over SSE through them.
  */
 import type { HttpAdapter } from '@znight/http'
+import type { GraphQLDriver } from '../../src/index.ts'
 
 import { expressAdapter } from '@znight/http/express'
 import { fastifyAdapter } from '@znight/http/fastify'
@@ -13,6 +17,8 @@ import { nodeAdapter } from '@znight/http/node'
 import { auditServer } from 'graphql-http'
 import { createClient } from 'graphql-sse'
 
+import { yogaDriver } from '../../src/yoga.ts'
+import { graphqlHttpDriver } from '../support/graphql-http-driver.ts'
 import { observed, startLibrary } from '../support/library.ts'
 
 const ADAPTERS: readonly [string, () => HttpAdapter][] = [
@@ -155,18 +161,72 @@ async function sse(adapter: () => HttpAdapter): Promise<Record<string, unknown>>
   return result
 }
 
+async function audit(url: string): Promise<{ audits: number; notOk: string[] }> {
+  const audits = await auditServer({ url })
+  return {
+    audits: audits.length,
+    notOk: audits
+      .filter(audit => audit.status !== 'ok')
+      .map(audit => `${audit.id} ${audit.status} ${audit.name}: ${'reason' in audit ? audit.reason : ''}`),
+  }
+}
+
+/** The graphql-http driver on the engine: the audits, a query, and a resolver error (masked by the engine). */
+async function driver(
+  adapter: () => HttpAdapter,
+  create: () => GraphQLDriver = graphqlHttpDriver,
+): Promise<Record<string, unknown>> {
+  const app = await startLibrary({ adapter: adapter(), graphql: { driver: create() } })
+  try {
+    const post = async (query: string): Promise<unknown> => {
+      const response = await fetch(app.url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/graphql-response+json' },
+        body: JSON.stringify({ query }),
+      })
+      return { status: response.status, body: await response.json() }
+    }
+    const result: Record<string, unknown> = {
+      ...(await audit(app.url)),
+      hello: await post('{ hello }'),
+      fail: await post('{ fail }'),
+    }
+    if (app.graphql.engine.settings.subscriptions !== false && create !== graphqlHttpDriver) {
+      // the driver's own GraphQL over SSE, on the engine's streams
+      result['framing'] = await readUntil(
+        await sseRequest(app.url, 'subscription { countdown(from: 2) }'),
+        text => text.includes('event: complete'),
+        2_000,
+      )
+      const client = createClient({ url: app.url, retryAttempts: 0 })
+      const values: unknown[] = []
+      for await (const value of client.iterate({ query: 'subscription { countdown(from: 3) }' })) values.push(value)
+      client.dispose()
+      result['client'] = values
+      // the shutdown: the engine ends the stream, the driver completes it
+      const open = await sseRequest(app.url, 'subscription { forever }')
+      const reading = readUntil(open, () => false, 5_000)
+      await new Promise(resolve => setTimeout(resolve, 50))
+      await app.stop()
+      const tail = await reading
+      result['shutdown'] = { next: tail.includes('event: next'), complete: tail.includes('event: complete') }
+    }
+    return result
+  } finally {
+    await app.stop()
+  }
+}
+
 const results: Record<string, unknown> = {}
 for (const [name, adapter] of ADAPTERS) {
   const app = await startLibrary({ adapter: adapter() })
   try {
-    const audits = await auditServer({ url: app.url })
     results[name] = {
-      audits: audits.length,
-      notOk: audits
-        .filter(audit => audit.status !== 'ok')
-        .map(audit => `${audit.id} ${audit.status} ${audit.name}: ${'reason' in audit ? audit.reason : ''}`),
+      ...(await audit(app.url)),
       statuses: await statuses(app.url),
       sse: await sse(adapter),
+      driver: await driver(adapter),
+      yoga: await driver(adapter, yogaDriver),
     }
   } finally {
     await app.stop()

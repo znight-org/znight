@@ -755,7 +755,9 @@ adapter in the same pipeline as the controllers (the `http:request` hook, the gl
 their own), take their route decisions from `meta` (`[Public.meta()]`), and are listed in
 `HttpPlugin.routes` with the plugin name as `source`. `bodyLimit` (`'100kb'`, bytes, `Infinity`)
 replaces the plugin `bodyLimit` for that route only: a larger body answers `413`. An invalid route
-or a path collision is [`ZNIGHT007`](/reference/error-codes#znight007) naming the plugin.
+or a path collision is [`ZNIGHT007`](/reference/error-codes#znight007) naming the plugin. An optional
+`onHttpDrain()` is called when `HttpPlugin` starts draining, whatever the plugin order: the plugin
+ends there the long-lived streams its routes serve, so that the drain does not wait for them.
 
 ## Adapters
 

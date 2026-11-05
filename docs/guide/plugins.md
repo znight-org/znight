@@ -325,7 +325,8 @@ interface GraphQLOperationEvent {
   readonly operationType: 'query' | 'mutation' | 'subscription' | undefined // undefined: rejected before
   readonly operationName: string | undefined // undefined: anonymous
   readonly documentId: string | undefined // SHA-256 (hex) of the query text
-  readonly transport: 'http' | 'sse' | 'direct'
+  readonly transport: 'http' | 'sse' | 'ws' | 'direct' // 'ws': reserved for graphql-ws
+  readonly driver: string // the GraphQL driver: 'builtin' (built-in transport, direct calls), 'yoga'...
   readonly requestId: string
   readonly context: unknown // GraphQLContext
   readonly startTime: number

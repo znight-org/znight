@@ -2,6 +2,7 @@
  * Options of `GraphQLPlugin` (RFC 0005 §5.11): their types, defaults and validation (ZNIGHT066).
  */
 import type { ByteSize, GuardRef, RouteMetaEntry } from '@znight/http'
+import type { GraphQLDriver } from './driver.ts'
 import type { SubscribeOptions } from './pubsub.ts'
 import type {
   GraphQLErrorMapper,
@@ -70,9 +71,12 @@ export interface GraphQLSubscriptionOptions {
   readonly maxActive?: number
   /** Events buffered per subscriber by the default `MemoryPubSub`. Default 100. */
   readonly bufferSize?: number
-  /** SSE heartbeat (ms), `false` for none. Default: the `HttpPlugin` `sse` option. */
+  /**
+   * SSE heartbeat (ms), `false` for none. Default: the `HttpPlugin` `sse` option. Built-in transport
+   * only: with a `driver`, its own keep-alive options apply (ZNIGHT066).
+   */
   readonly heartbeat?: number | false
-  /** SSE maximum duration (ms). Default: none. */
+  /** SSE maximum duration (ms). Default: none. Built-in transport only (ZNIGHT066 with a `driver`). */
   readonly maxDuration?: number
 }
 
@@ -95,12 +99,15 @@ export interface GraphQLPluginOptions {
   readonly exposeErrors?: boolean
   /** Introspection; off, suggestions are hidden too. Default `NODE_ENV !== 'production'`. */
   readonly introspection?: boolean
-  /** GraphiQL on `GET path` with `accept: text/html`. Default `NODE_ENV === 'development'`. */
+  /**
+   * GraphiQL on `GET path` with `accept: text/html`; with a `driver`, the driver's IDE. Default
+   * `NODE_ENV === 'development'`.
+   */
   readonly graphiql?: boolean
   readonly limits?: GraphQLLimits
   /** Distinct documents kept parsed and validated (LRU); 0 disables the cache. Default 1 000. */
   readonly documentCache?: number
-  /** `false` disables subscriptions over SSE. */
+  /** `false` disables subscriptions over SSE (with a `driver`, subscriptions altogether). */
   readonly subscriptions?: GraphQLSubscriptionOptions | false
   /** The `PubSub` provided to the container. Default: a `MemoryPubSub` (closed with the application). */
   readonly pubsub?: AnyPubSub
@@ -109,6 +116,11 @@ export interface GraphQLPluginOptions {
    * `'error'` (default) fails the boot, `'warn'` logs.
    */
   readonly enforcement?: 'error' | 'warn'
+  /**
+   * The GraphQL server serving the schema (RFC 0009): a driver of a subpath (`yogaDriver()`) or a
+   * third party's. Default: the built-in GraphQL-over-HTTP and SSE transport, the fastest.
+   */
+  readonly driver?: GraphQLDriver
 }
 
 /** Options with their defaults, validated. */
@@ -139,6 +151,8 @@ export interface ResolvedGraphQLOptions {
   readonly bufferSize: number
   readonly pubsub: AnyPubSub | undefined
   readonly enforcement: 'error' | 'warn'
+  /** `undefined`: the built-in transport. */
+  readonly driver: GraphQLDriver | undefined
 }
 
 const KEYS: ReadonlySet<string> = new Set([
@@ -155,6 +169,7 @@ const KEYS: ReadonlySet<string> = new Set([
   'subscriptions',
   'pubsub',
   'enforcement',
+  'driver',
 ])
 const PATH = /^\/[A-Za-z0-9\-._~!$&'()*+,;=:@/]*$/
 const LIMIT_DEFAULTS = { maxTokens: 2000, maxDepth: 12, maxAliases: 30, maxDirectives: 50 } as const
@@ -307,6 +322,19 @@ export function resolveGraphQLOptions(
   if (enforcement !== 'error' && enforcement !== 'warn')
     throw invalidOption('enforcement', "'error' or 'warn'", enforcement)
 
+  const driver = resolveDriver(options['driver'])
+  if (driver !== undefined && subscriptions !== false) {
+    for (const key of ['heartbeat', 'maxDuration'] as const) {
+      if (subscriptions[key] !== undefined) {
+        throw new ZnightError(
+          ErrorCode.InvalidGraphQLSetup,
+          `GraphQLPlugin: subscriptions.${key} configures the built-in SSE transport, not the ${driver.name} driver`,
+          { hints: [`Remove subscriptions.${key}: the ${driver.name} driver's own keep-alive options apply`] },
+        )
+      }
+    }
+  }
+
   return {
     path,
     http,
@@ -327,5 +355,26 @@ export function resolveGraphQLOptions(
     bufferSize,
     pubsub: pubsub as AnyPubSub | undefined,
     enforcement,
+    driver,
   }
+}
+
+/** The `driver` option: an object with a `name` (not `builtin`) and `start()`, `routes()` and `stop()` functions when present. */
+function resolveDriver(value: unknown): GraphQLDriver | undefined {
+  if (value === undefined) return undefined
+  const expected = 'a GraphQL driver ({ name, start(), routes?(), stop?() }, from yogaDriver() for instance)'
+  if (value === null || typeof value !== 'object') throw invalidOption('driver', expected, value)
+  const driver = value as Record<string, unknown>
+  const name = driver['name']
+  if (typeof name !== 'string' || name === '') throw invalidOption('driver', `${expected} with a name`, value)
+  if (name === 'builtin') {
+    throw invalidOption('driver.name', "a name other than 'builtin' (reserved for the built-in transport)", name)
+  }
+  if (typeof driver['start'] !== 'function') throw invalidOption('driver', `${expected} with a start() method`, value)
+  for (const method of ['routes', 'stop']) {
+    if (driver[method] !== undefined && typeof driver[method] !== 'function') {
+      throw invalidOption(`driver.${method}`, 'a function', driver[method])
+    }
+  }
+  return value as GraphQLDriver
 }

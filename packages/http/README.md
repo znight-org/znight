@@ -1622,6 +1622,13 @@ export class StatusPlugin implements Plugin, PluginHttpRoutes {
   needs a decision there too: without one the boot fails (ZNIGHT023), with a hint naming the plugin.
 - An invalid route (method, path grammar, name, handler, meta, body limit) or a collision with another route is
   ZNIGHT007 naming the plugin. `HttpPlugin.routes` lists the routes with `source: '<plugin name>'`.
+- `onHttpDrain()` (optional) is called once when `HttpPlugin` starts draining, in its `onStop`,
+  whatever the plugin order: after it stopped accepting connections and started closing its event
+  streams, before it waits for the requests in flight. A plugin whose routes answer long-lived
+  streams `HttpPlugin` does not know of (a streamed `Response` produced by another server, such as a
+  GraphQL driver's subscriptions) ends them there, so that the drain does not wait for them until
+  `drainTimeoutMs`. The drain waits for a returned promise too (within `drainTimeoutMs`); a failure
+  is logged, never thrown.
 
 ## Adapters
 

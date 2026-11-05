@@ -186,7 +186,7 @@ export const ERROR_DESCRIPTIONS: Readonly<Record<ErrorCode, string>> = {
   ZNIGHT063: 'Invalid GraphQL input: a type cannot be used in an input position',
   ZNIGHT064: 'Unresolvable abstract type: the members of a GraphQL union or interface cannot be told apart at runtime',
   ZNIGHT065: 'Invalid loader: not a Loader of a BatchLoad provider, or a batch returning the wrong number of values',
-  ZNIGHT066: 'Invalid GraphQL setup: metadata, schema, GraphQLPlugin options or HttpPlugin missing',
+  ZNIGHT066: 'Invalid GraphQL setup: metadata, schema, GraphQLPlugin options, driver or HttpPlugin missing',
   ZNIGHT067: 'Invalid GraphQL SDL: the schema-first .graphql files cannot be read, parsed or validated',
   ZNIGHT068: 'GraphQL schema mismatch: schema-first resolvers do not cover or conform to the SDL',
 }

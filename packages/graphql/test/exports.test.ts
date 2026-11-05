@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import * as compiler from '../src/compiler/index.ts'
 import * as entry from '../src/index.ts'
 import * as testing from '../src/testing.ts'
+import * as yoga from '../src/yoga.ts'
 import { expect, test as it } from 'bun:test'
 
 interface Manifest {
@@ -106,7 +107,12 @@ it('declares the manifest of RFC 0005 §7.4, whose exports exist', () => {
 })
 
 it('exports the compiler extension and the testing helpers', () => {
-  expect(Object.keys(testing).sort()).toEqual(['executeOperation', 'fakeLoader', 'subscribeOperation'])
+  expect(Object.keys(testing).sort()).toEqual([
+    'describeDriverConformance',
+    'executeOperation',
+    'fakeLoader',
+    'subscribeOperation',
+  ])
   expect(compiler.default).toBe(compiler.graphqlCompilerExtension)
   expect(compiler.default).toMatchObject({ apiVersion: 1, name: 'graphql' })
   expect(Object.keys(compiler.default.decorators).sort()).toEqual([
@@ -127,6 +133,24 @@ it('exports the compiler extension and the testing helpers', () => {
     params: [],
     rest: 'value',
   })
+})
+
+it('exports the Yoga driver from @znight/graphql/yoga (RFC 0009 §4.15)', () => {
+  expect(Object.keys(yoga).sort()).toEqual(['yogaContext', 'yogaDriver'])
+  const manifest = JSON.parse(readFileSync(join(import.meta.dir, '..', 'package.json'), 'utf8')) as {
+    exports: Record<string, unknown>
+    peerDependencies: Record<string, string>
+    peerDependenciesMeta: Record<string, { optional?: boolean }>
+    devDependencies: Record<string, string>
+  }
+  expect(manifest.exports['./yoga']).toEqual({
+    '@znight/source': './src/yoga.ts',
+    types: './dist/yoga.d.mts',
+    default: './dist/yoga.mjs',
+  })
+  expect(manifest.peerDependencies['graphql-yoga']).toMatch(/^\^6\./)
+  expect(manifest.peerDependenciesMeta['graphql-yoga']).toEqual({ optional: true })
+  expect(manifest.devDependencies['graphql-yoga']).toMatch(/^\d+\.\d+\.\d+$/)
 })
 
 it('names every decorator after the export the compiler resolves', () => {

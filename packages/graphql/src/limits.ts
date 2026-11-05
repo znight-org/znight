@@ -5,7 +5,7 @@
  * written, and, when the document spreads fragments, as each operation executes them (a fragment
  * spread several times counts each time). `maxTokens` is enforced by `parse()` itself.
  */
-import type { DirectiveNode, DocumentNode, FragmentDefinitionNode, SelectionSetNode } from 'graphql'
+import type { DirectiveNode, DocumentNode, FragmentDefinitionNode, SelectionSetNode, ValidationRule } from 'graphql'
 
 import { GraphQLError, Kind } from 'graphql'
 
@@ -74,6 +74,27 @@ export function checkLimits(document: DocumentNode, limits: DocumentLimits): Gra
     }
   }
   return errors
+}
+
+/**
+ * The limits as a graphql-js validation rule (`GraphQLEngine.rules`, RFC 0009), for GraphQL servers
+ * that parse and validate documents themselves: the same check as {@link checkLimits}, run once on
+ * the document node. `undefined` when every limit is disabled.
+ */
+export function limitsRule(limits: DocumentLimits): ValidationRule | undefined {
+  if (limits.maxDepth === undefined && limits.maxAliases === undefined && limits.maxDirectives === undefined) {
+    return undefined
+  }
+  const rule: ValidationRule = context => ({
+    Document(node) {
+      const errors = checkLimits(node, limits)
+      if (errors !== undefined) for (const error of errors) context.reportError(error)
+      // the whole document is checked at once: nothing to visit below it
+      return false
+    },
+  })
+  Object.defineProperty(rule, 'name', { value: 'ZnightDocumentLimitsRule' })
+  return rule
 }
 
 interface Counter {

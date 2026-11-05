@@ -173,9 +173,10 @@ export type GraphQLOperationType = 'query' | 'mutation' | 'subscription'
 
 /**
  * How a GraphQL operation reached the server (`GraphQLOperationEvent.transport`): GraphQL over HTTP,
- * GraphQL over Server-Sent Events, or a direct call (`execute()` / `subscribe()` of the plugin).
+ * GraphQL over Server-Sent Events, GraphQL over WebSocket (`ws`, reserved for `graphql-ws`), or a
+ * direct call (`execute()` / `subscribe()` of the plugin).
  */
-export type GraphQLOperationTransport = 'http' | 'sse' | 'direct'
+export type GraphQLOperationTransport = 'http' | 'sse' | 'ws' | 'direct'
 
 /**
  * Outcome of a GraphQL operation (`GraphQLOperationEvent.outcome`):
@@ -210,6 +211,11 @@ export interface GraphQLOperationEvent {
   /** SHA-256 (hex) of the query text, cached with the parsed document; `undefined` without a query. */
   readonly documentId: string | undefined
   readonly transport: GraphQLOperationTransport
+  /**
+   * The GraphQL driver that received the operation (RFC 0009): `'builtin'` for the built-in
+   * transport and for direct calls, `'yoga'`, `'apollo'` or a third-party driver's name otherwise.
+   */
+  readonly driver: string
   readonly requestId: string
   /** `GraphQLContext` from `@znight/graphql`. */
   readonly context: unknown

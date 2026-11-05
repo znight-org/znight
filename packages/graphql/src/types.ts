@@ -17,8 +17,11 @@ export type GraphQLArgs = Readonly<Record<string, unknown>>
 /** Kind of a GraphQL operation. */
 export type GraphQLOperationKind = 'query' | 'mutation' | 'subscription'
 
-/** How an operation reached the server: GraphQL over HTTP, GraphQL over SSE, or `plugin.execute()`. */
-export type GraphQLTransport = 'http' | 'sse' | 'direct'
+/**
+ * How an operation reached the server: GraphQL over HTTP, GraphQL over SSE, GraphQL over WebSocket
+ * (`ws`, reserved for `graphql-ws`), or `plugin.execute()` / `plugin.subscribe()` (`direct`).
+ */
+export type GraphQLTransport = 'http' | 'sse' | 'ws' | 'direct'
 
 /**
  * Options of a loader (§5.5), read once per loader class: the `options` property of a
@@ -112,6 +115,13 @@ export interface GraphQLContext {
   readonly signal: AbortSignal
   /** Per-operation storage. */
   readonly state: Map<string | symbol, unknown>
+  /**
+   * The context of the GraphQL server that received the operation through a driver (RFC 0009): the
+   * `contextValue` it passed to `GraphQLEngine.execute()` (Yoga's initial context, Apollo's context
+   * value). `undefined` for the built-in transport and direct calls. Resolvers do not need it: the
+   * request is `http`, the user a request-scoped provider.
+   */
+  readonly serverContext: unknown
   /** The DataLoader of the current execution for a loader class (`ctx.loader(AuthorsById)`). */
   loader<L extends BatchLoad<unknown, unknown>>(loader: BatchLoadClass<L>): BatchLoader<LoaderKey<L>, LoaderValue<L>>
   /**
