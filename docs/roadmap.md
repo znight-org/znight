@@ -1,5 +1,5 @@
 ---
-description: What Znight v0.1 contains, what v0.2 brings (GraphQL), what is planned without a date (WebSocket gateways, a cache package), what is being considered (application events among others), and what is deliberately not planned.
+description: What Znight v0.1 contains, what v0.2 brings (GraphQL, custom parameter decorators), what is planned without a date (WebSocket gateways, a cache package), what is being considered (application events among others), and what is deliberately not planned.
 ---
 
 # Roadmap
@@ -20,7 +20,7 @@ may change APIs.
 | [0007](https://github.com/znight-org/znight/blob/main/rfcs/0007-graphql-schema-first.md)        | Schema-first GraphQL                      | Accepted (v0.2)    |
 | [0008](https://github.com/znight-org/znight/blob/main/rfcs/0008-graphql-errors-as-data.md)      | Errors as data in `@znight/graphql`       | Accepted (v0.2)    |
 | [0009](https://github.com/znight-org/znight/blob/main/rfcs/0009-graphql-drivers.md)             | GraphQL drivers (`@znight/graphql`)       | Accepted (planned) |
-| [0010](https://github.com/znight-org/znight/blob/main/rfcs/0010-custom-parameter-decorators.md) | Custom parameter decorators               | Proposed           |
+| [0010](https://github.com/znight-org/znight/blob/main/rfcs/0010-custom-parameter-decorators.md) | Custom parameter decorators               | Accepted (v0.2)    |
 | [0011](https://github.com/znight-org/znight/blob/main/rfcs/0011-application-events.md)          | Application events (`@znight/events`)     | Proposed           |
 
 ## v0.1: the first release {#v0-1}
@@ -79,6 +79,16 @@ of every resolver signature at build time
 ([`ZNIGHT067`](/reference/error-codes#znight067)–[`ZNIGHT068`](/reference/error-codes#znight068));
 interfaces are supported in this mode.
 
+### Custom parameter decorators
+
+**Implemented**, released with v0.2
+([RFC 0010](https://github.com/znight-org/znight/blob/main/rfcs/0010-custom-parameter-decorators.md),
+[guide](/guide/custom-parameters)): a `@CurrentUser()` of your own, defined once with
+`createParamDecorator` from `@znight/core` and usable on HTTP routes, GraphQL fields and message
+handlers. Its target, data argument and value type are checked at build time, resolvers may be
+providers in any scope, and the generated code calls them directly: handlers without custom
+parameters are unchanged.
+
 ## Planned, without a date {#planned}
 
 ### `@znight/websocket`
@@ -127,12 +137,6 @@ These are tracked in the RFCs as follow-ups. None has a date.
   errors reported). It covers what `@nestjs/cqrs`'s `EventBus` and `@nestjs/event-emitter` are used
   for; `@znight/messaging` stays the tool for durable, out-of-process delivery. Until it lands, a
   multi-injected handler interface does the job.
-- **Custom parameter decorators**: a `@CurrentUser()` of your own, defined once with
-  `createParamDecorator` and usable on HTTP routes, GraphQL fields and message handlers, with its
-  target, data argument and value type checked at build time and resolvers that may be providers
-  ([RFC 0010](https://github.com/znight-org/znight/blob/main/rfcs/0010-custom-parameter-decorators.md),
-  proposed). Until then, a request-scoped provider reading the context does the job
-  ([Request context](/packages/http#request-context)).
 - **HTTP**: a `znight routes` command listing every route with its decision and guards; encrypted
   cookies; a hook measuring the lifetime of event streams; fan-out of events across instances.
 - **WebSocket follow-ups**: rooms shared across instances, a typed client generated from the

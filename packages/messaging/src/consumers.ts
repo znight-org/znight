@@ -3,6 +3,7 @@
  */
 import type { Container, Token } from '@znight/core'
 import type { MessagingDriver } from './driver.ts'
+import type { InboundMessage } from './message.ts'
 import type { ConsumerDefinition, MessageHandlerDefinition, MessagingMetadata } from './metadata.ts'
 import type { RetryOptions, RetryPolicy } from './retry.ts'
 
@@ -22,6 +23,11 @@ import {
 /** A handler ready to be dispatched to. */
 export interface PreparedHandler {
   readonly definition: MessageHandlerDefinition
+  /**
+   * Calls the handler: `definition.invoke`, or for a handler with parameter resolvers (RFC 0010) a
+   * function passing their instances, resolved in the delivery scope.
+   */
+  readonly invoke: (consumer: unknown, message: InboundMessage) => unknown
   readonly method: string
   readonly policy: RetryPolicy
 }
@@ -140,7 +146,7 @@ function prepareConsumer(
   let maxAttempts = 1
   const nativeDelays = new Set<number>()
   for (const handlerDefinition of handlers) {
-    const handler = prepareHandler(handlerDefinition, name, driver, defaults.retry)
+    const handler = prepareHandler(handlerDefinition, name, driver, defaults.retry, container)
     maxAttempts = Math.max(maxAttempts, handler.policy.attempts)
     for (const delay of retryDelays(handler.policy)) {
       if (!isInProcessDelay(delay, driver.capabilities)) nativeDelays.add(delay)
@@ -204,6 +210,7 @@ function prepareHandler(
   consumer: string,
   driver: MessagingDriver,
   defaultPolicy: RetryPolicy,
+  container: Container,
 ): PreparedHandler {
   if (
     definition === null ||
@@ -227,7 +234,29 @@ function prepareHandler(
     driver.name,
     definition.retry === undefined ? `${where} (default retry policy)` : `@Retry on ${where}`,
   )
-  return { definition, method: definition.method, policy }
+  return { definition, invoke: handlerInvoke(definition, container, where), method: definition.method, policy }
+}
+
+/** The generated invoke, or a function passing the parameter resolver instances (resolved per delivery). */
+function handlerInvoke(
+  definition: MessageHandlerDefinition,
+  container: Container,
+  where: string,
+): PreparedHandler['invoke'] {
+  const invoke = definition.invoke
+  const tokens = definition.paramResolvers
+  if (tokens === undefined || tokens.length === 0) return invoke
+  for (const token of tokens) {
+    if (!container.has(token)) {
+      throw consumerError(`${where}: the parameter resolver ${token} is not a provider`, ['Regenerate the metadata'])
+    }
+  }
+  return (consumer, message) =>
+    invoke(
+      consumer,
+      message,
+      tokens.map(token => container.get(token)),
+    )
 }
 
 function duplicateType(consumer: string, type: string): Error {

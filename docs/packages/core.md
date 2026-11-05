@@ -52,6 +52,24 @@ All decorators are compile-time markers: each returns a shared no-op function.
 
 Type helpers: `Lazy<T>`, `OnStart`, `OnReady`, `OnStop`, `MethodInterceptor<O>`, `MethodInvocation`.
 
+## Custom parameter decorators
+
+`createParamDecorator<T, D>(resolvers)` defines a decorator such as `@CurrentUser()`, with one
+resolver per transport (`http`, `graphql`, `messaging`): a function `(ctx, data) => T` (or a
+promise of it), or a provider class implementing `ParamResolver<C, T, D>`. The compiler checks every
+use at build time (target, transport, data argument, `T` against the parameter type) and the
+generated code calls the resolver directly. Types: `ParamDecorator`, `ParamResolver`,
+`ParamResolvers`, `ParamContexts` (augmented by each transport package).
+
+```ts
+import { createParamDecorator } from '@znight/core'
+import type { User } from './user.ts'
+
+export const CurrentUser = createParamDecorator<User>({
+  http: ctx => ctx.state.get('user') as User,
+})
+```
+
 ## `Application`
 
 ```ts

@@ -12,7 +12,7 @@
 import type { Token } from '@znight/core'
 import type { HttpRouteGroupDefinition } from '@znight/http'
 import type { GraphQLResolveInfo, GraphQLScalarType } from 'graphql'
-import type { GraphQLArgs, GraphQLContext, ScalarDefinition } from './types.ts'
+import type { GraphQLArgs, GraphQLContext, ResolverContext, ScalarDefinition } from './types.ts'
 
 /** Format version of `metadata.extensions.graphql` (another version is ZNIGHT066 at boot). */
 export const GRAPHQL_METADATA_VERSION = 1
@@ -202,17 +202,33 @@ export interface GraphQLResolverBinding {
   /** Informational: loader provider tokens the method injects. */
   readonly loaders?: readonly Token[]
   /**
-   * Calls the method: maps the graphql-js arguments to the method parameters (§7.3). Synchronous
-   * unless an argument is validated with a Standard Schema.
+   * The method has custom parameters (`createParamDecorator`, RFC 0010): the pipeline passes the
+   * field's `ResolverContext` to `invoke` (`f`). Absent otherwise.
    */
-  readonly invoke: (
+  readonly context?: true
+  /**
+   * Provider classes resolving custom parameters (`ParamResolver`), in order of first use: the
+   * pipeline resolves them in the operation scope and passes the instances to `invoke` (`x`).
+   * Absent when there is none.
+   */
+  readonly paramResolvers?: readonly Token[]
+  /**
+   * Calls the method: maps the graphql-js arguments to the method parameters (§7.3). Synchronous
+   * unless an argument is validated with a Standard Schema or a custom parameter resolver returns a
+   * promise. `field` and `resolvers` are passed only to methods with custom parameters (declared as
+   * a method so that a generated invoke requiring them is accepted).
+   */
+  invoke(
     // biome-ignore lint/suspicious/noExplicitAny: generated invokers receive the concrete resolver class
     resolver: any,
     parent: unknown,
     args: GraphQLArgs,
     context: GraphQLContext,
     info: GraphQLResolveInfo,
-  ) => unknown
+    field?: ResolverContext,
+    // biome-ignore lint/suspicious/noExplicitAny: generated invokers receive the tuple of resolver classes
+    resolvers?: any,
+  ): unknown
 }
 
 declare module '@znight/core' {

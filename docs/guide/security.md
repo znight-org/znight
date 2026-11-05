@@ -127,7 +127,7 @@ decisions it enforces with a static `enforces` array:
 import type { Lazy } from '@znight/core'
 import type { CanActivate, HttpContext } from '@znight/http'
 import type { Authenticator } from './authenticator.js'
-import type { CurrentUser } from './current-user.js'
+import type { RequestUser } from './request-user.js'
 
 import { Injectable } from '@znight/core'
 
@@ -140,7 +140,7 @@ export class AuthGuard implements CanActivate {
 
   constructor(
     private readonly authenticator: Authenticator,
-    private readonly user: Lazy<CurrentUser>,
+    private readonly user: Lazy<RequestUser>,
   ) {}
 
   async canActivate(ctx: HttpContext): Promise<boolean> {
@@ -518,7 +518,7 @@ function unauthorized(message: string): UnauthorizedException {
 Store the caller in a **request-scoped** provider filled by the guard, and read it anywhere during
 the request:
 
-```ts [src/auth/current-user.ts]
+```ts [src/auth/request-user.ts]
 import type { Principal } from './principal.js'
 
 import { Injectable } from '@znight/core'
@@ -526,7 +526,7 @@ import { UnauthorizedException } from '@znight/http'
 
 /** One instance per request, disposed with it. */
 @Injectable({ scope: 'request' })
-export class CurrentUser {
+export class RequestUser {
   #principal: Principal | undefined
 
   /** Called by AuthGuard once the caller is authenticated. */
@@ -546,14 +546,47 @@ export class CurrentUser {
 }
 ```
 
+In a handler, the caller is a parameter: `@CurrentUser()` is a **custom parameter decorator**
+(`createParamDecorator` of `@znight/core`) whose resolver is a request-scoped provider reading
+`RequestUser`. The compiler checks every use: it must decorate a parameter of a route, and the
+parameter must accept a `Principal`.
+
+```ts [src/auth/current-user.ts]
+import type { ParamResolver } from '@znight/core'
+import type { HttpContext } from '@znight/http'
+import type { Principal } from './principal.js'
+import type { RequestUser } from './request-user.js'
+
+import { createParamDecorator, Injectable } from '@znight/core'
+
+/**
+ * Resolves `@CurrentUser()`: a request-scoped provider reading the `RequestUser` that `AuthGuard`
+ * filled, so the handler receives the caller in its signature (no `Lazy<RequestUser>` to call).
+ */
+@Injectable({ scope: 'request' })
+export class CurrentUserResolver implements ParamResolver<HttpContext, Principal> {
+  constructor(private readonly user: RequestUser) {}
+
+  /** The caller; 401 on a public route called anonymously. */
+  resolve(): Principal {
+    return this.user.principal
+  }
+}
+
+/**
+ * The authenticated caller of the request, as a handler parameter: `me(@CurrentUser() user: Principal)`.
+ * The compiler checks every use (an HTTP route, a parameter accepting `Principal`).
+ */
+export const CurrentUser = createParamDecorator<Principal>({ http: CurrentUserResolver })
+```
+
 ```ts [src/auth/me.controller.ts]
-import type { Lazy } from '@znight/core'
-import type { CurrentUser } from './current-user.js'
 import type { Principal } from './principal.js'
 
 import { Controller, Ctx, Get, type HttpContext } from '@znight/http'
 
 import { Authenticated } from './access.js'
+import { CurrentUser } from './current-user.js'
 
 /** The caller as the API sees it. */
 export interface Me extends Principal {
@@ -568,22 +601,21 @@ export interface Me extends Principal {
 @Controller('/me')
 @Authenticated()
 export class MeController {
-  // a singleton: the request-scoped CurrentUser is read through Lazy (injecting it directly is ZNIGHT003)
-  constructor(private readonly user: Lazy<CurrentUser>) {}
-
   /** GET /me: whoever authenticated, with a token, an API key or a session cookie. */
   @Get()
-  whoami(@Ctx() ctx: HttpContext): Me {
-    return { ...this.user.get().principal, ip: ctx.ip }
+  whoami(@CurrentUser() user: Principal, @Ctx() ctx: HttpContext): Me {
+    return { ...user, ip: ctx.ip }
   }
 }
 ```
 
-Controllers, guards and services are singletons: they inject `Lazy<CurrentUser>` and call `get()`
-while handling a request. Injecting `CurrentUser` directly into a singleton is a build error
+Controllers, guards and services are singletons. Handlers receive the caller with `@CurrentUser()`;
+guards and services inject `Lazy<RequestUser>` and call `get()` while handling a request. Injecting
+`RequestUser` directly into a singleton is a build error
 ([`ZNIGHT003`](/reference/error-codes#znight003)): the singleton would keep the first caller
 forever. Unlike `ctx.state.get('user')`, the type is checked and every consumer is visible in the
-dependency graph.
+dependency graph. See [Custom parameter decorators](/guide/custom-parameters) for function
+resolvers, data arguments and GraphQL or messaging resolvers.
 
 ## Policies are guards {#policies}
 
@@ -593,7 +625,7 @@ any provider:
 
 ```ts [src/notes/note-owner.policy.ts]
 import type { Lazy } from '@znight/core'
-import type { CurrentUser } from '../auth/current-user.js'
+import type { RequestUser } from '../auth/request-user.js'
 import type { NoteRepository } from './note.repository.js'
 
 import { Injectable } from '@znight/core'
@@ -606,7 +638,7 @@ const READ_METHODS: ReadonlySet<string> = new Set(['GET', 'HEAD'])
 export class NoteOwnerPolicy implements CanActivate {
   constructor(
     private readonly notes: NoteRepository,
-    private readonly user: Lazy<CurrentUser>,
+    private readonly user: Lazy<RequestUser>,
   ) {}
 
   async canActivate(ctx: HttpContext): Promise<boolean> {
@@ -642,7 +674,7 @@ export class NoteController {
   may read every note, so a change refused to them is a `403`.
 - A request-scoped policy is possible, but then the controller using it must be request-scoped too
   ([`ZNIGHT003`](/reference/error-codes#znight003)): prefer a singleton policy with
-  `Lazy<CurrentUser>`, as above.
+  `Lazy<RequestUser>`, as above.
 - Rules inside services (a background job has no HTTP context) are explicit domain checks, or a
   method interceptor ([`@Intercept`](/guide/aop)) when the same rule wraps many methods.
 
@@ -787,7 +819,7 @@ decorator and a guard give per-route limits keyed by caller, with
 
 ```ts [src/security/rate-limit.ts]
 import type { Lazy } from '@znight/core'
-import type { CurrentUser } from '../auth/current-user.js'
+import type { RequestUser } from '../auth/request-user.js'
 
 import { Injectable } from '@znight/core'
 import { type CanActivate, createRouteDecorator, type HttpContext, TooManyRequestsException } from '@znight/http'
@@ -809,7 +841,7 @@ export class RateLimitGuard implements CanActivate {
 
   readonly #limiters = new Map<string, RateLimiterAbstract>()
 
-  constructor(private readonly user: Lazy<CurrentUser>) {}
+  constructor(private readonly user: Lazy<RequestUser>) {}
 
   async canActivate(ctx: HttpContext): Promise<boolean> {
     const policy = RateLimit.get(ctx)
@@ -969,7 +1001,7 @@ A global guard, registered after `AuthGuard`, then refuses forged requests:
 ```ts [src/security/csrf.guard.ts]
 import type { Lazy } from '@znight/core'
 import type { CanActivate, HttpContext } from '@znight/http'
-import type { CurrentUser } from '../auth/current-user.js'
+import type { RequestUser } from '../auth/request-user.js'
 import type { CorsConfig } from '../config/cors.config.js'
 import type { SessionCookies } from '../session/session-cookies.js'
 
@@ -986,7 +1018,7 @@ const SAFE_METHODS: ReadonlySet<string> = new Set(['GET', 'HEAD', 'OPTIONS'])
 export class CsrfGuard implements CanActivate {
   constructor(
     private readonly cors: CorsConfig,
-    private readonly user: Lazy<CurrentUser>,
+    private readonly user: Lazy<RequestUser>,
     private readonly sessions: SessionCookies,
   ) {}
 

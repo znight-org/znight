@@ -11,6 +11,7 @@ import type {
   DecoratorInfo,
   Location,
   MethodInfo,
+  ParamDecoratorUse,
   ParameterInfo,
   StaticValue,
   TypeInfo,
@@ -813,6 +814,24 @@ function analyzeParams(
     const decorators = unique(param.decorators).filter(
       decorator => decorator.owner === EXTENSION_NAME && PARAM_SOURCES.has(decorator.identity ?? ''),
     )
+    // custom parameter decorators (RFC 0010); compilers before it have no paramDecorator
+    const custom = typeof ctx.paramDecorator === 'function' ? ctx.paramDecorator(param, 'http', cls) : undefined
+    if (custom !== undefined) {
+      for (const other of decorators) {
+        error(
+          ctx,
+          other.location,
+          `Parameter '${param.name}' of ${where} has several parameter decorators (@${custom.decorator.name} and @${other.name})`,
+          ['Keep a single parameter decorator'],
+        )
+      }
+      if (custom.ok && decorators.length === 0) {
+        params.push(customParam(param, custom))
+      } else {
+        complete = false
+      }
+      continue
+    }
     const [decorator, ...extra] = decorators
     const foreign = decorator === undefined ? foreignParameterDecorator(param) : undefined
     if (foreign !== undefined) {
@@ -850,6 +869,30 @@ function analyzeParams(
     }
   }
   return { params, complete }
+}
+
+/** A custom parameter (`source: 'custom'`, the decorator name as `name`). */
+function customParam(param: ParameterInfo, use: Extract<ParamDecoratorUse, { readonly ok: true }>): HttpParamData {
+  const data = use.data
+  return {
+    index: param.index,
+    name: param.name,
+    source: 'custom',
+    key: use.name,
+    type: undefined,
+    optional: param.optional || param.hasDefault,
+    schema: undefined,
+    coercion: undefined,
+    custom: {
+      identity: use.identity,
+      name: use.name,
+      data: data === undefined ? undefined : { value: data.ref ?? (data.value as StaticValue) },
+      resolver: use.resolver.kind === 'class' ? use.resolver.ref : undefined,
+      ...(use.resolver.kind === 'class' && use.resolver.arity !== undefined ? { arity: use.resolver.arity } : {}),
+      cast: use.cast,
+    },
+    location: use.location,
+  }
 }
 
 function analyzeParam(

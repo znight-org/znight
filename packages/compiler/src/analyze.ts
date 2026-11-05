@@ -36,6 +36,7 @@ import {
 } from './extensions/contexts.ts'
 import { DefinitionIndex } from './extensions/definitions.ts'
 import { loadExtensions } from './extensions/loader.ts'
+import { ParamDecoratorIndex } from './extensions/param-decorators.ts'
 import { buildGraph } from './graph/build.ts'
 import { mergeCompiledLibraries } from './library/merge.ts'
 import { compareStrings } from './project/compare.ts'
@@ -134,6 +135,8 @@ export function analyzeProject(
   }
 
   // 3. extensions
+  const types = createTypeHelpers(project)
+  const definitions = new DefinitionIndex(project)
   const state: AnalysisState = {
     project,
     analyzer,
@@ -144,8 +147,9 @@ export function analyzeProject(
     bindings: [],
     stored: new Map(),
     roots: [],
-    types: createTypeHelpers(project),
-    definitions: new DefinitionIndex(project),
+    types,
+    definitions,
+    params: new ParamDecoratorIndex(project, definitions, types, report),
     nextBindingId: 1,
   }
   for (const extension of loaded) {
@@ -165,6 +169,9 @@ export function analyzeProject(
       }
     }
   }
+
+  // 3a. custom parameter decorators no extension claimed (RFC 0010)
+  state.params.reportUnclaimed(classes)
 
   // 3b. compiled provider libraries (§6.4): merged before binding, validated with the application
   mergeCompiledLibraries({

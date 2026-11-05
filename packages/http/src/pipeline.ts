@@ -1,5 +1,6 @@
 import type { Container, CoreLogger, Hooks, HttpRequestEvent, OpenedScope, Token } from '@znight/core'
 import type { AdapterHandler, AdapterReply, AdapterRequest, ReplyBody } from './adapter.ts'
+import type { HttpContext } from './context.ts'
 import type { CookieSettings } from './cookie-settings.ts'
 import type { SerializedCookie } from './cookies.ts'
 import type { CorsPolicy } from './cors.ts'
@@ -53,6 +54,11 @@ export type Resolvable<T> = { readonly instance: T } | { readonly token: Token }
 /** Everything the pipeline needs to serve one registered route (internal). */
 export interface RoutePlan {
   readonly definition: HttpRouteDefinition
+  /**
+   * Calls the handler: `definition.invoke`, or for a route with parameter resolvers a function
+   * passing their instances (resolved in the request scope) as the third argument.
+   */
+  readonly invoke: (controller: object, ctx: HttpContext) => unknown
   /** The registered path (a trailing-slash variant has an extra empty static segment). */
   readonly path: RoutePath
   readonly info: HttpRouteInfo
@@ -436,7 +442,7 @@ export class Pipeline {
     let result: unknown
     let reply: AdapterReply | undefined
     try {
-      result = plan.definition.invoke(this.#resolve(plan.controller), ctx)
+      result = plan.invoke(this.#resolve(plan.controller), ctx)
       if (isThenable(result)) return this.#fastLater(route, request, ctx, result, startTime)
       reply = this.#fastReply(route, ctx, result)
     } catch (error) {
@@ -480,7 +486,7 @@ export class Pipeline {
       if (result === NO_RESULT) {
         const controller = this.#resolve(plan.controller)
         await ctx.parseBody()
-        result = plan.definition.invoke(controller, ctx)
+        result = plan.invoke(controller, ctx)
       }
       if (isThenable(result)) result = await result
       reply = this.#fastReply(route, ctx, result)
@@ -584,7 +590,7 @@ export class Pipeline {
     if (plan.parseBody) return this.#fastOperationLater(x, route, NO_RESULT)
     let result: unknown
     try {
-      result = plan.definition.invoke(this.#resolve(plan.controller), ctx)
+      result = plan.invoke(this.#resolve(plan.controller), ctx)
     } catch (error) {
       return this.#fastChecked(x, this.#failed(error, ctx, x.event))
     }
@@ -601,7 +607,7 @@ export class Pipeline {
       if (result === NO_RESULT) {
         const controller = this.#resolve(plan.controller)
         await ctx.parseBody()
-        result = plan.definition.invoke(controller, ctx)
+        result = plan.invoke(controller, ctx)
       }
       if (isThenable(result)) result = await result
     } catch (error) {
@@ -1235,13 +1241,12 @@ export class Pipeline {
         if (allowed !== true) throw new ForbiddenException('Forbidden resource')
       }
       if (plan.parseBody) await ctx.parseBody()
-      const definition = plan.definition
       const interceptors = plan.interceptors
       if (interceptors.length === 0) {
-        result = definition.invoke(controller, ctx)
+        result = plan.invoke(controller, ctx)
       } else {
         const chain = async (index: number): Promise<unknown> => {
-          if (index === interceptors.length) return await definition.invoke(controller, ctx)
+          if (index === interceptors.length) return await plan.invoke(controller, ctx)
           const interceptor = this.#resolve(interceptors[index] as Resolvable<HttpInterceptor>)
           return await interceptor.intercept(ctx, () => chain(index + 1))
         }

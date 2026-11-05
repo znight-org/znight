@@ -13,7 +13,7 @@
  * ```
  */
 
-import type { GenerateContext, GenInput, GenNode, GenParam } from '@znight/compiler'
+import type { ClassRef, GenerateContext, GenInput, GenNode, GenParam, StaticValue, ValueRef } from '@znight/compiler'
 import type { Token } from '@znight/core'
 import type { MetaEntry } from '@znight/http/compiler'
 import type { FieldData, GraphQLData, ParamData, ResolverData } from './data.ts'
@@ -34,6 +34,8 @@ interface Imports {
   argsType(): GenNode
   contextType(): GenNode
   infoType(): GenNode
+  resolverContextType(): GenNode
+  paramFunctionOf(): GenNode
   validateArgs(): GenNode
   isThenable(): GenNode
   hostType(identity: string): GenNode
@@ -63,6 +65,8 @@ function createImports(ctx: Context): Imports {
   let args: GenNode | undefined
   let context: GenNode | undefined
   let info: GenNode | undefined
+  let resolverContext: GenNode | undefined
+  let paramFunctionOf: GenNode | undefined
   let validateArgs: GenNode | undefined
   let isThenable: GenNode | undefined
   const hosts = new Map<string, GenNode>()
@@ -78,6 +82,14 @@ function createImports(ctx: Context): Imports {
     infoType: () => {
       info ??= ctx.importFrom('graphql', 'GraphQLResolveInfo', { type: true })
       return info
+    },
+    resolverContextType: () => {
+      resolverContext ??= ctx.importFrom(RUNTIME_MODULE, 'ResolverContext', { type: true })
+      return resolverContext
+    },
+    paramFunctionOf: () => {
+      paramFunctionOf ??= ctx.importFrom('@znight/core', 'ParamFunctionOf', { type: true })
+      return paramFunctionOf
     },
     validateArgs: () => {
       validateArgs ??= ctx.importFrom(RUNTIME_MODULE, 'validateArgs')
@@ -208,7 +220,13 @@ function resolverNode(ctx: Context, imports: Imports, resolver: ResolverData, fi
   ]
   const loaders = field.params.flatMap(param => (param?.kind === 'loader' ? [loaderToken(ctx, param)] : []))
   if (loaders.length > 0) entries.push(['loaders', ctx.lit(loaders)])
-  entries.push(['invoke', invokeNode(ctx, imports, resolver, field)])
+  // custom parameters (RFC 0010): the pipeline builds the ResolverContext and resolves the class resolvers
+  const resolvers = paramResolvers(field)
+  if (field.params.some(param => param?.kind === 'custom')) entries.push(['context', ctx.lit(true)])
+  if (resolvers.length > 0) {
+    entries.push(['paramResolvers', ctx.lit(resolvers.map(ref => ctx.tokenOf(ref) ?? ref.token))])
+  }
+  entries.push(['invoke', invokeNode(ctx, imports, resolver, field, resolvers)])
   return ctx.obj(entries)
 }
 
@@ -222,14 +240,31 @@ function loaderToken(ctx: Context, param: Extract<ParamData, { kind: 'loader' }>
 
 // ------------------------------------------------------------------------------------------- invoke
 
-/** Which `invoke` parameters a field uses: `(r, p, a, c, i)`. */
-function usedParameters(field: FieldData): readonly [p: boolean, a: boolean, c: boolean, i: boolean] {
+/** The provider classes resolving custom parameters, in order of first use (`x[i]`). */
+function paramResolvers(field: FieldData): ClassRef[] {
+  const found = new Map<string, ClassRef>()
+  for (const param of field.params) {
+    const resolver = param?.kind === 'custom' ? param.resolver : undefined
+    if (resolver !== undefined && !found.has(resolver.token)) found.set(resolver.token, resolver)
+  }
+  return [...found.values()]
+}
+
+/** Which `invoke` parameters a field uses: `(r, p, a, c, i, f, x)`. */
+function usedParameters(field: FieldData): readonly boolean[] {
   let p = false
   let a = false
   let c = false
   let i = false
+  let f = false
+  let x = false
   for (const param of field.params) {
     switch (param?.kind) {
+      case 'custom':
+        // a class resolver whose `resolve()` takes no parameter does not read `f`
+        f ||= param.resolver === undefined || param.arity !== 0
+        x ||= param.resolver !== undefined
+        break
       case 'parent':
         p = true
         break
@@ -245,31 +280,58 @@ function usedParameters(field: FieldData): readonly [p: boolean, a: boolean, c: 
         break
     }
   }
-  return [p, a, c, i]
+  return [p, a, c, i, f, x]
 }
 
 /**
  * `(r: Resolver, p: unknown, a: GraphQLArgs, c: GraphQLContext, i: GraphQLResolveInfo) => r.m(...)`:
  * unused middle parameters are `_`-prefixed, trailing ones omitted (`noUnusedParameters`).
  */
-function invokeNode(ctx: Context, imports: Imports, resolver: ResolverData, field: FieldData): GenNode {
+function invokeNode(
+  ctx: Context,
+  imports: Imports,
+  resolver: ResolverData,
+  field: FieldData,
+  resolvers: readonly ClassRef[],
+): GenNode {
   const used = usedParameters(field)
   const last = used.lastIndexOf(true)
-  const types = [() => ctx.code`unknown`, imports.argsType, imports.contextType, imports.infoType]
-  const names = ['p', 'a', 'c', 'i']
+  const types = [
+    () => ctx.code`unknown`,
+    imports.argsType,
+    imports.contextType,
+    imports.infoType,
+    imports.resolverContextType,
+    () =>
+      tupleType(
+        ctx,
+        resolvers.map(ref => ctx.importType(ref)),
+      ),
+  ]
+  const names = ['p', 'a', 'c', 'i', 'f', 'x']
   const params: [string, GenNode][] = [['r', imports.hostType(resolver.host.identity)]]
   for (let index = 0; index <= last; index++) {
     params.push([`${used[index] ? '' : '_'}${names[index] as string}`, (types[index] as () => GenNode)()])
   }
-  const validated = field.params.flatMap((param, index) =>
-    param?.kind === 'args' && param.schema !== undefined ? [index] : [],
-  )
+  const deferred = field.params.flatMap((param, index) => (param !== undefined && isDeferred(param) ? [index] : []))
+  const positions = new Map(resolvers.map((ref, position) => [ref.token, position]))
   return ctx.arrow(params, (r, ...rest) => {
-    const [p, a, c, i] = rest as (GenParam | undefined)[]
-    const scope: Scope = { p, a, c, i }
-    if (validated.length === 0) return call(ctx, r, field, index => argument(ctx, scope, field, index))
-    return validatingBlock(ctx, imports, r, scope, field, validated)
+    const [p, a, c, i, f, x] = rest as (GenParam | undefined)[]
+    const scope: Scope = { p, a, c, i, f, x, resolvers: positions, imports }
+    if (deferred.length === 0) return call(ctx, r, field, index => argument(ctx, scope, field, index))
+    return validatingBlock(ctx, imports, r, scope, field, deferred)
   })
+}
+
+/** `readonly [A, B]`. */
+function tupleType(ctx: Context, nodes: readonly GenNode[]): GenNode {
+  const joined = nodes.slice(1).reduce((all, node) => ctx.code`${all}, ${node}`, nodes[0] as GenNode)
+  return ctx.code`readonly [${joined}]`
+}
+
+/** An argument whose expression may return a thenable: a validated `@Args`, or a custom parameter. */
+function isDeferred(param: ParamData): boolean {
+  return (param.kind === 'args' && param.schema !== undefined) || param.kind === 'custom'
 }
 
 /** The parameters of the `invoke` arrow (absent when not declared). */
@@ -278,6 +340,13 @@ interface Scope {
   readonly a: GenNode | undefined
   readonly c: GenNode | undefined
   readonly i: GenNode | undefined
+  /** The `ResolverContext` of custom parameters. */
+  readonly f: GenNode | undefined
+  /** The class resolver instances (`x[i]`). */
+  readonly x: GenNode | undefined
+  /** Position of each class resolver token in `x`. */
+  readonly resolvers: ReadonlyMap<string, number>
+  readonly imports: Imports
 }
 
 /** `r.method(args)`. */
@@ -302,9 +371,60 @@ function argument(ctx: Context, scope: Scope, field: FieldData, index: number): 
       return ctx.code`${ctx.call(ctx.member(scope.c as GenNode, 'loader'), [loaderToken(ctx, param)])} as never`
     case 'args':
       return ctx.code`${argsValue(ctx, scope, param.name)} as never`
+    case 'custom':
+      return customArgument(ctx, scope, param)
     default:
       return ctx.lit(undefined)
   }
+}
+
+/**
+ * A custom parameter (RFC 0010): `(D.resolvers.graphql as ParamFunctionOf<typeof D, 'graphql'>)(f, data)`
+ * or `x[i].resolve(f, data)`, cast with `as never` when the value type could not be checked.
+ */
+function customArgument(ctx: Context, scope: Scope, param: Extract<ParamData, { kind: 'custom' }>): GenNode {
+  const f = scope.f as GenNode
+  const data = param.data === undefined ? ctx.lit(undefined) : dataNode(ctx, param.data.value)
+  let node: GenNode
+  if (param.resolver === undefined) {
+    const decorator = ctx.importValue(param.identity)
+    const type = ctx.code`${scope.imports.paramFunctionOf()}<typeof ${decorator}, 'graphql'>`
+    node = ctx.call(ctx.code`${ctx.member(decorator, 'resolvers', 'graphql')} as ${type}`, [f, data])
+  } else {
+    const position = scope.resolvers.get(param.resolver.token) as number
+    if (param.arity === undefined) {
+      // a `resolve` the compiler cannot read (inherited from a mixin...): the instance is cast to a
+      // method taking both arguments (method parameters are bivariant), the value with `as never`
+      return ctx.code`(${scope.x as GenNode}[${position}] as { resolve(ctx: unknown, data: unknown): unknown }).resolve(${f}, ${data}) as never`
+    }
+    // a `resolve(ctx)` that ignores the data gets no data argument (TypeScript checks the arity)
+    const arity = Math.min(param.arity, 2)
+    let args = ctx.code``
+    if (arity === 1) args = f
+    else if (arity === 2) args = ctx.code`${f}, ${data}`
+    node = ctx.code`${scope.x as GenNode}[${position}].resolve(${args})`
+  }
+  return param.cast ? ctx.code`${node} as never` : node
+}
+
+/** The data argument of a custom parameter: a literal (references imported) or a reference. */
+function dataNode(ctx: Context, value: StaticValue): GenNode {
+  return isValueRef(value) ? ctx.ref(value as ValueRef) : ctx.lit(value as never)
+}
+
+/** `true` for a {@link ValueRef} (the only non-plain object a static value can hold). */
+function isValueRef(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const prototype = Object.getPrototypeOf(value)
+  return prototype !== Object.prototype && prototype !== null && (value as { kind?: unknown }).kind === 'ref'
+}
+
+/** The expression of a deferred parameter (validation or custom resolver), before any `await`. */
+function deferredValue(ctx: Context, imports: Imports, scope: Scope, field: FieldData, index: number): GenNode {
+  const param = field.params[index] as ParamData
+  return param.kind === 'custom'
+    ? customArgument(ctx, scope, param)
+    : validation(ctx, imports, scope, param as Extract<ParamData, { kind: 'args' }>)
 }
 
 /** `a['name']`, or `a` for `@Args()`. */
@@ -356,8 +476,7 @@ function validatingBlock(
       const statements: GenNode[] = []
       for (const index of validated) {
         const name = local.get(index) as GenNode
-        const param = field.params[index] as Extract<ParamData, { kind: 'args' }>
-        statements.push(ctx.code`const ${name} = ${validation(ctx, imports, scope, param)}`)
+        statements.push(ctx.code`const ${name} = ${deferredValue(ctx, imports, scope, field, index)}`)
         const resume = ctx.arrow(
           [],
           () =>
@@ -366,8 +485,7 @@ function validatingBlock(
               if (value === undefined) return argument(ctx, scope, field, position)
               if (position < index) return ctx.code`${value} as never`
               if (position === index) return ctx.code`await ${value} as never`
-              const later = field.params[position] as Extract<ParamData, { kind: 'args' }>
-              return ctx.code`await ${validation(ctx, imports, scope, later)} as never`
+              return ctx.code`await ${deferredValue(ctx, imports, scope, field, position)} as never`
             }),
           { async: true },
         )

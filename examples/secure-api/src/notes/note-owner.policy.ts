@@ -1,5 +1,5 @@
 import type { Lazy } from '@znight/core'
-import type { CurrentUser } from '../auth/current-user.js'
+import type { RequestUser } from '../auth/request-user.js'
 import type { NoteRepository } from './note.repository.js'
 
 import { Injectable } from '@znight/core'
@@ -12,7 +12,7 @@ const READ_METHODS: ReadonlySet<string> = new Set(['GET', 'HEAD'])
 export class NoteOwnerPolicy implements CanActivate {
   constructor(
     private readonly notes: NoteRepository,
-    private readonly user: Lazy<CurrentUser>,
+    private readonly user: Lazy<RequestUser>,
   ) {}
 
   async canActivate(ctx: HttpContext): Promise<boolean> {

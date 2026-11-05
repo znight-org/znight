@@ -4,7 +4,7 @@
 import type { HttpRequestEvent } from '@znight/core'
 
 import { ADAPTERS, createApp, type Send, type TestApp, TRANSPORTS } from './helpers.ts'
-import { sampleMetadata, sampleOptions, scopeStats } from './sample-app.ts'
+import { paramStats, sampleMetadata, sampleOptions, scopeStats } from './sample-app.ts'
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
@@ -523,6 +523,40 @@ for (const adapter of ADAPTERS) {
             const forbidden = await send({ method: 'GET', url: '/errors/forbidden' })
             expect(forbidden.status).toBe(403)
             expect(forbidden.headers['x-guard']).toBe('set-before-throw')
+          })
+        })
+
+        describe('custom parameters', () => {
+          it('passes resolved values, maps resolver errors and awaits asynchronous resolvers', async () => {
+            const ok = await send({ method: 'GET', url: '/params/user', headers: { 'x-user': 'ada' } })
+            expect(ok.json()).toEqual({ user: 'ada' })
+            const anonymous = await send({ method: 'GET', url: '/params/user' })
+            expect(anonymous.status).toBe(401)
+            const async = await send({ method: 'GET', url: '/params/async', headers: { 'x-user': 'lin' } })
+            expect(async.json()).toEqual({ user: 'lin', async: true })
+            expect((await send({ method: 'GET', url: '/params/async' })).status).toBe(401)
+          })
+
+          it('resolves class resolvers in the request scope, singletons once', async () => {
+            const before = paramStats.resolvers
+            const first = await send({ method: 'GET', url: '/params/scoped', headers: { 'x-user': 'ada' } })
+            const second = await send({
+              method: 'GET',
+              url: '/params/scoped',
+              headers: { 'x-user': 'lin', 'accept-language': 'fr' },
+            })
+            expect(first.json()).toEqual({
+              first: { user: 'ada', instance: before + 1, same: true },
+              second: { user: 'ada', instance: before + 1, same: true },
+              locale: 'en',
+            })
+            expect(second.json()).toEqual({
+              first: { user: 'lin', instance: before + 2, same: true },
+              second: { user: 'lin', instance: before + 2, same: true },
+              locale: 'fr',
+            })
+            const locale = await send({ method: 'GET', url: '/params/locale', headers: { 'accept-language': 'de' } })
+            expect(locale.json()).toEqual({ first: null, second: null, locale: 'de' })
           })
         })
 

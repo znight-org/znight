@@ -21,18 +21,23 @@ import type {
   DefinitionInfo,
   DependencyDetails,
   InjectionRequest,
+  ParamDecoratorUse,
+  ParameterInfo,
   ProviderRegistration,
   RootDetails,
   RootNode,
+  ShapeTarget,
   TypeHelpers,
   ValidateContext,
 } from './api.ts'
 import type { DefinitionIndex } from './definitions.ts'
+import type { ParamDecoratorIndex } from './param-decorators.ts'
 
 import { ErrorCode } from '@znight/core'
 
 import { awaitedType, stripNullish } from '../binding/injection.ts'
 import { displayNameOf, formatType, referenceType, serializeType, typesEqual } from '../project/index.ts'
+import { assignableShapes } from '../shapes/assignable.ts'
 import { ShapeResolver } from '../shapes/resolver.ts'
 
 /**
@@ -48,7 +53,14 @@ export function createTypeHelpers(project: Project): TypeHelpers {
     stripNullish,
     awaited: awaitedType,
     shape: (target, options) => shapes.shape(target, options),
+    assignable: (source, target) =>
+      assignableShapes((what, options) => shapes.shape(what, options), toShapeTarget(source), toShapeTarget(target)),
   } satisfies TypeHelpers)
+}
+
+/** A {@link TypeInfo} as a {@link ShapeTarget} (`{ type }`); other targets unchanged. */
+function toShapeTarget(value: TypeInfo | ShapeTarget): ShapeTarget {
+  return 'kind' in value && typeof value.kind === 'string' ? { type: value as TypeInfo } : (value as ShapeTarget)
 }
 
 const SCOPES: readonly Scope[] = ['singleton', 'request', 'transient']
@@ -82,6 +94,7 @@ export interface AnalysisState {
   readonly roots: RootNode[]
   readonly types: TypeHelpers
   readonly definitions: DefinitionIndex
+  readonly params: ParamDecoratorIndex
   nextBindingId: number
 }
 
@@ -208,6 +221,10 @@ export class ExtensionAnalyzeContext implements AnalyzeContext<unknown> {
 
   definitionsOf(callee: string): readonly DefinitionInfo[] {
     return this.#state.definitions.definitionsOf(callee)
+  }
+
+  paramDecorator(param: ParameterInfo, transport: string, from: ClassInfo): ParamDecoratorUse | undefined {
+    return this.#state.params.use(param, transport, from, this)
   }
 }
 

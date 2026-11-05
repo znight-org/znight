@@ -63,6 +63,13 @@ export interface HttpRouteInfo {
   readonly meta: Readonly<Record<string, unknown>>
 }
 
+declare module '@znight/core' {
+  /** Custom parameter decorators (`createParamDecorator`) resolve HTTP parameters from the {@link HttpContext}. */
+  interface ParamContexts {
+    http: HttpContext
+  }
+}
+
 /**
  * Adapter-neutral view of the current HTTP request, shared by guards, interceptors, exception
  * mappers and handlers (`@Ctx()`), and injectable in request-scoped providers.

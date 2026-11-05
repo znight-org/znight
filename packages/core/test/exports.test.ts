@@ -23,6 +23,7 @@ describe('public entry', () => {
       'Named',
       'Primary',
       'Intercept',
+      'createParamDecorator',
       'applyInterceptors',
       'interceptMethod',
       'callLifecycleHook',

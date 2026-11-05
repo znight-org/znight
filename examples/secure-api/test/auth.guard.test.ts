@@ -7,7 +7,7 @@ import { TestBed } from '@znight/testing'
 import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
 import { AuthGuard } from '../src/auth/auth.guard.js'
 import { Authenticator } from '../src/auth/authenticator.js'
-import { CurrentUser } from '../src/auth/current-user.js'
+import { RequestUser } from '../src/auth/request-user.js'
 import { describe, expect, test as it } from 'bun:test'
 
 const EDITOR: Principal = { id: 'u-1', roles: ['editor'], via: 'token' }
@@ -17,13 +17,13 @@ function request(meta: Record<string, unknown>): HttpContext {
   return { route: { method: 'GET', path: '/x', controller: 'X', handler: 'x', meta } } as unknown as HttpContext
 }
 
-/** `TestBed`: the real guard, its `Authenticator` and `Lazy<CurrentUser>` auto-mocked. */
+/** `TestBed`: the real guard, its `Authenticator` and `Lazy<RequestUser>` auto-mocked. */
 async function setup(principal: Principal | Error = EDITOR) {
   const { instance, mocks } = await TestBed.create(AuthGuard, { metadata })
   const authenticate = mocks.get(Authenticator).authenticate
   if (principal instanceof Error) authenticate.mockRejectedValue(principal)
   else authenticate.mockResolvedValue(principal)
-  return { guard: instance, authenticate, user: mocks.get(CurrentUser) }
+  return { guard: instance, authenticate, user: mocks.get(RequestUser) }
 }
 
 describe('AuthGuard', () => {

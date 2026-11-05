@@ -1,6 +1,6 @@
 import type { Lazy } from '@znight/core'
 import type { CanActivate, HttpContext } from '@znight/http'
-import type { CurrentUser } from '../auth/current-user.js'
+import type { RequestUser } from '../auth/request-user.js'
 import type { CorsConfig } from '../config/cors.config.js'
 import type { SessionCookies } from '../session/session-cookies.js'
 
@@ -17,7 +17,7 @@ const SAFE_METHODS: ReadonlySet<string> = new Set(['GET', 'HEAD', 'OPTIONS'])
 export class CsrfGuard implements CanActivate {
   constructor(
     private readonly cors: CorsConfig,
-    private readonly user: Lazy<CurrentUser>,
+    private readonly user: Lazy<RequestUser>,
     private readonly sessions: SessionCookies,
   ) {}
 

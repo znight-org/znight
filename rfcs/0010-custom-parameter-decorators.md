@@ -2,7 +2,7 @@
 
 |          |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Status   | Proposed                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Status   | Accepted (v0.2)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | Date     | 2026-11-04                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | Affects  | `@znight/core` (the `createParamDecorator` factory and its types), `@znight/compiler` (recognition of the definitions, an extension API to read their uses, an assignability helper), `@znight/http`, `@znight/graphql` and `@znight/messaging` (analysis, generated `invoke`, metadata of the handlers, runtime pipelines), `@znight/openapi` (custom parameters are not documented), `@znight/testing` (docs only). No new error code: ZNIGHT005 is reused                                                                             |
 | Decision | **One factory in `@znight/core`, one resolver per transport.** `export const CurrentUser = createParamDecorator<User>({ http: ctx => ..., graphql: ctx => ... })`. The compiler recognises the `const`, checks every use (target, transport, data argument, declared type against the parameter type) at build time, and the generated `invoke` calls the resolver directly: a function, or the `resolve()` method of a provider bound at build time. Synchronous until a resolver returns a promise; handlers without one are unchanged |
@@ -741,3 +741,32 @@ the imports of the decorator.
   deterministic (golden).
 - Runtime: scopes of class resolvers (singleton, request, transient), errors through exception
   mappers, GraphQL `errors[]` and result mappers, messaging retries; `TestApp` overrides.
+
+## 14. Implementation notes
+
+What the implementation settled where this document was not precise, or differs from it (the
+specification, `docs/internals/architecture.md` §4.6, §6.5, §8.6, §9.1, §9.2, §9.7, is normative):
+
+- **No `R` type parameter.** TypeScript does not infer a type parameter when another one is given
+  explicitly (`createParamDecorator<User>({...})`), so `ParamDecorator<T, D>` keeps
+  `resolvers: ParamResolvers<T, D>`. Generated code selects the function member with a type-only
+  cast, `(CurrentUser.resolvers.http as ParamFunctionOf<typeof CurrentUser, 'http'>)(ctx, data)`,
+  which costs nothing at runtime.
+- **`TypeHelpers.assignable(source, target)`** accepts a `TypeInfo` or a shape target such as
+  `{ parameter }` (aliases and object literal types are kept). Nothing was moved from the GraphQL
+  conformance, which compares TypeScript shapes with SDL types: the comparison of two TypeScript
+  types is new (`packages/compiler/src/shapes/assignable.ts`, `members: 'instance'`, recursive types
+  compared coinductively).
+- **Class resolvers and the data argument.** When the class's `resolve` (its own method, an
+  inherited one or an arrow function property) declares fewer than two parameters, the generated
+  call leaves the data out (`x[0].resolve(ctx)`): TypeScript checks the arity of the call against
+  the class. When the compiler cannot read it (a base it cannot analyse, such as a mixin), the
+  instance is cast to a `resolve(ctx, data)` method and the value with `as never`.
+- **Messaging** awaits custom parameters (the invoke becomes `async` for such handlers) instead of
+  the `isThenable` fallback: a delivery already awaits `invoke`, and handlers without custom
+  parameters are unchanged. Parameter resolvers are resolved in the delivery scope on every call.
+- **GraphQL** `GraphQLResolverBinding.invoke` is declared as a method (bivariant parameters), so that
+  a generated invoke requiring `f` is accepted while hand-written bindings keep five parameters.
+- **`TestApp`** treats the parameter resolvers of routes, fields and message handlers as roots.
+- **Benchmarks.** The route with `@CurrentUser()` in the HTTP benchmark (§4.13) is not added yet.
+

@@ -625,6 +625,17 @@ export interface TypeHelpers {
    * the files read are part of `watchFiles`. Available in the analyze, validate and generate contexts.
    */
   shape(target: ShapeTarget, options?: ShapeOptions): ShapeResult
+  /**
+   * Conservative assignability (RFC 0010 §4.5), through the shapes of both sides (instance members:
+   * fields and getters, no methods): `true` when every value of `source` is a value of `target`,
+   * `false` when one certainly is not (a missing required property, `undefined` or `null` the target
+   * does not accept, another primitive), `undefined` when it cannot be decided (`any`, `unknown`,
+   * opaque parts, schemas, kept references, a property the source declares as a method, a target
+   * declaring methods or `private` members, which shapes leave out). A
+   * {@link TypeInfo} is compared as `{ type }`; a parameter as `{ parameter }` is more precise
+   * (aliases and object literal types are kept). Report only `false`.
+   */
+  assignable(source: TypeInfo | ShapeTarget, target: TypeInfo | ShapeTarget): boolean | undefined
 }
 
 /**
@@ -774,6 +785,53 @@ export interface DefinitionInfo {
   readonly exported: boolean
 }
 
+/** How a custom parameter decorator computes its value for a transport ({@link ParamDecoratorUse}). */
+export type ParamDecoratorResolver =
+  /** A function, called as `Decorator.resolvers.<transport>(ctx, data)`; `async` when it is declared `async`. */
+  | { readonly kind: 'function'; readonly async: boolean }
+  /**
+   * The class of a provider implementing `ParamResolver`, bound with a lazy edge from the handler's
+   * class: the plugin resolves it in the scope of the call and generated code calls `resolve(ctx, data)`.
+   */
+  | {
+      readonly kind: 'class'
+      readonly ref: ClassRef
+      readonly async: boolean
+      /**
+       * Number of parameters of the class's `resolve`: its own method, an inherited one (through
+       * analysable base classes) or an arrow function (or function-typed) property. Generated code
+       * passes at most that many arguments (`resolve(ctx)` ignores the data). `undefined` when the
+       * compiler cannot read it (a base it cannot analyse, such as a mixin): generated code then
+       * casts the instance to `{ resolve(ctx: unknown, data: unknown): unknown }` and the value with
+       * `as never`.
+       */
+      readonly arity: number | undefined
+    }
+
+/**
+ * A use of a custom parameter decorator (RFC 0010) on a handler parameter, read for one transport
+ * ({@link AnalyzeContext.paramDecorator}). `ok: false` when a problem was reported: the parameter
+ * cannot be generated.
+ */
+export type ParamDecoratorUse =
+  | { readonly ok: false; readonly decorator: DecoratorInfo }
+  | {
+      readonly ok: true
+      readonly decorator: DecoratorInfo
+      /** Canonical identity of the decorator `const` (`importValue(identity)`). */
+      readonly identity: string
+      /** Name of the `const` (`CurrentUser`), also the display name in metadata. */
+      readonly name: string
+      /** `T` of the definition, resolved. */
+      readonly valueType: TypeInfo
+      /** The data argument, evaluated as a `value` argument (`undefined` without argument). */
+      readonly data: ArgInfo | undefined
+      readonly resolver: ParamDecoratorResolver
+      /** The value type could not be checked against the parameter (opaque): cast the argument with `as never`. */
+      readonly cast: boolean
+      readonly location: Location
+    }
+
 /** Context of {@link CompilerExtension.analyzeClass}. */
 export interface AnalyzeContext<TData = unknown> {
   readonly extension: string
@@ -827,6 +885,15 @@ export interface AnalyzeContext<TData = unknown> {
    * per compile and callee.
    */
   definitionsOf(callee: string): readonly DefinitionInfo[]
+  /**
+   * The custom parameter decorator (RFC 0010) of a method parameter of `from`, read for `transport`
+   * (`'http'`, `'graphql'`, `'messaging'`: a key of the definitions' resolvers); `undefined` when the
+   * parameter has none. Marks the use as claimed (the uses no extension claims are ZNIGHT005 at the
+   * end of the analysis), checks it (definition shape, call form, transport, data argument, value
+   * type against the parameter) and binds a class resolver with a lazy edge from `from`. Problems
+   * are reported here as ZNIGHT005, and the result is then `{ ok: false }`.
+   */
+  paramDecorator(param: ParameterInfo, transport: string, from: ClassInfo): ParamDecoratorUse | undefined
 }
 
 /** Context of {@link CompilerExtension.validate}. */

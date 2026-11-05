@@ -1,5 +1,5 @@
 import type { Lazy } from '@znight/core'
-import type { CurrentUser } from '../auth/current-user.js'
+import type { RequestUser } from '../auth/request-user.js'
 
 import { Injectable } from '@znight/core'
 import { type CanActivate, createRouteDecorator, type HttpContext, TooManyRequestsException } from '@znight/http'
@@ -21,7 +21,7 @@ export class RateLimitGuard implements CanActivate {
 
   readonly #limiters = new Map<string, RateLimiterAbstract>()
 
-  constructor(private readonly user: Lazy<CurrentUser>) {}
+  constructor(private readonly user: Lazy<RequestUser>) {}
 
   async canActivate(ctx: HttpContext): Promise<boolean> {
     const policy = RateLimit.get(ctx)

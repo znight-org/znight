@@ -150,6 +150,25 @@ export interface UploadData {
   readonly cast: boolean
 }
 
+/** A custom parameter (`createParamDecorator`, RFC 0010). */
+export interface CustomParamData {
+  /** Canonical identity of the decorator `const` (imported by the generated module). */
+  readonly identity: string
+  /** Name of the decorator (`CurrentUser`). */
+  readonly name: string
+  /** The data argument: evaluated value (it may contain references) or a reference; `undefined` without argument. */
+  readonly data: { readonly value: StaticValue } | undefined
+  /** The class resolver (`x[i].resolve(ctx, data)`); `undefined` for a function resolver. */
+  readonly resolver: ClassRef | undefined
+  /**
+   * Parameters of the class resolver's `resolve` (own, inherited or an arrow function property);
+   * `undefined` for a function resolver, or when the compiler cannot read it (the call is cast).
+   */
+  readonly arity?: number
+  /** The value type could not be checked against the parameter: `as never`. */
+  readonly cast: boolean
+}
+
 /** A handler parameter. */
 export interface HttpParamData {
   /** Position in the handler signature. */
@@ -169,6 +188,8 @@ export interface HttpParamData {
   readonly coercion: ParamCoercion | undefined
   /** Upload parameter (`source` `file` / `files`). */
   readonly upload?: UploadData
+  /** Custom parameter (`source` `custom`). */
+  readonly custom?: CustomParamData
   /**
    * The default value of the handler parameter (`@Query('page') page = 1` → `1`), when it is
    * statically evaluable (literals, `const` references; references to exported bindings are left

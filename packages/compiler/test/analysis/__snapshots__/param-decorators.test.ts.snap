@@ -1,0 +1,44 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`custom parameter decorators reports every invalid use as ZNIGHT005, the definition related 1`] = `
+"error ZNIGHT005 src/handler.ts:7:15: @CurrentUser cannot be used on constructor parameter 'user' of Handler: a custom parameter decorator decorates a parameter of a handler (a route of a @Controller, a field of a @Resolver, a message handler of a @Consumer)
+  = hint: Inject a provider in the constructor instead, or move the parameter to a handler
+  - @CurrentUser is defined here (src/decorators.ts:5:14)
+error ZNIGHT001 src/handler.ts:7:45: Missing provider for 'User' required by Handler
+  = hint: Implement User with a class decorated with @Injectable()
+error ZNIGHT005 src/handler.ts:11:5: @OptionalUser() injects User | undefined, which parameter 'a' of Handler.run() does not accept (User)
+  = hint: Declare the parameter as optional (a?: User), or make the decorator inject User
+  - @OptionalUser is defined here (src/decorators.ts:6:14)
+error ZNIGHT005 src/handler.ts:12:5: @OtherOnly has no 'fake' resolver: it cannot be used on parameter 'b' of Handler.run()
+  = hint: Add a fake resolver to the definition: createParamDecorator<User>({ ..., fake: ctx => ... })
+  - @OtherOnly is defined here (src/decorators.ts:10:14)
+error ZNIGHT005 src/handler.ts:13:5: @Untyped cannot be used: the definition of Untyped has no type argument
+  = hint: Give the injected type: createParamDecorator<User>({ ... })
+  - @Untyped is defined here (src/decorators.ts:11:14)
+error ZNIGHT005 src/handler.ts:14:5: @NotObject cannot be used: the argument of createParamDecorator must be an object literal of resolvers
+  = hint: Write createParamDecorator<T>({ http: ctx => ..., graphql: ctx => ... })
+  - @NotObject is defined here (src/decorators.ts:12:14)
+error ZNIGHT005 src/handler.ts:15:5: @Spread cannot be used: the resolvers object must only have plain keys (no spread, no computed key)
+  = hint: Write each transport key: { http: ..., graphql: ... }
+  - @Spread is defined here (src/decorators.ts:13:14)
+error ZNIGHT005 src/handler.ts:16:5: @Called cannot be used: the 'fake' resolver must be an inline function, or a reference to a function or a provider class
+  = hint: Write an arrow function (ctx => ...), or reference an exported function or class
+  - @Called is defined here (src/decorators.ts:14:14)
+error ZNIGHT005 src/handler.ts:17:12: Invalid data argument of @Claim: A function call is not statically evaluable
+  = hint: Extract the value to \`export const X = ...\` with a statically evaluable initializer
+error ZNIGHT005 src/handler.ts:18:5: @Claim takes at most one argument (its data)
+  = hint: Pass a single value (an object or an array)
+  - @Claim is defined here (src/decorators.ts:7:14)
+error ZNIGHT005 src/handler.ts:19:5: @CurrentUser must be called: @CurrentUser()
+  = hint: Write @CurrentUser()
+  - @CurrentUser is defined here (src/decorators.ts:5:14)
+error ZNIGHT005 src/handler.ts:20:5: @CurrentUser() injects User, which parameter 'j' of Handler.run() does not accept (string)
+  = hint: Declare the parameter as User, or use a decorator that injects string
+  - @CurrentUser is defined here (src/decorators.ts:5:14)
+error ZNIGHT005 src/handler.ts:22:5: @CurrentUser cannot decorate the rest parameter 'rest' of Handler.run()
+  = hint: Declare a regular parameter
+  - @CurrentUser is defined here (src/decorators.ts:5:14)
+error ZNIGHT005 src/handler.ts:25:10: @CurrentUser cannot be used on parameter 'user' of Handler.helper(): a custom parameter decorator decorates a parameter of a handler (a route of a @Controller, a field of a @Resolver, a message handler of a @Consumer)
+  = hint: Move it to a handler parameter
+  - @CurrentUser is defined here (src/decorators.ts:5:14)"
+`;

@@ -79,6 +79,18 @@ export {
 } from './logger.ts'
 export * from './metadata.ts'
 export {
+  createParamDecorator,
+  type ParamContexts,
+  type ParamDataArgs,
+  type ParamDecorator,
+  type ParamFunctionOf,
+  type ParamResolver,
+  type ParamResolverClass,
+  type ParamResolverFunction,
+  type ParamResolverOf,
+  type ParamResolvers,
+} from './params.ts'
+export {
   type Plugin,
   type PluginContext,
   type PluginHook,

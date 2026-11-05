@@ -1,7 +1,7 @@
 import type { Lazy } from '@znight/core'
 import type { CanActivate, HttpContext } from '@znight/http'
 import type { Authenticator } from './authenticator.js'
-import type { CurrentUser } from './current-user.js'
+import type { RequestUser } from './request-user.js'
 
 import { Injectable } from '@znight/core'
 
@@ -14,7 +14,7 @@ export class AuthGuard implements CanActivate {
 
   constructor(
     private readonly authenticator: Authenticator,
-    private readonly user: Lazy<CurrentUser>,
+    private readonly user: Lazy<RequestUser>,
   ) {}
 
   async canActivate(ctx: HttpContext): Promise<boolean> {

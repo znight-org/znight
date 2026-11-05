@@ -540,6 +540,32 @@ Built-in scalars appear in the schema only when used: `String`, `Float`, `Int`, 
   `plugin.execute()` and `plugin.subscribe()` run in the current scope when one is active (a
   controller calling GraphQL), otherwise in a scope of their own.
 
+### Custom parameter decorators
+
+A decorator defined with `createParamDecorator` (`@znight/core`, RFC 0010) works on resolver
+methods when it has a `graphql` resolver, which receives the field's `ResolverContext` (`parent`,
+`args`, `info`, `operation`, `http`, `route.meta`). One definition serves HTTP routes and GraphQL
+fields:
+
+```ts
+import { createParamDecorator } from '@znight/core'
+import type { User } from './user.ts'
+
+export const CurrentUser = createParamDecorator<User>({
+  http: ctx => ctx.state.get('user') as User,
+  graphql: ctx => ctx.operation.state.get('user') as User,
+})
+
+// @Query() me(@CurrentUser() user: User): User { return user }
+```
+
+The resolver runs after the guards (it sees what they stored) and before the method; what it
+throws fails the field like the method would (`errors[]`, or a result mapper). A custom parameter
+is not a GraphQL argument: it never appears in the schema. Resolver classes implementing
+`ParamResolver` are resolved in the operation scope. Custom parameters belong to the field
+resolvers of the schema, so they work the same through the built-in transport, `plugin.execute()`
+and a driver such as `yogaDriver()` (RFC 0009).
+
 ## Authorization
 
 The route decorators of `@znight/http` (`createRouteDecorator`, with RFC 0001's groups) apply to
@@ -1486,7 +1512,17 @@ interface GraphQLResolverBinding {
   guards: Token[] // class @UseGuard guards, then method ones
   meta: Record<string, unknown> // effective route metadata (method over class); {}: none
   loaders?: Token[] // informational: loaders the method injects
-  invoke: (resolver, parent, args: GraphQLArgs, context: GraphQLContext, info: GraphQLResolveInfo) => unknown
+  context?: true // custom parameters (RFC 0010): the pipeline passes the ResolverContext as `f`
+  paramResolvers?: Token[] // class resolvers of custom parameters, passed as `x`
+  invoke(
+    resolver,
+    parent,
+    args: GraphQLArgs,
+    context: GraphQLContext,
+    info: GraphQLResolveInfo,
+    f?: ResolverContext,
+    x?,
+  ): unknown
 }
 ```
 
@@ -1498,7 +1534,9 @@ Type references are strings in graphql-js' canonical form, parsed by
 
 `invoke` maps the graphql-js arguments to the method parameters: `@Args('x')` → `a['x']`,
 `@Args()` → `a`, `@Parent()` → `p`, `@Ctx()` → `c`, `@Info()` → `i`, `@Loader()` →
-`c.loader(token)`. Unused middle parameters are `_`-prefixed and trailing ones omitted, so the code
+`c.loader(token)`, a custom parameter decorator (`createParamDecorator`, RFC 0010) →
+`(D.resolvers.graphql as ParamFunctionOf<typeof D, 'graphql'>)(f, data)` or `x[i].resolve(f, data)`
+(evaluated like a validated argument: synchronous while the resolvers return values). Unused middle parameters are `_`-prefixed and trailing ones omitted, so the code
 type-checks with `noUnusedParameters`. It calls these runtime helpers, kept stable:
 
 - `validateArgs(schema, value, label)`, exported from `@znight/graphql`: validates an argument with

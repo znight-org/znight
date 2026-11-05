@@ -251,7 +251,7 @@ export class ConsumerRuntime {
     }
     try {
       const instance = this.#services.container.get(this.consumer.token)
-      await handler.definition.invoke(instance, message)
+      await handler.invoke(instance, message)
     } catch (error) {
       return this.#failure(context, error, true)
     }
