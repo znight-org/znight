@@ -13,7 +13,7 @@ Design documents for significant changes. Each RFC is discussed before implement
 | [0007](./0007-graphql-schema-first.md)        | Schema-first GraphQL (`@znight/graphql`)  | Accepted (v0.2)    |
 | [0008](./0008-graphql-errors-as-data.md)      | Errors as data in `@znight/graphql`       | Accepted (v0.2)    |
 | [0009](./0009-graphql-drivers.md)             | GraphQL drivers (`@znight/graphql`)       | Proposed           |
-| [0010](./0010-custom-parameter-decorators.md) | Custom parameter decorators               | Proposed           |
+| [0010](./0010-custom-parameter-decorators.md) | Custom parameter decorators               | Accepted (v0.2)    |
 | [0011](./0011-application-events.md)          | Application events (`@znight/events`)     | Proposed           |
 
 ## Error code allocation
