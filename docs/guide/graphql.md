@@ -930,12 +930,12 @@ guards, CORS, `http.meta` decisions and the drain apply, and `executeOperation()
 its IDE (`graphiql: true` serves it), its subscription transports and its keep-alive options
 (`subscriptions.heartbeat` and `maxDuration` belong to the built-in SSE transport).
 
-| Driver                 | Entry                                                            | Use it for                                                             |
-| ---------------------- | ---------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| Built-in (no `driver`) | `@znight/graphql`                                                | The default: GraphQL over HTTP and SSE, GraphiQL, the fastest          |
-| GraphQL Yoga           | [`yogaDriver()`](#yoga) from `@znight/graphql/yoga`              | Envelop and Yoga plugins, Yoga's GraphiQL and SSE, batching, multipart |
-| Apollo Server          | Once Apollo Server accepts graphql-js 17                         | Apollo plugins and usage reporting (planned, RFC 0009 M3)              |
-| Your own               | A `GraphQLDriver`: `name`, `routes()`, `start(engine)`, `stop()` | Another server; check it with `describeDriverConformance()`            |
+| Driver                 | Entry                                                            | Use it for                                                    |
+| ---------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------- |
+| Built-in (no `driver`) | `@znight/graphql`                                                | The default: GraphQL over HTTP and SSE, GraphiQL, the fastest |
+| GraphQL Yoga           | [`yogaDriver()`](#yoga) from `@znight/graphql/yoga`              | Envelop and Yoga plugins, Yoga's GraphiQL and SSE             |
+| Apollo Server          | Once Apollo Server accepts graphql-js 17                         | Apollo plugins and usage reporting (planned, RFC 0009 M3)     |
+| Your own               | A `GraphQLDriver`: `name`, `routes()`, `start(engine)`, `stop()` | Another server; check it with `describeDriverConformance()`   |
 
 Drivers buy an ecosystem, the built-in transport buys throughput: in the in-process benchmark of the
 package (`{ hello }`, one synchronous resolver, the `HttpPlugin` pipeline without a socket), a
@@ -998,8 +998,9 @@ once by the engine, and the `graphql:operation` hook reports every operation wit
 
 - **Options.** `yogaDriver()` takes Yoga's options, except those Znight owns: the schema, the
   context, the endpoint (`path`), masking (`exposeErrors`), CORS (`HttpPlugin`'s), the body limit
-  (`http.bodyLimit`), the document cache and the request id (`HttpPlugin`'s). Passing one is a type
-  error, and ZNIGHT066 for untyped callers. Yoga's `logging` is off unless set: Znight logs requests
+  (`http.bodyLimit`), the document cache and the request id (`HttpPlugin`'s); and `batching` and
+  `multipart`, which the driver refuses: one operation per request scope, and JSON bodies only
+  (below). Passing one is a type error, and ZNIGHT066 for untyped callers. Yoga's `logging` is off unless set: Znight logs requests
   and operations. `graphiql: true` on `GraphQLPlugin` serves Yoga's GraphiQL; `yogaDriver({ graphiql:
   { title } })` configures it.
 - **Plugins.** Envelop and Yoga plugins run around the engine: persisted operations, response
@@ -1016,6 +1017,17 @@ once by the engine, and the `graphql:operation` hook reports every operation wit
 - **Protocol.** Yoga follows the GraphQL-over-HTTP draft (the `graphql-http` audits pass through it
   on every adapter); its request errors (malformed JSON, missing query) carry its own messages. A
   body past `http.bodyLimit` is `HttpPlugin`'s 413, as with the built-in endpoint.
+- **CSRF.** As with the built-in endpoint, a `POST` body is `application/json` only: a form, a
+  multipart or a text body is a 415 before Yoga parses it, and a mutation over `GET` is a 405. A
+  cross-site page therefore cannot run a mutation with the user's cookies: a JSON body always needs
+  a CORS preflight.
+- **Errors.** The engine masks the errors of the execution. An unexpected error thrown outside of
+  it, by an Envelop plugin or by Yoga, is masked the same way (`Unexpected error.`, its message
+  with `exposeErrors`) and logged once; a `GraphQLError` a plugin throws on purpose (a rate limit)
+  is sent as it is.
+- **Shutdown.** When `HttpPlugin` starts draining, whatever the plugin order, the engine ends Yoga's
+  subscriptions and refuses new ones; queries and mutations in flight are served, then Yoga is
+  disposed (`yoga.dispose()`).
 - **Route decisions.** An application whose route decisions are required gives the endpoint its
   decision with `http: { meta: [Public.meta()] }`, as for the built-in endpoint.
 

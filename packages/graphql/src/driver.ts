@@ -54,6 +54,10 @@ export interface GraphQLDriver {
    * fails the boot (ZNIGHT066, the original error as `cause`).
    */
   start(engine: GraphQLEngine, context: GraphQLDriverContext): void | Promise<void>
-  /** Called in `GraphQLPlugin.onStop`, after the engine ended its subscriptions: drain and stop the server. */
+  /**
+   * Stops the server, after the engine ended its subscriptions: in `GraphQLPlugin.onDispose` for a
+   * route-mounted driver (once `HttpPlugin` drained its requests, which the driver keeps serving),
+   * in `GraphQLPlugin.onStop` for a server-mounted one (drain and stop the server).
+   */
   stop?(): void | Promise<void>
 }

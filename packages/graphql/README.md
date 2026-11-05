@@ -808,7 +808,7 @@ ZNIGHT066.
 | `pubsub`                       | The `PubSub` of the application                                                                                                   |
 | `activeSubscriptions`          | Active subscriptions, every transport                                                                                             |
 | `engine`                       | The `GraphQLEngine` drivers call (after bootstrap): [Drivers and the engine](#drivers-and-the-engine)                             |
-| `initRoots()` / `httpRoutes()` | The `PluginInitRoots` contract (`TestApp`) and the `PluginHttpRoutes` contract of `@znight/http`                                  |
+| `initRoots()` / `httpRoutes()` | The `PluginInitRoots` contract (`TestApp`) and the `PluginHttpRoutes` contract of `@znight/http`, `onHttpDrain()` included        |
 
 `request` is `{ query, operationName?, variables?, extensions? }`; `options` is `{ signal?,
 requestId? }`. A direct execution has no HTTP guards of its own: inside a controller, it runs in the
@@ -824,10 +824,12 @@ const result = await plugin?.execute({ query: '{ books { total } }' })
 
 `onStart` logs `GraphQL endpoint ready` with the path, the number of types and the schema hash
 (`GraphQL schema ready` with `http: false`). On shutdown, `onStop` ends the direct subscriptions
-and those of the engine, then stops the driver;
-`HttpPlugin` drains the requests in flight and closes the SSE streams (their `ctx.signal` aborts with
-`'shutdown'`, then the stream ends with a jittered `retry` and **no** `complete` event, so clients
-reconnect to another instance). Plugin order does not matter.
+and those of the engine; `HttpPlugin` drains the requests in flight and closes the SSE streams
+(their `ctx.signal` aborts with `'shutdown'`, then the stream ends with a jittered `retry` and **no**
+`complete` event, so clients reconnect to another instance). When `HttpPlugin` starts draining, it
+calls `GraphQLPlugin.onHttpDrain()`, which ends the engine's subscriptions too (a driver serves them
+as streams `HttpPlugin` does not close) and refuses new ones (503). A route-mounted driver stops in
+`onDispose`, once the drain is over: requests in flight are served. Plugin order does not matter.
 
 ## GraphQL over HTTP and SSE
 
@@ -959,18 +961,20 @@ export function graphqlHttpDriver(): GraphQLDriver {
   possibly before `start()`. A driver without routes is server-mounted: it attaches itself to
   `context.http.adapter` in `start()` and runs outside the pipeline.
 - **Lifecycle.** `onBootstrap` builds the engine, then awaits `start(engine, { logger, container,
-  http })`; a failure fails the boot (ZNIGHT066, the original error as `cause`). `onStop` ends the
-  engine's subscriptions, then awaits `stop()` (`onDispose` does, for an application that never
-  started).
+  http })`; a failure fails the boot (ZNIGHT066, the original error as `cause`). The engine's
+  subscriptions end when `HttpPlugin` starts draining (`onHttpDrain()`, whatever the plugin order)
+  and in `onStop`; new ones are then refused (503). `stop()` is awaited in `onDispose` for a
+  route-mounted driver, after `HttpPlugin` drained its requests, and in `onStop` for a
+  server-mounted one (`onDispose` does, for an application that never started).
 - **Options.** The engine options (`guards`, `errorMappers`, `resultMappers`, `exposeErrors`,
   `introspection`, `limits`, `documentCache`, `subscriptions: false`, `maxActive`, `bufferSize`,
   `pubsub`, `enforcement`) apply to every driver. `path`, `http` and `graphiql` are read by the
   driver through its routes and `engine.settings`. `subscriptions.heartbeat` and `maxDuration`
   configure the built-in SSE transport only: with a driver they are ZNIGHT066 (use the driver's
   keep-alives). A driver with routes needs `HttpPlugin` and refuses `http: false` (ZNIGHT066).
-- **Errors.** The engine maps and masks errors once; a driver turns its server's own masking off.
-  Request errors raised by the server itself (malformed JSON, a persisted query not found) are the
-  server's.
+- **Errors.** The engine maps and masks errors once; a driver keeps the engine's errors as they
+  are. Request errors raised by the server itself (malformed JSON, a persisted query not found) are
+  the server's; an unexpected error thrown outside the engine is masked like the engine masks one.
 - **Cost.** Without `driver`, the plugin runs the built-in transport's handlers, which call the
   internal executor directly: an application without driver pays nothing for the abstraction.
 
@@ -1006,20 +1010,34 @@ GraphQLPlugin.configure({ driver: yogaDriver({ plugins: [usePersistedOperations(
   (`useGraphQlJit`) fails with ZNIGHT066, logged once: its resolvers would not get the
   `GraphQLContext`.
 - **Owned options**, refused with ZNIGHT066 (a type error first): `schema`, `context`,
-  `graphqlEndpoint` (`path`), `maskedErrors` (the engine masks once: Yoga's is off),
+  `graphqlEndpoint` (`path`), `maskedErrors` (the engine masks once, see below),
   `cors` (`HttpPlugin`'s), `maxRequestBodySize` (`http.bodyLimit`), `parserAndValidationCache`,
   `requestId` (Yoga uses `HttpContext.requestId`), `healthCheckEndpoint`, `landingPage`,
-  `fetchAPI` (the runtime's own) and `disposeOnProcessTerminate` (the application stops Yoga).
-  Yoga's `logging` is off unless set.
+  `fetchAPI` (the runtime's own), `disposeOnProcessTerminate` (the application stops Yoga),
+  `batching` (one operation per request: the operations of a batch would share the request scope,
+  where each one's `GraphQLContext` would replace the other's) and `multipart` (JSON bodies only,
+  below). Yoga's `logging` is off unless set.
 - **Routes.** `GET` and `POST` on `path`. `GET` serves Yoga's GraphiQL with `graphiql` on, and
-  queries with `http.get` on (405 with `allow: POST` otherwise).
+  queries with `http.get` on (405 with `allow: POST` otherwise); a mutation over `GET` is Yoga's 405
+  (`allow: POST`). A `POST` body is `application/json` only, like the built-in transport: any other
+  content type (a form, `multipart/form-data`, `text/plain`, `application/graphql`) is the built-in
+  transport's 415, before Yoga parses it, so a cross-site page cannot run a mutation with the
+  user's cookies (no CSRF: a JSON body always needs a CORS preflight).
+- **Errors.** The engine's errors (masked already) and `GraphQLError`s thrown on purpose (a plugin's
+  rate limit, Yoga's request errors) are sent as they are. Any other error thrown outside the engine
+  (an Envelop plugin's hook, Yoga itself) is logged once by Znight and masked like the engine masks
+  one: `Unexpected error.` with code `INTERNAL_SERVER_ERROR` (its message with `exposeErrors`), a
+  500 for a request error.
 - **The Fetch bridge.** On `honoAdapter()` the native Web `Request` is handed to Yoga as is (a `GET`,
   or a body with a `content-length` within the limit); otherwise a `Request` is built from
   `HttpContext` with the body read by `ctx.rawBody()`, so a body past `http.bodyLimit` is
   `HttpPlugin`'s 413 on every adapter. Yoga's `Response` is sent as is by `HttpPlugin`.
-- **Subscriptions** use Yoga's SSE; the engine caps them (`subscriptions.maxActive`) and ends them on
-  shutdown, when Yoga sends `complete` (not the built-in transport's `retry` hint). `stop()` awaits
-  `yoga.dispose()` (the plugins' `onDispose`).
+- **Subscriptions** use Yoga's SSE; the engine caps them (`subscriptions.maxActive`) and ends them
+  when `HttpPlugin` starts draining, whatever the plugin order, when Yoga sends `complete` (not the
+  built-in transport's `retry` hint); a subscription sent during the drain gets a
+  `SERVICE_UNAVAILABLE` error. Queries in flight are served until the drain is over; `stop()` then
+  awaits `yoga.dispose()` (the plugins' `onDispose`), and a request reaching the stopped driver gets
+  a 503.
 - **Cost.** Yoga's request parsing, its plugin chain and the Web objects cost about 13 to 18 µs per
   request on Bun and 27 to 45 µs on Node.js in the in-process benchmark (`test/bench/http.bench.ts`),
   against about 1.6 µs and 5.5 µs for the built-in transport.
@@ -1030,8 +1048,9 @@ GraphQLPlugin.configure({ driver: yogaDriver({ plugins: [usePersistedOperations(
 passes (RFC 0009 §12), with the test framework's own functions (`bun:test`, Vitest, Jest,
 `node:test`) and `node:assert`: queries, mutations, a field guard reading a request-scoped
 provider, loaders batching, request-scoped providers per request, result mappers, masking,
-introspection off, limits, HTTP guards on the endpoint, the hook, and over SSE (unless
-`subscriptions: false`) events, completion, client abort, `maxActive` and shutdown.
+introspection off, limits, HTTP guards on the endpoint, the hook, `POST` bodies other than JSON
+(415, never executed) and mutations over `GET` (405), and over SSE (unless `subscriptions: false`)
+events, completion, client abort, `maxActive` and shutdown in both plugin orders.
 
 ```ts
 import { describeDriverConformance } from '@znight/graphql/testing'

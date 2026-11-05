@@ -1889,7 +1889,12 @@ not call `next()` gets the same reply as in the general pipeline.
   `guards`, the handler and the exception mappers; global interceptors do not wrap them; the body is
   read lazily; `GET` answers `HEAD`. An invalid route (a `bodyLimit` that `parseByteSize` rejects
   included) or a collision with another route is ZNIGHT007 naming the plugin. The
-  plugin name is `ctx.route.controller` and the `source` of the route summary.
+  plugin name is `ctx.route.controller` and the `source` of the route summary. A plugin MAY also
+  implement `onHttpDrain(): void | Promise<void>`: `HttpPlugin.onStop` MUST call it once on every
+  other plugin implementing it, in plugin order, after setting the pipeline draining and starting to
+  close its event streams, and before awaiting the drain, whatever the plugin order. The plugin ends
+  there the long-lived responses `HttpPlugin` does not track (streams another server produced); a
+  returned promise joins the drain (bounded by `drainTimeoutMs`); a failure is logged, never thrown.
 - **Cookies** (RFC 0006; `cookies.ts` is import-free). Request: the `cookie` header is split on `;`
   only, pairs trimmed, quoted values unquoted, `%` sequences decoded (malformed: kept raw); pairs
   without `=` or with an empty name are ignored; the first occurrence of a name wins; repeated
@@ -2952,12 +2957,18 @@ below; absent: the built-in transport); unknown keys and invalid values are ZNIG
   mapper class that is not a provider is ZNIGHT001. The `types` of every result mapper (a class's
   `static types`, an instance's `types` property or its class's) MUST be a non-empty array of names of
   object types of the section, ZNIGHT066 otherwise (every problem in one error).
-- `onStart` logs `GraphQL endpoint ready` (path, types, schema hash); `onStop` aborts the plugin's
-  signal, ends the subscriptions it owns (`plugin.subscribe()` and `engine.subscribe()`), then
-  awaits `driver.stop()`; requests and SSE streams of the built-in transport are drained and
-  closed by `HttpPlugin.onStop` (RFC 0006: streams end without `complete`). `onDispose` closes the
-  `MemoryPubSub` the plugin created and clears the document cache; for an application disposed
-  without having started (no `onStop`), it first ends those subscriptions and stops the driver.
+- `onStart` logs `GraphQL endpoint ready` (path, types, schema hash). `GraphQLPlugin` implements
+  `onHttpDrain()` (§9.1): when `HttpPlugin` starts draining, whatever the plugin order, it ends the
+  subscriptions of the engine (a route-mounted driver serves them as streams `HttpPlugin` does not
+  track). `onStop` aborts the plugin's signal, ends the subscriptions it owns (`plugin.subscribe()`
+  and `engine.subscribe()`), then awaits `driver.stop()` for a server-mounted driver; once either
+  ran, `engine.subscribe()` answers a new subscription with a `SERVICE_UNAVAILABLE` result
+  (`The server is shutting down, retry later`). Requests and SSE streams of the built-in transport
+  are drained and closed by `HttpPlugin.onStop` (RFC 0006: streams end without `complete`).
+  `onDispose` awaits `driver.stop()` for a route-mounted driver (after `HttpPlugin` drained its
+  requests: every `onStop` ran), closes the `MemoryPubSub` the plugin created and clears the
+  document cache; for an application disposed without having started (no `onStop`), it first ends
+  those subscriptions and stops the driver.
 - **Resolver pipeline (normative, per call):** the resolver instance (the singleton, or
   `container.get(token)` in the current scope), then guards, global ones only on root fields and
   on field resolvers whose `meta` is not empty, then class and method `@UseGuard` (each resolved
@@ -2966,7 +2977,9 @@ below; absent: the built-in transport); unknown keys and invalid values are ZNIG
   fields: `null` → `undefined`), then `invoke`. A field without guards nor null handling MUST call
   `invoke` directly, with no extra closure nor `await`. Root subscription guards run once, when the
   subscription starts.
-- **Execution:** one operation per request scope (no batching); `plugin.execute()` /
+- **Execution:** one operation per request scope (no batching, on every driver: the Yoga driver
+  refuses Yoga's `batching`, since the operations of a batch would share the request scope and its
+  `GraphQLContext` entry); `plugin.execute()` /
   `subscribe()` run in the current scope or open one. A document is parsed with `maxTokens`,
   checked against `maxDepth` (introspection fields exempt), `maxAliases` and `maxDirectives` in one
   pass (aliases as written, and as each operation executes them: a fragment spread several times
@@ -3099,8 +3112,9 @@ interface GraphQLDriver {
   `locations`, `path` and `extensions` and no `originalError`; variable errors give a result
   without `data` (`BAD_USER_INPUT`); operation selection errors and a subscription given to
   `execute` are `BAD_REQUEST` results. `subscribe` gives a query or a mutation its single result,
-  a subscription that cannot start a single error result, a subscription past `maxActive` a
-  `SERVICE_UNAVAILABLE` result (the cap is shared with every transport), and `subscriptions:
+  a subscription that cannot start a single error result, a subscription past `maxActive` or sent
+  while the application stops a `SERVICE_UNAVAILABLE` result (the cap is shared with every
+  transport), and `subscriptions:
   false` a `BAD_REQUEST` result. One `graphql:operation` event per operation, with the driver's
   name.
 - The `driver` option MUST be an object with a non-empty `name` other than `builtin`, a `start`
@@ -3118,13 +3132,14 @@ interface GraphQLDriver {
 - **The Yoga driver** (`yogaDriver()`, `name: 'yoga'`) is route-mounted: `GET` and `POST` on
   `path`. `start()` creates the Yoga server with `schema: engine.schema`, `graphqlEndpoint:
   settings.path`, `graphiql` from `settings.ide` (GraphiQL options from the driver options),
-  `maskedErrors: false`, `cors: false`, `maxRequestBodySize` from `settings.http.bodyLimit`,
-  `parserAndValidationCache: false`, `landingPage: false`, Yoga's request id from
-  `HttpContext.requestId`, the runtime's Fetch API, `disposeOnProcessTerminate: false` and
-  `logging: false` unless set; the options Znight owns (`schema`, `context`, `graphqlEndpoint`,
-  `maskedErrors`, `cors`, `fetchAPI`, `maxRequestBodySize`, `parserAndValidationCache`,
-  `requestId`, `healthCheckEndpoint`, `landingPage`, `disposeOnProcessTerminate`, a non-object
-  `graphiql`) are ZNIGHT066 when `yogaDriver()` is called. An Envelop plugin installed before the
+  `maskedErrors: { maskError }` (below), `cors: false`, `maxRequestBodySize` from
+  `settings.http.bodyLimit`, `parserAndValidationCache: false`, `landingPage: false`, `batching:
+  false`, `multipart: false`, Yoga's request id from `HttpContext.requestId`, the runtime's Fetch
+  API, `disposeOnProcessTerminate: false` and `logging: false` unless set; the options Znight owns
+  (`schema`, `context`, `graphqlEndpoint`, `maskedErrors`, `cors`, `fetchAPI`, `maxRequestBodySize`,
+  `parserAndValidationCache`, `requestId`, `healthCheckEndpoint`, `landingPage`,
+  `disposeOnProcessTerminate`, `batching`, `multipart`, a non-object `graphiql`) are ZNIGHT066 when
+  `yogaDriver()` is called (absent from `YogaDriverOptions`: a type error first). An Envelop plugin installed before the
   application's plugins sets the engine's `parse`, `validate`, `execute` and `subscribe`
   (`transport: 'sse'`) as Yoga's (Envelop's `useEngine`): Yoga's default `specifiedRules` reach
   `validate` as the default rules. A guard plugin installed after them refuses an operation that
@@ -3137,7 +3152,15 @@ interface GraphQLDriver {
   A `Response` that is not an instance of the global `Response` of the moment (`@hono/node-server`
   replaces it when listening) is rebuilt on it with the same status, headers and body. `GET`
   without `http.get` answers 405 (`allow: POST`) unless it asks for GraphiQL (`accept: text/html`)
-  with `graphiql` on. `stop()` awaits `yoga.dispose()`. `yogaContext(ctx)` returns
+  with `graphiql` on; a mutation over `GET` is Yoga's 405 (`allow: POST`). A `POST` whose
+  `content-type` is not JSON (the built-in transport's test: `application/json`, UTF-8) MUST be
+  answered with the built-in transport's 415 before Yoga parses it, so that no form, multipart or
+  text body (CORS simple requests) runs an operation. Yoga's `maskError` keeps a `GraphQLError`
+  that wraps no other error (the engine's, or one thrown on purpose) and turns any other error
+  (thrown outside the engine) into `Unexpected error.` (its message with `exposeErrors`) with code
+  `INTERNAL_SERVER_ERROR` and the error as `originalError` (a 500 for a request error), logged
+  once through the application logger. `stop()` awaits `yoga.dispose()`; a request reaching the
+  driver once stopped is a 503 (`SERVICE_UNAVAILABLE`). `yogaContext(ctx)` returns
   `ctx.serverContext` when it is Yoga's context of the driver (ZNIGHT066 otherwise).
 
 **Impl.** Two concurrent `plugin.execute()` calls in one request scope share the scope's

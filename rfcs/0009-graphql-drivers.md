@@ -462,9 +462,13 @@ adapter → HttpPlugin pipeline
 ```
 
 One HTTP request may carry several operations with a driver that batches (Apollo's
-`allowBatchedHttpRequests`): they share the request scope, so request-scoped providers are shared
-between them, which is what NestJS does too. The documentation says so; batching stays off by
-default in every first-party driver.
+`allowBatchedHttpRequests`): they would share the request scope, so request-scoped providers would
+be shared between them, which is what NestJS does too. But the scope also holds the operation's
+`GraphQLContext`: each operation of a batch would replace the other's, and a request-scoped provider
+injecting it would see another operation's name, signal and document. Amended on 2026-11-05 (review
+of milestone 2): first-party drivers refuse batching (Yoga's `batching` option is ZNIGHT066, a type
+error first), so a request scope carries exactly one operation with every driver. A child scope per
+operation of a batch would lift that; it is not planned.
 
 ### 4.8 Errors and masking
 
@@ -473,7 +477,11 @@ statuses, masking unless `exposeErrors`, logging of unexpected errors once). The
 turn the server's own masking off so that nothing is masked twice and no original error leaks
 through a server's development mode:
 
-- Yoga: `maskedErrors: false` (the engine already masked);
+- Yoga: the engine's errors (`GraphQLError`s without `originalError`) and `GraphQLError`s thrown on
+  purpose are kept as they are by Yoga's `maskError`; any other error, thrown outside the engine (an
+  Envelop plugin's hook, Yoga itself), is masked like the engine masks one (`Unexpected error.`,
+  its message with `exposeErrors`) and logged once. Amended on 2026-11-05: `maskedErrors: false`
+  let such errors reach clients with their raw message;
 - Apollo Server: `includeStacktraceInErrorResponses: false`, user `formatError` kept (it receives
   `GraphQLError`s whose message is already masked and which carry no `originalError`).
 
@@ -499,19 +507,25 @@ documented as such).
 
 ### 4.10 Lifecycle and graceful shutdown
 
-1. `GraphQLPlugin.onStop`: aborts the engine's stop signal, ends every subscription the engine
-   serves (direct and driver ones: their source is returned, `GraphQLContext.signal` aborts), then
-   awaits `driver.stop()` (Yoga: `yoga.dispose()`; Apollo Server: `server.stop()`, which runs its
-   drain plugins).
-2. `HttpPlugin.onStop`: the RFC 0006 sequence. `HttpResponse.sse()` sessions get the jittered
-   `retry`; a driver's event stream is a plain streamed body, not a session, so it ends because its
-   source ended in step 1, and the drain waits for it up to `drainTimeoutMs`. Clients of a driver's
-   SSE see an ordinary end of stream (Yoga sends `complete`), not a retry hint: documented as a
-   difference with the built-in transport.
-3. Providers stop and are disposed; `onDispose` releases the engine.
+Amended on 2026-11-05 (review of milestone 2): plugins stop in reverse order, so the steps below
+used to depend on it. With `GraphQLPlugin` first, `HttpPlugin`'s drain waited `drainTimeoutMs` for
+the driver's event streams; with `HttpPlugin` first, the driver was disposed while `HttpPlugin`
+still accepted requests (a 500). The order is now irrelevant:
 
-Plugin order still does not matter: the engine ends its streams whether `HttpPlugin` stops before or
-after it.
+1. `HttpPlugin.onStop` (the RFC 0006 sequence) calls `onHttpDrain()` on the plugins serving routes
+   (a new optional member of `PluginHttpRoutes`) once it started draining. `GraphQLPlugin` ends there
+   the subscriptions of the engine (their source is returned, `GraphQLContext.signal` aborts): a
+   driver's event stream is a plain streamed body, not a session, and ends with its source.
+   `HttpResponse.sse()` sessions get the jittered `retry`. Clients of a driver's SSE see an ordinary
+   end of stream (Yoga sends `complete`), not a retry hint: documented as a difference with the
+   built-in transport.
+2. `GraphQLPlugin.onStop`: aborts the engine's stop signal, ends every subscription the plugin
+   owns (direct and engine ones), and stops a server-mounted driver. From step 1 or 2 on, the engine
+   answers a new subscription with a `SERVICE_UNAVAILABLE` result.
+3. Providers stop and are disposed; `GraphQLPlugin.onDispose` awaits `driver.stop()` for a
+   route-mounted driver (Yoga: `yoga.dispose()`; Apollo Server: `server.stop()`), after every
+   `onStop`, so the requests of the drain are served; a request reaching the stopped driver gets a
+   503. Then it releases the engine.
 
 ### 4.11 The built-in transport as the default driver
 
@@ -598,7 +612,10 @@ export function yogaDriver(options?: YogaDriverOptions): GraphQLDriver
   with the built-in transport. Yoga 6's `requestId` option is fed from `HttpContext.requestId`, so
   logs of both sides share one id.
 - Routes: `GET` and `POST` on `path` (plus `OPTIONS` handled by `HttpPlugin`'s CORS), each calling
-  `yoga.fetch(fetchRequest(ctx), { znight: ctx })` and returning the `Response`.
+  `yoga.fetch(fetchRequest(ctx), { znight: ctx })` and returning the `Response`. Amended on
+  2026-11-05: a `POST` body is JSON only, the built-in transport's 415 otherwise, before Yoga parses
+  it (Yoga's form-urlencoded and multipart parsers would run a mutation sent by a cross-site form:
+  CSRF); Yoga's `multipart` option is refused (ZNIGHT066).
 - Why first: Fetch-based (no Node.js-only integration), the closest protocol to Znight's (GraphQL
   over HTTP, SSE subscriptions), Envelop plugins are the largest plugin ecosystem, `useEngine` lets
   Znight keep parse, validate and its document cache, and The Guild maintains NestJS's Yoga driver,
