@@ -428,10 +428,12 @@
         "@znight/http": "workspace:^",
         "@znight/testing": "workspace:^",
         "graphql": "^17.0.2",
+        "graphql-yoga": "^6.0.1",
       },
       "optionalPeers": [
         "@znight/compiler",
         "@znight/testing",
+        "graphql-yoga",
       ],
     },
     "packages/http": {

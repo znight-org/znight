@@ -60,7 +60,7 @@ Codes are allocated in order inside a block, so the numbering has gaps between b
 | [ZNIGHT063](#znight063) | Invalid GraphQL input                               | error                                                | build                      |
 | [ZNIGHT064](#znight064) | Unresolvable abstract type                          | error                                                | build                      |
 | [ZNIGHT065](#znight065) | Invalid loader                                      | error                                                | build, runtime             |
-| [ZNIGHT066](#znight066) | Invalid GraphQL setup                               | error                                                | startup                    |
+| [ZNIGHT066](#znight066) | Invalid GraphQL setup                               | error                                                | startup, runtime           |
 | [ZNIGHT067](#znight067) | Invalid GraphQL SDL                                 | error, warning                                       | build                      |
 | [ZNIGHT068](#znight068) | GraphQL schema mismatch                             | error                                                | build                      |
 
@@ -1403,17 +1403,25 @@ return one value (or one `Error`) per key, in the order of the keys (`orderByKey
 
 ## ZNIGHT066: Invalid GraphQL setup {#znight066}
 
-The catch-all code of `@znight/graphql` at startup: `GraphQLPlugin` cannot build or serve the
+The catch-all code of `@znight/graphql`, at startup: `GraphQLPlugin` cannot build or serve the
 schema.
 
-| Situation                                                       | Message                                                                                                |
-| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| No `HttpPlugin` while the HTTP transport is on                  | `GraphQLPlugin serves its endpoint through HttpPlugin, which is not registered`                        |
-| Invalid `GraphQLPlugin` options (unknown keys included)         | `GraphQLPlugin: invalid option limits.maxDepth: expected a positive integer (received 0)`              |
-| No `extensions.graphql` in the metadata                         | `GraphQLPlugin: the metadata has no GraphQL schema (metadata.extensions.graphql)`                      |
-| Malformed or version-skewed metadata, a graphql-js schema error | `GraphQLPlugin: invalid GraphQL schema (metadata.extensions.graphql), 1 problem:` and the list         |
-| A graphql-js scalar whose name differs from `scalar<T>(name)`   | a problem of the list: `the scalar URL is implemented by the graphql-js scalar Url (names must match)` |
-| A guard of a field without `canResolve()`                       | `GraphQLPlugin: the guard (AuthGuard) has no canResolve() method`                                      |
+| Situation                                                           | Message                                                                                                                                     |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| No `HttpPlugin` while the HTTP transport is on                      | `GraphQLPlugin serves its endpoint through HttpPlugin, which is not registered`                                                             |
+| Invalid `GraphQLPlugin` options (unknown keys included)             | `GraphQLPlugin: invalid option limits.maxDepth: expected a positive integer (received 0)`                                                   |
+| No `extensions.graphql` in the metadata                             | `GraphQLPlugin: the metadata has no GraphQL schema (metadata.extensions.graphql)`                                                           |
+| Malformed or version-skewed metadata, a graphql-js schema error     | `GraphQLPlugin: invalid GraphQL schema (metadata.extensions.graphql), 1 problem:` and the list                                              |
+| A graphql-js scalar whose name differs from `scalar<T>(name)`       | a problem of the list: `the scalar URL is implemented by the graphql-js scalar Url (names must match)`                                      |
+| A guard of a field without `canResolve()`                           | `GraphQLPlugin: the guard (AuthGuard) has no canResolve() method`                                                                           |
+| A `driver` that is not one (no `name` or `start()`, `builtin`)      | `GraphQLPlugin: invalid option driver: expected a GraphQL driver (...) with a start() method`                                               |
+| `subscriptions.heartbeat` or `.maxDuration` with a `driver`         | `GraphQLPlugin: subscriptions.heartbeat configures the built-in SSE transport, not the yoga driver`                                         |
+| A driver serving routes with `http: false`                          | `GraphQLPlugin: the yoga driver serves routes, which http: false turns off`                                                                 |
+| A driver whose `start()` throws or rejects (original as `cause`)    | `GraphQLPlugin: the yoga driver failed to start`                                                                                            |
+| `GraphQLEngine.execute()` given another schema than the engine's    | `GraphQLEngine: the operation targets another schema than the engine's (ExecutionArgs.schema)` (runtime)                                    |
+| `yogaDriver()` given an option Znight owns                          | `yogaDriver(): the maskedErrors option of Yoga is not available with Znight`                                                                |
+| A Yoga plugin executing an operation instead of the engine          | `GraphQLPlugin: a Yoga plugin executed the operation instead of the Znight engine (useGraphQlJit?)` (runtime, an error result, logged once) |
+| `yogaContext(ctx)` for an operation the Yoga driver did not receive | `yogaContext(): the operation was not received by the Yoga driver` (runtime)                                                                |
 
 Metadata problems are collected and reported together, one per line (version, roots, type names
 and kinds, type references and positions, resolver bindings, union discriminators, scalars,
@@ -1433,7 +1441,9 @@ ZNIGHT066: GraphQLPlugin serves its endpoint through HttpPlugin, which is not re
 
 **How to fix**: follow the message. Register `HttpPlugin` (or set `http: false`), fix the option it
 names, regenerate the container module after upgrading `@znight/*` packages, and declare at least
-one `@Resolver()` with a `@Query()` when the application registers `GraphQLPlugin`.
+one `@Resolver()` with a `@Query()` when the application registers `GraphQLPlugin`. With a
+[driver](/guide/graphql#drivers), configure keep-alives with the driver's own options, read the
+`cause` of a failed start, and give the GraphQL server `engine.schema`.
 
 ## ZNIGHT067: Invalid GraphQL SDL {#znight067}
 

@@ -133,7 +133,8 @@ With [`@znight/graphql`](/packages/graphql), the plugin also wraps the `graphql:
 
 - **Span** `<type> <name>` (`query Books`; `mutation` for an anonymous operation) per operation,
   child of the HTTP request span, with the OpenTelemetry attributes `graphql.operation.type` and
-  `graphql.operation.name`, plus the transport, the document id, the outcome and the error codes.
+  `graphql.operation.name`, plus the transport, the [driver](/guide/graphql#drivers) when it is not
+  the built-in transport, the document id, the outcome and the error codes.
   The `error` and `rejected` outcomes set the status to `ERROR`; a subscription's span covers its
   whole life. The query text (`graphql.document`) is recorded only with
   `tracing: { graphql: { document: true } }`.

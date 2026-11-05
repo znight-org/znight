@@ -1,5 +1,5 @@
 ---
-description: "@znight/graphql - GraphQL on graphql-js 17 whose schema is derived from TypeScript types at build time, or read from SDL files and checked against the resolvers: loaders, subscriptions over SSE, route decisions and guards."
+description: "@znight/graphql - GraphQL on graphql-js 17 whose schema is derived from TypeScript types at build time, or read from SDL files and checked against the resolvers: loaders, subscriptions over SSE, route decisions and guards, and drivers such as GraphQL Yoga."
 ---
 
 # @znight/graphql <Badge type="tip" text="new in v0.2" />
@@ -219,10 +219,34 @@ guards. `false` is a `FORBIDDEN` error on that field. See the [guide](/guide/gra
 | `subscriptions` | `{ maxActive: 10_000, bufferSize: 100 }`                               | `false`, or caps, buffer, `heartbeat`, `maxDuration`                            |
 | `pubsub`        | a `MemoryPubSub`                                                       | The `PubSub` of the application                                                 |
 | `enforcement`   | `'error'`                                                              | Field decisions not enforced by a guard: fail the boot or `'warn'`              |
+| `driver`        | the built-in transport                                                 | Another GraphQL server for the schema ([drivers](/guide/graphql#drivers))       |
 
 The instance exposes `schema`, `printSchema()`, `execute(request)`, `subscribe(request)`, `pubsub`
-and `activeSubscriptions`, for custom transports and controllers calling GraphQL, such as
-[GraphQL Yoga behind a controller](/guide/graphql#yoga).
+and `activeSubscriptions`, for custom transports and controllers calling GraphQL, and `engine`: the
+graphql-js-shaped `parse`, `validate`, `execute` and `subscribe` that [drivers](#drivers) call.
+
+## Drivers
+
+The built-in GraphQL-over-HTTP and SSE endpoint is the default and the fastest. A driver serves the
+same schema with another GraphQL server, inside the `HttpPlugin` pipeline; the engine still parses,
+validates and executes, so resolvers, guards, loaders, masking and tests do not change
+([RFC 0009](../../rfcs/0009-graphql-drivers.md)).
+
+```ts
+import { GraphQLPlugin } from '@znight/graphql'
+import { yogaDriver } from '@znight/graphql/yoga'
+
+GraphQLPlugin.configure({ driver: yogaDriver({ plugins: [] }) }) // Envelop and Yoga plugins
+```
+
+| Entry                  | Driver                                                                                                      |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `@znight/graphql`      | The built-in transport (no `driver`); `GraphQLDriver` and `GraphQLEngine` for your own                      |
+| `@znight/graphql/yoga` | `yogaDriver()`, `yogaContext()`: GraphQL Yoga 6 (`npm install graphql-yoga`), its plugins, GraphiQL and SSE |
+
+Apollo Server follows once it accepts graphql-js 17. `describeDriverConformance()` of
+`@znight/graphql/testing` runs the scenarios every driver passes. See
+[Choose a driver](/guide/graphql#drivers) and [Serve the schema with GraphQL Yoga](/guide/graphql#yoga).
 
 ## Errors
 

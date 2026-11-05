@@ -1,6 +1,6 @@
 /**
- * The types of `@whatwg-node/fetch` (a dependency of graphql-yoga, used by the Yoga recipe), mapped
- * through `paths` in `test/tsconfig.json`: the package's own typings start with
+ * The types of `@whatwg-node/fetch` (a dependency of graphql-yoga: the Yoga driver, the recipe), mapped
+ * through `paths` in `tsconfig.json` and `test/tsconfig.json`: the package's own typings start with
  * `/// <reference lib="dom" />`, which would replace the Bun and Node.js globals of the whole test
  * program with the DOM ones. The same declarations, on the globals already there.
  */

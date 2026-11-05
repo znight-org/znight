@@ -170,6 +170,22 @@ describe('repository boundaries (architecture §2)', () => {
     expect(forbidden.map(({ specifier, chain }) => `${specifier} (${show(chain)})`)).toEqual([])
   })
 
+  it('@znight/graphql never loads a driver: graphql-yoga only through @znight/graphql/yoga (RFC 0009 §4.15)', () => {
+    const graphql = packages.find(pkg => pkg.manifest.name === '@znight/graphql')
+    const yoga = graphql?.entries.get('./yoga')
+    expect(yoga).toBeDefined()
+    for (const subpath of ['.', './testing']) {
+      const { files, bare } = closure(graphql?.entries.get(subpath) ?? '')
+      expect(files.filter(({ file }) => file === yoga).map(({ chain }) => show(chain))).toEqual([])
+      const servers = bare.filter(
+        ({ specifier }) => specifier === 'graphql-yoga' || specifier.startsWith('@znight/graphql/'),
+      )
+      expect(servers.map(({ specifier, chain }) => `${specifier} (${show(chain)})`)).toEqual([])
+    }
+    const { bare } = closure(yoga ?? '')
+    expect(bare.map(({ specifier }) => specifier)).toContain('graphql-yoga')
+  })
+
   it('@znight/graphql/compiler loads lazily only the build-time modules of graphql-js (RFC 0007 §7)', () => {
     const graphql = compilerEntries.find(({ pkg }) => pkg.manifest.name === '@znight/graphql')
     const required = closure(graphql?.file ?? '').files.flatMap(({ file, chain }) =>

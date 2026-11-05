@@ -374,7 +374,7 @@ without depending on each other:
 | `messaging:message` | `MessageDeliveryEvent`  | `@znight/messaging`, one delivery                                            |
 | `messaging:publish` | `MessagePublishEvent`   | `@znight/messaging`, one `MessageBroker` publication                         |
 | `schedule:run`      | `ScheduledRunEvent`     | `@znight/schedule`, one occurrence of a job (executed or not, see `outcome`) |
-| `graphql:operation` | `GraphQLOperationEvent` | `@znight/graphql` (planned, RFC 0005), one GraphQL operation                 |
+| `graphql:operation` | `GraphQLOperationEvent` | `@znight/graphql` (RFC 0005), one GraphQL operation                          |
 
 `ScheduledRunEvent` carries `job`, `kind` (`cron` / `interval` / `timeout`), `host`, `method`,
 `runId`, `trigger` (`schedule` / `start` / `manual` / `queued`), `scheduledAt` (epoch ms),
@@ -391,8 +391,10 @@ threw), so a wrapper that reports it reads `event.outcome ?? (nextRejected ? 'fa
 
 `GraphQLOperationEvent` carries `operationType` (`query` / `mutation` / `subscription`, `undefined`
 when the request was rejected before an operation was selected), `operationName`, `documentId`
-(SHA-256 of the query text), `transport` (`http` / `sse` / `direct`), `requestId`, `context` (the
-`GraphQLContext`), `startTime`, and, once settled, `outcome` (`success` / `partial` / `error` /
+(SHA-256 of the query text), `transport` (`http` / `sse` / `ws` / `direct`; `ws` is reserved for
+`graphql-ws`), `driver` (the GraphQL driver that received the operation: `builtin` for the built-in
+transport and direct calls, `yoga`...), `requestId`, `context` (the `GraphQLContext`), `startTime`,
+and, once settled, `outcome` (`success` / `partial` / `error` /
 `rejected`) and `errors` (`{ message, code, path? }`, as sent to the client). A subscription is one
 operation from its start to its end.
 

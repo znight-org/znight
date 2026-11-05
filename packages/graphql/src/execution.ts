@@ -4,7 +4,10 @@
  *
  * `GraphQLExecutor` is the internal API of the transports (`plugin.execute()`, GraphQL over HTTP
  * and SSE): `execute()` answers a request with a status and a formatted result, `subscribe()` with
- * a stream of formatted results (or a rejection).
+ * a stream of formatted results (or a rejection). The `*Document()` methods are what the public
+ * `GraphQLEngine` of the drivers calls (RFC 0009 §4.2): graphql-js-shaped, on a parsed document,
+ * answering `GraphQLError` instances. They share the document cache, the context, the pipelines,
+ * the formatting and the hook with the transport methods, whose code they leave untouched.
  *
  * Per operation, on the hot path (a cached query over a scope that already exists): one cache
  * lookup, one context object, graphql-js `execute`, and the result as graphql-js returned it when
@@ -15,12 +18,14 @@ import type { Container, CoreLogger, GraphQLOperationEvent, Hooks, ScopeContext 
 import type { HttpContext } from '@znight/http'
 import type {
   DocumentNode,
+  ExecutionArgs,
   ExecutionResult,
   FormattedExecutionResult,
   GraphQLError,
   GraphQLFormattedError,
   GraphQLSchema,
   OperationDefinitionNode,
+  Source,
   ValidatedSubscriptionArgs,
   ValidationRule,
 } from 'graphql'
@@ -30,6 +35,7 @@ import type { DocumentLimits } from './limits.ts'
 import type { GraphQLOperationKind, GraphQLTransport } from './types.ts'
 
 import { createHash, randomUUID } from 'node:crypto'
+import { ErrorCode, ZnightError } from '@znight/core'
 import { HttpTokens } from '@znight/http'
 import {
   AbortedGraphQLExecutionError,
@@ -40,6 +46,7 @@ import {
   Kind,
   NoSchemaIntrospectionCustomRule,
   parse,
+  print,
   specifiedRules,
   validate,
   validateSubscriptionArgs,
@@ -48,8 +55,9 @@ import {
 import { OperationContext } from './context.ts'
 import { GraphQLErrorCode } from './errors.ts'
 import { requestError, withCode } from './format.ts'
-import { checkLimits } from './limits.ts'
+import { checkLimits, limitsRule } from './limits.ts'
 import { GraphQLTokens } from './tokens.ts'
+import { DeferredAbort } from './transport/abort.ts'
 
 /** A GraphQL request: the body of a GraphQL-over-HTTP request, or the argument of `plugin.execute()`. */
 export interface GraphQLRequest {
@@ -87,6 +95,10 @@ export interface ExecuteOptions {
    * yet) instead of a 400: the HTTP transport then streams it (the client accepts an event stream).
    */
   readonly streamSubscriptions?: boolean
+  /** The driver that received the operation (`GraphQLOperationEvent.driver`). Default `'builtin'`. */
+  readonly driver?: string
+  /** The driver's context (`ExecutionArgs.contextValue`): `GraphQLContext.serverContext`. */
+  readonly serverContext?: unknown
 }
 
 /**
@@ -114,6 +126,28 @@ export interface GraphQLResultStream extends AsyncIterableIterator<FormattedExec
   return(): Promise<IteratorResult<FormattedExecutionResult>>
 }
 
+/** The stream of results of a subscription started through the engine (`GraphQLEngine.subscribe`). */
+export type EngineStream = AsyncGenerator<ExecutionResult, void, void>
+
+/** Any result the hook reads: a transport response, or an engine one (`GraphQLError` instances). */
+interface Settled {
+  readonly status: number
+  readonly result: {
+    readonly data?: unknown
+    readonly errors?: readonly {
+      readonly message: string
+      readonly path?: readonly (string | number)[] | undefined
+      readonly extensions?: { readonly [key: string]: unknown } | undefined
+    }[]
+  }
+}
+
+/** The answer to an engine execution: like {@link GraphQLResponse}, with a graphql-js result. */
+interface EngineResponse {
+  readonly status: number
+  readonly result: ExecutionResult
+}
+
 /** What {@link GraphQLExecutor} is built from (resolved plugin options). */
 export interface ExecutorOptions {
   readonly schema: GraphQLSchema
@@ -128,10 +162,16 @@ export interface ExecutorOptions {
   readonly documentCache: number
   /** Active subscriptions cap, `undefined`: none. */
   readonly maxActiveSubscriptions: number | undefined
+  /**
+   * `subscriptions: false`: the engine answers a subscription with a `BAD_REQUEST` error result
+   * (the built-in transport refuses event streams itself). Default `true`.
+   */
+  readonly subscriptions?: boolean
 }
 
 const OPERATION_HOOK = 'graphql:operation'
 const DIRECT: ExecuteOptions = Object.freeze({})
+const NO_ERRORS: readonly GraphQLError[] = Object.freeze([])
 const DONE: IteratorResult<FormattedExecutionResult> = Object.freeze({ done: true, value: undefined })
 
 /** SHA-256 (hex) of a query text: `GraphQLOperationEvent.documentId`. */
@@ -255,6 +295,9 @@ interface Prepared {
   readonly operation: OperationDefinitionNode
 }
 
+/** What starting a subscription gives: a stream, a rejection, or (engine) an error result. */
+type Started = GraphQLResultStream | EngineStream | ExecutionResult | Rejection
+
 /** The GraphQL executor of a plugin. */
 export class GraphQLExecutor {
   readonly #schema: GraphQLSchema
@@ -269,10 +312,27 @@ export class GraphQLExecutor {
   readonly #hideSuggestions: boolean
   readonly #cache: DocumentCache
   readonly #maxActive: number | undefined
-  readonly #streams = new Set<SubscriptionStream>()
-  readonly #direct = new Set<SubscriptionStream>()
+  readonly #subscriptions: boolean
+  readonly #streams = new Set<SubscriptionStream<unknown>>()
+  /**
+   * The streams the plugin ends in `onStop`: direct subscriptions and those of the engine. The SSE
+   * streams of the built-in transport are ended by `HttpPlugin`'s shutdown (with a `retry` hint).
+   */
+  readonly #owned = new Set<SubscriptionStream<unknown>>()
+  /** The streams of the engine (drivers), a part of {@link #owned}: ended when `HttpPlugin` drains. */
+  readonly #engineStreams = new Set<SubscriptionStream<unknown>>()
+  /** The application stops (`HttpPlugin` drains, or the plugin stops): the engine refuses new subscriptions (503). */
+  #closing = false
   /** Subscriptions counted against `maxActive` while their source starts (not yet in `#streams`). */
   #starting = 0
+  /** The engine's extra rules (`GraphQLEngine.rules`): the limits, introspection. Built on first use. */
+  #engineRules: readonly ValidationRule[] | undefined
+  /** The document limits as a rule, `undefined` when every limit is off. */
+  readonly #limitsRule: ValidationRule | undefined
+  /** Documents parsed by {@link parseDocument}: within their limits, not checked again by validation. */
+  readonly #limited = new WeakSet<DocumentNode>()
+  /** Operations of the documents the engine executed, by document (the server's or the cache's). */
+  readonly #documents = new WeakMap<DocumentNode, CachedDocument>()
 
   constructor(options: ExecutorOptions) {
     this.#schema = options.schema
@@ -288,6 +348,26 @@ export class GraphQLExecutor {
     this.#hideSuggestions = !options.introspection
     this.#cache = new DocumentCache(options.documentCache)
     this.#maxActive = options.maxActiveSubscriptions
+    this.#subscriptions = options.subscriptions !== false
+    this.#limitsRule = limitsRule(options.limits)
+  }
+
+  /** The schema operations run against. */
+  get schema(): GraphQLSchema {
+    return this.#schema
+  }
+
+  /** The engine's own validation rules (`GraphQLEngine.rules`): the limits, and introspection when it is off. */
+  get engineRules(): readonly ValidationRule[] {
+    let rules = this.#engineRules
+    if (rules === undefined) {
+      const list: ValidationRule[] = []
+      if (this.#limitsRule !== undefined) list.push(this.#limitsRule)
+      if (this.#hideSuggestions) list.push(NoSchemaIntrospectionCustomRule)
+      rules = Object.freeze(list)
+      this.#engineRules = rules
+    }
+    return rules
   }
 
   /** Active subscriptions (every transport). */
@@ -354,22 +434,30 @@ export class GraphQLExecutor {
       const response = await this.execute(request, options)
       return response.status === 200 ? new SingleResultStream(response.result) : response
     }
-    const limited = this.#maxActive !== undefined
-    if (limited && this.#streams.size + this.#starting >= (this.#maxActive as number)) {
-      return this.#reject(
-        new Rejection(
-          503,
-          [requestError('Too many active subscriptions, retry later', GraphQLErrorCode.ServiceUnavailable)],
-          prepared.entry.id,
-          prepared.operation,
-        ),
-        request,
-        options,
-      )
-    }
+    if (this.#full()) return this.#reject(overflow(prepared), request, options)
+    const started = await this.#start(prepared, request, options, false)
+    return started instanceof Rejection ? started.response() : (started as GraphQLResultStream)
+  }
+
+  /** Every slot of `subscriptions.maxActive` is taken (started streams and starting ones). */
+  #full(): boolean {
+    return this.#maxActive !== undefined && this.#streams.size + this.#starting >= this.#maxActive
+  }
+
+  /**
+   * Starts a subscription in the current scope (or in one of its own, open as long as the stream):
+   * the slot reserved, the context and the hook observer created, the source started. A rejection
+   * (variables) is observed and returned for the caller to answer.
+   */
+  async #start(
+    prepared: Prepared,
+    request: GraphQLRequest,
+    options: ExecuteOptions,
+    engine: boolean,
+  ): Promise<Started> {
     // the slot is reserved before the source starts (guards and subscribe methods may be async):
     // concurrent subscriptions see it; released once the stream is counted or did not start
-    let reserved = limited
+    let reserved = this.#maxActive !== undefined
     if (reserved) this.#starting++
     const release = (): void => {
       if (reserved) {
@@ -401,13 +489,12 @@ export class GraphQLExecutor {
     const observer = this.#observer(ctx, prepared.entry.id)
     try {
       const stream = await run(() =>
-        this.#startSubscription(prepared, request, options, ctx, observer, run, close, release),
+        this.#startSubscription(prepared, request, options, ctx, observer, run, close, release, engine),
       )
       release()
       if (stream instanceof Rejection) {
         close()
         observer?.end('rejected', stream.errors)
-        return stream.response()
       }
       return stream
     } catch (error) {
@@ -418,14 +505,332 @@ export class GraphQLExecutor {
     }
   }
 
-  /** Ends every subscription started with `transport: 'direct'` (plugin `onStop`). */
-  async stopDirect(): Promise<void> {
-    await Promise.all([...this.#direct].map(stream => stream.return()))
+  /**
+   * Ends every subscription the plugin owns (plugin `onStop`): direct ones and those started
+   * through the engine (drivers). Built-in SSE streams end with `HttpPlugin`'s shutdown.
+   */
+  async stopStreams(): Promise<void> {
+    this.#closing = true
+    await Promise.all([...this.#owned].map(stream => stream.return()))
+  }
+
+  /**
+   * Ends the subscriptions of the engine (`HttpPlugin` drains, `GraphQLPlugin.onHttpDrain()`): a
+   * driver serves them as streamed responses `HttpPlugin` does not close. New ones are refused (503).
+   */
+  async stopEngineStreams(): Promise<void> {
+    this.#closing = true
+    await Promise.all([...this.#engineStreams].map(stream => stream.return()))
   }
 
   /** Forgets every cached document. */
   clear(): void {
     this.#cache.clear()
+  }
+
+  // ------------------------------------------------------------------------------------------------
+  // engine (RFC 0009 §4.2): graphql-js-shaped, on parsed documents, for GraphQL servers (drivers)
+
+  /**
+   * `GraphQLEngine.parse`: the document of the cache for a valid text, otherwise the text parsed
+   * with `maxTokens` and checked against the depth, aliases and directives limits. Throws a
+   * `GraphQLError` (`GRAPHQL_PARSE_FAILED`, `QUERY_TOO_COMPLEX`), observed as a rejected operation.
+   */
+  parseDocument(source: string | Source, driver: string): DocumentNode {
+    const text = typeof source === 'string' ? source : (source as Source | undefined)?.body
+    if (typeof text === 'string') {
+      const cached = this.#cache.get(text)
+      if (cached !== undefined) return cached.document
+    }
+    let document: DocumentNode
+    try {
+      document = parse(source, this.#maxTokens === undefined ? undefined : { maxTokens: this.#maxTokens })
+    } catch (error) {
+      if (!(error instanceof GraphQLErrorClass)) throw error
+      const failed = coded(error, GraphQLErrorCode.ParseFailed)
+      this.#rejectedDocument([failed], text, driver)
+      throw failed
+    }
+    const limited = checkLimits(document, this.#limits)
+    if (limited !== undefined) {
+      this.#rejectedDocument(limited, text, driver)
+      throw limited[0]
+    }
+    this.#limited.add(document)
+    return document
+  }
+
+  /**
+   * `GraphQLEngine.validate`: `rules` (default: graphql-js `specifiedRules`) plus the engine's own
+   * (the limits, unless {@link parseDocument} checked them, and introspection), with
+   * `hideSuggestions` when introspection is off. With the default rules on the engine's schema, a
+   * cached document is not validated again, and a valid one enters the document cache. Errors carry
+   * `GRAPHQL_VALIDATION_FAILED` (or the limit's code) and are observed as a rejected operation.
+   */
+  validateDocument(
+    schema: GraphQLSchema,
+    document: DocumentNode,
+    rules: readonly ValidationRule[] | undefined,
+    driver: string,
+  ): readonly GraphQLError[] {
+    const standard = rules === undefined || isSpecifiedRules(rules)
+    const cacheable = standard && schema === this.#schema
+    const text = document.loc?.source.body
+    if (cacheable && text !== undefined && this.#cache.get(text)?.document === document) return NO_ERRORS
+    const limited = this.#limited.has(document)
+    let all: readonly ValidationRule[]
+    if (standard) {
+      all = limited || this.#limitsRule === undefined ? this.#rules : [this.#limitsRule, ...this.#rules]
+    } else {
+      // the server's rules (Envelop plugins add some) and the engine's, each once
+      const merged = new Set<ValidationRule>(limited ? rules : [...this.engineRules, ...rules])
+      for (const rule of this.engineRules) merged.add(rule)
+      if (limited && this.#limitsRule !== undefined) merged.delete(this.#limitsRule)
+      all = [...merged]
+    }
+    const errors = validate(schema, document, all, { hideSuggestions: this.#hideSuggestions })
+    if (errors.length === 0) {
+      if (cacheable && text !== undefined) {
+        const entry = new CachedDocument(text, document)
+        this.#cache.set(text, entry)
+        this.#documents.set(document, entry)
+      }
+      return NO_ERRORS
+    }
+    const failed = errors.map(error =>
+      coded(error, error.extensions['code'] === undefined ? GraphQLErrorCode.ValidationFailed : undefined),
+    )
+    this.#rejectedDocument(failed, text, driver)
+    return failed
+  }
+
+  /**
+   * `GraphQLEngine.execute`: a validated query or mutation of `args.document`, in the current
+   * request scope (or one of its own), with the operation's `GraphQLContext` as `contextValue`
+   * (`args.contextValue` becomes `serverContext`). The result is graphql-js's, its errors mapped
+   * and masked, as `GraphQLError` instances without `originalError`. Without `options.signal`, an
+   * execution that turns asynchronous follows `GraphQLContext.signal` (the HTTP request's).
+   */
+  executeDocument(args: ExecutionArgs, options: ExecuteOptions): ExecutionResult | Promise<ExecutionResult> {
+    const prepared = this.#prepareDocument(args)
+    if (prepared instanceof Rejection) return asEngineResult(this.#reject(prepared, requestOf(args), options))
+    if (prepared.operation.operation === 'subscription') {
+      return asEngineResult(
+        this.#reject(
+          new Rejection(
+            400,
+            [requestError('Subscriptions are started with GraphQLEngine.subscribe()', GraphQLErrorCode.BadRequest)],
+            prepared.entry.id,
+            prepared.operation,
+          ),
+          requestOf(args),
+          options,
+        ),
+      )
+    }
+    const request: GraphQLRequest = {
+      query: prepared.entry.query,
+      operationName: args.operationName,
+      variables: args.variableValues,
+    }
+    let abort: DeferredAbort | undefined
+    let effective = options
+    if (options.signal === undefined) {
+      // like the HTTP transport: the request's signal is only followed once the execution is pending
+      abort = new DeferredAbort()
+      effective = { ...options, abortSignal: abort.asSignal() }
+    }
+    const scope = this.#container.currentScope()
+    const ctx = this.#context(prepared, request, effective, scope)
+    const run = (): EngineResponse | Promise<EngineResponse> =>
+      this.#runEngine(prepared, request, effective, ctx, args.rootValue)
+    const hooks = this.#hooks
+    const response =
+      !hooks.hasWrappers(OPERATION_HOOK) && !hooks.hasListeners(OPERATION_HOOK)
+        ? this.#inScope(scope, ctx, run)
+        : this.#inScope(scope, ctx, () => this.#observed(ctx, prepared.entry.id, run))
+    if (!isPromise(response)) return response.result
+    abort?.follow(() => ctx.signal)
+    return response.then(resultOf)
+  }
+
+  /**
+   * `GraphQLEngine.subscribe`: starts a validated subscription, a stream of graphql-js results (its
+   * loaders renewed per event), or a single error result (rejected, past `maxActive`, a source that
+   * could not start). A query or a mutation is executed: its single result. The stream ends with
+   * `return()`, `options.signal` (default: the HTTP request's), its source, or the plugin's stop.
+   */
+  async subscribeDocument(args: ExecutionArgs, options: ExecuteOptions): Promise<EngineStream | ExecutionResult> {
+    const prepared = this.#prepareDocument(args)
+    if (prepared instanceof Rejection) return asEngineResult(this.#reject(prepared, requestOf(args), options))
+    if (prepared.operation.operation !== 'subscription') return this.executeDocument(args, options)
+    if (!this.#subscriptions) {
+      return asEngineResult(
+        this.#reject(
+          new Rejection(
+            400,
+            [requestError('Subscriptions are disabled on this server', GraphQLErrorCode.BadRequest)],
+            prepared.entry.id,
+            prepared.operation,
+          ),
+          requestOf(args),
+          options,
+        ),
+      )
+    }
+    if (this.#full() || this.#closing) {
+      return asEngineResult(this.#reject(unavailable(prepared, this.#closing), requestOf(args), options))
+    }
+    const request: GraphQLRequest = {
+      query: prepared.entry.query,
+      operationName: args.operationName,
+      variables: args.variableValues,
+    }
+    let effective = options
+    if (options.signal === undefined) {
+      const http = this.#container.currentScope()?.get(HttpTokens.Context) as HttpContext | undefined
+      if (http !== undefined) effective = { ...options, signal: http.signal }
+    }
+    const started = await this.#start(prepared, request, effective, true)
+    if (started instanceof Rejection) return { errors: started.errors.map(fromFormatted) }
+    return started as EngineStream | ExecutionResult
+  }
+
+  /** The document of `args` and its operation, or a rejection (operation selection). */
+  #prepareDocument(args: ExecutionArgs): Prepared | Rejection {
+    if (args?.schema !== this.#schema) {
+      throw new ZnightError(
+        ErrorCode.InvalidGraphQLSetup,
+        "GraphQLEngine: the operation targets another schema than the engine's (ExecutionArgs.schema)",
+        { hints: ["Give the GraphQL server engine.schema: its resolvers are the engine's pipelines"] },
+      )
+    }
+    const document = args.document
+    let entry = this.#documents.get(document)
+    if (entry === undefined) {
+      const text = document.loc?.source.body
+      const cached = text === undefined ? undefined : this.#cache.get(text)
+      entry =
+        cached !== undefined && cached.document === document
+          ? cached
+          : new CachedDocument(text ?? print(document), document)
+      this.#documents.set(document, entry)
+    }
+    const operationName = args.operationName
+    let operation: OperationDefinitionNode | undefined
+    if (operationName === undefined || operationName === null) {
+      operation = entry.single
+      if (operation === undefined) {
+        return new Rejection(
+          400,
+          [
+            requestError(
+              'Must provide operation name if query contains multiple operations.',
+              GraphQLErrorCode.BadRequest,
+            ),
+          ],
+          entry.id,
+        )
+      }
+    } else {
+      operation = entry.named?.get(operationName)
+      if (operation === undefined) {
+        return new Rejection(
+          400,
+          [requestError(`Unknown operation named "${operationName}".`, GraphQLErrorCode.BadRequest)],
+          entry.id,
+        )
+      }
+    }
+    return { entry, operation }
+  }
+
+  #runEngine(
+    prepared: Prepared,
+    request: GraphQLRequest,
+    options: ExecuteOptions,
+    ctx: OperationContext,
+    rootValue: unknown,
+  ): EngineResponse | Promise<EngineResponse> {
+    let result: ExecutionResult | Promise<ExecutionResult>
+    try {
+      result = execute({
+        schema: this.#schema,
+        document: prepared.entry.document,
+        rootValue,
+        operationName: request.operationName,
+        variableValues: request.variables,
+        contextValue: ctx,
+        abortSignal: options.abortSignal ?? options.signal,
+        hideSuggestions: this.#hideSuggestions,
+      })
+    } catch (error) {
+      return Promise.reject(abortReason(error, options))
+    }
+    if (isPromise(result)) {
+      return result.then(
+        settled => this.#respondEngine(settled, ctx),
+        (error: unknown) => Promise.reject(abortReason(error, options)),
+      )
+    }
+    return this.#respondEngine(result, ctx)
+  }
+
+  /** {@link #respond} for the engine: the errors as `GraphQLError` instances. */
+  #respondEngine(result: ExecutionResult, ctx: OperationContext): EngineResponse {
+    const errors = result.errors
+    if (errors === undefined) return { status: 200, result }
+    if (!('data' in result)) {
+      // no data: graphql-js refused the variables before executing
+      return {
+        status: 400,
+        result: {
+          errors: errors.map(error =>
+            coded(error, error.extensions['code'] === undefined ? GraphQLErrorCode.BadUserInput : undefined),
+          ),
+        },
+      }
+    }
+    return {
+      status: 200,
+      result: {
+        data: result.data,
+        errors: asGraphQLErrors(errors, this.#formatter.format(errors, ctx)),
+        ...(result.extensions === undefined ? {} : { extensions: result.extensions }),
+      },
+    }
+  }
+
+  /** A document rejected by {@link parseDocument} or {@link validateDocument}, for the hook. */
+  #rejectedDocument(errors: readonly GraphQLError[], text: string | undefined, driver: string): void {
+    const hooks = this.#hooks
+    const wrapped = hooks.hasWrappers(OPERATION_HOOK)
+    if (!wrapped && !hooks.hasListeners(OPERATION_HOOK)) return
+    const event: GraphQLOperationEvent = {
+      operationType: undefined,
+      operationName: undefined,
+      documentId: text === undefined ? undefined : documentId(text),
+      transport: 'http',
+      driver,
+      requestId: this.#scopedRequestId(),
+      context: undefined,
+      startTime: performance.now(),
+      outcome: 'rejected',
+      errors: summaries(errors),
+    }
+    if (!wrapped) {
+      hooks.emit(OPERATION_HOOK, event)
+      return
+    }
+    // parse and validate are synchronous: wrappers see the rejection, they cannot delay it
+    hooks
+      .run(OPERATION_HOOK, event, () => Promise.resolve())
+      .then(
+        () => {
+          if (hooks.hasListeners(OPERATION_HOOK)) hooks.emit(OPERATION_HOOK, event)
+        },
+        (error: unknown) => this.#runtimeLogError('A "graphql:operation" hook wrapper failed', error),
+      )
   }
 
   // ------------------------------------------------------------------------------------------------
@@ -623,6 +1028,21 @@ export class GraphQLExecutor {
     }
   }
 
+  /** {@link formatEvent} for the engine: the errors formatted, then given back as `GraphQLError` instances. */
+  engineEvent(result: ExecutionResult, ctx: OperationContext): ExecutionResult {
+    const errors = result.errors
+    if (errors === undefined) return result
+    return {
+      ...('data' in result ? { data: result.data } : {}),
+      errors: asGraphQLErrors(errors, this.#formatter.format(errors, ctx)),
+    }
+  }
+
+  /**
+   * Starts the source of a subscription. `engine`: the results are graphql-js results
+   * ({@link engineEvent}) and a source that could not start is an error result instead of a stream
+   * of one result.
+   */
   #startSubscription(
     prepared: Prepared,
     request: GraphQLRequest,
@@ -632,7 +1052,8 @@ export class GraphQLExecutor {
     run: <R>(fn: () => R) => R,
     close: () => void,
     release: () => void,
-  ): Promise<GraphQLResultStream | Rejection> | GraphQLResultStream | Rejection {
+    engine: boolean,
+  ): Promise<Started> | Started {
     const validated = validateSubscriptionArgs({
       schema: this.#schema,
       document: prepared.entry.document,
@@ -645,17 +1066,23 @@ export class GraphQLExecutor {
     if (!('schema' in validated)) {
       return new Rejection(400, validated.map(variableError), prepared.entry.id, prepared.operation)
     }
-    const start = (source: AsyncIterable<unknown> | ExecutionResult): GraphQLResultStream => {
+    const start = (source: AsyncIterable<unknown> | ExecutionResult): Started => {
       // the reservation becomes the stream (counted in #streams), or ends with the failed start
       release()
       if (!isAsyncIterable(source)) {
         // the subscription could not start (guard, resolver error): one error result
+        if (engine) {
+          const result = this.engineEvent(source, ctx)
+          close()
+          observer?.end('error', result.errors)
+          return result
+        }
         const result = this.formatEvent(source, ctx)
         close()
         observer?.end('error', result.errors)
         return new SingleResultStream(result)
       }
-      const stream = new SubscriptionStream({
+      const stream = new SubscriptionStream<unknown>({
         executor: this,
         source: source[Symbol.asyncIterator](),
         validated,
@@ -663,16 +1090,23 @@ export class GraphQLExecutor {
         run,
         signal: options.signal,
         field: responseKey(prepared.operation),
+        engine,
         onEnd: (outcome, errors) => {
           this.#streams.delete(stream)
-          this.#direct.delete(stream)
+          this.#owned.delete(stream)
+          if (engine) this.#engineStreams.delete(stream)
           close()
           observer?.end(outcome, errors)
         },
       })
       this.#streams.add(stream)
-      if (ctx.transport === 'direct') this.#direct.add(stream)
-      return stream
+      if (engine || ctx.transport === 'direct') this.#owned.add(stream)
+      if (engine) {
+        this.#engineStreams.add(stream)
+        // stopped while its source started: ended at once
+        if (this.#closing) void stream.return()
+      }
+      return stream as GraphQLResultStream | EngineStream
     }
     const source = createSourceEventStream(validated)
     return isPromise(source) ? source.then(start) : start(source)
@@ -696,6 +1130,7 @@ export class GraphQLExecutor {
         rejection.operationName ?? (typeof request?.operationName === 'string' ? request.operationName : undefined),
       documentId: rejection.documentId,
       transport: options.transport ?? 'direct',
+      driver: options.driver ?? 'builtin',
       requestId: options.requestId ?? options.http?.requestId ?? this.#scopedRequestId(),
       context: undefined,
       startTime: performance.now(),
@@ -715,14 +1150,10 @@ export class GraphQLExecutor {
   }
 
   /** An executed query or mutation, observed by the hook. */
-  #observed(
-    ctx: OperationContext,
-    id: string,
-    run: () => GraphQLResponse | Promise<GraphQLResponse>,
-  ): GraphQLResponse | Promise<GraphQLResponse> {
+  #observed<T extends Settled>(ctx: OperationContext, id: string, run: () => T | Promise<T>): T | Promise<T> {
     const hooks = this.#hooks
     const event = operationEvent(ctx, id)
-    const done = (response: GraphQLResponse): GraphQLResponse => {
+    const done = (response: T): T => {
       event.outcome = outcomeOf(response)
       if (response.result.errors !== undefined) event.errors = summaries(response.result.errors)
       return response
@@ -748,7 +1179,7 @@ export class GraphQLExecutor {
       )
     }
     // listeners only: no promise added to a synchronous execution
-    let response: GraphQLResponse | Promise<GraphQLResponse>
+    let response: T | Promise<T>
     try {
       response = run()
     } catch (error) {
@@ -818,8 +1249,97 @@ export class GraphQLExecutor {
 interface Observer {
   end(
     outcome: NonNullable<GraphQLOperationEvent['outcome']>,
-    errors: readonly GraphQLFormattedError[] | undefined,
+    errors: NonNullable<Settled['result']['errors']> | undefined,
   ): void
+}
+
+/** The 503 of a subscription past `subscriptions.maxActive`. */
+function overflow(prepared: Prepared): Rejection {
+  return new Rejection(
+    503,
+    [requestError('Too many active subscriptions, retry later', GraphQLErrorCode.ServiceUnavailable)],
+    prepared.entry.id,
+    prepared.operation,
+  )
+}
+
+/** The 503 of an engine subscription past `subscriptions.maxActive`, or while the application stops. */
+function unavailable(prepared: Prepared, closing: boolean): Rejection {
+  if (!closing) return overflow(prepared)
+  return new Rejection(
+    503,
+    [requestError('The server is shutting down, retry later', GraphQLErrorCode.ServiceUnavailable)],
+    prepared.entry.id,
+    prepared.operation,
+  )
+}
+
+/** Whether `rules` are graphql-js `specifiedRules` (the same list, or a copy of it). */
+function isSpecifiedRules(rules: readonly ValidationRule[]): boolean {
+  if (rules === specifiedRules) return true
+  if (rules.length !== specifiedRules.length) return false
+  for (let index = 0; index < rules.length; index++) if (rules[index] !== specifiedRules[index]) return false
+  return true
+}
+
+/** The request of engine arguments, for the hook of a rejection (its operation name). */
+function requestOf(args: ExecutionArgs): GraphQLRequest {
+  return { query: '', operationName: args.operationName }
+}
+
+function resultOf(response: EngineResponse): ExecutionResult {
+  return response.result
+}
+
+/** `error` with `extensions.code` set to `code` (as is without code), without its original error. */
+function coded(error: GraphQLError, code: string | undefined): GraphQLError {
+  if (code === undefined) return error
+  return new GraphQLErrorClass(error.message, {
+    nodes: error.nodes,
+    source: error.source,
+    positions: error.positions,
+    path: error.path,
+    extensions: { ...error.extensions, code },
+  })
+}
+
+/**
+ * The formatted errors of an execution as `GraphQLError` instances (RFC 0009 §4.2, rule 5): the
+ * formatted message and extensions, the locations and path of the error they come from, no
+ * `originalError` (servers such as Apollo Server wrap anything that is not an `Error`).
+ */
+function asGraphQLErrors(
+  originals: readonly GraphQLError[],
+  formatted: readonly GraphQLFormattedError[],
+): GraphQLError[] {
+  const errors: GraphQLError[] = new Array(formatted.length)
+  for (let index = 0; index < formatted.length; index++) {
+    const original = originals[index] as GraphQLError
+    const shown = formatted[index] as GraphQLFormattedError
+    errors[index] = new GraphQLErrorClass(shown.message, {
+      nodes: original.nodes,
+      source: original.source,
+      positions: original.positions,
+      path: original.path,
+      extensions: shown.extensions,
+    })
+  }
+  return errors
+}
+
+/** A request error (formatted, without location) as a `GraphQLError`. */
+function fromFormatted(error: GraphQLFormattedError): GraphQLError {
+  return new GraphQLErrorClass(error.message, { path: error.path, extensions: error.extensions })
+}
+
+/** A rejection answered to the engine: a result of `GraphQLError`s. */
+function asEngineResult(
+  response: GraphQLResponse | Promise<GraphQLResponse>,
+): ExecutionResult | Promise<ExecutionResult> {
+  const settle = (settled: GraphQLResponse): ExecutionResult => ({
+    errors: (settled.result.errors ?? []).map(fromFormatted),
+  })
+  return isPromise(response) ? response.then(settle) : settle(response)
 }
 
 function noop(): void {}
@@ -845,20 +1365,21 @@ function operationEvent(ctx: OperationContext, id: string): GraphQLOperationEven
     operationName: ctx.operationName,
     documentId: id,
     transport: ctx.transport,
+    driver: ctx.driver,
     requestId: ctx.requestId,
     context: ctx,
     startTime: performance.now(),
   }
 }
 
-function outcomeOf(response: GraphQLResponse): NonNullable<GraphQLOperationEvent['outcome']> {
+function outcomeOf(response: Settled): NonNullable<GraphQLOperationEvent['outcome']> {
   if (response.status !== 200) return 'rejected'
   const result = response.result
   if (result.errors === undefined || result.errors.length === 0) return 'success'
   return result.data === null || result.data === undefined ? 'error' : 'partial'
 }
 
-function summaries(errors: readonly GraphQLFormattedError[]): NonNullable<GraphQLOperationEvent['errors']> {
+function summaries(errors: NonNullable<Settled['result']['errors']>): NonNullable<GraphQLOperationEvent['errors']> {
   return errors.map(error => {
     const code = error.extensions?.['code']
     return {
@@ -925,15 +1446,19 @@ interface SubscriptionStreamInit {
   readonly run: <R>(fn: () => R) => R
   readonly signal: AbortSignal | undefined
   readonly field: string | undefined
+  /** Results as graphql-js results with `GraphQLError` instances (the engine), or formatted. */
+  readonly engine: boolean
   readonly onEnd: (
     outcome: NonNullable<GraphQLOperationEvent['outcome']>,
-    errors: readonly GraphQLFormattedError[] | undefined,
+    errors: NonNullable<Settled['result']['errors']> | undefined,
   ) => void
 }
 
 /**
  * The results of a subscription: each source event executed with `executeSubscriptionEvent`, a
- * fresh per-execution state (loaders) and the operation's `GraphQLContext`.
+ * fresh per-execution state (loaders) and the operation's `GraphQLContext`. `R` is
+ * `FormattedExecutionResult` for the transports (`GraphQLResultStream`), `ExecutionResult` for the
+ * engine (`EngineStream`).
  *
  * The source is started at once: its first `next()` is requested when the stream is created, so
  * that a resolver written as an async generator (`for await (const x of pubsub.subscribe(...))`)
@@ -941,7 +1466,7 @@ interface SubscriptionStreamInit {
  * reads (an SSE body pulled on demand). Only that first event is read ahead; the next ones are read
  * when the consumer asks (backpressure).
  */
-class SubscriptionStream implements GraphQLResultStream {
+class SubscriptionStream<R> implements AsyncIterableIterator<R> {
   readonly #init: SubscriptionStreamInit
   readonly #onAbort: (() => void) | undefined
   /** The first `next()` of the source, requested at creation and consumed by the first read. */
@@ -968,8 +1493,8 @@ class SubscriptionStream implements GraphQLResultStream {
     if (signal?.aborted === true) void this.return()
   }
 
-  next(): Promise<IteratorResult<FormattedExecutionResult>> {
-    if (this.#ended) return Promise.resolve(DONE)
+  next(): Promise<IteratorResult<R, void>> {
+    if (this.#ended) return Promise.resolve(DONE as IteratorResult<R, void>)
     return this.#init.run(() => this.#pull())
   }
 
@@ -983,7 +1508,15 @@ class SubscriptionStream implements GraphQLResultStream {
     }
   }
 
-  async #pull(): Promise<IteratorResult<FormattedExecutionResult>> {
+  /** A result of the subscription, formatted for its consumer. */
+  #format(result: ExecutionResult): R {
+    const init = this.#init
+    return (
+      init.engine ? init.executor.engineEvent(result, init.ctx) : init.executor.formatEvent(result, init.ctx)
+    ) as R
+  }
+
+  async #pull(): Promise<IteratorResult<R, void>> {
     const init = this.#init
     let step: IteratorResult<unknown>
     try {
@@ -991,35 +1524,32 @@ class SubscriptionStream implements GraphQLResultStream {
       this.#first = undefined
       step = await (first ?? this.#read())
     } catch (error) {
-      if (this.#ended) return DONE
+      if (this.#ended) return DONE as IteratorResult<R, void>
       // the source failed (MemoryPubSub overflow...): a final error result, then the end
-      const result = init.executor.formatEvent(
-        {
-          errors: [
-            new GraphQLErrorClass(errorMessage(error), {
-              originalError: asError(error),
-              path: init.field === undefined ? undefined : [init.field],
-            }),
-          ],
-        },
-        init.ctx,
-      )
-      this.#end('error', result.errors)
+      const result = this.#format({
+        errors: [
+          new GraphQLErrorClass(errorMessage(error), {
+            originalError: asError(error),
+            path: init.field === undefined ? undefined : [init.field],
+          }),
+        ],
+      })
+      this.#end('error', (result as Settled['result']).errors)
       return { done: false, value: result }
     }
     if (step.done === true || this.#ended) {
       this.#end(this.#partial ? 'partial' : 'success', undefined)
-      return DONE
+      return DONE as IteratorResult<R, void>
     }
     init.ctx.resetLoaders()
     const executed = executeSubscriptionEvent({ ...init.validated, rootValue: step.value })
-    const result = init.executor.formatEvent(isPromise(executed) ? await executed : executed, init.ctx)
-    if (result.errors !== undefined) this.#partial = true
+    const result = this.#format(isPromise(executed) ? await executed : executed)
+    if ((result as Settled['result']).errors !== undefined) this.#partial = true
     return { done: false, value: result }
   }
 
-  async return(): Promise<IteratorResult<FormattedExecutionResult>> {
-    if (this.#ended) return DONE
+  async return(): Promise<IteratorResult<R, void>> {
+    if (this.#ended) return DONE as IteratorResult<R, void>
     this.#first = undefined
     // ends ctx.signal: a source following it (MemoryPubSub, a generator iterating it) ends at once
     this.#end(this.#partial ? 'partial' : 'success', undefined)
@@ -1033,20 +1563,25 @@ class SubscriptionStream implements GraphQLResultStream {
     } catch {
       // the source is gone either way
     }
-    return DONE
+    return DONE as IteratorResult<R, void>
   }
 
-  throw(): Promise<IteratorResult<FormattedExecutionResult>> {
+  throw(): Promise<IteratorResult<R, void>> {
     return this.return()
   }
 
-  [Symbol.asyncIterator](): GraphQLResultStream {
+  [Symbol.asyncIterator](): this {
     return this
+  }
+
+  /** `await using`: ends the stream (an `AsyncGenerator` is disposable). */
+  async [Symbol.asyncDispose](): Promise<void> {
+    await this.return()
   }
 
   #end(
     outcome: NonNullable<GraphQLOperationEvent['outcome']>,
-    errors: readonly GraphQLFormattedError[] | undefined,
+    errors: NonNullable<Settled['result']['errors']> | undefined,
   ): void {
     if (this.#ended) return
     this.#ended = true

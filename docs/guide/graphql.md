@@ -1,5 +1,5 @@
 ---
-description: Build a GraphQL API with Znight - types as the schema, resolvers, validated arguments, loaders against N+1 queries, subscriptions over SSE and a PubSub shared across instances, access control, errors, tests, production settings and serving the schema with GraphQL Yoga.
+description: Build a GraphQL API with Znight - types as the schema, resolvers, validated arguments, loaders against N+1 queries, subscriptions over SSE and a PubSub shared across instances, access control, errors, tests, production settings, GraphQL drivers and serving the schema with GraphQL Yoga (yogaDriver).
 ---
 
 # GraphQL
@@ -909,108 +909,130 @@ wraps it: a span per operation under the HTTP request span, `graphql_operations_
 `graphql_operation_duration_seconds` by type and (capped) operation name, and opt-in operation logs
 (`logging: { graphql: true }`).
 
+## Choose a driver {#drivers}
+
+The built-in endpoint (GraphQL over HTTP and SSE, GraphiQL) is the default and the fastest path.
+A **driver** serves the same schema with another GraphQL server when you need its protocol
+features or its plugin ecosystem (persisted operations, response caching, usage reporting):
+Znight stays the engine, the driver owns the transport
+([RFC 0009](../../rfcs/0009-graphql-drivers.md)).
+
+```ts
+GraphQLPlugin.configure({ guards: [AccessGuard], driver: yogaDriver() })
+```
+
+Nothing of this guide changes with a driver: the server calls `plugin.engine`, whose `parse`,
+`validate`, `execute` and `subscribe` run the compiled schema with its guards, loaders, request
+scope, error and result mappers, masking, limits and the `graphql:operation` hook (with the
+driver's name). The driver's routes run in the HTTP pipeline like the built-in endpoint, so HTTP
+guards, CORS, `http.meta` decisions and the drain apply, and `executeOperation()` and
+`subscribeOperation()` reach them in tests. What differs is the server's: its protocol choices,
+its IDE (`graphiql: true` serves it), its subscription transports and its keep-alive options
+(`subscriptions.heartbeat` and `maxDuration` belong to the built-in SSE transport).
+
+| Driver                 | Entry                                                            | Use it for                                                    |
+| ---------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------- |
+| Built-in (no `driver`) | `@znight/graphql`                                                | The default: GraphQL over HTTP and SSE, GraphiQL, the fastest |
+| GraphQL Yoga           | [`yogaDriver()`](#yoga) from `@znight/graphql/yoga`              | Envelop and Yoga plugins, Yoga's GraphiQL and SSE             |
+| Apollo Server          | Once Apollo Server accepts graphql-js 17                         | Apollo plugins and usage reporting (planned, RFC 0009 M3)     |
+| Your own               | A `GraphQLDriver`: `name`, `routes()`, `start(engine)`, `stop()` | Another server; check it with `describeDriverConformance()`   |
+
+Drivers buy an ecosystem, the built-in transport buys throughput: in the in-process benchmark of the
+package (`{ hello }`, one synchronous resolver, the `HttpPlugin` pipeline without a socket), a
+request costs about 1.6 µs on Bun and 5.5 µs on Node.js with the built-in transport, and about
+13 to 18 µs on Bun and 27 to 45 µs on Node.js with the Yoga driver (Yoga's request parsing, its
+plugin chain and the Web `Request` and `Response` objects). Over a network, with real resolvers,
+the gap is a smaller share of each request; measure your own operations before choosing.
+
+The engine and the driver contract are described in the
+[package README](../../packages/graphql/README.md#drivers-and-the-engine), with a complete driver
+built on `graphql-http`.
+
 ## Serve the schema with GraphQL Yoga {#yoga}
 
-The built-in endpoint covers GraphQL over HTTP and SSE. To serve the API with
-[GraphQL Yoga](https://the-guild.dev/graphql/yoga-server) instead (its protocol support, its
-GraphiQL, its envelop plugins), turn the endpoint off and hand the requests of a controller to Yoga.
-Yoga parses and validates the operation against `plugin.schema`; the execution goes back to
-`GraphQLPlugin` through `execute()` and `subscribe()`, in the request scope of the route:
+[GraphQL Yoga](https://the-guild.dev/graphql/yoga-server) serves the schema with its protocol
+support, its GraphiQL, its SSE subscriptions and its Envelop plugins when the driver of
+`GraphQLPlugin` is `yogaDriver()`. Yoga handles each request and hands the document to the engine,
+which parses it through its document cache, validates it with its limits and executes it, in the
+request scope of the route:
 
-```ts [src/graphql/yoga.controller.ts]
-import type { GraphQLPlugin, GraphQLRequest } from '@znight/graphql'
-import type { ExecutionArgs } from 'graphql'
-import type { Plugin, YogaInitialContext, YogaServerInstance } from 'graphql-yoga'
+```ts [src/graphql/yoga.plugins.ts]
+import type { Plugin } from '@znight/core'
+import type { Plugin as YogaPlugin } from 'graphql-yoga'
 
-import { Controller, Ctx, Get, type HttpContext, Post } from '@znight/http'
-import { createYoga } from 'graphql-yoga'
+import { GraphQLPlugin } from '@znight/graphql'
+import { yogaDriver } from '@znight/graphql/yoga'
+import { HttpPlugin } from '@znight/http'
 
-type Yoga = YogaServerInstance<Record<string, unknown>, Record<string, unknown>>
-
-/** The operation Yoga received, as `GraphQLPlugin` takes it, and the signal of the request. */
-function operation(args: ExecutionArgs): [GraphQLRequest, { signal: AbortSignal }] {
-  const { params, request } = args.contextValue as YogaInitialContext
-  return [{ ...params, query: params.query ?? '' }, { signal: request.signal }]
+/** A Yoga plugin: Envelop and Yoga plugins (persisted operations, response cache...) go to the driver. */
+const servedBy: YogaPlugin = {
+  onResponse({ response }) {
+    response.headers.set('x-graphql-server', 'yoga')
+  },
 }
 
-/** Yoga parses and validates; Znight executes: guards, loaders, request scope, errors and hooks. */
-function executeWithZnight(graphql: GraphQLPlugin): Plugin {
-  return {
-    onExecute({ setExecuteFn }) {
-      setExecuteFn(async args => (await graphql.execute(...operation(args))) as never)
-    },
-    onSubscribe({ setSubscribeFn }) {
-      setSubscribeFn(args => graphql.subscribe(...operation(args)) as never)
-    },
-  }
-}
-
-@Controller('/graphql')
-export class YogaController {
-  #yoga: Yoga | undefined
-
-  constructor(private readonly graphql: GraphQLPlugin) {}
-
-  @Get()
-  get(@Ctx() ctx: HttpContext): Promise<Response> {
-    return this.#handle(ctx)
-  }
-
-  @Post()
-  post(@Ctx() ctx: HttpContext): Promise<Response> {
-    return this.#handle(ctx)
-  }
-
-  async #handle(ctx: HttpContext): Promise<Response> {
-    const headers = new Headers()
-    for (const [name, value] of Object.entries(ctx.headers)) if (value !== undefined) headers.set(name, value)
-    const url = new URL(ctx.url, `${ctx.protocol}://${ctx.header('host') ?? 'localhost'}`)
-    const request = new Request(url.href, {
-      method: ctx.method,
-      headers,
-      ...(ctx.method === 'GET' ? {} : { body: await ctx.rawBody() }),
-      signal: ctx.signal,
-    })
-    // the schema exists once the application booted: Yoga is created on the first request
-    this.#yoga ??= createYoga({
-      schema: this.graphql.schema,
-      graphqlEndpoint: '/graphql',
-      maskedErrors: false, // GraphQLPlugin already masks unexpected errors
-      logging: false, // requests and operations are logged by Znight (@znight/observability)
-      plugins: [executeWithZnight(this.graphql)],
-    })
-    return this.#yoga.fetch(request)
-  }
+export function plugins(): Plugin[] {
+  return [
+    HttpPlugin.configure(),
+    GraphQLPlugin.configure({
+      graphiql: process.env['NODE_ENV'] === 'development',
+      driver: yogaDriver({ plugins: [servedBy] }),
+    }),
+  ]
 }
 ```
 
 ```ts [src/main.ts (excerpt)]
-GraphQLPlugin.configure({ http: false }) // no built-in endpoint: the controller serves /graphql
+const app = await Application.create({ metadata: __ZNIGHT_METADATA__, plugins: plugins() })
 ```
 
 ```sh
 npm install graphql-yoga
 ```
 
-Why Yoga does not execute the schema itself: its resolvers expect Znight's `GraphQLContext`
-(`@Ctx()`, `@Loader()`, `ctx.signal`), the request scope and the error formatting of
-`GraphQLPlugin`, none of which Yoga's context provides. Delegating the execution keeps everything of
-this guide: GraphQL guards (whose `ctx.http` is the request of the route), loaders, request-scoped
-providers, argument validation, error and result mappers, masking, limits, and the
-`graphql:operation` hook (with `transport: 'direct'`). What to know:
+The resolvers, guards, loaders and tests of the application do not change: resolvers keep
+`GraphQLContext` (`@Ctx()`, `@Loader()`, `ctx.signal`), guards see the HTTP request of the route in
+`ctx.http`, request-scoped providers are created once per request, errors are mapped and masked
+once by the engine, and the `graphql:operation` hook reports every operation with `driver: 'yoga'`
+(`transport: 'sse'` for subscriptions). What to know:
 
-- The route is a controller route: HTTP guards, CORS and access decisions apply to it like to any
-  other (a required group needs a decision on the controller, `@Public()` for instance).
-- Yoga plugins that work on the request, the parsed document, the validation or the result apply;
-  those that wrap resolvers or replace the execution do not, and Yoga's `context` option does not
-  reach the resolvers (use request-scoped providers).
-- An operation is parsed by Yoga, then again by `GraphQLPlugin` (its document cache makes repeated
-  documents cheap), and validated by both.
-- Apollo Server cannot take this route today: it needs graphql-js 16, while `@znight/graphql` runs
-  on graphql-js 17. Pluggable GraphQL servers are being designed (RFC 0009).
+- **Options.** `yogaDriver()` takes Yoga's options, except those Znight owns: the schema, the
+  context, the endpoint (`path`), masking (`exposeErrors`), CORS (`HttpPlugin`'s), the body limit
+  (`http.bodyLimit`), the document cache and the request id (`HttpPlugin`'s); and `batching` and
+  `multipart`, which the driver refuses: one operation per request scope, and JSON bodies only
+  (below). Passing one is a type error, and ZNIGHT066 for untyped callers. Yoga's `logging` is off unless set: Znight logs requests
+  and operations. `graphiql: true` on `GraphQLPlugin` serves Yoga's GraphiQL; `yogaDriver({ graphiql:
+  { title } })` configures it.
+- **Plugins.** Envelop and Yoga plugins run around the engine: persisted operations, response
+  caching, rate limits, usage reporting, plugins wrapping the execution. A plugin that replaces the
+  execution (`useGraphQlJit`) would bypass the engine: such an operation fails with ZNIGHT066,
+  logged once. Prefer Znight's tracing (`@znight/observability`) to Yoga's: both would trace the
+  same operations.
+- **Yoga's context.** Resolvers rarely need it; `yogaContext(ctx)` returns it (`request`, `params`,
+  what a plugin added, and `znight`, the `HttpContext`) for an operation the driver received.
+- **Subscriptions** use Yoga's SSE (distinct connections; `useGraphQLSSE` for the single
+  connection mode). The engine keeps `subscriptions.maxActive` and ends every stream when the
+  application stops: the client receives Yoga's `complete` event rather than the built-in
+  transport's `retry` hint. Yoga's `keepAlive` pings replace `subscriptions.heartbeat`.
+- **Protocol.** Yoga follows the GraphQL-over-HTTP draft (the `graphql-http` audits pass through it
+  on every adapter); its request errors (malformed JSON, missing query) carry its own messages. A
+  body past `http.bodyLimit` is `HttpPlugin`'s 413, as with the built-in endpoint.
+- **CSRF.** As with the built-in endpoint, a `POST` body is `application/json` only: a form, a
+  multipart or a text body is a 415 before Yoga parses it, and a mutation over `GET` is a 405. A
+  cross-site page therefore cannot run a mutation with the user's cookies: a JSON body always needs
+  a CORS preflight.
+- **Errors.** The engine masks the errors of the execution. An unexpected error thrown outside of
+  it, by an Envelop plugin or by Yoga, is masked the same way (`Unexpected error.`, its message
+  with `exposeErrors`) and logged once; a `GraphQLError` a plugin throws on purpose (a rate limit)
+  is sent as it is.
+- **Shutdown.** When `HttpPlugin` starts draining, whatever the plugin order, the engine ends Yoga's
+  subscriptions and refuses new ones; queries and mutations in flight are served, then Yoga is
+  disposed (`yoga.dispose()`).
+- **Route decisions.** An application whose route decisions are required gives the endpoint its
+  decision with `http: { meta: [Public.meta()] }`, as for the built-in endpoint.
 
-The controller is tested in the repository on a compiled application:
-[`yoga.controller.ts`](../../packages/graphql/test/recipes/yoga.controller.ts) and its tests.
+The recipe is tested in the repository on a compiled application:
+[`yoga.plugins.ts`](../../packages/graphql/test/recipes/yoga.plugins.ts) and its tests.
 
 ## Schema-first {#schema-first}
 
@@ -1135,6 +1157,8 @@ NestJS.
 | ---------------------------------------------------- | ------------------------------------------------------------------ |
 | `@ObjectType()`, `@Field(() => Int)`, `@InputType()` | Plain interfaces and classes; `Int`, `ID` aliases                  |
 | `GraphQLModule.forRoot({ driver, autoSchemaFile })`  | `GraphQLPlugin.configure()`; `graphql.configure({ sdl })` at build |
+| `driver: YogaDriver` (`@graphql-yoga/nestjs`)        | `driver: yogaDriver()` from `@znight/graphql/yoga` ([Yoga](#yoga)) |
+| `driver: ApolloDriver`, `MercuriusDriver`            | The built-in transport (Apollo: once it accepts graphql-js 17)     |
 | `@Resolver(() => Book)` + `@ResolveField()`          | `@Resolver()` + `@ResolveField()` with a `@Parent()` parameter     |
 | `@Args('id', { type: () => ID })`                    | `@Args('id') id: ID`                                               |
 | `class-validator` on input classes, `ValidationPipe` | A Standard Schema: `@Args('input', NewBookInput)`                  |

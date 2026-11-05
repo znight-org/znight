@@ -44,6 +44,10 @@ export interface ContextOptions {
   readonly http?: HttpContext
   readonly signal?: AbortSignal
   readonly requestId?: string
+  /** The driver that received the operation (RFC 0009); `'builtin'` when absent. */
+  readonly driver?: string
+  /** The driver's context (`ExecutionArgs.contextValue` given to the engine). */
+  readonly serverContext?: unknown
 }
 
 const NO_VARIABLES: Readonly<Record<string, unknown>> = Object.freeze({})
@@ -86,6 +90,15 @@ export class OperationContext implements GraphQLContext {
 
   get transport(): GraphQLTransport {
     return this.#options.transport ?? 'direct'
+  }
+
+  /** The driver that received the operation: `'builtin'` for the built-in transport and direct calls. */
+  get driver(): string {
+    return this.#options.driver ?? 'builtin'
+  }
+
+  get serverContext(): unknown {
+    return this.#options.serverContext
   }
 
   get operationType(): GraphQLOperationKind {

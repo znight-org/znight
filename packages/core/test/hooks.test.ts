@@ -319,6 +319,7 @@ describe('graphql:operation', () => {
       operationName: 'Books',
       documentId: 'f3a1c0',
       transport: 'http',
+      driver: 'builtin',
       requestId: 'req-1',
       context: { requestId: 'req-1' },
       startTime: performance.now(),
@@ -363,7 +364,7 @@ describe('graphql:operation', () => {
 
   it('types the operation types, transports, outcomes and errors', () => {
     const types: readonly GraphQLOperationType[] = ['query', 'mutation', 'subscription']
-    const transports: readonly GraphQLOperationTransport[] = ['http', 'sse', 'direct']
+    const transports: readonly GraphQLOperationTransport[] = ['http', 'sse', 'ws', 'direct']
     const outcomes: readonly GraphQLOperationOutcome[] = ['success', 'partial', 'error', 'rejected']
     const error: GraphQLOperationError = { message: 'Syntax Error: Expected Name', code: 'GRAPHQL_PARSE_FAILED' }
     const rejected: HookEvent<'graphql:operation'> = {
@@ -371,13 +372,14 @@ describe('graphql:operation', () => {
       operationName: undefined,
       documentId: undefined,
       transport: 'direct',
+      driver: 'builtin',
       requestId: 'req-2',
       context: undefined,
       startTime: 0,
       outcome: 'rejected',
       errors: [error],
     }
-    expect([types.length, transports.length, outcomes.length]).toEqual([3, 3, 4])
+    expect([types.length, transports.length, outcomes.length]).toEqual([3, 4, 4])
     expect(rejected.errors?.[0]?.path).toBeUndefined()
   })
 })

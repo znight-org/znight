@@ -1,36 +1,31 @@
 /**
- * The "Serve the schema with GraphQL Yoga" recipe (`yoga.controller.ts`): the library application of
- * the compiler end-to-end test plus the controller, compiled, booted with `http: false`, and queried
- * through Yoga behind the controller route. Guards (and their `ctx.http`), the singleton and the
+ * The "Serve the schema with GraphQL Yoga" recipe (`yoga.plugins.ts`): the library application of
+ * the compiler end-to-end test plus the plugins of the recipe (the Yoga driver), compiled, booted and
+ * queried through Yoga on the endpoint. Guards (and their `ctx.http`), the singleton and the
  * request-scoped loaders, Standard Schema validation, error codes, the `graphql:operation` hook and
- * subscriptions over Yoga's SSE keep working, because `GraphQLPlugin` executes every operation.
+ * subscriptions over Yoga's SSE keep working, because the engine executes every operation.
  */
-import type { GraphQLOperationEvent, ZnightMetadata } from '@znight/core'
+import type { GraphQLOperationEvent, Plugin, ZnightMetadata } from '@znight/core'
+import type { GraphQLPlugin } from '../../src/index.ts'
 import type { TempApp } from '../compiler/helpers.ts'
 
 import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { HttpPlugin } from '@znight/http'
 import { TestApp } from '@znight/testing'
 
-import { GraphQLPlugin } from '../../src/index.ts'
 import { LIBRARY } from '../compiler/e2e-app.ts'
 import { cleanupApps, compileApp, GRAPHQL_ROOT, render, tempApp } from '../compiler/helpers.ts'
 import { captureLogger } from '../support/app.ts'
 import { afterAll, beforeAll, describe, expect, test as it } from 'bun:test'
 
 /**
- * The recipe, plus the decision the library requires on every route (its `access` group): what an
- * application with a required group adds to the controller, like `http.meta` on the built-in endpoint.
+ * The recipe, on a free port for the tests. The access guard of the library is a GraphQL guard: no
+ * HTTP guard enforces its group on the endpoint, hence `enforcement: 'warn'`.
  */
-const CONTROLLER = fs
-  .readFileSync(path.join(import.meta.dir, 'yoga.controller.ts'), 'utf8')
-  .replace(
-    "import { createYoga } from 'graphql-yoga'\n",
-    "import { createYoga } from 'graphql-yoga'\n\nimport { Public } from '../auth/access.ts'\n",
-  )
-  .replace("@Controller('/graphql')", "@Public()\n@Controller('/graphql')")
+const PLUGINS = fs
+  .readFileSync(path.join(import.meta.dir, 'yoga.plugins.ts'), 'utf8')
+  .replace('HttpPlugin.configure()', "HttpPlugin.configure({ port: 0, host: '127.0.0.1', enforcement: 'warn' })")
 const STORE = 'src/catalog/catalog.store.ts#CatalogStore'
 const EDITOR = { 'x-role': 'editor' }
 const READER = { 'x-role': 'reader' }
@@ -59,7 +54,7 @@ describe('the Yoga recipe', () => {
   }
 
   beforeAll(async () => {
-    app = tempApp({ ...LIBRARY, 'src/graphql/yoga.controller.ts': CONTROLLER })
+    app = tempApp({ ...LIBRARY, 'src/graphql/yoga.plugins.ts': PLUGINS })
     fs.symlinkSync(
       fs.realpathSync.native(path.join(GRAPHQL_ROOT, 'node_modules/graphql-yoga')),
       path.join(app.root, 'node_modules/graphql-yoga'),
@@ -70,13 +65,12 @@ describe('the Yoga recipe', () => {
     fs.mkdirSync(path.dirname(result.outFile), { recursive: true })
     fs.writeFileSync(result.outFile, result.code)
     const generated = (await import(pathToFileURL(result.outFile).href)) as { __ZNIGHT_METADATA__: ZnightMetadata }
+    const recipe = (await import(pathToFileURL(path.join(app.root, 'src/graphql/yoga.plugins.ts')).href)) as {
+      plugins(): Plugin[]
+    }
     server = await TestApp.create({
       metadata: generated.__ZNIGHT_METADATA__,
-      plugins: [
-        // the access guard of the library is a GraphQL guard: no HTTP guard enforces the group on the route
-        HttpPlugin.configure({ port: 0, host: '127.0.0.1', enforcement: 'warn' }),
-        GraphQLPlugin.configure({ http: false }),
-      ],
+      plugins: recipe.plugins(),
       logger: captureLogger(),
     })
     server.app.hooks.on('graphql:operation', event => {
@@ -97,6 +91,8 @@ describe('the Yoga recipe', () => {
 
     expect(res.status).toBe(200)
     expect(res.headers['content-type']).toContain('application/graphql-response+json')
+    // the Yoga plugin of the recipe ran
+    expect(res.headers['x-graphql-server']).toBe('yoga')
     expect(res.json<Result>()).toEqual({
       data: {
         books: {
@@ -150,7 +146,7 @@ describe('the Yoga recipe', () => {
     expect(forbidden.json<Result>().errors?.map(error => error.extensions?.['code'])).toEqual(['FORBIDDEN'])
   })
 
-  it('reports parse and validation errors from Yoga, before any execution', async () => {
+  it('reports parse and validation errors of the engine, observed as rejected operations', async () => {
     const before = operations.length
     const syntax = await post({ query: '{ books {' })
     const unknown = await post({ query: '{ nope }' })
@@ -158,7 +154,12 @@ describe('the Yoga recipe', () => {
     expect(syntax.status).toBe(400)
     expect(unknown.status).toBe(400)
     expect(unknown.json<Result>().errors?.[0]?.message).toContain('Cannot query field "nope"')
-    expect(operations.length).toBe(before)
+    expect(
+      operations.slice(before).map(event => [event.outcome, event.driver, event.errors?.map(error => error.code)]),
+    ).toEqual([
+      ['rejected', 'yoga', ['GRAPHQL_PARSE_FAILED']],
+      ['rejected', 'yoga', ['GRAPHQL_VALIDATION_FAILED']],
+    ])
   })
 
   it('emits the graphql:operation hook of every execution', async () => {
@@ -166,7 +167,7 @@ describe('the Yoga recipe', () => {
     await post({ query: 'query Titles { books { total } }' })
 
     expect(operations.slice(before)).toEqual([
-      expect.objectContaining({ operationType: 'query', operationName: 'Titles', transport: 'direct' }),
+      expect.objectContaining({ operationType: 'query', operationName: 'Titles', transport: 'http', driver: 'yoga' }),
     ])
   })
 

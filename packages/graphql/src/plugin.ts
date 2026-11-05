@@ -1,7 +1,8 @@
 /**
  * `GraphQLPlugin` (RFC 0005 §5.11, §8.2): builds the schema from `metadata.extensions.graphql`,
  * provides `GraphQLContext`, `PubSub` and itself to the container, executes operations
- * (`execute()`, `subscribe()`) and contributes the GraphQL endpoint to `HttpPlugin`.
+ * (`execute()`, `subscribe()`, the `engine` of drivers, RFC 0009) and contributes the routes of its
+ * driver (the built-in GraphQL-over-HTTP endpoint by default) to `HttpPlugin`.
  */
 import type {
   Container,
@@ -15,9 +16,11 @@ import type {
   Token,
   ZnightMetadata,
 } from '@znight/core'
-import type { PluginHttpRoutes, PluginHttpRoutesContext, PluginRoute, SseOptions } from '@znight/http'
+import type { HttpPlugin, PluginHttpRoutes, PluginHttpRoutesContext, PluginRoute, SseOptions } from '@znight/http'
 import type { FormattedExecutionResult, GraphQLSchema } from 'graphql'
 import type { CheckedField } from './decisions.ts'
+import type { GraphQLDriver, GraphQLDriverRoute } from './driver.ts'
+import type { GraphQLEngine } from './engine.ts'
 import type { ExecuteOptions, GraphQLRequest, GraphQLResultStream } from './execution.ts'
 import type { Resolvable } from './format.ts'
 import type { GraphQLInputTypeDefinition, GraphQLMetadata, GraphQLResolverBinding } from './metadata.ts'
@@ -28,6 +31,7 @@ import { displayName, ErrorCode, resolveOptions, ZnightError } from '@znight/cor
 import { printSchema } from 'graphql'
 
 import { checkFieldDecisions } from './decisions.ts'
+import { Engine } from './engine.ts'
 import { GraphQLExecutor, singleResult } from './execution.ts'
 import { ErrorFormatter } from './format.ts'
 import { LoaderFactory } from './loaders.ts'
@@ -38,7 +42,8 @@ import { PubSub } from './pubsub.ts'
 import { checkResultTypes, declaredTypes, ResultMappers } from './results.ts'
 import { buildGraphQLSchema, checkGraphQLSection, graphqlSection } from './schema.ts'
 import { GraphQLTokens } from './tokens.ts'
-import { checkSseOptions, HttpTransport } from './transport/http.ts'
+import { BUILTIN_DRIVER, BuiltinDriver } from './transport/builtin.ts'
+import { checkSseOptions } from './transport/http.ts'
 
 /** Options of {@link GraphQLPlugin.execute} and {@link GraphQLPlugin.subscribe}. */
 export interface DirectExecuteOptions {
@@ -53,6 +58,7 @@ interface Runtime {
   readonly schema: GraphQLSchema
   readonly section: GraphQLMetadata
   readonly executor: GraphQLExecutor
+  readonly engine: GraphQLEngine
 }
 
 let readExecutor: (plugin: GraphQLPlugin) => GraphQLExecutor
@@ -101,6 +107,10 @@ export class GraphQLPlugin implements Plugin, PluginHttpRoutes {
   #runtime: Runtime | undefined
   #stop: AbortController | undefined
   #endpoint: string | undefined
+  /** The driver serving the schema: the `driver` option, or the built-in transport. */
+  #driver: GraphQLDriver | undefined
+  /** The driver was started (`onBootstrap`): `onStop` stops it. */
+  #started = false
   #active = false
 
   private constructor(options: PluginOptions<GraphQLPluginOptions>) {
@@ -164,6 +174,8 @@ export class GraphQLPlugin implements Plugin, PluginHttpRoutes {
     this.#runtime = undefined
     this.#ownPubSub = undefined
     this.#endpoint = undefined
+    this.#driver = undefined
+    this.#started = false
     this.#container = ctx.container
     this.#metadata = ctx.metadata
     this.#logger = ctx.logger
@@ -183,42 +195,58 @@ export class GraphQLPlugin implements Plugin, PluginHttpRoutes {
   }
 
   /**
-   * The `PluginHttpRoutes` contract of `@znight/http`: the GraphQL endpoint (`GET` and `POST` on
-   * `path`). `[]` with `http: false`.
+   * The `PluginHttpRoutes` contract of `@znight/http`: the routes of the driver, with the `http`
+   * option's meta and guards, and its body limit on the routes that are not `GET`. For the built-in
+   * transport, the GraphQL endpoint (`GET` and `POST` on `path`). `[]` with `http: false`.
    */
   httpRoutes(context: PluginHttpRoutesContext): readonly PluginRoute[] {
     this.#container ??= context.container
     const options = this.#resolve()
     const http = options.http
     if (http === false) return []
+    const driver = this.#driverOf(options)
+    // a server-mounted driver attaches itself to the adapter in start()
+    if (driver.routes === undefined) return []
     const endpoint = endpointPath(context.prefix, options.path)
-    const transport = new HttpTransport({
-      // called on the first request: the routes are collected before or after this plugin's onBootstrap
-      executor: () => this.#ready().executor,
-      endpoint,
-      get: http.get,
-      graphiql: options.graphiql,
-      sse: sseOptions(options),
-    })
+    const routes = driver.routes({ path: options.path, endpoint })
+    if (!Array.isArray(routes))
+      throw invalidOption(`routes() of the ${driver.name} driver`, 'an array of routes', routes)
     this.#endpoint = endpoint
-    const common = {
-      name: 'handle',
-      path: options.path,
-      ...(http.meta.length === 0 ? {} : { meta: http.meta }),
-      ...(http.guards.length === 0 ? {} : { guards: http.guards }),
-    }
-    const routes: PluginRoute[] = [{ ...common, method: 'POST', handler: transport.post, bodyLimit: http.bodyLimit }]
-    // GET serves queries (`http.get`) and GraphiQL; without either, the router answers 405
-    if (http.get || options.graphiql) routes.unshift({ ...common, method: 'GET', handler: transport.get })
-    return routes
+    return routes.map(route => mount(route, http, driver))
   }
 
-  onBootstrap(ctx: PluginContext): void {
+  onBootstrap(ctx: PluginContext): void | Promise<void> {
     this.#container = ctx.container
     const options = this.#resolve()
     if (typeof this.#options === 'function') this.#checkHttp(ctx, options)
-    this.#checkSse(options)
-    this.#runtime = this.#build(ctx, options)
+    if (options.driver === undefined) this.#checkSse(options)
+    const runtime = this.#build(ctx, options)
+    this.#runtime = runtime
+    const driver = this.#driverOf(options)
+    // the built-in transport reads the executor on its first request: nothing to start
+    if (options.driver === undefined) return
+    let started: void | Promise<void>
+    try {
+      started = driver.start(runtime.engine, {
+        logger: ctx.logger,
+        container: ctx.container,
+        http: ctx.getPlugin<HttpPlugin>('http'),
+      })
+    } catch (error) {
+      throw driverFailed(driver, error)
+    }
+    if (!isPromise(started)) {
+      this.#started = true
+      return
+    }
+    return started.then(
+      () => {
+        this.#started = true
+      },
+      (error: unknown) => {
+        throw driverFailed(driver, error)
+      },
+    )
   }
 
   onStart(ctx: PluginContext): void {
@@ -230,12 +258,45 @@ export class GraphQLPlugin implements Plugin, PluginHttpRoutes {
     else ctx.logger.info('GraphQL endpoint ready', { path: options.path, ...details })
   }
 
-  async onStop(): Promise<void> {
-    this.#stop?.abort(new Error('The application is stopping'))
-    await this.#runtime?.executor.stopDirect()
+  /**
+   * The `PluginHttpRoutes` contract: `HttpPlugin` starts draining, whatever the plugin order. The
+   * subscriptions of the engine end (a route-mounted driver serves them as streamed responses
+   * `HttpPlugin` does not close), and new ones are refused (503); queries and mutations in flight
+   * are served. Built-in SSE streams are closed by `HttpPlugin` itself.
+   */
+  onHttpDrain(): Promise<void> | undefined {
+    return this.#runtime?.executor.stopEngineStreams()
   }
 
-  onDispose(): void {
+  async onStop(): Promise<void> {
+    this.#stop?.abort(new Error('The application is stopping'))
+    // direct subscriptions and the driver's (engine) ones; built-in SSE streams end with HttpPlugin
+    await this.#runtime?.executor.stopStreams()
+    // a route-mounted driver serves requests until HttpPlugin drained them: it stops in onDispose
+    if (this.#driver?.routes === undefined) await this.#stopDriver()
+  }
+
+  onDispose(): void | Promise<void> {
+    if (!this.#started) {
+      this.#release()
+      return
+    }
+    // after HttpPlugin drained (every onStop ran), or disposed without having started (onStop did not run)
+    this.#stop?.abort(new Error('The application is stopping'))
+    return Promise.resolve(this.#runtime?.executor.stopStreams())
+      .then(() => this.#stopDriver())
+      .finally(() => this.#release())
+  }
+
+  /** Stops the driver started in onBootstrap (once). */
+  #stopDriver(): void | Promise<void> {
+    const driver = this.#driver
+    if (!this.#started) return
+    this.#started = false
+    return driver?.stop?.()
+  }
+
+  #release(): void {
     this.#active = false
     this.#ownPubSub?.close()
     this.#ownPubSub = undefined
@@ -248,6 +309,15 @@ export class GraphQLPlugin implements Plugin, PluginHttpRoutes {
   /** The schema (after bootstrap). */
   get schema(): GraphQLSchema {
     return this.#ready().schema
+  }
+
+  /**
+   * The GraphQL engine (after bootstrap, RFC 0009): graphql-js-shaped `parse`, `validate`, `execute`
+   * and `subscribe` running this plugin's schema with its guards, loaders, request scope, error
+   * formatting and hook. What drivers receive in `start()`; any GraphQL server can call it.
+   */
+  get engine(): GraphQLEngine {
+    return this.#ready().engine
   }
 
   /** The SDL of the schema (graphql-js `printSchema`). */
@@ -320,6 +390,25 @@ export class GraphQLPlugin implements Plugin, PluginHttpRoutes {
     return this.#resolved
   }
 
+  /** The driver of the application: the `driver` option, or the built-in transport. */
+  #driverOf(options: ResolvedGraphQLOptions): GraphQLDriver {
+    let driver = this.#driver
+    if (driver === undefined) {
+      const http = options.http
+      driver =
+        options.driver ??
+        new BuiltinDriver({
+          // called on the first request: the routes are collected before or after this plugin's onBootstrap
+          executor: () => this.#ready().executor,
+          get: http !== false && http.get,
+          graphiql: options.graphiql,
+          sse: sseOptions(options),
+        })
+      this.#driver = driver
+    }
+    return driver
+  }
+
   /** The SSE options are those of `HttpResponse.sse()` (heartbeat and maxDuration from 1 000 ms): checked at boot. */
   #checkSse(options: ResolvedGraphQLOptions): void {
     const sse = sseOptions(options)
@@ -329,6 +418,14 @@ export class GraphQLPlugin implements Plugin, PluginHttpRoutes {
   }
 
   #checkHttp(ctx: PluginContext, options: ResolvedGraphQLOptions): void {
+    const driver = options.driver
+    if (options.http === false && driver?.routes !== undefined) {
+      throw new ZnightError(
+        ErrorCode.InvalidGraphQLSetup,
+        `GraphQLPlugin: the ${driver.name} driver serves routes, which http: false turns off`,
+        { hints: ['Remove http: false: the driver serves the endpoint through HttpPlugin'] },
+      )
+    }
     if (options.http !== false && ctx.getPlugin('http') === undefined) {
       throw new ZnightError(
         ErrorCode.InvalidGraphQLSetup,
@@ -425,13 +522,29 @@ export class GraphQLPlugin implements Plugin, PluginHttpRoutes {
       introspection: options.introspection,
       documentCache: options.documentCache,
       maxActiveSubscriptions: options.subscriptions === false ? undefined : options.subscriptions.maxActive,
+      subscriptions: options.subscriptions !== false,
     })
+    const http = ctx.getPlugin<HttpPlugin>('http')
+    const engine = new Engine(
+      executor,
+      {
+        path:
+          this.#endpoint ?? endpointPath(options.http === false || http === undefined ? '' : http.prefix, options.path),
+        introspection: options.introspection,
+        ide: options.graphiql,
+        exposeErrors: options.exposeErrors,
+        maxTokens: options.limits.maxTokens,
+        subscriptions: options.subscriptions === false ? false : { maxActive: options.subscriptions.maxActive },
+        http: options.http === false ? false : { get: options.http.get, bodyLimit: options.http.bodyLimit },
+      },
+      options.driver?.name ?? BUILTIN_DRIVER,
+    )
     ctx.logger.debug('GraphQL schema built', {
       types: types.length,
       schemaHash: section.schemaHash,
       ...(results.fields === 0 ? {} : { resultFields: results.fields }),
     })
-    return { schema, section, executor }
+    return { schema, section, executor, engine }
   }
 }
 
@@ -445,6 +558,34 @@ function direct(options: DirectExecuteOptions | undefined): ExecuteOptions {
 }
 
 const DIRECT: ExecuteOptions = Object.freeze({ transport: 'direct' })
+
+/** A route of the driver as a plugin route: the `http` option's meta and guards, its body limit unless `GET`. */
+function mount(
+  route: GraphQLDriverRoute,
+  http: Exclude<ResolvedGraphQLOptions['http'], false>,
+  driver: GraphQLDriver,
+): PluginRoute {
+  if (route === null || typeof route !== 'object' || typeof route.handler !== 'function') {
+    throw invalidOption(`routes() of the ${driver.name} driver`, 'routes { method, path, name, handler }', route)
+  }
+  return {
+    method: route.method,
+    path: route.path,
+    name: route.name,
+    handler: route.handler,
+    ...(http.meta.length === 0 ? {} : { meta: http.meta }),
+    ...(http.guards.length === 0 ? {} : { guards: http.guards }),
+    ...(route.method === 'GET' || route.method === 'HEAD' ? {} : { bodyLimit: http.bodyLimit }),
+  }
+}
+
+/** ZNIGHT066 for a driver whose `start()` failed, the original error as `cause`. */
+function driverFailed(driver: GraphQLDriver, error: unknown): ZnightError {
+  return new ZnightError(ErrorCode.InvalidGraphQLSetup, `GraphQLPlugin: the ${driver.name} driver failed to start`, {
+    cause: error,
+    hints: ['See the cause: the driver could not create its server'],
+  })
+}
 
 /** `prefix` (`''`, `/api`) joined with `path` (`/graphql`), without trailing slash: `/api/graphql`. */
 function endpointPath(prefix: string, path: string): string {
