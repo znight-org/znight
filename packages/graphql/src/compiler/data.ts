@@ -5,7 +5,7 @@
  * parameters are looked up again by name and index (`ctx.classInfo(host.identity)`).
  */
 
-import type { BindingHandle, ClassInfo, ClassRef, Location, ValueRef } from '@znight/compiler'
+import type { BindingHandle, ClassInfo, ClassRef, Location, StaticValue, ValueRef } from '@znight/compiler'
 import type { Scope } from '@znight/core'
 import type { MetaEntry } from '@znight/http/compiler'
 
@@ -76,6 +76,22 @@ export type ParamData =
       readonly binding: BindingHandle
       /** Identity of `L` in `Loader<L>`. */
       readonly identity: string
+      readonly location: Location
+    }
+  | {
+      /** A custom parameter decorator (`createParamDecorator`, RFC 0010). */
+      readonly kind: 'custom'
+      /** Canonical identity of the decorator `const` (imported by the generated module). */
+      readonly identity: string
+      readonly name: string
+      /** The data argument (a value, possibly holding references, or a reference); `undefined` without argument. */
+      readonly data: { readonly value: StaticValue } | undefined
+      /** The class resolver (`x[i].resolve(f, data)`); `undefined` for a function resolver. */
+      readonly resolver: ClassRef | undefined
+      /** Parameters of the class resolver's own `resolve` (`undefined`: inherited, or a function). */
+      readonly arity?: number
+      /** The value type could not be checked against the parameter. */
+      readonly cast: boolean
       readonly location: Location
     }
 

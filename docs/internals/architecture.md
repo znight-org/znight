@@ -2988,7 +2988,9 @@ interface GraphQLResolverBinding {
   guards: Token[] // class @UseGuard, then method @UseGuard
   meta: Record<string, unknown> // effective route metadata; {} when none
   loaders?: Token[] // informational
-  invoke: (resolver, parent, args, context: GraphQLContext, info: GraphQLResolveInfo) => unknown
+  context?: true // custom parameters: the pipeline passes the ResolverContext (RFC 0010)
+  paramResolvers?: Token[] // class resolvers of custom parameters, in order of first use
+  invoke(resolver, parent, args, context: GraphQLContext, info: GraphQLResolveInfo, f?: ResolverContext, x?): unknown
 }
 ```
 
@@ -3002,6 +3004,18 @@ interface GraphQLResolverBinding {
   the arrow calls the method synchronously unless `isThenable(vN)` (`@znight/http`), and only then
   resumes in an `async` arrow. `validateArgs` MUST return synchronously for a synchronous schema and
   throw a `GraphQLException` `BAD_USER_INPUT` with `extensions.issues: [{ path, message }]`.
+- **Custom parameters** (RFC 0010, §8.6): a parameter decorated with a custom parameter decorator
+  that has a `graphql` resolver. The binding gets `context: true` and, for class resolvers,
+  `paramResolvers` (tokens in order of first use); `invoke` gains `f` (the field's
+  `ResolverContext`) and `x` (the resolver instances), each declared only when used. The argument is
+  `(D.resolvers.graphql as ParamFunctionOf<typeof D, 'graphql'>)(f, data)` or `x[i].resolve(f,
+  data)` (data left out when the class's own `resolve` declares one parameter), evaluated like a
+  validated argument (`const vN`, `isThenable` fallback). The pipeline builds the `ResolverContext`
+  only for such fields, sharing the guards' instance when the field has guards, and passes the
+  resolver instances (one frozen array at boot for singletons, resolved in the operation scope
+  otherwise). Custom parameters are not GraphQL arguments: the code-first builder ignores them and
+  the schema-first conformance skips them. A resolver error fails the field like a method error
+  (`errors[]`, or the result mapper of RFC 0008).
 - Fields: declaration order, base members first; a `@ResolveField` of the same name replaces the
   property in place (same GraphQL type, ZNIGHT061 otherwise), others are appended by resolver token
   then source order. Enum values in declaration order. Statically evaluable defaults (`@default`,

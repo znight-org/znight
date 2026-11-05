@@ -471,6 +471,33 @@ function parameterDecorators(param: ParameterInfo): DecoratorInfo[] {
 
 function analyzeParameter(ctx: Context, cls: ClassInfo, param: ParameterInfo, where: string): ParamData | undefined {
   const decorators = parameterDecorators(param)
+  // custom parameter decorators (RFC 0010); compilers before it have no paramDecorator
+  const custom = typeof ctx.paramDecorator === 'function' ? ctx.paramDecorator(param, 'graphql', cls) : undefined
+  if (custom !== undefined) {
+    for (const other of decorators) {
+      error(
+        ctx,
+        Codes.InvalidDecorator,
+        other.location,
+        `Parameter '${param.name}' of ${where} has several parameter decorators (@${custom.decorator.name} and @${other.name})`,
+        ['Keep a single parameter decorator'],
+      )
+    }
+    if (!custom.ok || decorators.length > 0) return undefined
+    const data = custom.data
+    return {
+      kind: 'custom',
+      identity: custom.identity,
+      name: custom.name,
+      data: data === undefined ? undefined : { value: data.ref ?? (data.value as StaticValue) },
+      resolver: custom.resolver.kind === 'class' ? custom.resolver.ref : undefined,
+      ...(custom.resolver.kind === 'class' && custom.resolver.arity !== undefined
+        ? { arity: custom.resolver.arity }
+        : {}),
+      cast: custom.cast,
+      location: custom.location,
+    }
+  }
   const decorator = decorators[0]
   if (decorator === undefined) {
     const lookAlike = param.decorators.find(

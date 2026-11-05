@@ -45,6 +45,8 @@ export interface PipelineOptions {
   readonly guard: (token: Token, coordinate: string) => Resolvable<GraphQLGuard>
   /** The resolver provider of a binding (memoised by the caller). */
   readonly resolver: (binding: GraphQLResolverBinding, coordinate: string) => Resolvable<object>
+  /** The provider of a custom parameter resolver class (RFC 0010; memoised by the caller). */
+  readonly paramResolver?: (token: Token, coordinate: string) => Resolvable<object>
   /** Input object types by name (null handling of nested input values). */
   readonly inputs: ReadonlyMap<string, GraphQLInputTypeDefinition>
   /** The {@link Recover} function of a field that carries results (RFC 0008), `undefined` for the others. */
@@ -52,7 +54,15 @@ export interface PipelineOptions {
 }
 
 /** The generated invoker of a binding. */
-type Invoke = GraphQLResolverBinding['invoke']
+type Invoke = (
+  resolver: object,
+  parent: unknown,
+  args: GraphQLArgs,
+  context: GraphQLContext,
+  info: GraphQLResolveInfo,
+  field?: ResolverContext,
+  resolvers?: readonly object[],
+) => unknown
 
 /** Mutates a coerced argument or input value in place: `null` → `undefined` where flagged. */
 type Normalize = (value: unknown) => void
@@ -78,7 +88,6 @@ function fieldFunctions(
   parent: GraphQLObjectTypeDefinition,
 ): FieldFunctions {
   const container = options.container
-  const invoke: Invoke = binding.invoke
   const target = options.resolver(binding, coordinate)
   const guards: Resolvable<GraphQLGuard>[] = [
     ...(globalGuardsApply(binding) ? options.globalGuards : []),
@@ -86,10 +95,16 @@ function fieldFunctions(
   ]
   const normalize = field.args === undefined ? undefined : normalizers.args(field.args)
   const recover = options.results?.(field, coordinate)
+  const custom = binding.context === true
   const route =
-    guards.length === 0 && recover === undefined ? undefined : Object.freeze({ meta: binding.meta, coordinate })
+    guards.length === 0 && recover === undefined && !custom
+      ? undefined
+      : Object.freeze({ meta: binding.meta, coordinate })
   const parentType = parent.name
   const fieldName = field.name
+  const invoke: Invoke = custom
+    ? customInvoke(options, binding, coordinate, route as ResolverContext['route'], parentType, fieldName)
+    : (binding.invoke as Invoke)
 
   let resolve: GraphQLFieldResolver<unknown, unknown>
   if (guards.length === 0) {
@@ -120,15 +135,21 @@ function fieldFunctions(
     resolve = (p, a, c, i) => {
       const operation = c as OperationContext
       const args = a as GraphQLArgs
-      const allowed = runGuards(
-        container,
-        guards,
-        new FieldContext(route as ResolverContext['route'], operation, parentType, fieldName, args, p, i),
+      const fieldContext = new FieldContext(
+        route as ResolverContext['route'],
+        operation,
+        parentType,
+        fieldName,
+        args,
+        p,
+        i,
       )
-      // §8.5: guards (they see the coerced arguments), then null handling, then invoke
+      const allowed = runGuards(container, guards, fieldContext)
+      // §8.5: guards (they see the coerced arguments), then null handling, then invoke (custom
+      // parameters share the guards' ResolverContext)
       const call = (): unknown => {
         if (normalize !== undefined) normalize(args)
-        return invoke(resolveIn(container, target), p, args, operation, i)
+        return invoke(resolveIn(container, target), p, args, operation, i, fieldContext)
       }
       if (allowed === true) return call()
       if (allowed === false) return forbidden()
@@ -148,6 +169,48 @@ function fieldFunctions(
 
 function identity(payload: unknown): unknown {
   return payload
+}
+
+/**
+ * The invoke of a method with custom parameters (RFC 0010): the generated `invoke` receives the
+ * field's `ResolverContext` (the guards' one when the field has guards, else a new one) and the
+ * instances of its parameter resolvers: one frozen array resolved at boot when they are all
+ * singletons, otherwise resolved in the operation scope on every call.
+ */
+function customInvoke(
+  options: PipelineOptions,
+  binding: GraphQLResolverBinding,
+  coordinate: string,
+  route: ResolverContext['route'],
+  parentType: string,
+  fieldName: string,
+): Invoke {
+  const generated = binding.invoke as Invoke
+  const container = options.container
+  const tokens = binding.paramResolvers ?? []
+  const resolvers = tokens.map(token => {
+    if (options.paramResolver === undefined) throw new TypeError(`No parameter resolver for ${coordinate}`)
+    return options.paramResolver(token, coordinate)
+  })
+  const context = (p: unknown, a: GraphQLArgs, c: GraphQLContext, i: GraphQLResolveInfo, f?: ResolverContext) =>
+    f ?? new FieldContext(route, c as OperationContext, parentType, fieldName, a, p, i)
+  if (resolvers.length === 0) {
+    return (r, p, a, c, i, f) => generated(r, p, a, c, i, context(p, a, c, i, f))
+  }
+  if (resolvers.every(resolver => resolver.token === undefined)) {
+    const instances = Object.freeze(resolvers.map(resolver => resolveIn(container, resolver)))
+    return (r, p, a, c, i, f) => generated(r, p, a, c, i, context(p, a, c, i, f), instances)
+  }
+  return (r, p, a, c, i, f) =>
+    generated(
+      r,
+      p,
+      a,
+      c,
+      i,
+      context(p, a, c, i, f),
+      resolvers.map(resolver => resolveIn(container, resolver)),
+    )
 }
 
 /**

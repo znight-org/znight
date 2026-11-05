@@ -396,6 +396,8 @@ export class GraphQLPlugin implements Plugin, PluginHttpRoutes {
         guard: (token, coordinate) => providers.token<GraphQLGuard>(token, `guard of ${coordinate}`, 'canResolve'),
         resolver: (binding, coordinate) =>
           providers.token<object>(binding.token, `resolver of ${coordinate}`, binding.method),
+        paramResolver: (token, coordinate) =>
+          providers.token<object>(token, `parameter resolver of ${coordinate}`, 'resolve'),
         inputs,
         results: (field, coordinate) => results.recover(field, coordinate),
       }),

@@ -121,9 +121,17 @@ export interface GraphQLContext {
   loader(token: Token): BatchLoader<unknown, unknown>
 }
 
+declare module '@znight/core' {
+  /** Custom parameter decorators (`createParamDecorator`) resolve GraphQL parameters from the {@link ResolverContext}. */
+  interface ParamContexts {
+    graphql: ResolverContext
+  }
+}
+
 /**
- * What a {@link GraphQLGuard} receives for one resolver call (§5.9). It satisfies the
- * `RouteMetaCarrier` of `@znight/http`, so route decorators read it: `Roles.get(ctx)`.
+ * What a {@link GraphQLGuard} receives for one resolver call (§5.9), and the context of custom
+ * parameter resolvers (RFC 0010). It satisfies the `RouteMetaCarrier` of `@znight/http`, so route
+ * decorators read it: `Roles.get(ctx)`.
  */
 export interface ResolverContext<TParent = unknown, TArgs extends GraphQLArgs = GraphQLArgs> extends RouteMetaCarrier {
   /** Effective metadata of the field (method decisions over class decisions) and its schema coordinate. */
