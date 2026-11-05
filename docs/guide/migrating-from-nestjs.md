@@ -55,6 +55,7 @@ walks through a migration.
 | `@UsePipes(ValidationPipe)`                        | Schemas on parameters, or `@Validate(schema)`                 | See [validation](#validationpipe-schemas).                                                  |
 | `@UseFilters()` / `ExceptionFilter`                | `exceptionMappers` option of `HttpPlugin`                     | `HttpException(status, message, details?)` for expected errors.                             |
 | `@SetMetadata('roles', [...])` + `Reflector`       | `createRouteDecorator<T>('roles')`                            | See [route metadata](#reflector-createroutedecorator).                                      |
+| `createParamDecorator((data, ctx) => ...)`         | `createParamDecorator<T, D>({ http, graphql, messaging })`    | One resolver per transport, checked at build time. See [below](#createparamdecorator).      |
 | `@UploadedFile()` + `FileInterceptor('file')`      | `@UploadedFile('file', { maxSize, mimeTypes })`               | No interceptor nor Multer: standard `File` objects, limits checked while reading.           |
 | `cookie-parser` + `@Req() req.cookies`             | `@Cookie('name')`, `@SignedCookie('name')`, `ctx.cookies`     | Coerced like headers; signed cookies with key rotation ([cookies](/packages/http#cookies)). |
 | `res.cookie()`                                     | `ctx.setCookie()` / `HttpResponse.withCookie()`               | Secure defaults: `Secure; HttpOnly; SameSite=Lax`.                                          |
@@ -263,6 +264,25 @@ Register the guard globally (`HttpPlugin.configure({ guards: [AuthGuard] })`, th
 `APP_GUARD`). Instead of `ctx.state.get('user')`, a request-scoped `CurrentUser` keeps the caller
 typed and visible in the dependency graph. The [Security guide](./security) has the complete
 recipes: JWT and OIDC with `jose`, API keys, policies, rate limiting, CSRF.
+
+## `createParamDecorator` → one resolver per transport {#createparamdecorator}
+
+NestJS parameter decorators receive an `ExecutionContext` and switch on its type; Znight's take
+one resolver per transport, each with the typed context of its transport, and the compiler checks
+every use ([Custom parameter decorators](./custom-parameters)).
+
+| NestJS                                                                        | Znight                                                                                           |
+| ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `createParamDecorator((data, ctx) => ctx.switchToHttp().getRequest().user)`   | `createParamDecorator<User>({ http: ctx => ctx.state.get('user') as User })`                     |
+| `GqlExecutionContext.create(ctx).getContext().req.user` in a second decorator | a `graphql` resolver in the same definition: `graphql: ctx => ctx.operation.state.get('user')`   |
+| `@CurrentUser()` and `@GqlCurrentUser()`                                      | one `@CurrentUser()`                                                                             |
+| `request.user` set by a Passport guard                                        | `ctx.state.set('user', user)` in the guard ([Security](./security))                              |
+| `data` argument, any runtime value                                            | `data` argument, static or an exported `const`                                                   |
+| `createParamDecorator<string>` (types `data` only)                            | `createParamDecorator<User, string>`: `T` checked against each parameter at build time           |
+| `@CurrentUser(new ValidationPipe({ validateCustomDecorators: true }))`        | `validate(S, value, label)` in the resolver, or the schema as data                               |
+| `Reflector` reading handler metadata in the factory                           | route decorators: `Roles.get(ctx)` (`HttpContext` and `ResolverContext` are `RouteMetaCarrier`s) |
+| A pipe class to reach providers                                               | a class resolver implementing `ParamResolver`, with constructor injection                        |
+| `applyDecorators(...)`                                                        | not supported: apply the decorators directly                                                     |
 
 ## `new Logger(X.name)` → `getLogger()` {#logger-to-getlogger}
 

@@ -272,6 +272,45 @@ describe('TestApp: instantiated providers', () => {
     await app.close()
   })
 
+  it('parameter resolvers of routes, fields and message handlers are roots (RFC 0010)', async () => {
+    const custom = defineTestMetadata({
+      providers: [
+        { token: T.Database, class: Database },
+        { token: T.AuditService, class: AuditService },
+        { token: T.BrokenService, class: BrokenService },
+      ],
+      extensions: {
+        http: {
+          controllers: [
+            {
+              token: T.Database,
+              guards: [],
+              interceptors: [],
+              routes: [{ guards: [], paramResolvers: [T.AuditService] }],
+            },
+          ],
+        },
+        messaging: { consumers: [{ token: T.Database, handlers: [{ paramResolvers: [T.AuditService] }, null] }] },
+        graphql: {
+          version: 1,
+          roots: { query: 'Query' },
+          types: [
+            {
+              kind: 'object',
+              name: 'Query',
+              fields: [{ name: 'a', resolver: { token: T.Database, paramResolvers: [T.AuditService] } }],
+            },
+          ],
+        },
+      },
+    })
+    const app = await TestApp.create({ metadata: custom, logger: quiet() })
+    const created = app.container.instances().map(instance => instance.token)
+    expect(created).toEqual(expect.arrayContaining([T.Database, T.AuditService]))
+    expect(created).toHaveLength(2)
+    await app.close()
+  })
+
   it('GraphQL roots join the controllers', async () => {
     const both = defineTestMetadata({
       providers: [

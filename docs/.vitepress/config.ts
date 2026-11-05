@@ -159,6 +159,7 @@ function sidebarGuide(): DefaultTheme.SidebarItem[] {
         { text: 'Lifecycle', link: '/guide/lifecycle' },
         { text: 'Plugins & hooks', link: '/guide/plugins' },
         { text: 'Method interceptors (AOP)', link: '/guide/aop' },
+        { text: 'Custom parameter decorators', link: '/guide/custom-parameters' },
         { text: 'The compiler', link: '/guide/compiler' },
       ],
     },

@@ -3208,11 +3208,11 @@ res.json()
   Jest-compatible spy (`createSpy`).
 - `TestApp.create({ metadata, plugins?, providers?, overrides?, only?, start?, logger?, shutdown? })`
   runs `Application.create` with signal handlers disabled, applies `overrides` last and, by default,
-  instantiates only the closure of the HTTP controllers (with their guards and interceptors), the
-  message consumers, the hosts of scheduled jobs (`extensions.schedule.jobs[].token`, disabled jobs
-  included: they can be triggered), the GraphQL resolvers with their guards and loaders (for every
+  instantiates only the closure of the HTTP controllers (with their guards, interceptors and
+  parameter resolvers, RFC 0010), the message consumers (with their parameter resolvers), the hosts of scheduled jobs (`extensions.schedule.jobs[].token`, disabled jobs
+  included: they can be triggered), the GraphQL resolvers with their guards, loaders and parameter resolvers (for every
   field of an object type bound to a resolver, `extensions.graphql.types[].fields[].resolver.token`,
-  `guards` and `loaders`; RFC 0005 §7.1), the override keys and the **plugin roots** (everything
+  `guards`, `loaders` and `paramResolvers`; RFC 0005 §7.1), the override keys and the **plugin roots** (everything
   when there is no controller, consumer, job nor resolver; `only: 'all' | keys`, keys to which the
   override keys and plugin roots are added; `'all'` ignores plugin roots). Plugin roots are the
   providers a plugin resolves in `onBootstrap` although the metadata does not reference them

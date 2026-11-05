@@ -75,7 +75,7 @@ export function readConfigClasses(metadata: ZnightMetadata): Map<Token, ConfigCl
 
 /**
  * Tokens an HTTP application needs at boot: controllers (`extensions.http.controllers[].token`) and
- * the guards and interceptors they and their routes reference.
+ * the guards, interceptors and parameter resolvers (RFC 0010) they and their routes reference.
  */
 export function readHttpRoots(metadata: ZnightMetadata): Token[] {
   const roots: Token[] = []
@@ -84,17 +84,27 @@ export function readHttpRoots(metadata: ZnightMetadata): Token[] {
     if (typeof controller['token'] === 'string') roots.push(controller['token'])
     roots.push(...tokensOf(controller['guards']), ...tokensOf(controller['interceptors']))
     for (const route of arrayOf(controller['routes'])) {
-      if (isRecord(route)) roots.push(...tokensOf(route['guards']), ...tokensOf(route['interceptors']))
+      if (isRecord(route)) {
+        roots.push(
+          ...tokensOf(route['guards']),
+          ...tokensOf(route['interceptors']),
+          ...tokensOf(route['paramResolvers']),
+        )
+      }
     }
   }
   return roots
 }
 
-/** Message consumers (`extensions.messaging.consumers[].token`). */
+/** Message consumers (`extensions.messaging.consumers[].token`) and their parameter resolvers (RFC 0010). */
 export function readMessagingRoots(metadata: ZnightMetadata): Token[] {
   const roots: Token[] = []
   for (const consumer of arrayOf(extension(metadata, 'messaging')?.['consumers'])) {
-    if (isRecord(consumer) && typeof consumer['token'] === 'string') roots.push(consumer['token'])
+    if (!isRecord(consumer)) continue
+    if (typeof consumer['token'] === 'string') roots.push(consumer['token'])
+    for (const handler of arrayOf(consumer['handlers'])) {
+      if (isRecord(handler)) roots.push(...tokensOf(handler['paramResolvers']))
+    }
   }
   return roots
 }
@@ -111,7 +121,7 @@ export function readScheduleRoots(metadata: ZnightMetadata): Token[] {
 /**
  * Tokens a GraphQL application needs at boot (`extensions.graphql`, RFC 0005 §7.1): for every field
  * of an object type bound to a resolver (`types[kind: 'object'].fields[].resolver`), the resolver
- * token, its guard tokens and the loader tokens its method injects.
+ * token, its guard tokens, the loader tokens its method injects and its parameter resolvers (RFC 0010).
  */
 export function readGraphQLRoots(metadata: ZnightMetadata): Token[] {
   const roots: Token[] = []
@@ -121,7 +131,11 @@ export function readGraphQLRoots(metadata: ZnightMetadata): Token[] {
       const resolver = isRecord(field) ? field['resolver'] : undefined
       if (!isRecord(resolver)) continue
       if (typeof resolver['token'] === 'string') roots.push(resolver['token'])
-      roots.push(...tokensOf(resolver['guards']), ...tokensOf(resolver['loaders']))
+      roots.push(
+        ...tokensOf(resolver['guards']),
+        ...tokensOf(resolver['loaders']),
+        ...tokensOf(resolver['paramResolvers']),
+      )
     }
   }
   return roots
