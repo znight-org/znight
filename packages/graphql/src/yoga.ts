@@ -27,7 +27,10 @@ import { parseByteSize } from '@znight/http'
 import { GraphQLError } from 'graphql'
 import { createYoga } from 'graphql-yoga'
 
+import { GraphQLErrorCode } from './errors.ts'
+import { MEDIA, Media, type MediaKind, negotiate } from './transport/accept.ts'
 import { fetchRequest } from './transport/fetch.ts'
+import { isJsonRequest, notJson } from './transport/http.ts'
 
 /** The server context the driver gives Yoga: the `HttpContext` of the route, as `znight`. */
 export interface YogaServerContext {
@@ -54,6 +57,8 @@ const OWNED = [
   'healthCheckEndpoint',
   'landingPage',
   'disposeOnProcessTerminate',
+  'batching',
+  'multipart',
 ] as const
 
 /** Where each owned option comes from, for the ZNIGHT066 hint. */
@@ -69,15 +74,20 @@ const OWNER: Readonly<Record<(typeof OWNED)[number], string>> = {
   requestId: 'Yoga uses the request id of HttpPlugin',
   healthCheckEndpoint: 'the driver only serves the GraphQL endpoint',
   landingPage: 'the driver only serves the GraphQL endpoint',
-  disposeOnProcessTerminate: 'the application stops Yoga (GraphQLPlugin.onStop)',
+  disposeOnProcessTerminate: 'the application stops Yoga once HttpPlugin drained its requests',
+  batching:
+    'Send one operation per request: the operations of a batch would share the request scope and its GraphQLContext',
+  multipart:
+    'POST bodies are application/json only: form and multipart bodies skip the CORS preflight (CSRF); upload files through an HTTP controller',
 }
 
 /**
- * Options of {@link yogaDriver}: Yoga's own (`plugins`, `batching`, `multipart`, `logging`...),
- * except those the engine, `GraphQLPlugin` or `HttpPlugin` own: the schema, the context, the
- * endpoint (`path`), masking (`exposeErrors`), CORS, the body limit (`http.bodyLimit`), the
- * document cache, the request id and the IDE switch (`graphiql`). Yoga's `logging` is off unless
- * set: requests and operations are logged by Znight.
+ * Options of {@link yogaDriver}: Yoga's own (`plugins`, `logging`, `allowedHeaders`...), except
+ * those the engine, `GraphQLPlugin` or `HttpPlugin` own: the schema, the context, the endpoint
+ * (`path`), masking (`exposeErrors`), CORS, the body limit (`http.bodyLimit`), the document cache,
+ * the request id and the IDE switch (`graphiql`); and those the driver refuses: `batching` (one
+ * operation per request scope) and `multipart` (JSON bodies only, see {@link yogaDriver}). Yoga's
+ * `logging` is off unless set: requests and operations are logged by Znight.
  */
 export interface YogaDriverOptions
   extends Omit<YogaServerOptions<YogaServerContext, Record<string, unknown>>, (typeof OWNED)[number] | 'graphiql'> {
@@ -100,6 +110,11 @@ export interface YogaDriver extends GraphQLDriver {
  * Yoga handles the protocol and its Envelop plugins; the engine parses, validates and executes
  * (guards, loaders, request scope, masking, the `graphql:operation` hook). Plugins that replace
  * the engine's execution (`useGraphQlJit`) are refused: the operation fails with ZNIGHT066.
+ *
+ * Like the built-in transport, a `POST` body is `application/json` only (415 otherwise): form,
+ * multipart and text bodies, which a cross-site page sends without a CORS preflight, never run
+ * an operation (CSRF). Errors thrown outside the engine (by Yoga or an Envelop plugin) are masked
+ * like the engine's (`Unexpected error.` unless `exposeErrors`) and logged.
  *
  * ```ts
  * GraphQLPlugin.configure({
@@ -159,6 +174,8 @@ class Driver implements YogaDriver {
   readonly name = 'yoga' as const
   readonly #options: YogaDriverOptions
   #yoga: Yoga | undefined
+  /** Stopped: the application stops, requests that still reach the driver get a 503. */
+  #stopped = false
   #get = true
   #ide = false
   #limit = DEFAULT_BODY_LIMIT
@@ -175,7 +192,7 @@ class Driver implements YogaDriver {
   routes(context: GraphQLDriverRoutesContext): readonly GraphQLDriverRoute[] {
     return [
       { method: 'GET', path: context.path, name: 'yoga', handler: this.#getHandler },
-      { method: 'POST', path: context.path, name: 'yoga', handler: this.#handle },
+      { method: 'POST', path: context.path, name: 'yoga', handler: this.#postHandler },
     ]
   }
 
@@ -200,7 +217,10 @@ class Driver implements YogaDriver {
       graphiql: settings.ide ? (graphiql ?? true) : false,
       landingPage: false,
       healthCheckEndpoint: UNREACHABLE,
-      maskedErrors: false, // the engine masked them
+      // the engine masked its errors (kept as they are); those thrown outside of it are masked here
+      maskedErrors: { maskError: outsideErrors(settings.exposeErrors, context.logger) },
+      batching: false,
+      multipart: false,
       cors: false, // HttpPlugin's CORS
       maxRequestBodySize: this.#limit,
       parserAndValidationCache: false, // the engine's document cache
@@ -209,22 +229,35 @@ class Driver implements YogaDriver {
       fetchAPI: fetchApi(),
       plugins: [engineFns.plugin, ...plugins, engineFns.guard],
     })
+    this.#stopped = false
   }
 
+  /** Called once `HttpPlugin` drained the requests (`GraphQLPlugin.onDispose`). */
   async stop(): Promise<void> {
     const yoga = this.#yoga
     this.#yoga = undefined
+    this.#stopped = true
     await yoga?.dispose()
   }
 
   readonly #handle = (ctx: HttpContext): Response | Promise<Response> => {
     const yoga = this.#yoga
-    if (yoga === undefined) throw notStarted()
+    if (yoga === undefined) {
+      if (this.#stopped) return shuttingDown()
+      throw notStarted()
+    }
     const request = fetchRequest(ctx, this.#limit)
     const server: YogaServerContext = { znight: ctx }
     const response =
       request instanceof Request ? yoga.fetch(request, server) : request.then(built => yoga.fetch(built, server))
     return response instanceof Response ? response : Promise.resolve(response).then(sendable)
+  }
+
+  /** `POST`: JSON bodies only (the 415 of the built-in transport otherwise: no CSRF). */
+  readonly #postHandler = (ctx: HttpContext): unknown => {
+    const headers = ctx.headers
+    if (!isJsonRequest(headers['content-type'])) return notJson(jsonMedia(headers['accept']))
+    return this.#handle(ctx)
   }
 
   /** `GET`: Yoga's, or 405 when queries over `GET` are off (GraphiQL pages still served). */
@@ -283,6 +316,52 @@ function requestIdOf(payload: { readonly context: Partial<YogaServerContext> }):
 
 function acceptsHtml(ctx: HttpContext): boolean {
   return ctx.headers['accept']?.includes('text/html') === true
+}
+
+/** The JSON type a refusal is written in, like the built-in transport: `application/json` unless the client prefers `application/graphql-response+json`. */
+function jsonMedia(accept: string | undefined): MediaKind {
+  const media = (negotiate(accept, (1 << Media.GraphQLJson) | (1 << Media.Json)) & MEDIA) as MediaKind
+  return media === Media.None ? Media.Json : media
+}
+
+/** A request reaching the driver once it stopped (after `HttpPlugin` drained): 503. */
+function shuttingDown(): Response {
+  return Response.json(
+    {
+      errors: [
+        {
+          message: 'The server is shutting down, retry later',
+          extensions: { code: GraphQLErrorCode.ServiceUnavailable },
+        },
+      ],
+    },
+    { status: 503 },
+  )
+}
+
+/**
+ * Yoga's `maskError`: the errors of the engine (masked already) and the `GraphQLError`s thrown on
+ * purpose (by Yoga or a plugin, with a code) are kept; any other error, thrown outside the engine
+ * (an Envelop plugin's hook, Yoga itself), is logged and masked like the engine masks it
+ * (`Unexpected error.`, its message with `exposeErrors`). Yoga then answers 500 for a request error.
+ */
+function outsideErrors(expose: boolean, logger: CoreLogger): (error: unknown, message: string) => Error {
+  return (error, message) => {
+    if (isOriginalGraphQLError(error)) return error
+    logger.error('GraphQL: an error was thrown outside the engine (by Yoga or an Envelop plugin)', { err: error })
+    const original = error instanceof Error ? error : new Error(String(error))
+    return new GraphQLError(expose ? original.message : message, {
+      originalError: original,
+      extensions: { code: GraphQLErrorCode.InternalServerError },
+    })
+  }
+}
+
+/** A `GraphQLError` that wraps no other error: the engine's, or thrown on purpose. */
+function isOriginalGraphQLError(error: unknown): error is GraphQLError {
+  if (!(error instanceof GraphQLError)) return false
+  const original = error.originalError
+  return original === undefined || original === null || isOriginalGraphQLError(original)
 }
 
 function getNotAllowed(): Response {

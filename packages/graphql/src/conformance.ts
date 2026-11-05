@@ -52,8 +52,9 @@ export interface DriverConformanceOptions {
 /**
  * Describes the conformance scenarios of a GraphQL driver (RFC 0009 §12): queries, mutations,
  * field guards and HTTP guards, loaders batching, request-scoped providers, result mappers,
- * masking, introspection, limits, the `graphql:operation` hook and, over SSE, subscriptions (events,
- * completion, client abort, `maxActive`, shutdown).
+ * masking, introspection, limits, the `graphql:operation` hook, `POST` bodies other than JSON and
+ * mutations over `GET` refused (CSRF) and, over SSE, subscriptions (events, completion, client
+ * abort, `maxActive`, shutdown whatever the plugin order).
  *
  * ```ts
  * import { describeDriverConformance } from '@znight/graphql/testing'
@@ -401,26 +402,36 @@ function conformanceMetadata() {
   })
 }
 
-/** Boots the conformance application on `adapter` with `driver`. */
+/** The drain timeout of `HttpPlugin` in the suite: a shutdown waiting for it is a failure. */
+const DRAIN_TIMEOUT_MS = 5_000
+
+/**
+ * Boots the conformance application on `adapter` with `driver`, `GraphQLPlugin` after `HttpPlugin`
+ * (or before it, `graphqlFirst`).
+ */
 function boot(
   options: DriverConformanceOptions,
   adapter: (() => HttpAdapter) | undefined,
-  maxActive = 2,
+  graphqlFirst = false,
 ): Promise<TestApp> {
   const driver = options.driver()
+  const http = HttpPlugin.configure({
+    port: 0,
+    host: '127.0.0.1',
+    drainTimeoutMs: DRAIN_TIMEOUT_MS,
+    ...(adapter === undefined ? {} : { adapter: adapter() }),
+  })
+  const graphql = GraphQLPlugin.configure({
+    introspection: false,
+    resultMappers: [Rejections],
+    limits: { maxAliases: 3, maxDepth: 4 },
+    http: { guards: [Gate] },
+    subscriptions: { maxActive: 2 },
+    ...(driver === undefined ? {} : { driver }),
+  })
   return TestApp.create({
     metadata: conformanceMetadata(),
-    plugins: [
-      HttpPlugin.configure({ port: 0, host: '127.0.0.1', ...(adapter === undefined ? {} : { adapter: adapter() }) }),
-      GraphQLPlugin.configure({
-        introspection: false,
-        resultMappers: [Rejections],
-        limits: { maxAliases: 3, maxDepth: 4 },
-        http: { guards: [Gate] },
-        subscriptions: { maxActive },
-        ...(driver === undefined ? {} : { driver }),
-      }),
-    ],
+    plugins: graphqlFirst ? [graphql, http] : [http, graphql],
     logger: { debug() {}, info() {}, warn() {}, error() {} },
   })
 }
@@ -565,6 +576,56 @@ function describeOperations(
     await executeOperation(app, { query: 'query Named { books { id } }' })
     deepStrictEqual(events, [{ driver: driverName, transport: 'http', operationName: 'Named' }])
   })
+
+  test.it('refuses POST bodies other than JSON (415): a cross-site form never runs an operation', async () => {
+    const mutation = 'mutation { addBook(title: "Forged") { id } }'
+    const before = await executeOperation<{ books: unknown[] }>(app, { query: '{ books { id } }' })
+    for (const [type, body] of [
+      ['application/x-www-form-urlencoded', `query=${encodeURIComponent(mutation)}`],
+      [
+        'multipart/form-data; boundary=x',
+        `--x\r\ncontent-disposition: form-data; name="query"\r\n\r\n${mutation}\r\n--x--\r\n`,
+      ],
+      ['text/plain', JSON.stringify({ query: mutation })],
+      ['application/graphql', mutation],
+    ] as const) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/graphql',
+        headers: { 'content-type': type, 'x-user': 'editor' },
+        body,
+      })
+      strictEqual(response.status, 415, type)
+      deepStrictEqual(
+        response.json(),
+        {
+          errors: [
+            {
+              message: 'Send GraphQL requests as application/json (content-type: application/json)',
+              extensions: { code: 'BAD_REQUEST' },
+            },
+          ],
+        },
+        type,
+      )
+    }
+    const after = await executeOperation<{ books: unknown[] }>(app, { query: '{ books { id } }' })
+    strictEqual(after.data?.books.length, before.data?.books.length)
+  })
+
+  test.it('refuses mutations over GET (405, allow: POST)', async () => {
+    const before = await executeOperation<{ books: unknown[] }>(app, { query: '{ books { id } }' })
+    const response = await app.inject({
+      method: 'GET',
+      url: '/graphql',
+      query: { query: 'mutation { addBook(title: "Fetched") { id } }' },
+      headers: { 'x-user': 'editor' },
+    })
+    strictEqual(response.status, 405)
+    strictEqual(response.headers['allow'], 'POST')
+    const after = await executeOperation<{ books: unknown[] }>(app, { query: '{ books { id } }' })
+    strictEqual(after.data?.books.length, before.data?.books.length)
+  })
 }
 
 function describeSubscriptions(options: DriverConformanceOptions, adapter: (() => HttpAdapter) | undefined): void {
@@ -612,17 +673,24 @@ function describeSubscriptions(options: DriverConformanceOptions, adapter: (() =
     await until(() => graphql(app).activeSubscriptions === 0, 'the end of the subscriptions')
   })
 
-  test.it('ends the subscriptions when the application stops', async () => {
-    const stopping = await boot(options, adapter)
-    const ended = observed(stopping).ended
-    const events = await subscribeOperation(stopping, { query: 'subscription { forever }' })
-    deepStrictEqual((await events.next()).value, { data: { forever: 1 } })
-    await stopping.close()
-    await until(() => ended.includes('forever'), 'the end of the source on shutdown')
-    let next = await events.next()
-    while (next.done !== true) next = await events.next()
-    strictEqual(graphql(stopping).activeSubscriptions, 0)
-  })
+  for (const graphqlFirst of [false, true]) {
+    const order = graphqlFirst ? 'GraphQLPlugin before HttpPlugin' : 'HttpPlugin before GraphQLPlugin'
+    test.it(`ends the subscriptions when the application stops, without waiting for the drain (${order})`, async () => {
+      const stopping = await boot(options, adapter, graphqlFirst)
+      const ended = observed(stopping).ended
+      const events = await subscribeOperation(stopping, { query: 'subscription { forever }' })
+      deepStrictEqual((await events.next()).value, { data: { forever: 1 } })
+      // the client keeps reading, as a real one does (the stream ends once read)
+      const rest = drain(events)
+      const started = Date.now()
+      await stopping.close()
+      const elapsed = Date.now() - started
+      ok(elapsed < DRAIN_TIMEOUT_MS / 2, `the shutdown waited ${elapsed} ms for the drain`)
+      await until(() => ended.includes('forever'), 'the end of the source on shutdown')
+      await rest
+      strictEqual(graphql(stopping).activeSubscriptions, 0)
+    })
+  }
 }
 
 async function drain(events: OperationStream): Promise<OperationResult[]> {

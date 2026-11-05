@@ -319,6 +319,10 @@ export class GraphQLExecutor {
    * streams of the built-in transport are ended by `HttpPlugin`'s shutdown (with a `retry` hint).
    */
   readonly #owned = new Set<SubscriptionStream<unknown>>()
+  /** The streams of the engine (drivers), a part of {@link #owned}: ended when `HttpPlugin` drains. */
+  readonly #engineStreams = new Set<SubscriptionStream<unknown>>()
+  /** The application stops (`HttpPlugin` drains, or the plugin stops): the engine refuses new subscriptions (503). */
+  #closing = false
   /** Subscriptions counted against `maxActive` while their source starts (not yet in `#streams`). */
   #starting = 0
   /** The engine's extra rules (`GraphQLEngine.rules`): the limits, introspection. Built on first use. */
@@ -506,7 +510,17 @@ export class GraphQLExecutor {
    * through the engine (drivers). Built-in SSE streams end with `HttpPlugin`'s shutdown.
    */
   async stopStreams(): Promise<void> {
+    this.#closing = true
     await Promise.all([...this.#owned].map(stream => stream.return()))
+  }
+
+  /**
+   * Ends the subscriptions of the engine (`HttpPlugin` drains, `GraphQLPlugin.onHttpDrain()`): a
+   * driver serves them as streamed responses `HttpPlugin` does not close. New ones are refused (503).
+   */
+  async stopEngineStreams(): Promise<void> {
+    this.#closing = true
+    await Promise.all([...this.#engineStreams].map(stream => stream.return()))
   }
 
   /** Forgets every cached document. */
@@ -664,7 +678,9 @@ export class GraphQLExecutor {
         ),
       )
     }
-    if (this.#full()) return asEngineResult(this.#reject(overflow(prepared), requestOf(args), options))
+    if (this.#full() || this.#closing) {
+      return asEngineResult(this.#reject(unavailable(prepared, this.#closing), requestOf(args), options))
+    }
     const request: GraphQLRequest = {
       query: prepared.entry.query,
       operationName: args.operationName,
@@ -1078,12 +1094,18 @@ export class GraphQLExecutor {
         onEnd: (outcome, errors) => {
           this.#streams.delete(stream)
           this.#owned.delete(stream)
+          if (engine) this.#engineStreams.delete(stream)
           close()
           observer?.end(outcome, errors)
         },
       })
       this.#streams.add(stream)
       if (engine || ctx.transport === 'direct') this.#owned.add(stream)
+      if (engine) {
+        this.#engineStreams.add(stream)
+        // stopped while its source started: ended at once
+        if (this.#closing) void stream.return()
+      }
       return stream as GraphQLResultStream | EngineStream
     }
     const source = createSourceEventStream(validated)
@@ -1236,6 +1258,17 @@ function overflow(prepared: Prepared): Rejection {
   return new Rejection(
     503,
     [requestError('Too many active subscriptions, retry later', GraphQLErrorCode.ServiceUnavailable)],
+    prepared.entry.id,
+    prepared.operation,
+  )
+}
+
+/** The 503 of an engine subscription past `subscriptions.maxActive`, or while the application stops. */
+function unavailable(prepared: Prepared, closing: boolean): Rejection {
+  if (!closing) return overflow(prepared)
+  return new Rejection(
+    503,
+    [requestError('The server is shutting down, retry later', GraphQLErrorCode.ServiceUnavailable)],
     prepared.entry.id,
     prepared.operation,
   )

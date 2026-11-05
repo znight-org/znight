@@ -258,15 +258,22 @@ export class GraphQLPlugin implements Plugin, PluginHttpRoutes {
     else ctx.logger.info('GraphQL endpoint ready', { path: options.path, ...details })
   }
 
+  /**
+   * The `PluginHttpRoutes` contract: `HttpPlugin` starts draining, whatever the plugin order. The
+   * subscriptions of the engine end (a route-mounted driver serves them as streamed responses
+   * `HttpPlugin` does not close), and new ones are refused (503); queries and mutations in flight
+   * are served. Built-in SSE streams are closed by `HttpPlugin` itself.
+   */
+  onHttpDrain(): Promise<void> | undefined {
+    return this.#runtime?.executor.stopEngineStreams()
+  }
+
   async onStop(): Promise<void> {
     this.#stop?.abort(new Error('The application is stopping'))
     // direct subscriptions and the driver's (engine) ones; built-in SSE streams end with HttpPlugin
     await this.#runtime?.executor.stopStreams()
-    const driver = this.#driver
-    if (this.#started && driver?.stop !== undefined) {
-      this.#started = false
-      await driver.stop()
-    }
+    // a route-mounted driver serves requests until HttpPlugin drained them: it stops in onDispose
+    if (this.#driver?.routes === undefined) await this.#stopDriver()
   }
 
   onDispose(): void | Promise<void> {
@@ -274,13 +281,19 @@ export class GraphQLPlugin implements Plugin, PluginHttpRoutes {
       this.#release()
       return
     }
-    // disposed without having started (onStop did not run): the driver started in onBootstrap stops here
-    this.#started = false
+    // after HttpPlugin drained (every onStop ran), or disposed without having started (onStop did not run)
     this.#stop?.abort(new Error('The application is stopping'))
-    const driver = this.#driver
     return Promise.resolve(this.#runtime?.executor.stopStreams())
-      .then(() => driver?.stop?.())
+      .then(() => this.#stopDriver())
       .finally(() => this.#release())
+  }
+
+  /** Stops the driver started in onBootstrap (once). */
+  #stopDriver(): void | Promise<void> {
+    const driver = this.#driver
+    if (!this.#started) return
+    this.#started = false
+    return driver?.stop?.()
   }
 
   #release(): void {
