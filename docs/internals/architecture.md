@@ -1567,6 +1567,38 @@ intercepted. The top-most decorator is the outermost interceptor. Interceptors M
 - `CoreLogger` (`debug`/`info`/`warn`/`error` with an optional context object), `createConsoleLogger`,
   `silentLogger`, `DelegatingLogger`.
 
+### 8.6 Custom parameter decorators
+
+RFC 0010. `createParamDecorator<T, D = undefined>(resolvers)` defines a parameter decorator whose
+value is computed per call by a resolver of the handler's transport:
+
+```ts
+interface ParamContexts {} // http: HttpContext, graphql: ResolverContext, messaging: InboundMessage (declaration merging)
+interface ParamResolver<C, T, D = undefined> {
+  resolve(ctx: C, data: D): T | PromiseLike<T>
+}
+type ParamResolverFunction<C, T, D> = (ctx: C, data: D) => T | PromiseLike<T>
+type ParamResolverClass<C, T, D> = abstract new (...args: never[]) => ParamResolver<C, T, D>
+type ParamResolvers<T, D> = { readonly [K in keyof ParamContexts]?: ParamResolverFunction<...> | ParamResolverClass<...> }
+interface ParamDecorator<T, D = undefined> {
+  (...data: undefined extends D ? [data?: D] : [data: D]): ParameterMarker
+  readonly resolvers: ParamResolvers<T, D> // frozen copy
+}
+type ParamFunctionOf<P, K> // the function member of P['resolvers'][K]
+```
+
+- `T` is the injected type (required, read by the compiler, §4.6); `D` the type of the data
+  argument (none by default, required when it excludes `undefined`, optional otherwise).
+- Each transport package augments `ParamContexts` with its key and context type, so a definition
+  only type-checks with the resolvers of installed transports.
+- The decorator returns the shared no-op function; `resolvers` is a frozen copy of the argument.
+- Generated code calls a function resolver as
+  `(CurrentUser.resolvers.http as ParamFunctionOf<typeof CurrentUser, 'http'>)(ctx, data)` (TypeScript
+  cannot infer the literal type of `resolvers` when `T` is given explicitly, so the cast selects the
+  function member of the union; it costs nothing at runtime), and a class resolver as
+  `x[i].resolve(ctx, data)` where `x` holds the instances the plugin resolved in the scope of the call
+  (§9.1, §9.2, §9.7).
+
 ## 9. Feature runtime contracts
 
 Common rules: each feature plugin is created with `XxxPlugin.configure(options)`, has a fixed `name`

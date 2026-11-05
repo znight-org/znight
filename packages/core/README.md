@@ -93,6 +93,36 @@ export class DatabaseFactory {
 }
 ```
 
+## Custom parameter decorators
+
+`createParamDecorator<T, D>(resolvers)` defines a parameter decorator of your own (RFC 0010), usable
+on HTTP routes, GraphQL fields and message handlers. Each key of `resolvers` is a transport
+(`http`, `graphql`, `messaging`: the installed transport packages declare them in `ParamContexts`)
+and its value computes the parameter: a function `(ctx, data) => T | PromiseLike<T>`, or the class
+of a provider implementing `ParamResolver<C, T, D>` (constructor injection, any scope).
+
+```ts
+import { createParamDecorator } from '@znight/core'
+import type { User } from './user.ts'
+
+/** The authenticated user, stored in the request state by the authentication guard. */
+export const CurrentUser = createParamDecorator<User>({
+  http: ctx => ctx.state.get('user') as User,
+})
+
+// @Get('/me') me(@CurrentUser() user: User) { ... }
+```
+
+- `T` (required) is the injected type; the compiler checks it against every decorated parameter.
+- `D` is the type of the data argument (`@Claim('sub')`): none by default, required when it excludes
+  `undefined`. The argument is a `value` argument: statically evaluable or an exported binding.
+- The definition is an exported top-level `const`: the generated module imports it and calls
+  `CurrentUser.resolvers.http(ctx, data)` (no lookup, no closure, no promise when the resolver
+  returns a value). `resolvers` is frozen.
+- Using the decorator on a handler of a transport it has no resolver for, on a constructor parameter,
+  with a data argument that cannot be emitted or on a parameter whose type does not accept `T` is a
+  ZNIGHT005 at build time.
+
 ## Application
 
 `Application.create(options)` builds the container and runs the plugins:
