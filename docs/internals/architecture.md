@@ -468,7 +468,9 @@ static argument or inline non-evaluable value argument → ZNIGHT005 with the fi
 file initialised with a call to `@znight/core#createParamDecorator` (`definitionsOf`, §6.5): it MUST
 be exported (the generated module imports it), have the type argument `T` and a first argument that
 is an object literal whose keys are identifiers or string literals (no spread, no computed key) and
-whose values are inline functions, references to functions or references to provider classes. A
+whose values are inline functions, references to functions or references to provider classes
+(`const` aliases followed: `const R = UserResolver`; a reference the compiler cannot classify as a
+function or a class, such as an export of an untyped package, makes the definition invalid). A
 _use_ is a decorator on a method parameter whose callee resolves to a definition: it keeps
 `owner: undefined` in `DecoratorInfo` and is read by the transport extensions with
 `AnalyzeContext.paramDecorator` (§6.5). A use MUST be called, decorate a non-rest parameter of a

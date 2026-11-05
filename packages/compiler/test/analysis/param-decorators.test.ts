@@ -242,6 +242,65 @@ export class Handler {
     }
   })
 
+  it('follows const aliases of resolvers, and rejects references it cannot classify', async () => {
+    const app = tempApp({
+      ...FAKE,
+      'src/user.ts': 'export interface User { readonly id: string }\n',
+      'src/user-resolver.ts': `import type { User } from './user.ts'
+export class UserResolver {
+  resolve(): User {
+    return { id: 'r' }
+  }
+}
+export async function readUser(): Promise<User> {
+  return { id: 'f' }
+}
+`,
+      'src/decorators.ts': `import { createParamDecorator } from '@znight/core'
+import { inspect } from 'node:util'
+import { UserResolver, readUser } from './user-resolver.ts'
+import type { User } from './user.ts'
+
+const R = UserResolver
+const RR = R
+const read = readUser
+export const Aliased = createParamDecorator<User>({ fake: RR })
+export const AliasedFunction = createParamDecorator<User>({ fake: read })
+export const External = createParamDecorator<User>({ fake: inspect })
+`,
+      'src/handler.ts': `import { Handle, Handlers } from '@acme/fake'
+import { Aliased, AliasedFunction, External } from './decorators.ts'
+import type { User } from './user.ts'
+
+@Handlers()
+export class Handler {
+  @Handle()
+  run(@Aliased() aliased: User, @AliasedFunction() aliasedFunction: User, @External() external: User): void {}
+}
+`,
+    })
+    const uses = new Map<string, ParamDecoratorUse | undefined>()
+    try {
+      const result = await analyzeRoot(app.root, { extensions: [fakeExtension(uses)] })
+      const rendered = renderDiagnostics(result.root, result.diagnostics)
+      expect(rendered).toContain(
+        "@External cannot be used: the 'fake' resolver must be an inline function, or a reference to a function or a provider class",
+      )
+      expect(result.diagnostics.map(diagnostic => diagnostic.code)).toEqual(['ZNIGHT005'])
+      const aliased = uses.get('run.aliased')
+      expect(aliased?.ok && aliased.resolver.kind === 'class' ? aliased.resolver.ref.token : undefined).toBe(
+        'src/user-resolver.ts#UserResolver',
+      )
+      const edge = result.graph.edges.find(candidate => candidate.to === 'src/user-resolver.ts#UserResolver')
+      expect(edge).toMatchObject({ from: 'src/handler.ts#Handler', kind: 'lazy', label: 'parameter resolver' })
+      const aliasedFunction = uses.get('run.aliasedFunction')
+      expect(aliasedFunction?.ok ? aliasedFunction.resolver : undefined).toEqual({ kind: 'function', async: true })
+      expect(uses.get('run.external')?.ok).toBe(false)
+    } finally {
+      app.cleanup()
+    }
+  })
+
   it('costs nothing without definitions', async () => {
     const app = tempApp({
       ...FAKE,

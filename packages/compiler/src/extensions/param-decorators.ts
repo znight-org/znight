@@ -30,6 +30,9 @@ import { unionType } from '../project/index.ts'
 /** Canonical identity of the factory. */
 export const CREATE_PARAM_DECORATOR = '@znight/core#createParamDecorator'
 
+/** `const` aliases followed from a resolver reference to the function or class. */
+const MAX_ALIAS_HOPS = 8
+
 /** A resolver entry of a definition, before binding. */
 type ResolverEntry =
   | { readonly kind: 'function'; readonly async: boolean }
@@ -294,9 +297,13 @@ export class ParamDecoratorIndex {
     return { info, problem: undefined, valueType, resolvers }
   }
 
-  /** A reference to a function or a class, `undefined` for anything else. */
-  #reference(scope: ScopeRef, value: Expression): ResolverEntry | undefined {
-    if (value.type !== 'Identifier' && value.type !== 'MemberExpression') {
+  /**
+   * A reference to a function or a class, `undefined` for anything else (or anything the compiler
+   * cannot classify, such as an export of an untyped package). `const` aliases are followed
+   * (`const R = UserResolver`).
+   */
+  #reference(scope: ScopeRef, value: Expression, hops = 0): ResolverEntry | undefined {
+    if (hops > MAX_ALIAS_HOPS || (value.type !== 'Identifier' && value.type !== 'MemberExpression')) {
       return undefined
     }
     const evaluation = this.#project.evaluate(scope, value, { refs: 'nested' })
@@ -304,22 +311,50 @@ export class ParamDecoratorIndex {
       return undefined
     }
     const symbol = evaluation.ref.symbol
+    if (symbol.kind === 'expression') {
+      // `export default (class { ... })`, `export default (ctx => ...)`
+      const file = this.#project.getFile(symbol.file)
+      const expression = unwrap(symbol.expression)
+      if (expression.type === 'ClassExpression') {
+        return { kind: 'class', ref: evaluation.ref }
+      }
+      return file === undefined ? undefined : this.#aliased({ file, namespace: undefined }, expression, hops)
+    }
     if (symbol.kind !== 'declaration') {
-      return { kind: 'function', async: false }
+      return undefined
     }
     if (symbol.declarations.some(declaration => declaration.kind === 'class')) {
       return { kind: 'class', ref: evaluation.ref }
     }
-    const declaration = symbol.declarations[0]
-    const node = declaration?.node as { type?: string; async?: boolean; init?: Expression | null } | undefined
-    if (node?.type === 'FunctionDeclaration') {
-      return { kind: 'function', async: node.async === true }
+    const declaration = symbol.declaration
+    if (declaration.kind === 'function') {
+      return { kind: 'function', async: (declaration.node as { async?: boolean }).async === true }
     }
-    const init = node?.init ? unwrap(node.init) : undefined
-    if (init?.type === 'ArrowFunctionExpression' || init?.type === 'FunctionExpression') {
+    if (declaration.kind !== 'const' && declaration.kind !== 'let' && declaration.kind !== 'var') {
+      return undefined
+    }
+    const node = declaration.node as {
+      init?: Expression | null
+      id?: { typeAnnotation?: { typeAnnotation?: { type: string } } | null }
+    }
+    if (!node.init) {
+      // `declare const resolve: (ctx: HttpContext) => User`
+      return node.id?.typeAnnotation?.typeAnnotation?.type === 'TSFunctionType'
+        ? { kind: 'function', async: false }
+        : undefined
+    }
+    const file = this.#project.getFile(declaration.file)
+    return file === undefined
+      ? undefined
+      : this.#aliased({ file, namespace: declaration.namespace }, unwrap(node.init), hops)
+  }
+
+  /** The initializer of a binding: an inline function, or another reference (an alias). */
+  #aliased(scope: ScopeRef, init: Expression, hops: number): ResolverEntry | undefined {
+    if (init.type === 'ArrowFunctionExpression' || init.type === 'FunctionExpression') {
       return { kind: 'function', async: init.async }
     }
-    return { kind: 'function', async: false }
+    return this.#reference(scope, init, hops + 1)
   }
 
   #format(type: TypeInfo | undefined): string {

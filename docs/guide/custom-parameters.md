@@ -118,7 +118,9 @@ Every mistake that can be found at build time is a [`ZNIGHT005`](/reference/erro
 located on the use, with the definition as related location:
 
 - the definition is not exported, has no type argument, or its resolvers are not an object literal
-  of inline functions, function references or class references;
+  of inline functions, function references or class references (`const` aliases are followed; a
+  reference the compiler cannot tell is a function or a class, such as an export of an untyped
+  package, is an error);
 - the decorator is not called (`@CurrentUser` instead of `@CurrentUser()`), decorates a rest
   parameter, a constructor parameter or a method that is not a handler;
 - the handler's transport has no resolver (`@CurrentUser has no 'messaging' resolver`);
