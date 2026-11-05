@@ -8,6 +8,7 @@ const RANGES: readonly (readonly [owner: string, first: number, last: number])[]
   ['@znight/schedule', 40, 49],
   ['@znight/websocket (reserved)', 50, 59],
   ['@znight/graphql', 60, 69],
+  ['@znight/events', 70, 79],
 ]
 
 const numberOf = (code: string): number => Number(code.slice('ZNIGHT'.length))
@@ -60,6 +61,7 @@ describe('ErrorCode', () => {
       InvalidGraphQLSetup: 'ZNIGHT066',
       InvalidGraphQLSdl: 'ZNIGHT067',
       GraphQLSchemaMismatch: 'ZNIGHT068',
+      InvalidEventListener: 'ZNIGHT070',
     })
   })
 

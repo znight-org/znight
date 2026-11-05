@@ -33,6 +33,17 @@ export interface ZnightHooks {
    * emitted when listeners exist.
    */
   'graphql:operation': GraphQLOperationEvent
+  /**
+   * One publication of `@znight/events` (`EventPublisher.publish()` or `emit()`) that matched at least
+   * one listener (RFC 0011): wraps the inline phase with `hooks.run` when wrappers exist, then is
+   * emitted when listeners exist. A publication without listener produces nothing.
+   */
+  'events:publish': EventPublishEvent
+  /**
+   * One listener invocation of `@znight/events` (RFC 0011), inline or detached: wrapped with
+   * `hooks.run` when wrappers exist, then emitted when listeners exist.
+   */
+  'events:listener': EventListenerEvent
 }
 
 /**
@@ -225,6 +236,52 @@ export interface GraphQLOperationEvent {
   outcome?: GraphQLOperationOutcome
   /** Errors of the response (field and request errors), set before `hooks.run` resolves. */
   errors?: readonly GraphQLOperationError[]
+}
+
+/** How an application event was published (`EventPublishEvent.mode`). */
+export type EventPublishMode = 'publish' | 'emit'
+
+/**
+ * Instrumentation event of the `events:publish` hook, produced by `@znight/events` (RFC 0011) for a
+ * publication that matched at least one listener. The wrappers surround the inline phase (the
+ * detached listeners are scheduled after it succeeded); `error` and `failedListener` are set before
+ * `next()` rejects.
+ */
+export interface EventPublishEvent {
+  /** Class name of the event (`UserCreated`). */
+  readonly event: string
+  /** The published object. */
+  readonly payload: object
+  readonly mode: EventPublishMode
+  /** Number of inline listeners matched. */
+  readonly inline: number
+  /** Number of detached listeners matched. */
+  readonly detached: number
+  /** `performance.now()` when the publication started. */
+  readonly startTime: number
+  /** First inline error, set before `next()` rejects in the wrappers. */
+  error?: unknown
+  /** `Class.method` of the inline listener that failed. */
+  failedListener?: string
+}
+
+/**
+ * Instrumentation event of the `events:listener` hook, produced by `@znight/events` (RFC 0011) for
+ * every listener invocation. Inline listeners run in the publisher's async context, detached ones in
+ * a fresh scope of their own; `error` is set before `next()` rejects.
+ */
+export interface EventListenerEvent {
+  /** Class name of the event. */
+  readonly event: string
+  /** The published object. */
+  readonly payload: object
+  /** `Class.method` of the listener (`WelcomeMail.send`). */
+  readonly listener: string
+  readonly detached: boolean
+  /** `performance.now()` when the invocation started. */
+  readonly startTime: number
+  /** What the listener threw or rejected with. */
+  error?: unknown
 }
 
 /** Name of a declared hook. */

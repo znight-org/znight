@@ -573,12 +573,14 @@ application provider, e.g. `class AppLogger implements CoreLogger`) nor package-
 | ZNIGHT066 | Invalid GraphQL setup (boot): malformed or version-skewed `extensions.graphql`, graphql-js schema validation failure, invalid `GraphQLPlugin` options (an invalid `driver`, SSE options with a driver), no `http` plugin while the HTTP transport is on, a route-mounted driver with `http: false`, a driver failing to start, scalar name mismatch; at runtime, `GraphQLEngine.execute()` / `subscribe()` with another schema (RFC 0009)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | error                                          |
 | ZNIGHT067 | Invalid GraphQL SDL (schema-first, RFC 0007): no `.graphql` file matches the `schema` globs, a syntax error, a type defined twice, a duplicate field, value or argument, an unknown type or directive, an extension of a missing type or of another kind, a graphql-js schema validation error, `@oneOf` inputs, a scalar without `scalar()` definition; a custom directive, a description or `@specifiedBy` on a built-in scalar (warnings)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | error / warning                                |
 | ZNIGHT068 | GraphQL schema mismatch (schema-first, RFC 0007): a root field without resolver, a resolver method naming no field, `@Resolver('X')` naming no object type, `@Args('x')` naming no argument, an object field neither a resolver nor the returned TypeScript type provides, a signature not conforming to the SDL types (nullability, lists, scalars, enums, union and interface members, input objects)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | error                                          |
+| ZNIGHT070 | Invalid event listener (`@znight/events`, RFC 0011): an `@OnEvent` method without exactly one undecorated parameter, a parameter that is not a class or a union of classes (interface, type alias, primitive, `object`, `unknown`, `any`, inline type, no annotation), a class with type arguments, an optional or nullable event, an event class the generated module cannot import, options that are not static or unknown, `order` not a finite integer, `detached` not a boolean, a string argument (the `@nestjs/event-emitter` form), a detached listener whose host reaches a request-scoped external; warnings: union members overlapping by inheritance (registered once), `@OnEvent` on an abstract class no concrete provider extends                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | error / warning                                |
 
 Codes are allocated by range (`rfcs/README.md`): `ZNIGHT001`–`029` belong to the core, the
 compiler and the features shipped in 0.1 (http, messaging, config, observability); from
 `ZNIGHT030`, each first-party package reserves a block of ten in the `@znight/core` catalogue
 (`030`–`039` `@znight/openapi`, `040`–`049` `@znight/schedule`, `050`–`059` `@znight/websocket`,
-reserved by RFC 0003, and `060`–`069` `@znight/graphql`, RFC 0005). Codes are allocated in order
+reserved by RFC 0003, `060`–`069` `@znight/graphql`, RFC 0005, and `070`–`079` `@znight/events`,
+RFC 0011). Codes are allocated in order
 inside a block and never change meaning. A package uses its block for its own failure modes, with
 one catch-all code for invalid usage and options, and reuses a lower code when the meaning is the
 same (a decorator on the wrong target is always ZNIGHT005). Third-party packages get no `ZNIGHT`
@@ -1538,6 +1540,8 @@ interface ZnightHooks {
   'messaging:publish': MessagePublishEvent // produced by @znight/messaging (MessageBroker.publish)
   'schedule:run': ScheduledRunEvent // produced by @znight/schedule (one occurrence of a job)
   'graphql:operation': GraphQLOperationEvent // produced by @znight/graphql (one operation, RFC 0005)
+  'events:publish': EventPublishEvent // produced by @znight/events (one publication with listeners, RFC 0011)
+  'events:listener': EventListenerEvent // produced by @znight/events (one listener invocation, RFC 0011)
 } // augmentable by third-party packages
 class Hooks {
   on<K>(name: K, listener: (event) => unknown): () => void
@@ -1549,7 +1553,7 @@ class Hooks {
 }
 ```
 
-- The five hooks and their event types live in `@znight/core`, so producers and observers share
+- The seven hooks and their event types live in `@znight/core`, so producers and observers share
   them without depending on each other. Event shapes:
   - `HttpRequestEvent`: `method`, `path`, `route` (pattern, `undefined` when unmatched),
     `requestId`, `headers`, `context` (`HttpContext`), `startTime`, `responseHeaders` (mutable),
@@ -1576,6 +1580,14 @@ class Hooks {
     `startTime`, `outcome?` (`success` / `partial` / `error` / `rejected`) and `errors?`
     (`{ message, code, path? }[]`, as sent to the client), both set before `run` resolves. One event
     per operation; a subscription has one event for its whole life, settled when it ends.
+  - `EventPublishEvent`: `event` (class name), `payload` (the published object), `mode` (`publish` /
+    `emit`), `inline` and `detached` (numbers of matched listeners), `startTime`, `error?` and
+    `failedListener?` (`Class.method` of the inline listener that failed), set before `next()`
+    rejects. Produced only for a publication matching at least one listener; the wrappers surround
+    the inline phase (§9.8);
+  - `EventListenerEvent`: `event`, `payload`, `listener` (`Class.method`), `detached`, `startTime`,
+    `error?`. One per listener invocation, inline listeners in the publisher's async context,
+    detached ones in their own scope.
 - Listeners are called synchronously in registration order; a failing listener is logged and never
   affects the emitter. Producers call `run` when there are wrappers and `emit` after it when there
   are listeners.

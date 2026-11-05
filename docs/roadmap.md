@@ -21,7 +21,7 @@ may change APIs.
 | [0008](https://github.com/znight-org/znight/blob/main/rfcs/0008-graphql-errors-as-data.md)      | Errors as data in `@znight/graphql`       | Accepted (v0.2)    |
 | [0009](https://github.com/znight-org/znight/blob/main/rfcs/0009-graphql-drivers.md)             | GraphQL drivers (`@znight/graphql`)       | Accepted (planned) |
 | [0010](https://github.com/znight-org/znight/blob/main/rfcs/0010-custom-parameter-decorators.md) | Custom parameter decorators               | Accepted (v0.2)    |
-| [0011](https://github.com/znight-org/znight/blob/main/rfcs/0011-application-events.md)          | Application events (`@znight/events`)     | Proposed           |
+| [0011](https://github.com/znight-org/znight/blob/main/rfcs/0011-application-events.md)          | Application events (`@znight/events`)     | Accepted (v0.2)    |
 
 ## v0.1: the first release {#v0-1}
 

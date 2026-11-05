@@ -38,6 +38,9 @@ export {
 export { isProviderDefinition } from './definition.ts'
 export * from './errors.ts'
 export {
+  type EventListenerEvent,
+  type EventPublishEvent,
+  type EventPublishMode,
   type GraphQLOperationError,
   type GraphQLOperationEvent,
   type GraphQLOperationOutcome,
