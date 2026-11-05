@@ -12,7 +12,7 @@ import type { GraphQLContext, GraphQLPluginOptions } from '../src/index.ts'
 
 import { HttpPlugin } from '@znight/http'
 import { TestApp } from '@znight/testing'
-import { execute } from 'graphql'
+import { execute, GraphQLError } from 'graphql'
 
 import { GraphQLPlugin } from '../src/index.ts'
 import { resolveGraphQLOptions } from '../src/options.ts'
@@ -103,11 +103,22 @@ describe('yogaDriver()', () => {
       ['cors', 'set the cors option of HttpPlugin'],
       ['maxRequestBodySize', 'set http.bodyLimit of GraphQLPlugin'],
       ['parserAndValidationCache', 'the engine caches documents (the documentCache option of GraphQLPlugin)'],
+      [
+        'batching',
+        'Send one operation per request: the operations of a batch would share the request scope and its GraphQLContext',
+      ],
+      [
+        'multipart',
+        'POST bodies are application/json only: form and multipart bodies skip the CORS preflight (CSRF); upload files through an HTTP controller',
+      ],
     ] as const) {
       const error = thrown(() => yogaDriver({ [key]: true } as never))
       expect(error.message).toBe(`ZNIGHT066: yogaDriver(): the ${key} option of Yoga is not available with Znight`)
       expect(error.hints).toEqual([hint])
     }
+    // a type error for typed callers
+    // @ts-expect-error batching is not a YogaDriverOptions option
+    expect(() => yogaDriver({ batching: true })).toThrow('the batching option of Yoga is not available')
     expect(thrown(() => yogaDriver({ graphiql: true } as never)).message).toBe(
       "ZNIGHT066: yogaDriver(): graphiql takes GraphiQL's options",
     )
@@ -181,6 +192,37 @@ describe('the Yoga driver', () => {
     expect(logs.messages('error').filter(message => message.includes('fail'))).toHaveLength(1)
     await using exposed = await create({ driver: yogaDriver(), exposeErrors: true })
     expect((await post(exposed, '{ fail }')).json()).toMatchObject({ errors: [{ message: 'postgres://secret' }] })
+  })
+
+  it('masks errors thrown outside the engine (an Envelop plugin), logged once; exposes them with exposeErrors', async () => {
+    const leaking: YogaPlugin = {
+      onParams: ({ params }) => {
+        if (params.query?.includes('leak')) throw new Error('connect ECONNREFUSED redis://admin:pw@10.0.0.5')
+        if (params.query?.includes('coded'))
+          throw new GraphQLError('Slow down', { extensions: { code: 'RATE_LIMITED' } })
+      },
+    }
+    const logs = captureLogger()
+    await using masked = await create({ driver: yogaDriver({ plugins: [leaking] }) }, logs)
+    const response = await post(masked, '{ leak: hello }')
+    expect(response.status).toBe(500)
+    expect(response.body).not.toContain('redis')
+    expect(response.json()).toEqual({
+      errors: [{ message: 'Unexpected error.', extensions: { code: 'INTERNAL_SERVER_ERROR' } }],
+    })
+    expect(logs.messages('error')).toEqual([
+      'GraphQL: an error was thrown outside the engine (by Yoga or an Envelop plugin)',
+    ])
+    // a GraphQLError thrown on purpose is the plugin's answer: kept
+    expect((await post(masked, '{ coded: hello }')).json()).toMatchObject({
+      errors: [{ message: 'Slow down', extensions: { code: 'RATE_LIMITED' } }],
+    })
+    await using exposed = await create({ driver: yogaDriver({ plugins: [leaking] }), exposeErrors: true })
+    expect((await post(exposed, '{ leak: hello }')).json()).toEqual({
+      errors: [
+        { message: 'connect ECONNREFUSED redis://admin:pw@10.0.0.5', extensions: { code: 'INTERNAL_SERVER_ERROR' } },
+      ],
+    })
   })
 
   it('reports operations to the hook with driver yoga, subscriptions over SSE as transport sse', async () => {
@@ -261,6 +303,65 @@ describe('the Yoga driver', () => {
     await using ideOnly = await create({ driver: yogaDriver(), graphiql: true, http: { get: false } })
     expect((await ideOnly.inject({ method: 'GET', url: '/graphql', headers: page })).status).toBe(200)
     expect((await ideOnly.inject({ method: 'GET', url: '/graphql', query: { query: '{ hello }' } })).status).toBe(405)
+  })
+
+  for (const graphqlFirst of [false, true]) {
+    const order = graphqlFirst ? 'GraphQLPlugin before HttpPlugin' : 'HttpPlugin before GraphQLPlugin'
+    it(`serves the requests of the drain, refuses new subscriptions (503), then stops (${order})`, async () => {
+      const replies: { status: number; body: unknown }[] = []
+      const http = HttpPlugin.configure({ port: 0 })
+      // the requests a keep-alive client sends while the application stops (TestApp.inject() refuses them)
+      const send = async (query: string): Promise<void> => {
+        const response = await http.inject({
+          method: 'POST',
+          url: '/graphql',
+          headers: { 'content-type': 'application/json', accept: 'application/json' },
+          body: JSON.stringify({ query }),
+        })
+        replies.push({ status: response.status, body: JSON.parse(response.body) })
+      }
+      // stops between GraphQLPlugin and HttpPlugin, whatever their order
+      const probe = {
+        name: 'probe',
+        onStop: async () => {
+          await send('{ hello }')
+          await send('subscription { ticks }')
+        },
+      }
+      const driver = yogaDriver()
+      const graphql = GraphQLPlugin.configure({ driver })
+      const app = await TestApp.create({
+        metadata: metadata(),
+        plugins: graphqlFirst ? [graphql, probe, http] : [http, probe, graphql],
+        logger: captureLogger(),
+      })
+      await app.close()
+      expect(replies).toEqual([
+        { status: 200, body: { data: { hello: 'Hello world' } } },
+        {
+          status: 200,
+          body: {
+            errors: [
+              { message: 'The server is shutting down, retry later', extensions: { code: 'SERVICE_UNAVAILABLE' } },
+            ],
+          },
+        },
+      ])
+      expect(driver.yoga).toBeUndefined()
+    })
+  }
+
+  it('answers 503 once stopped (a request reaching the stopped driver)', async () => {
+    const driver = yogaDriver()
+    const app = await create({ driver })
+    const route = driver.routes?.({ path: '/graphql', endpoint: '/graphql' })[1]
+    await app.close()
+    const ctx = { method: 'POST', headers: { 'content-type': 'application/json' } }
+    const response = (await route?.handler(ctx as never)) as Response
+    expect(response.status).toBe(503)
+    expect(await response.json()).toEqual({
+      errors: [{ message: 'The server is shutting down, retry later', extensions: { code: 'SERVICE_UNAVAILABLE' } }],
+    })
   })
 
   it('disposes Yoga (and its plugins) when the application stops', async () => {

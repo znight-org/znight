@@ -20,9 +20,9 @@ describe('the driver conformance suite on Node.js', () => {
       new Response(child.stderr).text(),
       child.exited,
     ])
-    // the TAP summary: `# pass 88`, `# fail 0`
+    // the TAP summary: `# pass 112`, `# fail 0`
     const count = (name: string): number => Number(new RegExp(`^# ${name} (\\d+)$`, 'm').exec(stdout)?.[1])
     expect({ code, fail: count('fail'), stderr }).toEqual({ code: 0, fail: 0, stderr: '' })
-    expect(count('pass')).toBe(88)
+    expect(count('pass')).toBe(112)
   }, 120_000)
 })
