@@ -1,5 +1,11 @@
 # @znight/core
 
+## 0.3.0
+
+### Minor Changes
+
+- 75f4b8c: `GraphQLOperationEvent.driver`: the GraphQL driver that received the operation (`builtin` for the built-in transport and direct calls), and the `ws` transport reserved for `graphql-ws` (RFC 0009).
+
 ## 0.2.2
 
 No changes in this release.

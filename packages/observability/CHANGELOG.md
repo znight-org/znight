@@ -1,5 +1,13 @@
 # @znight/observability
 
+## 0.3.0
+
+### Patch Changes
+
+- 75f4b8c: GraphQL operation spans carry `znight.graphql.driver` when a GraphQL driver other than the built-in transport received the operation (RFC 0009).
+- Updated dependencies [75f4b8c]
+  - @znight/core@0.3.0
+
 ## 0.2.2
 
 ### Patch Changes
