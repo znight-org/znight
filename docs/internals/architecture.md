@@ -1648,7 +1648,12 @@ type ParamFunctionOf<P, K> // the function member of P['resolvers'][K]
   cannot infer the literal type of `resolvers` when `T` is given explicitly, so the cast selects the
   function member of the union; it costs nothing at runtime), and a class resolver as
   `x[i].resolve(ctx, data)` where `x` holds the instances the plugin resolved in the scope of the call
-  (§9.1, §9.2, §9.7).
+  (§9.1, §9.2, §9.7). The arguments follow the parameters of the class's `resolve`: its own method,
+  an inherited one (through analysable base classes) or an arrow function (or function-typed)
+  property; the data is left out when it declares fewer than two parameters. When the compiler
+  cannot read it (a base it cannot analyse, such as a mixin), the instance is cast and both
+  arguments passed: `(x[i] as { resolve(ctx: unknown, data: unknown): unknown }).resolve(ctx, data)
+  as never`.
 
 ## 9. Feature runtime contracts
 
@@ -1727,7 +1732,7 @@ interface HttpRouteDefinition {
 is `{ index, source: 'custom', name: '<decorator>' }` (plus `optional`). Its argument is computed in
 `invoke`, in parameter order with the others: `(D.resolvers.http as ParamFunctionOf<typeof D,
 'http'>)(ctx, data)` for a function resolver, `x[i].resolve(ctx, data)` for a class resolver (`x[i]`
-the instance of `paramResolvers[i]`; the data argument is left out when the class's own `resolve`
+the instance of `paramResolvers[i]`; the data argument is left out when the class's `resolve`
 declares fewer parameters), cast with `as never` when the compiler could not check the value type.
 Like a validation, it may return a thenable: it gets the `const aN` / `if (isThenable(aN)) return
 (async () => ...)()` treatment of validated arguments, so a route stays synchronous while every
@@ -2260,7 +2265,7 @@ interface MessageHandlerDefinition {
 m.payload)` (the arrow becomes `async`), `@Headers()` → `m.headers`, `@Headers('x')` →
 `messageHeader(m, 'x')`, `@Ctx()` → `m`, a custom parameter decorator (§8.6) → `await
 (D.resolvers.messaging as ParamFunctionOf<typeof D, 'messaging'>)(m, data)` or `await
-x[i].resolve(m, data)` (the arrow becomes `async`; `x` is declared only with `paramResolvers`, whose
+x[i].resolve(m, data)` (arguments as in §8.6; the arrow becomes `async`; `x` is declared only with `paramResolvers`, whose
 instances the runtime resolves in the delivery scope on every call). **Impl.** messaging awaits
 custom parameters instead of the `isThenable` fallback of HTTP and GraphQL: the delivery already
 awaits `invoke`, and handlers without custom parameters are unchanged. A resolver error fails the
@@ -3023,7 +3028,7 @@ interface GraphQLResolverBinding {
   `paramResolvers` (tokens in order of first use); `invoke` gains `f` (the field's
   `ResolverContext`) and `x` (the resolver instances), each declared only when used. The argument is
   `(D.resolvers.graphql as ParamFunctionOf<typeof D, 'graphql'>)(f, data)` or `x[i].resolve(f,
-  data)` (data left out when the class's own `resolve` declares one parameter), evaluated like a
+  data)` (data left out when the class's `resolve` declares one parameter, §8.6), evaluated like a
   validated argument (`const vN`, `isThenable` fallback). The pipeline builds the `ResolverContext`
   only for such fields, sharing the guards' instance when the field has guards, and passes the
   resolver instances (one frozen array at boot for singletons, resolved in the operation scope

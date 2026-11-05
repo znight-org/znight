@@ -62,6 +62,33 @@ export const Prefixed = createParamDecorator<string, string>({
   graphql: (ctx, prefix) => \`\${prefix}:\${ctx.parentType}.\${ctx.field}\`,
 })
 export const LoadedUser = createParamDecorator<User>({ graphql: LoadedUserResolver })
+
+/** \`resolve\` inherited from a base class. */
+class BaseFieldResolver {
+  resolve(ctx: ResolverContext): string {
+    return ctx.field
+  }
+}
+export class FieldNameResolver extends BaseFieldResolver {}
+
+/** \`resolve\` from a base the compiler cannot analyse (a mixin): its arity is unknown. */
+// biome-ignore lint/suspicious/noExplicitAny: the constructor type TypeScript requires of a mixin
+function withResolve<T extends new (...args: any[]) => object>(base: T) {
+  return class extends base {
+    resolve(ctx: ResolverContext): string {
+      return ctx.route.coordinate
+    }
+  }
+}
+const Mixed = withResolve(class {})
+export class CoordinateResolver extends Mixed {
+  constructor() {
+    super()
+  }
+}
+
+export const FieldName = createParamDecorator<string>({ graphql: FieldNameResolver })
+export const Coordinate = createParamDecorator<string>({ graphql: CoordinateResolver })
 `,
   'src/guard.ts': `import type { GraphQLGuard, ResolverContext } from '@znight/graphql'
 import { Injectable } from '@znight/core'
@@ -75,7 +102,7 @@ export class MarkGuard implements GraphQLGuard {
 }
 `,
   'src/me.resolver.ts': `import { Args, Query, Resolver, UseGuard } from '@znight/graphql'
-import { CurrentUser, LoadedUser, Prefixed } from './current-user.ts'
+import { Coordinate, CurrentUser, FieldName, LoadedUser, Prefixed } from './current-user.ts'
 import { MarkGuard } from './guard.ts'
 import type { User } from './user.ts'
 
@@ -100,6 +127,11 @@ export class MeResolver {
   @Query()
   loaded(@LoadedUser() first: User, @LoadedUser() second: User): boolean {
     return first.id === second.id
+  }
+
+  @Query()
+  inherited(@FieldName() field: string, @Coordinate() coordinate: string): string {
+    return \`\${field} \${coordinate}\`
   }
 }
 `,
@@ -160,6 +192,10 @@ describe('custom parameter decorators on GraphQL resolvers (e2e)', () => {
     expect(result.code).toContain("CurrentUser.resolvers.graphql as ParamFunctionOf<typeof CurrentUser, 'graphql'>")
     expect(result.code).toContain('x: readonly [LoadedUserResolver]')
     expect(result.code).toContain('const v0 = x[0].resolve(f)')
+    // an inherited resolve method is read; an unreadable one is cast
+    expect(result.code).toContain(
+      'const v1 = (x[1] as { resolve(ctx: unknown, data: unknown): unknown }).resolve(f, undefined) as never',
+    )
   })
 
   it('type-checks under max-strict settings', () => {
@@ -175,6 +211,12 @@ describe('custom parameter decorators on GraphQL resolvers (e2e)', () => {
     expect(res.errors).toBeUndefined()
     expect(res.data).toEqual({ me: 'ada', guarded: 'ada field:Query.guarded', echo: 'hi echo:Query.echo' })
     expect(calls).toEqual(['current Query.me false', 'current Query.guarded true'])
+  })
+
+  it('calls inherited and unanalysable resolve methods', async () => {
+    const res = await executeOperation(test, { query: '{ inherited }' })
+    expect(res.errors).toBeUndefined()
+    expect(res.data).toEqual({ inherited: 'inherited Query.inherited' })
   })
 
   it('reports resolver errors in errors[]', async () => {

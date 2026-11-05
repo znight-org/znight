@@ -150,8 +150,8 @@ export class ParamDecoratorIndex {
       if (ref === undefined) {
         return failed
       }
-      const resolve = ctx.classInfo(ref.identity)?.methods.find(member => member.name === 'resolve' && !member.static)
-      resolver = Object.freeze({ kind: 'class', ref, async: resolve?.async === true, arity: resolve?.params.length })
+      const resolve = resolveMember(ref.identity, ctx)
+      resolver = Object.freeze({ kind: 'class', ref, async: resolve?.async === true, arity: resolve?.arity })
     } else {
       resolver = Object.freeze({ kind: 'function', async: entry.async })
     }
@@ -369,6 +369,63 @@ export class ParamDecoratorIndex {
   ): void {
     this.#report({ code: ErrorCode.InvalidDecorator, severity: 'error', message, location, hints, related })
   }
+}
+
+/**
+ * The `resolve` member of a resolver class: its own method, an arrow function (or function-typed)
+ * property, or the member of a base class the compiler can analyse. `undefined` when it cannot be
+ * read (a base the compiler cannot analyse, such as a mixin, a class without `ClassInfo`).
+ */
+function resolveMember(
+  identity: string,
+  ctx: Pick<AnalyzeContext, 'classInfo'>,
+): { readonly async: boolean; readonly arity: number } | undefined {
+  const seen = new Set<string>()
+  let current: ClassInfo | undefined = ctx.classInfo(identity)
+  while (current !== undefined && !seen.has(current.identity)) {
+    seen.add(current.identity)
+    const method = current.methods.find(member => member.name === 'resolve' && !member.static && !member.computed)
+    if (method !== undefined) {
+      return method.kind === 'method' ? { async: method.async, arity: method.params.length } : undefined
+    }
+    if (current.properties.some(member => member.name === 'resolve' && !member.static && !member.computed)) {
+      return propertyFunction(current)
+    }
+    current = current.superClass === undefined ? undefined : ctx.classInfo(current.superClass.identity)
+  }
+  return undefined
+}
+
+/** `resolve = (ctx) => ...`, `resolve = async function (ctx) {...}` or `resolve: (ctx: C) => T`. */
+function propertyFunction(cls: ClassInfo): { readonly async: boolean; readonly arity: number } | undefined {
+  const body = (cls.declaration.node as { body?: { body?: readonly unknown[] } }).body?.body ?? []
+  for (const member of body as readonly {
+    type: string
+    static?: boolean
+    computed?: boolean
+    key?: { type: string; name?: string }
+    value?: Expression | null
+    typeAnnotation?: { typeAnnotation?: { type: string; params?: readonly unknown[] } } | null
+  }[]) {
+    if (
+      member.type !== 'PropertyDefinition' ||
+      member.static === true ||
+      member.computed === true ||
+      member.key?.type !== 'Identifier' ||
+      member.key.name !== 'resolve'
+    ) {
+      continue
+    }
+    const value = member.value ? unwrap(member.value) : undefined
+    if (value?.type === 'ArrowFunctionExpression' || value?.type === 'FunctionExpression') {
+      return { async: value.async, arity: value.params.length }
+    }
+    const annotation = member.typeAnnotation?.typeAnnotation
+    return annotation?.type === 'TSFunctionType' && annotation.params !== undefined
+      ? { async: false, arity: annotation.params.length }
+      : undefined
+  }
+  return undefined
 }
 
 type ObjectProperty = Exclude<ObjectExpression['properties'][number], SpreadElement>

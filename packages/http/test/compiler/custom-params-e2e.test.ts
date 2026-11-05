@@ -66,6 +66,36 @@ export class LocaleResolver {
   }
 }
 
+/** \`resolve\` inherited from a base class. */
+class BaseRoleResolver {
+  resolve(ctx: HttpContext): string {
+    return ctx.header('x-role') ?? 'guest'
+  }
+}
+export class RoleResolver extends BaseRoleResolver {}
+
+/** \`resolve\` declared as an arrow function property. */
+export class TokenResolver {
+  readonly resolve = (ctx: HttpContext): string => ctx.header('x-token') ?? 'none'
+}
+
+/** \`resolve\` from a base the compiler cannot analyse (a mixin): its arity is unknown. */
+// biome-ignore lint/suspicious/noExplicitAny: the constructor type TypeScript requires of a mixin
+function withResolve<T extends new (...args: any[]) => object>(base: T) {
+  return class extends base {
+    resolve(ctx: HttpContext): string {
+      return ctx.header('x-mixed') ?? 'mixed'
+    }
+  }
+}
+const Mixed = withResolve(class {})
+export class MixedResolver extends Mixed {
+  // biome-ignore lint/complexity/noUselessConstructor: a constructor the compiler can read
+  constructor() {
+    super()
+  }
+}
+
 export function userOf(ctx: HttpContext): User {
   const user = ctx.state.get('user') as User | undefined
   if (user === undefined) throw new UnauthorizedException()
@@ -76,7 +106,7 @@ export function userOf(ctx: HttpContext): User {
 const DECORATORS = `
 import { createParamDecorator } from '@znight/core'
 import { validate } from '@znight/http'
-import { LoadedUserResolver, LocaleResolver, userOf } from './resolvers.ts'
+import { LoadedUserResolver, LocaleResolver, MixedResolver, RoleResolver, TokenResolver, userOf } from './resolvers.ts'
 import { calls, type User } from './user.ts'
 import type { StandardSchemaV1 } from '@znight/http'
 
@@ -99,6 +129,9 @@ export const AsyncUser = createParamDecorator<User>({
 export const Claim = createParamDecorator<string, keyof User>({ http: (ctx, key) => String(userOf(ctx)[key]) })
 export const LoadedUser = createParamDecorator<User>({ http: LoadedUserResolver })
 export const Locale = createParamDecorator<string, string>({ http: LocaleResolver })
+export const Role = createParamDecorator<string>({ http: RoleResolver })
+export const Token = createParamDecorator<string>({ http: TokenResolver })
+export const Mixin = createParamDecorator<string>({ http: MixedResolver })
 export const Header = createParamDecorator<unknown, { readonly name: string; readonly schema: StandardSchemaV1 }>({
   http: (ctx, { name, schema }) => validate(schema, ctx.header(name), \`header "\${name}"\`),
 })
@@ -134,7 +167,7 @@ const CONTROLLER = `
 import type { CanActivate, HttpContext } from '@znight/http'
 import { Injectable } from '@znight/core'
 import { Body, Controller, Get, Post, Query, UseGuard } from '@znight/http'
-import { AsyncUser, Claim, CurrentUser, Header, LoadedUser, Locale, OptionalUser } from './decorators.ts'
+import { AsyncUser, Claim, CurrentUser, Header, LoadedUser, Locale, Mixin, OptionalUser, Role, Token } from './decorators.ts'
 import { Named, TenantHeader } from './schemas.ts'
 import { calls, type User } from './user.ts'
 
@@ -197,6 +230,11 @@ export class CustomController {
   @Get('/tenant')
   tenant(@Header(TenantHeader) tenant: unknown) {
     return { tenant }
+  }
+
+  @Get('/inherited')
+  inherited(@Role() role: string, @Token() token: string, @Mixin() mixed: string) {
+    return { role, token, mixed }
   }
 }
 `
@@ -264,6 +302,14 @@ describe.skipIf(typeof compile !== 'function')('custom parameter decorators on H
     expect(code).toContain("const a1 = x[1].resolve(ctx, 'en')")
     // resolve(ctx) declares no data parameter: none is passed
     expect(code).toContain('const a0 = x[0].resolve(ctx)')
+    // also when it is inherited or an arrow function property; cast when it cannot be read
+    expect(code).toContain(
+      '(c: CustomController, ctx: HttpContext, x: readonly [RoleResolver, TokenResolver, MixedResolver]) => {',
+    )
+    expect(code).toContain('const a1 = x[1].resolve(ctx)')
+    expect(code).toContain(
+      'const a2 = (x[2] as { resolve(ctx: unknown, data: unknown): unknown }).resolve(ctx, undefined) as never',
+    )
     // a route without custom parameter is unchanged
     expect(code).toContain(
       [
@@ -349,6 +395,11 @@ describe.skipIf(typeof compile !== 'function')('custom parameter decorators on H
     const invalid = await send({ method: 'POST', url: '/custom/validated-first', body: { name: 'bad' } })
     expect(invalid.status).toBe(400)
     expect(await calls()).toEqual(['name'])
+  })
+
+  it('calls inherited, arrow function and unanalysable resolve methods', async () => {
+    const response = await send({ method: 'GET', url: '/custom/inherited', headers: { 'x-role': 'admin' } })
+    expect(response.json()).toEqual({ role: 'admin', token: 'none', mixed: 'mixed' })
   })
 
   it('resolves class resolvers in the request scope', async () => {

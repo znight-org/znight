@@ -176,8 +176,14 @@ function customArgument(
     node = ctx.call(ctx.code`${ctx.member(decorator, 'resolvers', 'messaging')} as ${type}`, [m, data])
   } else {
     const position = resolvers.index.get(param.resolver.token) as number
+    if (param.arity === undefined) {
+      // a `resolve` the compiler cannot read (inherited from a mixin...): the instance is cast to a
+      // method taking both arguments (method parameters are bivariant), the value with `as never`
+      const instance = ctx.code`${resolvers.x as GenNode}[${position}] as { resolve(message: unknown, data: unknown): unknown }`
+      return ctx.code`(await (${instance}).resolve(${m}, ${data})) as never`
+    }
     // a `resolve(message)` that ignores the data gets no data argument (TypeScript checks the arity)
-    const arity = Math.min(param.arity ?? 2, 2)
+    const arity = Math.min(param.arity, 2)
     let args = ctx.code``
     if (arity === 1) args = m
     else if (arity === 2) args = ctx.code`${m}, ${data}`

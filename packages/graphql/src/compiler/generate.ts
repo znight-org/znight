@@ -391,8 +391,13 @@ function customArgument(ctx: Context, scope: Scope, param: Extract<ParamData, { 
     node = ctx.call(ctx.code`${ctx.member(decorator, 'resolvers', 'graphql')} as ${type}`, [f, data])
   } else {
     const position = scope.resolvers.get(param.resolver.token) as number
+    if (param.arity === undefined) {
+      // a `resolve` the compiler cannot read (inherited from a mixin...): the instance is cast to a
+      // method taking both arguments (method parameters are bivariant), the value with `as never`
+      return ctx.code`(${scope.x as GenNode}[${position}] as { resolve(ctx: unknown, data: unknown): unknown }).resolve(${f}, ${data}) as never`
+    }
     // a `resolve(ctx)` that ignores the data gets no data argument (TypeScript checks the arity)
-    const arity = Math.min(param.arity ?? 2, 2)
+    const arity = Math.min(param.arity, 2)
     let args = ctx.code``
     if (arity === 1) args = f
     else if (arity === 2) args = ctx.code`${f}, ${data}`

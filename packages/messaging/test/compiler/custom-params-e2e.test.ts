@@ -61,6 +61,58 @@ export class OrderConsumer {
 `,
 }
 
+const RESOLVE_FORMS: Readonly<Record<string, string>> = {
+  'src/resolvers.ts': `import type { InboundMessage } from '@znight/messaging'
+import { createParamDecorator } from '@znight/core'
+
+export const calls: unknown[] = []
+
+/** \`resolve\` inherited from a base class. */
+class BaseIdResolver {
+  resolve(message: InboundMessage): string {
+    return message.id
+  }
+}
+export class IdResolver extends BaseIdResolver {}
+
+/** \`resolve\` declared as an arrow function property. */
+export class TypeResolver {
+  readonly resolve = (message: InboundMessage): string => message.type ?? 'none'
+}
+
+/** \`resolve\` from a base the compiler cannot analyse (a mixin): its arity is unknown. */
+// biome-ignore lint/suspicious/noExplicitAny: the constructor type TypeScript requires of a mixin
+function withResolve<T extends new (...args: any[]) => object>(base: T) {
+  return class extends base {
+    resolve(message: InboundMessage): string {
+      return \`mixed:\${message.id}\`
+    }
+  }
+}
+const Mixed = withResolve(class {})
+export class MixedResolver extends Mixed {
+  constructor() {
+    super()
+  }
+}
+
+export const MessageId = createParamDecorator<string>({ messaging: IdResolver })
+export const MessageType = createParamDecorator<string>({ messaging: TypeResolver })
+export const MixedId = createParamDecorator<string>({ messaging: MixedResolver })
+`,
+  'src/orders.ts': `import { Consumer, OnMessage } from '@znight/messaging'
+import { calls, MessageId, MessageType, MixedId } from './resolvers.ts'
+
+@Consumer({ queue: 'orders' })
+export class OrderConsumer {
+  @OnMessage('order.placed')
+  placed(@MessageId() id: string, @MessageType() type: string, @MixedId() mixed: string): void {
+    calls.push({ id, type, mixed })
+  }
+}
+`,
+}
+
 const silent: CoreLogger = { debug() {}, info() {}, warn() {}, error() {} }
 
 const TSC = path.resolve(MESSAGING_DIR, '../../node_modules/.bin/tsc')
@@ -141,6 +193,38 @@ describe('custom parameter decorators on message handlers', () => {
         { order: { id: 2 }, tenant: 'zen', source: null, same: true, trace: '2:m2' },
       ])
       expect(driver.deadLetters('orders').map(entry => entry.message.id)).toEqual(['m3'])
+    } finally {
+      await application.stop()
+    }
+  }, 60_000)
+
+  it('calls inherited, arrow function and unanalysable resolve methods', async () => {
+    const app = tempApp(RESOLVE_FORMS)
+    const compiled = await compiler.compile({ root: app.root, conditions: ['@znight/source'] })
+    expect(compiled.diagnostics.filter(diagnostic => diagnostic.severity === 'error')).toEqual([])
+    const code = compiled.code
+    expect(code).toContain('await x[0].resolve(m)')
+    expect(code).toContain('await x[1].resolve(m)')
+    expect(code).toContain(
+      '(await (x[2] as { resolve(message: unknown, data: unknown): unknown }).resolve(m, undefined)) as never',
+    )
+    app.write(path.relative(app.root, compiled.outFile), code)
+    if (fs.existsSync(TSC)) expect(typecheck(app)).toEqual([])
+
+    const metadata = ((await import(compiled.outFile)) as { __ZNIGHT_METADATA__: ZnightMetadata }).__ZNIGHT_METADATA__
+    const { calls } = (await import(app.path('src/resolvers.ts'))) as { calls: unknown[] }
+    const driver = new MemoryDriver()
+    const application = await Application.create({
+      metadata,
+      plugins: [MessagingPlugin.configure({ driver })],
+      logger: silent,
+      shutdown: { signals: false },
+    })
+    await application.start()
+    try {
+      driver.send('orders', { id: 'm1', type: 'order.placed', payload: {} })
+      await driver.idle()
+      expect(calls).toEqual([{ id: 'm1', type: 'order.placed', mixed: 'mixed:m1' }])
     } finally {
       await application.stop()
     }

@@ -798,8 +798,12 @@ export type ParamDecoratorResolver =
       readonly ref: ClassRef
       readonly async: boolean
       /**
-       * Number of parameters of the class's own `resolve` method (`undefined` when it is inherited):
-       * generated code passes at most that many arguments (`resolve(ctx)` ignores the data).
+       * Number of parameters of the class's `resolve`: its own method, an inherited one (through
+       * analysable base classes) or an arrow function (or function-typed) property. Generated code
+       * passes at most that many arguments (`resolve(ctx)` ignores the data). `undefined` when the
+       * compiler cannot read it (a base it cannot analyse, such as a mixin): generated code then
+       * casts the instance to `{ resolve(ctx: unknown, data: unknown): unknown }` and the value with
+       * `as never`.
        */
       readonly arity: number | undefined
     }

@@ -521,8 +521,13 @@ function customArgument(ctx: Context, helpers: Helpers, http: GenNode, custom: C
   } else {
     const resolvers = helpers.resolvers as NonNullable<Helpers['resolvers']>
     const index = resolvers.index.get(custom.resolver.token) as number
+    if (custom.arity === undefined) {
+      // a `resolve` the compiler cannot read (inherited from a mixin...): the instance is cast to a
+      // method taking both arguments (method parameters are bivariant), the value with `as never`
+      return ctx.code`(${resolvers.x}[${index}] as { resolve(ctx: unknown, data: unknown): unknown }).resolve(${http}, ${data}) as never`
+    }
     // a `resolve(ctx)` that ignores the data gets no data argument (TypeScript checks the arity)
-    const args = [http, data].slice(0, custom.arity ?? 2)
+    const args = [http, data].slice(0, custom.arity)
     call = ctx.code`${resolvers.x}[${index}].resolve(${args.length === 0 ? ctx.code`` : joinNodes(ctx, args)})`
   }
   return custom.cast ? ctx.code`${call} as never` : call

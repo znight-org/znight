@@ -160,7 +160,10 @@ export interface CustomParamData {
   readonly data: { readonly value: StaticValue } | undefined
   /** The class resolver (`x[i].resolve(ctx, data)`); `undefined` for a function resolver. */
   readonly resolver: ClassRef | undefined
-  /** Parameters of the class resolver's own `resolve` (`undefined`: inherited, or a function resolver). */
+  /**
+   * Parameters of the class resolver's `resolve` (own, inherited or an arrow function property);
+   * `undefined` for a function resolver, or when the compiler cannot read it (the call is cast).
+   */
   readonly arity?: number
   /** The value type could not be checked against the parameter: `as never`. */
   readonly cast: boolean

@@ -757,9 +757,11 @@ specification, `docs/internals/architecture.md` §4.6, §6.5, §8.6, §9.1, §9.
   conformance, which compares TypeScript shapes with SDL types: the comparison of two TypeScript
   types is new (`packages/compiler/src/shapes/assignable.ts`, `members: 'instance'`, recursive types
   compared coinductively).
-- **Class resolvers and the data argument.** When the class's own `resolve` declares fewer than two
-  parameters, the generated call leaves the data out (`x[0].resolve(ctx)`): TypeScript checks the
-  arity of the call against the class.
+- **Class resolvers and the data argument.** When the class's `resolve` (its own method, an
+  inherited one or an arrow function property) declares fewer than two parameters, the generated
+  call leaves the data out (`x[0].resolve(ctx)`): TypeScript checks the arity of the call against
+  the class. When the compiler cannot read it (a base it cannot analyse, such as a mixin), the
+  instance is cast to a `resolve(ctx, data)` method and the value with `as never`.
 - **Messaging** awaits custom parameters (the invoke becomes `async` for such handlers) instead of
   the `isThenable` fallback: a delivery already awaits `invoke`, and handlers without custom
   parameters are unchanged. Parameter resolvers are resolved in the delivery scope on every call.
