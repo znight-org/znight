@@ -3408,7 +3408,8 @@ output, synchronously for synchronous schemas, and throws `WsValidationException
 `transport` (`'auto'`), `origins` (`'same-origin'`), `maxPayload` (`'1mb'`), `maxConnections`
 (`Infinity`), `maxPendingMessages` (32), `backpressure` (`{ limit: '1mb', onLimit: 'close' }`),
 `heartbeat` (`{ intervalMs: 30_000 }` or `false`), `handshakeTimeoutMs` (10 000), `handlerTimeoutMs`
-(30 000), `closeTimeoutMs` (2 000), `messageGuards`, `exceptionMappers`, `exposeErrors`,
+(30 000), `closeTimeoutMs` (2 000), `codec` (`jsonCodec`: `{ decode(frame, binary), encode(message) }`,
+used for every frame of `events` gateways, broadcasts included), `messageGuards`, `exceptionMappers`, `exposeErrors`,
 `shutdown` (`{ code: 1001, reason: 'Server shutting down', timeoutMs: 3_000 }`); invalid options
 are ZNIGHT050):
 

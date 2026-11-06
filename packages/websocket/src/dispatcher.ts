@@ -6,12 +6,12 @@
 import type { Hooks, WebSocketMessageEvent, WebSocketMessageOutcome } from '@znight/core'
 import type { ConnectionDriver, WsCloseInfo, WsConnectionImpl } from './connection.ts'
 import type { WsExceptionMapper, WsGuard, WsMessageContext } from './context.ts'
-import type { MessageId, WireError } from './envelope.ts'
+import type { MessageId, WireError, WsCodec } from './envelope.ts'
 import type { GatewayDefinition, WsHandlerDefinition } from './metadata.ts'
 
 import { HttpException } from '@znight/http'
 
-import { decodeFrame, encodeErrorEvent, encodeErrorReply, encodeReply, isFailure } from './envelope.ts'
+import { isFailure, jsonCodec } from './envelope.ts'
 import { codeOfStatus, WsCloseCode, WsErrorCode, WsException, WsValidationException } from './exceptions.ts'
 
 /** A handler with its resolved guards and effective metadata. */
@@ -43,6 +43,8 @@ export interface DispatcherOptions {
   readonly name?: string
   /** Plugin `exceptionMappers`, in order. */
   readonly mappers?: readonly WsExceptionMapper[]
+  /** The codec of `events` gateways. Default: {@link jsonCodec}. */
+  readonly codec?: WsCodec
 }
 
 const MESSAGE_HOOK = 'websocket:message'
@@ -100,9 +102,11 @@ export class GatewayDispatcher implements ConnectionDriver {
   readonly #options: DispatcherOptions
   readonly #byEvent = new Map<string, HandlerPlan>()
   readonly #fallback: HandlerPlan | undefined
+  readonly #codec: WsCodec
 
   constructor(options: DispatcherOptions) {
     this.#options = options
+    this.#codec = options.codec ?? jsonCodec
     let fallback: HandlerPlan | undefined
     for (const plan of options.handlers) {
       if (plan.definition.event === undefined) fallback = plan
@@ -140,9 +144,9 @@ export class GatewayDispatcher implements ConnectionDriver {
     this.#options.closed(conn, info)
   }
 
-  rateLimited(conn: WsConnectionImpl, frame: string | Uint8Array): void {
+  rateLimited(conn: WsConnectionImpl, frame: string | Uint8Array, binary: boolean): void {
     if (this.raw) return
-    const decoded = decodeFrame(frame)
+    const decoded = this.#codec.decode(frame, binary)
     const id = decoded.id
     const event = isFailure(decoded) ? undefined : decoded.event
     this.#fail(conn, id, event, { code: WsErrorCode.RateLimited, message: 'Too many messages' })
@@ -155,14 +159,14 @@ export class GatewayDispatcher implements ConnectionDriver {
     let data: unknown = frame
     let failure: WireError | undefined
     if (!this.raw) {
-      const decoded = decodeFrame(frame)
+      const decoded = this.#codec.decode(frame, binary)
       if (isFailure(decoded)) {
         id = decoded.id
         failure = { code: decoded.error, message: decoded.message }
       } else {
         ;({ event, id, data } = decoded)
         if (event === '$ping') {
-          if (id !== undefined) conn.sendFrame(encodeReply(id, { t: Date.now() }))
+          if (id !== undefined) conn.sendFrame(this.#codec.encode({ kind: 'reply', id, data: { t: Date.now() } }))
           return
         }
       }
@@ -251,7 +255,9 @@ export class GatewayDispatcher implements ConnectionDriver {
         }),
         abort,
       )
-      if (ctx.id !== undefined && conn.readyState === 'open') conn.sendFrame(encodeReply(ctx.id, result))
+      if (ctx.id !== undefined && conn.readyState === 'open') {
+        conn.sendFrame(this.#codec.encode({ kind: 'reply', id: ctx.id, data: result }))
+      }
       return OK
     } catch (thrown) {
       const error = await this.#map(thrown, ctx, conn)
@@ -317,6 +323,6 @@ export class GatewayDispatcher implements ConnectionDriver {
 
   #fail(conn: WsConnectionImpl, id: MessageId | undefined, event: string | undefined, error: WireError): void {
     if (this.raw || conn.readyState !== 'open') return
-    conn.sendFrame(id === undefined ? encodeErrorEvent(event, error) : encodeErrorReply(id, error))
+    conn.sendFrame(this.#codec.encode({ kind: 'error', id, event, error }))
   }
 }

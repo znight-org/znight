@@ -65,8 +65,11 @@ export {
   type InboundMessage,
   isFailure,
   isMessageId,
+  jsonCodec,
   type MessageId,
+  type OutboundMessage,
   type WireError,
+  type WsCodec,
 } from './envelope.ts'
 export {
   codeOfStatus,

@@ -3,7 +3,9 @@
  * created on first join and deleted when empty; a broadcast encodes its frame once, then sends it
  * to each selected member, which applies its own backpressure policy.
  */
-import { encodeEvent } from './envelope.ts'
+import type { WsCodec } from './envelope.ts'
+
+import { jsonCodec } from './envelope.ts'
 
 /** What a room holds: a connection, seen through the operations rooms need. */
 export interface ChannelMember {
@@ -45,6 +47,12 @@ function list(value: string | readonly string[]): readonly string[] {
 export class RoomRegistry<M extends ChannelMember = ChannelMember> {
   readonly #members = new Map<string, M>()
   readonly #rooms = new Map<string, Set<M>>()
+  /** Encodes the events of broadcasts (once per broadcast). */
+  readonly codec: WsCodec
+
+  constructor(codec: WsCodec = jsonCodec) {
+    this.codec = codec
+  }
 
   /** Open members. */
   get size(): number {
@@ -156,7 +164,7 @@ class BroadcastImpl<E extends object, M extends ChannelMember> implements Broadc
   }
 
   emit<K extends keyof E & string>(event: K, data: E[K]): void {
-    this.send(encodeEvent(event, data))
+    this.send(this.#registry.codec.encode({ kind: 'event', event, data }))
   }
 
   send(frame: string | Uint8Array): void {

@@ -394,7 +394,7 @@ export class WebSocketPlugin implements Plugin, PluginHttpUpgrades {
       }))
       const requestScoped = ctx.metadata.providers[definition.token]?.scope === 'request'
       const instance = gatewayInstance(ctx.container, definition.token, requestScoped)
-      const rooms = new RoomRegistry<WsConnectionImpl>()
+      const rooms = new RoomRegistry<WsConnectionImpl>(options.codec)
       const backpressure = definition.backpressure
       const gatewayMaxPayload = definition.maxPayload ?? options.maxPayload
       const plan: GatewayPlan = {
@@ -424,6 +424,7 @@ export class WebSocketPlugin implements Plugin, PluginHttpUpgrades {
           hooks: ctx.hooks,
           name,
           mappers,
+          codec: options.codec,
           logError: (message, error, conn) => {
             ctx.logger.error(`WebSocketPlugin: ${message}`, {
               err: error,

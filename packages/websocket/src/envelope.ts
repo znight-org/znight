@@ -93,3 +93,44 @@ function wireError(error: WireError): WireError {
     ? { code: error.code, message: error.message }
     : { code: error.code, message: error.message, details: error.details }
 }
+
+/** An outbound frame of an `events` gateway, before encoding. */
+export type OutboundMessage =
+  | { readonly kind: 'event'; readonly event: string; readonly data: unknown }
+  | { readonly kind: 'reply'; readonly id: MessageId; readonly data: unknown }
+  /** A failure: a reply when `id` is set, an `$error` event otherwise (`event`: the failed message's). */
+  | {
+      readonly kind: 'error'
+      readonly id: MessageId | undefined
+      readonly event: string | undefined
+      readonly error: WireError
+    }
+
+/**
+ * The codec of `events` gateways (`WebSocketPlugin` option `codec`): how frames are decoded into
+ * `{ event, data, id }` and how outbound messages are encoded. The default is {@link jsonCodec};
+ * a custom codec may carry MessagePack over binary frames, for instance.
+ */
+export interface WsCodec {
+  /** Decodes an inbound frame; a failure is answered with its code (`BAD_FRAME`...). */
+  decode(frame: string | Uint8Array, binary: boolean): InboundMessage | InboundFailure
+  /** Encodes an outbound message: a string is a text frame, bytes a binary frame. */
+  encode(message: OutboundMessage): string | Uint8Array
+}
+
+/** The default codec: UTF-8 JSON text frames (RFC 0003 §5.3); binary frames are `UNSUPPORTED_FRAME`. */
+export const jsonCodec: WsCodec = Object.freeze({
+  decode: (frame: string | Uint8Array): InboundMessage | InboundFailure => decodeFrame(frame),
+  encode(message: OutboundMessage): string {
+    switch (message.kind) {
+      case 'event':
+        return encodeEvent(message.event, message.data)
+      case 'reply':
+        return encodeReply(message.id, message.data)
+      case 'error':
+        return message.id === undefined
+          ? encodeErrorEvent(message.event, message.error)
+          : encodeErrorReply(message.id, message.error)
+    }
+  },
+})

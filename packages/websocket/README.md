@@ -225,6 +225,6 @@ ZNIGHT051 (no `HttpPlugin`, no upgrade support, `ws` missing, mismatched transpo
 
 ## Limitations (work in progress)
 
-- No custom codec yet (JSON envelope only); `conn.handshake` keeps the native request.
+- `conn.handshake` keeps the native request of the handshake.
 - Rooms are per process: broadcast across instances through `@znight/messaging`.
 - No HTTP/2 or HTTP/3 WebSockets, no Socket.IO protocol.

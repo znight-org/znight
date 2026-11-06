@@ -7,12 +7,18 @@ import type {
   ZnightMetadata,
 } from '@znight/core'
 import type { CanActivate, HttpContext } from '@znight/http'
-import type { GatewayDefinition, WebSocketPluginOptions, WsConnection, WsMessageContext } from '../src/index.ts'
+import type {
+  GatewayDefinition,
+  WebSocketPluginOptions,
+  WsCodec,
+  WsConnection,
+  WsMessageContext,
+} from '../src/index.ts'
 
 import { Application, silentLogger } from '@znight/core'
 import { HttpPlugin } from '@znight/http'
 
-import { WebSocketPlugin, WsException, WsHandshakeError, WsServer, WsTokens } from '../src/index.ts'
+import { jsonCodec, WebSocketPlugin, WsException, WsHandshakeError, WsServer, WsTokens } from '../src/index.ts'
 import { describe, expect, it } from 'bun:test'
 
 const CHAT = 'src/chat.gateway.ts#ChatGateway'
@@ -329,5 +335,25 @@ describe('WebSocketPlugin', () => {
     }
     const roots = WebSocketPlugin.configure({ messageGuards: [Guard] }).initRoots({ metadata })
     expect(roots).toEqual([Guard, CHAT, TICKET_GUARD, DOC])
+  })
+})
+
+describe('WebSocketPlugin codec', () => {
+  it('encodes and decodes events with a custom codec (JSON over binary frames)', async () => {
+    const text = new TextDecoder()
+    const bytes = new TextEncoder()
+    const binaryJson: WsCodec = {
+      decode: (frame, binary) =>
+        binary ? jsonCodec.decode(text.decode(frame as Uint8Array), false) : jsonCodec.decode(frame, false),
+      encode: message => bytes.encode(jsonCodec.encode(message) as string),
+    }
+    await using t = await createApp({ codec: binaryJson })
+    const client = await t.websocket.connect('/chat', { protocols: ['chat.v1'] })
+    client.sendRaw(bytes.encode(JSON.stringify({ event: 'room.join', data: { room: 'bin' }, id: 1 })))
+    const reply = await client.nextRaw()
+    expect(reply).toBeInstanceOf(Uint8Array)
+    expect(JSON.parse(text.decode(reply as Uint8Array))).toEqual({ id: 1, data: { members: 1 } })
+    await client.close()
+    await expect(createApp({ codec: { decode: () => undefined } } as never)).rejects.toThrow('ZNIGHT050')
   })
 })

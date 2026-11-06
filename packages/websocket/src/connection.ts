@@ -8,7 +8,6 @@ import type { TokenBucket } from './rate-limit.ts'
 import type { Broadcast, ChannelMember, RoomRegistry } from './rooms.ts'
 import type { SendStatus, SocketEvents, TransportSocket } from './transport.ts'
 
-import { encodeEvent } from './envelope.ts'
 import { WsCloseCode } from './exceptions.ts'
 
 /** Who closed a connection. */
@@ -259,7 +258,7 @@ export class WsConnectionImpl implements WsConnection, ChannelMember {
   }
 
   emit(event: string, data: unknown): WsSendResult {
-    return this.sendFrame(encodeEvent(event, data))
+    return this.sendFrame(this.#registry.codec.encode({ kind: 'event', event, data }))
   }
 
   send(frame: string | Uint8Array): WsSendResult {

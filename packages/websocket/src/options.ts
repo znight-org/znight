@@ -1,10 +1,13 @@
 /** Options of `@Gateway` and of `WebSocketPlugin` (RFC 0003 §5.2, §5.9). */
 import type { ByteSize, HttpContext } from '@znight/http'
 import type { WsExceptionMapper, WsGuard } from './context.ts'
+import type { WsCodec } from './envelope.ts'
 import type { WebSocketTransport } from './transport.ts'
 
 import { ErrorCode, ZnightError } from '@znight/core'
 import { parseByteSize } from '@znight/http'
+
+import { jsonCodec } from './envelope.ts'
 
 /** Options of `@Gateway` (RFC 0003 §5.2), all static: the compiler reads them. */
 export interface GatewayOptions {
@@ -80,6 +83,8 @@ export interface WebSocketPluginOptions {
   readonly handlerTimeoutMs?: number
   /** Wait for the client's close frame before terminating. Default: `2_000`. */
   readonly closeTimeoutMs?: number
+  /** The codec of `events` gateways. Default: `jsonCodec` (JSON text frames). */
+  readonly codec?: WsCodec
   /** Global message guards, run before the gateway's and the handler's. */
   readonly messageGuards?: readonly WsProviderRef<WsGuard>[]
   /** Exception mappers of message handlers and guards, in order. */
@@ -102,6 +107,7 @@ export interface ResolvedWebSocketOptions {
   readonly handshakeTimeoutMs: number
   readonly handlerTimeoutMs: number
   readonly closeTimeoutMs: number
+  readonly codec: WsCodec
   readonly messageGuards: readonly unknown[]
   readonly exceptionMappers: readonly unknown[]
   readonly exposeErrors: boolean
@@ -126,6 +132,7 @@ const OPTION_KEYS: ReadonlySet<string> = new Set([
   'handshakeTimeoutMs',
   'handlerTimeoutMs',
   'closeTimeoutMs',
+  'codec',
   'messageGuards',
   'exceptionMappers',
   'exposeErrors',
@@ -214,6 +221,15 @@ export function resolveWebSocketOptions(options: unknown): ResolvedWebSocketOpti
   if (typeof reason !== 'string' || Buffer.byteLength(reason) > 123) {
     throw invalidOption('shutdown.reason', 'a string of at most 123 bytes', reason)
   }
+  const codec = o.codec ?? jsonCodec
+  if (
+    codec === null ||
+    typeof codec !== 'object' ||
+    typeof codec.decode !== 'function' ||
+    typeof codec.encode !== 'function'
+  ) {
+    throw invalidOption('codec', '{ decode(frame, binary), encode(message) }', codec)
+  }
   if (o.exposeErrors !== undefined && typeof o.exposeErrors !== 'boolean') {
     throw invalidOption('exposeErrors', 'a boolean', o.exposeErrors)
   }
@@ -228,6 +244,7 @@ export function resolveWebSocketOptions(options: unknown): ResolvedWebSocketOpti
     handshakeTimeoutMs: positiveInteger('handshakeTimeoutMs', o.handshakeTimeoutMs, 10_000, true),
     handlerTimeoutMs: positiveInteger('handlerTimeoutMs', o.handlerTimeoutMs, 30_000, true),
     closeTimeoutMs: positiveInteger('closeTimeoutMs', o.closeTimeoutMs, 2_000),
+    codec,
     messageGuards: refs('messageGuards', o.messageGuards, 'canHandle'),
     exceptionMappers: refs('exceptionMappers', o.exceptionMappers, 'map'),
     exposeErrors: o.exposeErrors ?? false,
