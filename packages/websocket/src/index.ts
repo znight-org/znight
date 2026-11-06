@@ -53,4 +53,5 @@ export {
   WsValidationException,
   type WsValidationIssue,
 } from './exceptions.ts'
+export { type Broadcast, type ChannelMember, type MemberRef, RoomRegistry } from './rooms.ts'
 export { MemoryClient, type MemoryCloseInfo, memoryTransport } from './transports/memory.ts'
