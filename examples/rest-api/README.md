@@ -30,6 +30,7 @@ constructor types, validates the graph and generates the container (`src/.znight
 | Repository behind an interface, injected by interface                                                         | [`books/book.repository.ts`](src/books/book.repository.ts), [`drizzle-book.repository.ts`](src/books/drizzle-book.repository.ts) |
 | `@Config` classes, `@Env`, `@Secret`, `.env` files                                                            | [`config/`](src/config), [`.env.development`](.env.development)                                                                  |
 | JSON logs with request ids, Prometheus `/metrics`, `@Logged`, `@Metric`                                       | [`main.ts`](src/main.ts), [`books/book.service.ts`](src/books/book.service.ts)                                                   |
+| Application events: `BookAdded` published by the service, an inline and a detached `@OnEvent` listener        | [`books/book.events.ts`](src/books/book.events.ts), [`book.listeners.ts`](src/books/book.listeners.ts)                           |
 | Lifecycle hooks (`onReady`, `onStop`) and graceful shutdown                                                   | [`app.lifecycle.ts`](src/app.lifecycle.ts), [`main.ts`](src/main.ts)                                                             |
 | Unit tests (`TestBed`), repository tests on a real database, HTTP tests (`TestApp`), end-to-end tests         | [`test/`](test)                                                                                                                  |
 

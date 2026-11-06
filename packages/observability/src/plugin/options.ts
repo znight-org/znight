@@ -1,3 +1,4 @@
+import type { EventsInstrumentationOptions } from '../events/events.ts'
 import type { GraphQLMetricsOptions, GraphQLOperationLogOptions, GraphQLTracingOptions } from '../graphql/operations.ts'
 import type { LoggerOptions } from '../logging/logger.ts'
 import type { HttpRequestLogOptions, MessageLogOptions } from '../logging/requests.ts'
@@ -19,6 +20,8 @@ export interface LoggingOptions extends Omit<LoggerOptions, 'scope'> {
   readonly jobs?: boolean | JobLogOptions
   /** One entry per GraphQL operation (`graphql:operation` hook of `@znight/graphql`). Default: `false`. */
   readonly graphql?: boolean | GraphQLOperationLogOptions
+  /** One `debug` entry per event publication (`events:publish` hook of `@znight/events`). Default: `true`. */
+  readonly events?: boolean | EventsInstrumentationOptions
   /**
    * One entry per closed WebSocket connection and per failed message (`websocket:*` hooks of
    * `@znight/websocket`); `{ messages: true }` adds a `debug` entry per message. Default: `true`.
@@ -45,6 +48,8 @@ export interface MetricsOptions extends MetricsRegistryOptions {
   readonly graphql?: boolean | GraphQLMetricsOptions
   /** WebSocket connection and message metrics (`websocket:*` hooks of `@znight/websocket`). Default: `true`. */
   readonly websocket?: boolean | WebSocketMetricsOptions
+  /** Application event metrics (`events:*` hooks of `@znight/events`). Default: `true`. */
+  readonly events?: boolean | EventsInstrumentationOptions
 }
 
 /** `tracing` options of `ObservabilityPlugin.configure()`. */
@@ -73,6 +78,11 @@ export interface TracingOptions extends TracerOptions {
    * span (`websocket:message` hook of `@znight/websocket`). Default: `true`.
    */
   readonly websocket?: boolean | WebSocketTracingOptions
+  /**
+   * An `INTERNAL` span per event publication and per listener (`events:*` hooks of
+   * `@znight/events`). Default: `true`.
+   */
+  readonly events?: boolean | EventsInstrumentationOptions
 }
 
 /** Options of `ObservabilityPlugin.configure()`. */

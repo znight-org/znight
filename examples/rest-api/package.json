@@ -16,6 +16,7 @@
     "@znight/core": "workspace:*",
     "@znight/http": "workspace:*",
     "@znight/config": "workspace:*",
+    "@znight/events": "workspace:*",
     "@znight/observability": "workspace:*",
     "fastify": "5.12.7",
     "zod": "catalog:",

@@ -81,6 +81,8 @@ walks through a migration.
 | `new Logger(X.name)` (`@nestjs/common`)              | An injected `Logger`, or `getLogger(X.name)` outside DI ([below](#logger-to-getlogger))                                                  |
 | `Logger.overrideLogger(false)` in specs              | `setFallbackLogger(new Logger({ level: 'silent' }))` once, in the test preload ([below](#logger-to-getlogger))                           |
 | `ScheduleModule.forRoot()`, `@Cron()`, `@Interval()` | [`@znight/schedule`](/packages/schedule): `SchedulePlugin`, `@Cron()`, `@Interval('10s')`                                                |
+| `@nestjs/cqrs` `EventBus`, `@EventsHandler(X)`       | [`@znight/events`](/packages/events): `EventPublisher.publish()`, `@OnEvent({ detached: true })` ([below](#application-events))          |
+| `@nestjs/event-emitter` `@OnEvent('x.y')`            | `@OnEvent()` on a method typed with the event class; wildcards become base classes ([below](#application-events))                        |
 | `TypeOrmModule`, `@InjectRepository(User)`           | A `@Factory()` providing the client, repositories behind interfaces ([Data access](./data-access))                                       |
 | `CacheModule`, `CacheInterceptor`                    | A method interceptor ([cache recipe](./aop#cache)); `@znight/cache` is planned                                                           |
 | `@WebSocketGateway()`                                | Planned, `@znight/websocket` ([roadmap](/roadmap#znight-websocket)); Server-Sent Events today                                            |
@@ -413,6 +415,31 @@ the built-in GraphQL-over-HTTP and SSE endpoint by default, GraphQL Yoga with
 | `transformSchema`, `buildSchemaOptions`                           | Not supported: the engine owns the schema                                                  |
 | `path`, `useGlobalPrefix`                                         | `path`; the `HttpPlugin` prefix always applies                                             |
 | Mercurius `jit`, `loaders`                                        | No JIT (a Yoga plugin replacing the execution is refused); `@Loader()`                     |
+
+## Application events {#application-events}
+
+`@nestjs/cqrs` events and `@nestjs/event-emitter` map to [`@znight/events`](/guide/events). Events stay
+classes; the handler's parameter type replaces the decorator argument.
+
+| NestJS                                                             | Znight                                                                      |
+| ------------------------------------------------------------------ | --------------------------------------------------------------------------- |
+| `CqrsModule.forRoot()`, `EventEmitterModule.forRoot()`             | `EventsPlugin.configure()` in `Application.create({ plugins })`             |
+| `@EventsHandler(UserCreated)` + `implements IEventHandler<...>`    | Remove both; `@OnEvent({ detached: true })` on `handle(event: UserCreated)` |
+| `@EventsHandler(A, B)` + `handle(event: A \| B)`                   | `@OnEvent({ detached: true }) handle(event: A \| B)`                        |
+| `eventBus.publish(e)`                                              | `await events.publish(e)` (inject `EventPublisher`)                         |
+| `publishAll([a, b])`                                               | `for (const e of [a, b]) await events.publish(e)`                           |
+| `UnhandledExceptionBus`                                            | `EventsPlugin.configure({ onError })` or the `events:listener` hook         |
+| `eventEmitter.emit('order.created', payload)`                      | `events.emit(new OrderCreated(...))`                                        |
+| `emitAsync('order.created', payload)`                              | `await events.publish(new OrderCreated(...))`                               |
+| `@OnEvent('order.created')` + `handle(payload: OrderCreatedEvent)` | `@OnEvent()` + `handle(event: OrderCreated)` (ZNIGHT070 hints it)           |
+| `@OnEvent('order.*')`                                              | A base class (`OrderEvent`) as the parameter type                           |
+| `{ async: true }`, `suppressErrors`                                | `{ detached: true }`                                                        |
+| `prependListener: true`                                            | `{ order: -1 }`                                                             |
+| `createMock<EventBus>()` in unit specs                             | `TestBed` auto-mocks `EventPublisher`                                       |
+
+Every cqrs handler maps to a **detached** listener to keep its behaviour (it runs after `publish()`
+and its errors do not reach the publisher). Make one inline when its work must succeed for the
+operation to succeed.
 
 ## Bootstrap
 

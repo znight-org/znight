@@ -233,6 +233,7 @@
         "@electric-sql/pglite": "0.5.13",
         "@znight/config": "workspace:*",
         "@znight/core": "workspace:*",
+        "@znight/events": "workspace:*",
         "@znight/http": "workspace:*",
         "@znight/observability": "workspace:*",
         "drizzle-orm": "0.45.4",
@@ -348,7 +349,7 @@
     },
     "packages/cli": {
       "name": "@znight/cli",
-      "version": "0.3.0",
+      "version": "0.5.1",
       "bin": {
         "znight": "./bin/znight.mjs",
       },
@@ -377,7 +378,7 @@
     },
     "packages/compiler": {
       "name": "@znight/compiler",
-      "version": "0.3.0",
+      "version": "0.5.1",
       "dependencies": {
         "@znight/core": "workspace:*",
         "magic-string": "^1.4.5",
@@ -398,7 +399,7 @@
     },
     "packages/config": {
       "name": "@znight/config",
-      "version": "0.3.0",
+      "version": "0.5.1",
       "dependencies": {
         "@znight/core": "workspace:*",
       },
@@ -420,11 +421,28 @@
     },
     "packages/core": {
       "name": "@znight/core",
-      "version": "0.3.0",
+      "version": "0.5.1",
+    },
+    "packages/events": {
+      "name": "@znight/events",
+      "version": "0.5.1",
+      "dependencies": {
+        "@znight/core": "workspace:*",
+      },
+      "devDependencies": {
+        "@znight/compiler": "workspace:*",
+        "@znight/testing": "workspace:*",
+      },
+      "peerDependencies": {
+        "@znight/compiler": "workspace:^",
+      },
+      "optionalPeers": [
+        "@znight/compiler",
+      ],
     },
     "packages/graphql": {
       "name": "@znight/graphql",
-      "version": "0.3.0",
+      "version": "0.5.1",
       "dependencies": {
         "@znight/core": "workspace:*",
         "dataloader": "^2.2.3",
@@ -458,7 +476,7 @@
     },
     "packages/http": {
       "name": "@znight/http",
-      "version": "0.3.0",
+      "version": "0.5.1",
       "dependencies": {
         "@znight/core": "workspace:*",
       },
@@ -492,7 +510,7 @@
     },
     "packages/messaging": {
       "name": "@znight/messaging",
-      "version": "0.3.0",
+      "version": "0.5.1",
       "dependencies": {
         "@znight/core": "workspace:*",
       },
@@ -522,7 +540,7 @@
     },
     "packages/observability": {
       "name": "@znight/observability",
-      "version": "0.3.0",
+      "version": "0.5.1",
       "dependencies": {
         "@opentelemetry/api": "^1.10.0",
         "@znight/core": "workspace:*",
@@ -546,7 +564,7 @@
     },
     "packages/openapi": {
       "name": "@znight/openapi",
-      "version": "0.3.0",
+      "version": "0.5.1",
       "dependencies": {
         "@znight/core": "workspace:*",
       },
@@ -585,7 +603,7 @@
     },
     "packages/schedule": {
       "name": "@znight/schedule",
-      "version": "0.3.0",
+      "version": "0.5.1",
       "dependencies": {
         "@znight/core": "workspace:*",
       },
@@ -606,14 +624,14 @@
     },
     "packages/testing": {
       "name": "@znight/testing",
-      "version": "0.3.0",
+      "version": "0.5.1",
       "dependencies": {
         "@znight/core": "workspace:*",
       },
     },
     "packages/websocket": {
       "name": "@znight/websocket",
-      "version": "0.0.0",
+      "version": "0.3.0",
       "dependencies": {
         "@znight/core": "workspace:*",
         "@znight/http": "workspace:*",
@@ -1433,6 +1451,8 @@
     "@znight/core": ["@znight/core@workspace:packages/core"],
 
     "@znight/docs": ["@znight/docs@workspace:docs"],
+
+    "@znight/events": ["@znight/events@workspace:packages/events"],
 
     "@znight/graphql": ["@znight/graphql@workspace:packages/graphql"],
 

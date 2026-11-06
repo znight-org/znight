@@ -1,0 +1,13 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`diagnostics reports invalid listeners (ZNIGHT070) and wrong targets (ZNIGHT005) 1`] = `
+[
+  "error ZNIGHT070 src/bad.ts:9:12 @OnEvent("user.created") on Bad.named(): events are classes, not names",
+  "error ZNIGHT070 src/bad.ts:13:16 Bad.shape() listens to Shape, which is not a class: nothing at runtime identifies it",
+  "error ZNIGHT070 src/bad.ts:16:18 Bad.generic() listens to Generic<string>: type arguments are erased at runtime",
+  "error ZNIGHT070 src/bad.ts:19:14 Bad.two() takes 2 parameters: an @OnEvent method takes exactly one, the event",
+  "error ZNIGHT070 src/bad.ts:21:14 @OnEvent on Bad.nest(): unknown option 'async' (an option of @nestjs/event-emitter)",
+  "error ZNIGHT005 src/bad.ts:24:3 Bad.hidden() must be public: @OnEvent methods are called by the generated code",
+  "error ZNIGHT070 src/bad.ts:28:19 The event parameter of Bad.nullable() cannot be nullable (null | Ok): an event is never absent",
+]
+`;

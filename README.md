@@ -328,6 +328,7 @@ amqplib, prom-client...) are optional peer dependencies loaded from subpath expo
 | [`@znight/schedule`](./packages/schedule)           | Cron, interval and timeout jobs checked at build time, locks across instances        | dependency    |
 | [`@znight/graphql`](./packages/graphql)             | GraphQL: schema from TypeScript types or SDL files, checked at build time, SSE       | dependency    |
 | [`@znight/websocket`](./packages/websocket)         | WebSocket gateways on the HTTP server (RFC 0003, in progress, not published yet)     | dependency    |
+| [`@znight/events`](./packages/events)               | In-process application events: listeners wired at build time, inline or detached     | dependency    |
 | [`@znight/testing`](./packages/testing)             | `TestBed` with auto-mocks, `TestApp` for in-memory end-to-end tests                  | devDependency |
 | [`@znight/cli`](./packages/cli)                     | `znight new`, generators, `generate`, `dev`, `build`, `start`, `openapi`             | devDependency |
 

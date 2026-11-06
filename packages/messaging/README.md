@@ -399,8 +399,9 @@ quorum queues.
 After a connection loss the driver reconnects (exponential backoff) and resumes the consumers;
 messages in flight on the lost connection are redelivered by RabbitMQ. A consumer channel closed by a
 channel error, or a consumer cancelled by the broker (queue deleted, node down: the queues are then
-declared again with `assertTopology`), is resumed the same way. The recovery retries until every
-consumer consumes again, including when the connection is lost again while it runs.
+declared again with `assertTopology`), is resumed the same way; so is a consumer whose queue is gone
+when it resumes (`404 NOT_FOUND`: declared again before the next attempt). The recovery retries until
+every consumer consumes again, including when the connection is lost again while it runs.
 
 ### Amazon SQS
 

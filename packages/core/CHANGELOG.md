@@ -1,5 +1,21 @@
 # @znight/core
 
+## 0.5.1
+
+No changes in this release.
+
+## 0.5.0
+
+### Minor Changes
+
+- 469d6bf: New `@znight/events` package (RFC 0011): in-process application events, `@OnEvent` listeners found and checked at build time, `EventPublisher` with inline and detached dispatch, `recordEvents()` for tests; core gains the `events:publish` and `events:listener` hooks and ZNIGHT070.
+
+## 0.4.0
+
+### Minor Changes
+
+- 3bb4597: Custom parameter decorators (RFC 0010): `createParamDecorator<T, D>({ http, graphql, messaging })` defines a `@CurrentUser()` of your own, checked at build time (target, transport, data argument, value type) and called directly by the generated `invoke` of routes, GraphQL fields and message handlers; resolvers are functions or `ParamResolver` providers in any scope. The compiler adds `AnalyzeContext.paramDecorator` and `TypeHelpers.assignable` to the extension API; `TestApp` instantiates parameter resolvers with the controllers, resolvers and consumers.
+
 ## 0.3.0
 
 ### Minor Changes

@@ -1,5 +1,32 @@
 # @znight/http
 
+## 0.5.1
+
+### Patch Changes
+
+- @znight/compiler@0.5.1
+  - @znight/core@0.5.1
+
+## 0.5.0
+
+### Patch Changes
+
+- Updated dependencies [469d6bf]
+  - @znight/core@0.5.0
+  - @znight/compiler@0.5.0
+
+## 0.4.0
+
+### Minor Changes
+
+- 3bb4597: Custom parameter decorators (RFC 0010): `createParamDecorator<T, D>({ http, graphql, messaging })` defines a `@CurrentUser()` of your own, checked at build time (target, transport, data argument, value type) and called directly by the generated `invoke` of routes, GraphQL fields and message handlers; resolvers are functions or `ParamResolver` providers in any scope. The compiler adds `AnalyzeContext.paramDecorator` and `TypeHelpers.assignable` to the extension API; `TestApp` instantiates parameter resolvers with the controllers, resolvers and consumers.
+
+### Patch Changes
+
+- Updated dependencies [3bb4597]
+  - @znight/core@0.4.0
+  - @znight/compiler@0.4.0
+
 ## 0.3.0
 
 ### Patch Changes

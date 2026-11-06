@@ -21,7 +21,8 @@
  *   broker's default limit (20 deliveries) would drop messages released repeatedly.
  * - Recovers from connection losses (reconnection with exponential backoff), closed consumer channels
  *   and consumers cancelled by the broker: every subscription is resumed, with backoff, until it
- *   consumes again.
+ *   consumes again. A consumed queue that no longer exists (deleted) is declared again first
+ *   (`assertTopology`).
  */
 import type {
   Channel,
@@ -146,7 +147,10 @@ interface ConsumerSubscription {
   active: boolean
   /** In-progress (re)subscription. */
   consuming: Promise<void> | undefined
-  /** The broker cancelled the consumer (queue deleted...): declare the queues again before consuming. */
+  /**
+   * The queue may be gone (the broker cancelled the consumer, or consuming failed with NOT_FOUND):
+   * declare the queues again before consuming.
+   */
   redeclare: boolean
 }
 
@@ -746,6 +750,10 @@ export class RabbitMQDriver implements MessagingDriver {
       subscription.consumerTag = consumerTag
     } catch (error) {
       subscription.channel = undefined
+      // the queue does not exist (any more): declare it again before the next attempt. RabbitMQ cancels
+      // the consumers of a deleted queue before the deletion completes, so the declaration that follows
+      // a cancellation can still find the old queue, which is gone by the time `basic.consume` runs.
+      if (isNotFound(error)) subscription.redeclare = true
       await closeQuietly(channel)
       throw brokerUnavailableError(`RabbitMQ: cannot consume "${subscription.queue}": ${errorMessage(error)}`, error)
     }
@@ -933,6 +941,11 @@ function topologyError(queue: string, error: unknown): Error {
     ? ['The queue exists with different arguments: align queueType/queueArguments, or set assertTopology: false']
     : []
   return consumerError(`RabbitMQ: cannot declare the queue "${queue}": ${message}`, hints)
+}
+
+/** A channel error `404 NOT_FOUND` (amqplib sets the reply code as `code`). */
+function isNotFound(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && (error as { code?: unknown }).code === 404
 }
 
 async function closeQuietly(channel: Channel): Promise<void> {

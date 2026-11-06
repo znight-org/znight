@@ -3,6 +3,7 @@ import type { MetricsOptions, ObservabilityOptions, TracingOptions } from './opt
 
 import { ErrorCode, ZnightError } from '@znight/core'
 
+import { logEvents, measureEvents, traceEvents } from '../events/events.ts'
 import { logGraphQLOperations, measureGraphQLOperations, traceGraphQLOperations } from '../graphql/operations.ts'
 import { LoggedInterceptor } from '../interceptors/logged.ts'
 import { MetricInterceptor } from '../interceptors/metric.ts'
@@ -46,6 +47,10 @@ export interface ObservabilityKit {
   readonly websocket: HookWrapper<'websocket:message'> | undefined
   /** `websocket:connection` listener (connection metrics and logs), if any feature is enabled. */
   readonly websocketListener: HookListener<'websocket:connection'> | undefined
+  /** Combined `events:publish` wrapper (tracing → metrics → logs), if any feature is enabled. */
+  readonly events: HookWrapper<'events:publish'> | undefined
+  /** Combined `events:listener` wrapper (tracing → metrics), if any feature is enabled. */
+  readonly eventListener: HookWrapper<'events:listener'> | undefined
 }
 
 /** Builds the logger, tracer, registry, interceptors and hook wrappers from resolved options. */
@@ -56,6 +61,7 @@ export function buildKit(options: ObservabilityOptions, ctx: PluginContext): Obs
     jobs,
     graphql: graphqlLogs,
     websocket: websocketLogs,
+    events: eventLogs,
     replaceCoreLogger,
     ...loggerOptions
   } = options.logging ?? {}
@@ -69,6 +75,7 @@ export function buildKit(options: ObservabilityOptions, ctx: PluginContext): Obs
     schedule: scheduleTracing,
     graphql: graphqlTracing,
     websocket: websocketTracing,
+    events: eventsTracing,
     ...tracerOptions
   } = tracing ?? {}
   const tracer = new Tracer(tracerOptions)
@@ -81,6 +88,7 @@ export function buildKit(options: ObservabilityOptions, ctx: PluginContext): Obs
     schedule: scheduleMetrics,
     graphql: graphqlMetrics,
     websocket: websocketMetrics,
+    events: eventsMetrics,
     ...registryOptions
   } = metricsSection.options ?? {}
   const metrics = metricsSection.options === undefined ? undefined : new MetricsRegistry(registryOptions)
@@ -98,6 +106,11 @@ export function buildKit(options: ObservabilityOptions, ctx: PluginContext): Obs
       ? measureWebSocketMessages(metrics, objectOf(websocketMetrics))
       : undefined
   const wsLogs = websocketLogs === false ? undefined : logWebSocket(logger, objectOf(websocketLogs))
+  const eventObservers = [
+    tracing !== undefined && eventsTracing !== false ? traceEvents(tracer, objectOf(eventsTracing)) : undefined,
+    metrics !== undefined && eventsMetrics !== false ? measureEvents(metrics, objectOf(eventsMetrics)) : undefined,
+    eventLogs === false ? undefined : logEvents(logger, objectOf(eventLogs)),
+  ]
   const kit: ObservabilityKit = {
     logger,
     tracer,
@@ -153,6 +166,8 @@ export function buildKit(options: ObservabilityOptions, ctx: PluginContext): Obs
       wsLogs?.wrap,
     ]),
     websocketListener: composeListeners<'websocket:connection'>([wsMetrics?.listen, wsLogs?.listen]),
+    events: composeWrappers<'events:publish'>(eventObservers.map(observer => observer?.publish)),
+    eventListener: composeWrappers<'events:listener'>(eventObservers.map(observer => observer?.listener)),
   }
   if (replaceCoreLogger !== false) ctx.app.setLogger(toCoreLogger(coreLogger))
   if (metricsSection.reason !== undefined && metricsSection.options === undefined && options.metrics === undefined) {

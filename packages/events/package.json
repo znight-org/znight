@@ -1,0 +1,74 @@
+{
+  "name": "@znight/events",
+  "version": "0.5.1",
+  "description": "Znight events: in-process application events with listeners wired at build time, inline or detached",
+  "license": "MIT",
+  "author": "Ugho STEPHAN",
+  "homepage": "https://github.com/znight-org/znight/tree/main/packages/events#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/znight-org/znight.git",
+    "directory": "packages/events"
+  },
+  "bugs": "https://github.com/znight-org/znight/issues",
+  "keywords": ["znight", "events", "event-listener", "domain-events", "publisher", "observer"],
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=24"
+  },
+  "exports": {
+    ".": {
+      "@znight/source": "./src/index.ts",
+      "types": "./dist/index.d.mts",
+      "default": "./dist/index.mjs"
+    },
+    "./testing": {
+      "@znight/source": "./src/testing/index.ts",
+      "types": "./dist/testing.d.mts",
+      "default": "./dist/testing.mjs"
+    },
+    "./compiler": {
+      "@znight/source": "./src/compiler/index.ts",
+      "types": "./dist/compiler.d.mts",
+      "default": "./dist/compiler.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "types": "./dist/index.d.mts",
+  "files": ["dist", "src"],
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p test",
+    "test": "bun test --conditions=@znight/source test"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@znight/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "@znight/compiler": "workspace:^"
+  },
+  "peerDependenciesMeta": {
+    "@znight/compiler": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@znight/compiler": "workspace:*",
+    "@znight/testing": "workspace:*"
+  },
+  "znight": {
+    "apiVersion": 1,
+    "compiler": "@znight/events/compiler",
+    "provides": [
+      {
+        "export": "EventPublisher",
+        "plugin": "EventsPlugin",
+        "scope": "singleton"
+      }
+    ]
+  }
+}

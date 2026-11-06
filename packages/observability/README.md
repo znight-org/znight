@@ -391,6 +391,21 @@ delivery: producers choose it); a handler records at most `maxTypesPerHandler` (
 later ones are labelled `_OTHER` (a pattern or default `@OnMessage()` handler receives whatever types
 producers send). Label cardinality stays bounded.
 
+### Application event metrics
+
+With `@znight/events` (hooks `events:publish` and `events:listener`; `metrics.events: false` disables
+them):
+
+| Metric                                   | Type      | Labels                                            |
+| ---------------------------------------- | --------- | ------------------------------------------------- |
+| `znight_events_published_total`          | counter   | `event` (publications with at least one listener) |
+| `znight_event_listener_duration_seconds` | histogram | `event`, `listener`, `detached`, `outcome`        |
+
+Spans: `publish <Event>` around the inline phase and `<Event> → <Class.method>` per listener; detached
+listeners start inside the publication span, so their spans are its children (`tracing.events`).
+Logs: one `debug` entry `event published` per publication (`logging.events`). `traceEvents`,
+`measureEvents` and `logEvents` are exported for custom wiring.
+
 ### Scheduled job metrics
 
 | Metric                                    | Type      | Labels                                       |
@@ -651,13 +666,13 @@ conflicting metric definition is reported once through the logger and the method
 
 `ObservabilityPlugin.configure(options)` (name `observability`):
 
-| Hook          | What happens                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `register`    | Validates decorator options, creates the logger, tracer and registry (object options), replaces the core logger, provides the externals, wraps `http:request`, `messaging:message`, `schedule:run` and `graphql:operation` (spans → metrics → logs) and `messaging:publish` (producer spans), listens to `schedule:run` (run counters, logs of runs that did not execute); a hook whose features are all disabled is not registered |
-| `onBootstrap` | Evaluates function options if nothing did yet, then removes the hooks of the features they disable                                                                                                                                                                                                                                                                                                                                  |
-| `onStart`     | Starts the `/metrics` server                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `onStop`      | Closes the `/metrics` server                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `onDispose`   | Removes the hook wrappers, flushes the tracer provider (`forceFlush`) and the logger transports; entries logged afterwards are flushed as soon as they are written                                                                                                                                                                                                                                                                  |
+| Hook          | What happens                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `register`    | Validates decorator options, creates the logger, tracer and registry (object options), replaces the core logger, provides the externals, wraps `http:request`, `messaging:message`, `schedule:run`, `graphql:operation`, `events:publish` and `events:listener` (spans → metrics → logs) and `messaging:publish` (producer spans), listens to `schedule:run` (run counters, logs of runs that did not execute); a hook whose features are all disabled is not registered |
+| `onBootstrap` | Evaluates function options if nothing did yet, then removes the hooks of the features they disable                                                                                                                                                                                                                                                                                                                                                                       |
+| `onStart`     | Starts the `/metrics` server                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `onStop`      | Closes the `/metrics` server                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `onDispose`   | Removes the hook wrappers, flushes the tracer provider (`forceFlush`) and the logger transports; entries logged afterwards are flushed as soon as they are written                                                                                                                                                                                                                                                                                                       |
 
 Options may be computed from the container, e.g. from a config class:
 

@@ -7,7 +7,7 @@
  *   messaging, config, observability).
  * - From `ZNIGHT030`, each first-party package reserves a block of ten: `ZNIGHT030`–`039`
  *   `@znight/openapi`, `ZNIGHT040`–`049` `@znight/schedule`, `ZNIGHT050`–`059` `@znight/websocket`,
- *   `ZNIGHT060`–`069` `@znight/graphql`.
+ *   `ZNIGHT060`–`069` `@znight/graphql`, `ZNIGHT070`–`079` `@znight/events`.
  *
  * Within a range, codes are allocated in order without gaps. A package uses its block for its own
  * failure modes, with one catch-all code for invalid usage and options, and reuses a lower code
@@ -150,6 +150,14 @@ export const ErrorCode = {
    * type or argument the SDL does not declare, a signature that does not conform to the SDL types.
    */
   GraphQLSchemaMismatch: 'ZNIGHT068',
+
+  // ZNIGHT070–079: @znight/events (RFC 0011)
+  /**
+   * Invalid event listener: an `@OnEvent` method whose parameter is not a class (or a union of
+   * classes), a generic or optional event, an event class the generated module cannot import, invalid
+   * options, the NestJS string form, a detached listener depending on a request-scoped external.
+   */
+  InvalidEventListener: 'ZNIGHT070',
 } as const
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode]
@@ -203,6 +211,7 @@ export const ERROR_DESCRIPTIONS: Readonly<Record<ErrorCode, string>> = {
   ZNIGHT066: 'Invalid GraphQL setup: metadata, schema, GraphQLPlugin options, driver or HttpPlugin missing',
   ZNIGHT067: 'Invalid GraphQL SDL: the schema-first .graphql files cannot be read, parsed or validated',
   ZNIGHT068: 'GraphQL schema mismatch: schema-first resolvers do not cover or conform to the SDL',
+  ZNIGHT070: 'Invalid event listener: an @OnEvent method does not listen to a class, or its options are invalid',
 }
 
 export interface ZnightErrorOptions extends ErrorOptions {

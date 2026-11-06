@@ -3,6 +3,14 @@ export type { LoggingOptions, MetricsOptions, ObservabilityOptions, TracingOptio
 
 export { Logged, Metric, Traced } from './decorators.ts'
 export {
+  DEFAULT_EVENT_LISTENER_BUCKETS,
+  type EventsInstrumentationOptions,
+  type EventsObserver,
+  logEvents,
+  measureEvents,
+  traceEvents,
+} from './events/events.ts'
+export {
   ANONYMOUS_OPERATION,
   DEFAULT_MAX_OPERATION_NAMES,
   type GraphQLMetricsOptions,
