@@ -599,9 +599,19 @@
         "@znight/http": "workspace:*",
       },
       "devDependencies": {
+        "@znight/compiler": "workspace:*",
         "hono": "4.13.14",
         "ws": "8.22.0",
+        "zod": "catalog:",
       },
+      "peerDependencies": {
+        "@znight/compiler": "workspace:^",
+        "ws": "^8.21.0",
+      },
+      "optionalPeers": [
+        "@znight/compiler",
+        "ws",
+      ],
     },
   },
   "catalog": {

@@ -24,10 +24,20 @@
       "types": "./dist/index.d.mts",
       "default": "./dist/index.mjs"
     },
+    "./ws": {
+      "@znight/source": "./src/transports/ws.ts",
+      "types": "./dist/ws.d.mts",
+      "default": "./dist/ws.mjs"
+    },
     "./bun": {
       "@znight/source": "./src/transports/bun.ts",
       "types": "./dist/bun.d.mts",
       "default": "./dist/bun.mjs"
+    },
+    "./compiler": {
+      "@znight/source": "./src/compiler/index.ts",
+      "types": "./dist/compiler.d.mts",
+      "default": "./dist/compiler.mjs"
     },
     "./package.json": "./package.json"
   },
@@ -42,8 +52,43 @@
     "@znight/core": "workspace:*",
     "@znight/http": "workspace:*"
   },
+  "peerDependencies": {
+    "@znight/compiler": "workspace:^",
+    "ws": "^8.21.0"
+  },
+  "peerDependenciesMeta": {
+    "@znight/compiler": {
+      "optional": true
+    },
+    "ws": {
+      "optional": true
+    }
+  },
   "devDependencies": {
+    "@znight/compiler": "workspace:*",
     "hono": "4.13.14",
-    "ws": "8.22.0"
+    "ws": "8.22.0",
+    "zod": "catalog:"
+  },
+  "znight": {
+    "apiVersion": 1,
+    "compiler": "@znight/websocket/compiler",
+    "provides": [
+      {
+        "export": "WsServer",
+        "plugin": "WebSocketPlugin",
+        "scope": "singleton"
+      },
+      {
+        "export": "WebSocketPlugin",
+        "plugin": "WebSocketPlugin",
+        "scope": "singleton"
+      },
+      {
+        "export": "WsConnection",
+        "plugin": "WebSocketPlugin",
+        "scope": "request"
+      }
+    ]
   }
 }
