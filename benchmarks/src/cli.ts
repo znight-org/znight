@@ -1,13 +1,16 @@
 /**
- * The benchmark runner: `bun src/cli.ts <build | boot | http | di | all> [options]`.
+ * The benchmark runner: `bun src/cli.ts <build | boot | http | di | graphql | all> [options]`.
  *
  * - `build`: builds the applications (the `@znight/*` packages must be built: `bun run build`).
- * - `boot`, `http`, `di`: runs a suite and stores it in `results/results.json` (other suites kept).
+ * - `boot`, `http`, `di`, `graphql`: runs a suite and stores it in `results/results.json` (other
+ *   suites kept). `graphql` runs the GraphQL load tests, then the in-process GraphQL measurements.
  * - `all`: builds, then runs every suite.
  *
- * Options: `--runtimes node,bun`, `--variants znight-fastify,nestjs-fastify`, `--quick` (a few
- * short runs, to check the setup; results are written to `results/quick.json`).
+ * Options: `--runtimes node,bun`, `--variants znight-fastify,nestjs-fastify` (ids of
+ * `src/variants.ts` for `boot` and `http`, of `src/graphql-variants.ts` for `graphql`), `--quick`
+ * (a few short runs, to check the setup; results are written to `results/quick.json`).
  */
+import type { GraphqlVariant } from './graphql-variants.ts'
 import type { Endpoint, Results } from './results.ts'
 import type { Runtime, Variant } from './variants.ts'
 
@@ -18,6 +21,10 @@ import { parseArgs } from 'node:util'
 
 import { bootSuite } from './boot.ts'
 import { diSuite } from './di.ts'
+import { graphqlSuite } from './graphql.ts'
+import { graphqlMicroSuite } from './graphql-micro.ts'
+import { GRAPHQL_OPERATIONS } from './graphql-operations.ts'
+import { GRAPHQL_VARIANTS } from './graphql-variants.ts'
 import { httpSuite } from './http.ts'
 import { RESULTS_FILE, readResults, writeResults } from './results.ts'
 import { VARIANTS } from './variants.ts'
@@ -37,16 +44,23 @@ const { positionals, values } = parseArgs({
 const command = positionals[0] ?? 'all'
 const quick = values.quick
 const runtimes = values.runtimes.split(',') as Runtime[]
-const variants: readonly Variant[] =
-  values.variants === undefined ? VARIANTS : VARIANTS.filter(v => values.variants?.split(',').includes(v.id))
+const selected = values.variants?.split(',')
+const variants: readonly Variant[] = selected === undefined ? VARIANTS : VARIANTS.filter(v => selected.includes(v.id))
+const graphqlVariants: readonly GraphqlVariant[] =
+  selected === undefined ? GRAPHQL_VARIANTS : GRAPHQL_VARIANTS.filter(v => selected.includes(v.id))
 const file = quick ? join(import.meta.dir, '../results/quick.json') : RESULTS_FILE
 const log = (message: string): void => console.log(`[${new Date().toISOString().slice(11, 19)}] ${message}`)
 
-function build(): void {
-  if (!existsSync(join(ROOT, 'packages/http/dist/index.mjs'))) {
-    throw new Error('Build the @znight/* packages first: bun run build (at the repository root)')
+const APPS = ['znight', 'nestjs', 'baseline'] as const
+const GRAPHQL_APPS = ['baseline-graphql', 'znight-graphql', 'nestjs-graphql'] as const
+
+function build(apps: readonly string[] = [...APPS, ...GRAPHQL_APPS]): void {
+  for (const dist of ['packages/http/dist/index.mjs', 'packages/graphql/dist/index.mjs']) {
+    if (!existsSync(join(ROOT, dist))) {
+      throw new Error('Build the @znight/* packages first: bun run build (at the repository root)')
+    }
   }
-  for (const app of ['znight', 'nestjs', 'baseline']) {
+  for (const app of apps) {
     log(`build: apps/${app}`)
     execFileSync('bun', ['run', 'build'], { cwd: join(import.meta.dir, '../apps', app), stdio: 'inherit' })
   }
@@ -88,6 +102,28 @@ async function di(): Promise<void> {
   save(results => ({ ...results, di: suite }))
 }
 
+async function graphql(): Promise<void> {
+  const suite = await graphqlSuite({
+    variants: graphqlVariants,
+    runtimes,
+    operations: GRAPHQL_OPERATIONS,
+    connections: 100,
+    warmupSeconds: quick ? 1 : 3,
+    durationSeconds: quick ? 2 : 10,
+    rounds: quick ? 1 : 3,
+    log,
+  })
+  const micro = await graphqlMicroSuite({
+    runtimes,
+    schemaRuns: quick ? 3 : 30,
+    executeRuns: quick ? 1 : 5,
+    rounds: quick ? 3 : 7,
+    iterations: quick ? 2_000 : 20_000,
+    log,
+  })
+  save(results => ({ ...results, graphql: { ...suite, micro } }))
+}
+
 switch (command) {
   case 'build':
     build()
@@ -101,12 +137,16 @@ switch (command) {
   case 'di':
     await di()
     break
+  case 'graphql':
+    await graphql()
+    break
   case 'all':
     build()
     await boot()
     await di()
     await http()
+    await graphql()
     break
   default:
-    throw new Error(`Unknown command '${command}': build, boot, http, di or all`)
+    throw new Error(`Unknown command '${command}': build, boot, http, di, graphql or all`)
 }

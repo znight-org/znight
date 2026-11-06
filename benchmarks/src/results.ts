@@ -1,4 +1,6 @@
 /** The results file (`benchmarks/results/results.json`): what was measured, where, and with what. */
+import type { GraphqlOperation } from './graphql-operations.ts'
+import type { GraphqlFramework } from './graphql-variants.ts'
 import type { Summary } from './stats.ts'
 import type { Adapter, Framework, Runtime } from './variants.ts'
 
@@ -96,6 +98,68 @@ export interface CompileResult {
   readonly generateMs: Summary
 }
 
+export interface GraphqlResult {
+  readonly variant: string
+  readonly framework: GraphqlFramework
+  readonly runtime: Runtime
+  readonly operation: GraphqlOperation
+  readonly rounds: readonly HttpRound[]
+  readonly requestsPerSecond: Summary
+  readonly latencyP99Ms: Summary
+}
+
+/** An application that does not run on a runtime, and why. */
+export interface GraphqlSkipped {
+  readonly variant: string
+  readonly runtime: Runtime
+  readonly reason: string
+}
+
+export interface GraphqlMicroSettings {
+  /** Fresh processes per runtime and side of the schema build. */
+  readonly schemaRuns: number
+  /** Object types of the generated schema (plus `Query`). */
+  readonly types: number
+  /** Fresh processes per runtime of the execution overhead. */
+  readonly executeRuns: number
+  /** Fields of the cached query (10 root fields of 5 fields each). */
+  readonly fields: number
+  /** Interleaved rounds per process, of `iterations` operations per case. */
+  readonly rounds: number
+  readonly iterations: number
+}
+
+/** Schema built at boot: Znight from its metadata, graphql-js `buildSchema()` from the same SDL. */
+export interface GraphqlSchemaResult {
+  readonly runtime: Runtime
+  /** `Application.create()` with `GraphQLPlugin` (`http: false`): metadata checked, schema built, resolvers wired. */
+  readonly znightMs: Summary
+  /** graphql-js `buildSchema()` of the SDL Znight prints for the same metadata. */
+  readonly buildSchemaMs: Summary
+}
+
+/** Where an operation runs: outside any scope (a direct execution opens one), or in a request scope (GraphQL over HTTP). */
+export type GraphqlScope = 'direct' | 'request'
+
+/** What executes the cached 50-field query. */
+export type GraphqlExecutePath = 'graphql-js' | 'plugin' | 'engine'
+
+export interface GraphqlExecuteResult {
+  readonly runtime: Runtime
+  readonly scope: GraphqlScope
+  readonly path: GraphqlExecutePath
+  /** Nanoseconds per operation (median of the rounds of each process). */
+  readonly nsPerOp: Summary
+  /** Time added to graphql-js `execute()` on the same schema, in percent (`0` for graphql-js itself). */
+  readonly overheadPercent: Summary
+}
+
+export interface GraphqlMicro {
+  readonly settings: GraphqlMicroSettings
+  readonly schema: readonly GraphqlSchemaResult[]
+  readonly execute: readonly GraphqlExecuteResult[]
+}
+
 /** A suite of measurements, run together on one machine. */
 export interface Suite<Settings, Result> {
   readonly environment: Environment
@@ -109,6 +173,11 @@ export interface Results {
   readonly boot?: Suite<BootSettings, BootResult>
   readonly http?: Suite<HttpSettings, HttpResult>
   readonly di?: Suite<DiSettings, DiResult> & { readonly compile: readonly CompileResult[] }
+  readonly graphql?: Suite<HttpSettings, GraphqlResult> & {
+    readonly skipped: readonly GraphqlSkipped[]
+    /** In-process measurements (RFC 0005 §8.12), absent when they were not run. */
+    readonly micro?: GraphqlMicro
+  }
 }
 
 export function readResults(file: string = RESULTS_FILE): Results | undefined {
