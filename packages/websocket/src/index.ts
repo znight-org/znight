@@ -16,6 +16,13 @@ export type {
 } from './transport.ts'
 
 export {
+  WsClosedError,
+  type WsCloseInfo,
+  type WsCloseInitiator,
+  type WsConnection,
+  type WsSendResult,
+} from './connection.ts'
+export {
   Conn,
   Ctx,
   Gateway,
@@ -53,5 +60,6 @@ export {
   WsValidationException,
   type WsValidationIssue,
 } from './exceptions.ts'
+export { TokenBucket } from './rate-limit.ts'
 export { type Broadcast, type ChannelMember, type MemberRef, RoomRegistry } from './rooms.ts'
 export { MemoryClient, type MemoryCloseInfo, memoryTransport } from './transports/memory.ts'

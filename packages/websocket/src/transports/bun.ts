@@ -125,7 +125,7 @@ export function bunTransport(): WebSocketTransport {
         backpressureLimit: settings.backpressureLimit,
         closeOnBackpressureLimit: false,
         sendPings: settings.heartbeatMs > 0,
-        idleTimeout: settings.heartbeatMs > 0 ? Math.max(1, Math.ceil((settings.heartbeatMs * 2) / 1000)) : 0,
+        idleTimeout: settings.heartbeatMs > 0 ? Math.min(960, Math.ceil((settings.heartbeatMs * 2) / 1000)) : 0,
       }
     },
     accept(native: NodeUpgrade | BunUpgrade | MemoryUpgrade, init: AcceptInit, events: SocketEvents): TransportSocket {
