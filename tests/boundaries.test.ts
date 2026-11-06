@@ -112,6 +112,7 @@ describe('repository boundaries (architecture §2)', () => {
     expect(packages.map(pkg => pkg.manifest.name)).toContain('@znight/core')
     expect(compilerEntries.map(({ pkg }) => pkg.manifest.name).sort()).toEqual([
       '@znight/config',
+      '@znight/events',
       '@znight/graphql',
       '@znight/http',
       '@znight/messaging',

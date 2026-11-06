@@ -1,6 +1,7 @@
 import type { ZnightMetadata } from '@znight/core'
 
 import { ConfigPlugin, inline } from '@znight/config'
+import { EventsPlugin } from '@znight/events'
 import { HttpPlugin, type HttpPluginOptions } from '@znight/http'
 import { fastifyAdapter } from '@znight/http/fastify'
 import { ObservabilityPlugin } from '@znight/observability'
@@ -45,6 +46,7 @@ export function createTestApp({
         logging: { level: 'silent' },
         metrics: { server: false, defaultMetrics: false },
       }),
+      EventsPlugin.configure(),
       ConfigPlugin.configure({
         loaders: [
           inline({

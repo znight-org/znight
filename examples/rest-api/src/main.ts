@@ -1,5 +1,6 @@
 import { ConfigPlugin } from '@znight/config'
 import { Application } from '@znight/core'
+import { EventsPlugin } from '@znight/events'
 import { HttpPlugin } from '@znight/http'
 import { fastifyAdapter } from '@znight/http/fastify'
 import { ObservabilityPlugin } from '@znight/observability'
@@ -25,6 +26,9 @@ const app = await Application.create({
         metrics: { defaultLabels: { service: 'bookshelf' }, server: { port: server.metricsPort } },
       }
     }),
+    // Application events (BookAdded): listed before HttpPlugin, so that it stops after it and drains
+    // the detached listeners once no request can publish any more.
+    EventsPlugin.configure(),
     // Loads .env files then the environment, and validates every @Config class before anything
     // is created: a missing API_KEY stops the boot with every problem listed (ZNIGHT006).
     ConfigPlugin.configure(),

@@ -41,6 +41,11 @@ export const SemanticAttributes = {
   ZNIGHT_SCHEDULE_SCHEDULED_AT: 'znight.schedule.scheduled_at',
   ZNIGHT_SCHEDULE_OUTCOME: 'znight.schedule.outcome',
   ZNIGHT_SCHEDULE_ABORTED: 'znight.schedule.aborted',
+  /** Znight specific: application events (`@znight/events`). */
+  ZNIGHT_EVENT_NAME: 'znight.events.event',
+  ZNIGHT_EVENT_MODE: 'znight.events.mode',
+  ZNIGHT_EVENT_LISTENER: 'znight.events.listener',
+  ZNIGHT_EVENT_DETACHED: 'znight.events.detached',
   /** Znight specific: GraphQL operations (`@znight/graphql`). */
   ZNIGHT_GRAPHQL_TRANSPORT: 'znight.graphql.transport',
   ZNIGHT_GRAPHQL_DRIVER: 'znight.graphql.driver',

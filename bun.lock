@@ -213,6 +213,7 @@
         "@electric-sql/pglite": "0.5.13",
         "@znight/config": "workspace:*",
         "@znight/core": "workspace:*",
+        "@znight/events": "workspace:*",
         "@znight/http": "workspace:*",
         "@znight/observability": "workspace:*",
         "drizzle-orm": "0.45.4",
@@ -401,6 +402,23 @@
     "packages/core": {
       "name": "@znight/core",
       "version": "0.4.0",
+    },
+    "packages/events": {
+      "name": "@znight/events",
+      "version": "0.4.0",
+      "dependencies": {
+        "@znight/core": "workspace:*",
+      },
+      "devDependencies": {
+        "@znight/compiler": "workspace:*",
+        "@znight/testing": "workspace:*",
+      },
+      "peerDependencies": {
+        "@znight/compiler": "workspace:^",
+      },
+      "optionalPeers": [
+        "@znight/compiler",
+      ],
     },
     "packages/graphql": {
       "name": "@znight/graphql",
@@ -1388,6 +1406,8 @@
     "@znight/core": ["@znight/core@workspace:packages/core"],
 
     "@znight/docs": ["@znight/docs@workspace:docs"],
+
+    "@znight/events": ["@znight/events@workspace:packages/events"],
 
     "@znight/graphql": ["@znight/graphql@workspace:packages/graphql"],
 

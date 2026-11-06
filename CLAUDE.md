@@ -63,6 +63,7 @@ Every change must keep these. A change that bends one starts with an RFC (see [R
 | `@znight/messaging`     | Consumers, retries, dead letters; `/memory`, `/rabbitmq`, `/sqs`, `/kafka` drivers                                                                                               |
 | `@znight/schedule`      | `@Cron`, `@Interval`, `@Timeout`, `SchedulerRegistry`, lock stores, virtual clock for tests (RFC 0004)                                                                           |
 | `@znight/graphql`       | Code-first GraphQL (schema derived from TypeScript types, RFC 0005) or schema-first (SDL files, resolvers checked against them, RFC 0007), loaders, guards, HTTP and SSE         |
+| `@znight/events`        | In-process application events: `@OnEvent` listeners wired at build time, `EventPublisher`, inline or detached dispatch (RFC 0011)                                                |
 | `@znight/config`        | Typed config classes loaded from env, `.env`, JSON/YAML, Vault, AWS Secrets Manager                                                                                              |
 | `@znight/observability` | Pino logger, Prometheus metrics (prom-client), OpenTelemetry tracing, `@Logged`, `@Traced`, `@Metric`                                                                            |
 | `@znight/testing`       | `TestBed` (auto-mocked dependencies), `TestApp` (in-memory end-to-end tests), mocks and spies                                                                                    |
@@ -271,7 +272,7 @@ Affects, Decision) and a row in `rfcs/README.md`. Implement it only once it is a
   `packages/core/src/errors.ts`, shared by compiler diagnostics and runtime `ZnightError`s.
 - Ranges (`rfcs/README.md`): `ZNIGHT001`–`029` core, compiler and the 0.1 features (http, messaging,
   config, observability); `030`–`039` openapi; `040`–`049` schedule; `050`–`059` websocket and
-  `060`–`069` graphql (`060`–`068` allocated, RFCs 0005 and 0007). Codes are allocated in order without gaps inside a block
+  `060`–`069` graphql (`060`–`068` allocated, RFCs 0005 and 0007), `070`–`079` events (`070` allocated, RFC 0011). Codes are allocated in order without gaps inside a block
   and never change meaning. Reuse a lower code when the meaning is the same (a decorator on the
   wrong target is always ZNIGHT005); one catch-all code per package for invalid usage and options;
   third-party packages get no code.

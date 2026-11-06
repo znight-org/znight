@@ -1,9 +1,12 @@
 import type { TestApp } from '@znight/testing'
 import type { BookResponse } from '../src/books/book.controller.js'
 
+import { recordEvents } from '@znight/events/testing'
 import { Logger, MetricsRegistry } from '@znight/observability'
 import { createMock } from '@znight/testing'
 
+import { BookAdded } from '../src/books/book.events.js'
+import { RecentlyAdded } from '../src/books/book.listeners.js'
 import { createTestApp } from './support/app.js'
 import { ADMIN_KEY, BROWSER_ORIGIN, PNG_BYTES, pngFile, READER_KEY } from './support/fixtures.js'
 import { afterAll, beforeAll, describe, expect, test as it } from 'bun:test'
@@ -40,6 +43,19 @@ describe('Books API', () => {
 
   afterAll(async () => {
     await app.close()
+  })
+
+  describe('events', () => {
+    it('publishes BookAdded to an inline and a detached listener', async () => {
+      const events = recordEvents(app)
+      const book = await createBook({ title: 'The Left Hand of Darkness' })
+      // inline: done before the response
+      expect(app.app.container.get(RecentlyAdded).titles()[0]).toBe('The Left Hand of Darkness')
+      await events.idle() // the detached NewBookAnnouncer settled
+      expect(events.of(BookAdded).map(event => event.book.id)).toEqual([book.id])
+      expect(events.failures()).toEqual([])
+      events.stop()
+    })
   })
 
   describe('authentication', () => {

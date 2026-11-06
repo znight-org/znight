@@ -3,6 +3,7 @@ import type { MetricsOptions, ObservabilityOptions, TracingOptions } from './opt
 
 import { ErrorCode, ZnightError } from '@znight/core'
 
+import { logEvents, measureEvents, traceEvents } from '../events/events.ts'
 import { logGraphQLOperations, measureGraphQLOperations, traceGraphQLOperations } from '../graphql/operations.ts'
 import { LoggedInterceptor } from '../interceptors/logged.ts'
 import { MetricInterceptor } from '../interceptors/metric.ts'
@@ -41,11 +42,23 @@ export interface ObservabilityKit {
   readonly scheduleListener: HookListener<'schedule:run'> | undefined
   /** Combined `graphql:operation` wrapper (tracing → metrics → logs), if any feature is enabled. */
   readonly graphql: HookWrapper<'graphql:operation'> | undefined
+  /** Combined `events:publish` wrapper (tracing → metrics → logs), if any feature is enabled. */
+  readonly events: HookWrapper<'events:publish'> | undefined
+  /** Combined `events:listener` wrapper (tracing → metrics), if any feature is enabled. */
+  readonly eventListener: HookWrapper<'events:listener'> | undefined
 }
 
 /** Builds the logger, tracer, registry, interceptors and hook wrappers from resolved options. */
 export function buildKit(options: ObservabilityOptions, ctx: PluginContext): ObservabilityKit {
-  const { requests, messages, jobs, graphql: graphqlLogs, replaceCoreLogger, ...loggerOptions } = options.logging ?? {}
+  const {
+    requests,
+    messages,
+    jobs,
+    graphql: graphqlLogs,
+    events: eventLogs,
+    replaceCoreLogger,
+    ...loggerOptions
+  } = options.logging ?? {}
   const logger = new Logger({ ...loggerOptions, scope: ctx.container })
 
   const tracing = sectionOf<TracingOptions>(options.tracing)
@@ -55,6 +68,7 @@ export function buildKit(options: ObservabilityOptions, ctx: PluginContext): Obs
     publish: publishTracing,
     schedule: scheduleTracing,
     graphql: graphqlTracing,
+    events: eventsTracing,
     ...tracerOptions
   } = tracing ?? {}
   const tracer = new Tracer(tracerOptions)
@@ -66,6 +80,7 @@ export function buildKit(options: ObservabilityOptions, ctx: PluginContext): Obs
     messaging: messagingMetrics,
     schedule: scheduleMetrics,
     graphql: graphqlMetrics,
+    events: eventsMetrics,
     ...registryOptions
   } = metricsSection.options ?? {}
   const metrics = metricsSection.options === undefined ? undefined : new MetricsRegistry(registryOptions)
@@ -78,6 +93,11 @@ export function buildKit(options: ObservabilityOptions, ctx: PluginContext): Obs
   const jobLogs = jobs === false ? undefined : logJobs(logger, objectOf(jobs))
   const jobMetrics =
     metrics !== undefined && scheduleMetrics !== false ? measureJobs(metrics, objectOf(scheduleMetrics)) : undefined
+  const eventObservers = [
+    tracing !== undefined && eventsTracing !== false ? traceEvents(tracer, objectOf(eventsTracing)) : undefined,
+    metrics !== undefined && eventsMetrics !== false ? measureEvents(metrics, objectOf(eventsMetrics)) : undefined,
+    eventLogs === false ? undefined : logEvents(logger, objectOf(eventLogs)),
+  ]
   const kit: ObservabilityKit = {
     logger,
     tracer,
@@ -125,6 +145,8 @@ export function buildKit(options: ObservabilityOptions, ctx: PluginContext): Obs
         ? undefined
         : logGraphQLOperations(logger, objectOf(graphqlLogs)),
     ]),
+    events: composeWrappers<'events:publish'>(eventObservers.map(observer => observer?.publish)),
+    eventListener: composeWrappers<'events:listener'>(eventObservers.map(observer => observer?.listener)),
   }
   if (replaceCoreLogger !== false) ctx.app.setLogger(toCoreLogger(coreLogger))
   if (metricsSection.reason !== undefined && metricsSection.options === undefined && options.metrics === undefined) {

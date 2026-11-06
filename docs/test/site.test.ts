@@ -104,6 +104,7 @@ describe('error reference', () => {
     ['@znight/schedule', 40, 49],
     ['@znight/websocket', 50, 59],
     ['@znight/graphql', 60, 69],
+    ['@znight/events', 70, 79],
   ]
   const numberOf = (code: string): number => Number(code.slice('ZNIGHT'.length))
 

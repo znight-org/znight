@@ -1,5 +1,5 @@
 ---
-description: Every Znight error code (ZNIGHT001 to ZNIGHT068) with its meaning, an example that triggers it and how to fix it.
+description: Every Znight error code (ZNIGHT001 to ZNIGHT070) with its meaning, an example that triggers it and how to fix it.
 outline: [ 2, 2 ]
 ---
 
@@ -13,7 +13,8 @@ Codes `ZNIGHT001` to `ZNIGHT029` belong to the core, the compiler and the featur
 release (HTTP, messaging, configuration, observability). From `ZNIGHT030`, each package owns a block
 of ten: `ZNIGHT030`–`039` for `@znight/openapi`, `ZNIGHT040`–`049` for `@znight/schedule`,
 `ZNIGHT060`–`069` for [`@znight/graphql`](/packages/graphql) ([RFC 0005](../../rfcs/0005-graphql.md),
-[RFC 0007](../../rfcs/0007-graphql-schema-first.md) for schema-first).
+[RFC 0007](../../rfcs/0007-graphql-schema-first.md) for schema-first), `ZNIGHT070`–`079` for
+[`@znight/events`](/packages/events) ([RFC 0011](../../rfcs/0011-application-events.md)).
 Codes are allocated in order inside a block, so the numbering has gaps between blocks.
 
 | Code                    | Meaning                                             | Severity                                             | Reported                   |
@@ -63,6 +64,7 @@ Codes are allocated in order inside a block, so the numbering has gaps between b
 | [ZNIGHT066](#znight066) | Invalid GraphQL setup                               | error                                                | startup, runtime           |
 | [ZNIGHT067](#znight067) | Invalid GraphQL SDL                                 | error, warning                                       | build                      |
 | [ZNIGHT068](#znight068) | GraphQL schema mismatch                             | error                                                | build                      |
+| [ZNIGHT070](#znight070) | Invalid event listener                              | error / warning                                      | build                      |
 
 ## Reading an error
 
@@ -1549,3 +1551,54 @@ validated by a Standard Schema (their type is the schema output).
 
 **How to fix**: change the TypeScript type (graphql-codegen's types conform), or the SDL when the
 TypeScript type is right. Add the missing resolver or property the message names.
+
+## ZNIGHT070: Invalid event listener {#znight070}
+
+An [`@OnEvent`](/packages/events) method cannot be wired at build time: nothing at runtime could
+match its parameter to a published event, or its options are invalid. Events are matched by class
+(`event.constructor` and its prototype chain), so the parameter type must name a class.
+
+| Situation                                                                                                                                      | Severity |
+| ---------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| No parameter, several parameters, a rest parameter or a parameter decorator                                                                    | error    |
+| A parameter typed with an interface, a type alias of an object type, a primitive, `object`, `unknown`, `any`, an inline type, or not annotated | error    |
+| A class with type arguments (`EntityCreated<User>`: type arguments are erased)                                                                 | error    |
+| An optional or nullable event (`event?: UserCreated`, `UserCreated \| undefined`)                                                              | error    |
+| An event class the generated module cannot import (not exported)                                                                               | error    |
+| Options that are not an object literal, unknown options, `order` not a finite integer, `detached` not a boolean                                | error    |
+| A string argument (`@OnEvent('user.created')`, the `@nestjs/event-emitter` form)                                                               | error    |
+| A detached listener whose host depends on `HttpContext`, `RequestId`, `InboundMessage` or `JobContext`                                         | error    |
+| A union whose members overlap by inheritance (`A \| Base` with `A extends Base`): registered once                                              | warning  |
+| `@OnEvent` on an abstract class that no concrete provider extends: it never runs                                                               | warning  |
+
+```ts
+export interface UserCreated {
+  readonly userId: string
+}
+
+export class WelcomeMail {
+  @OnEvent({ detached: true })
+  send(event: UserCreated): Promise<void> {
+    // ✗ ZNIGHT070
+    return this.mail.welcome(event.userId)
+  }
+}
+```
+
+```txt
+✗ ZNIGHT070: WelcomeMail.send() listens to UserCreated, which is an interface: nothing at runtime identifies it
+ --> src/mail/welcome-mail.ts:4:15
+  |
+4 |   send(event: UserCreated): Promise<void> {
+  |               ^^^^^^^^^^^
+  = hint: Listen to a class: declare `export class UserCreated { constructor(readonly userId: string) {} }`
+```
+
+A detached listener runs after the publication, in a fresh scope, once the request may be over: the
+request values of the publisher (`HttpContext`, `InboundMessage`, `JobContext`) do not exist there.
+
+**How to fix**: declare the event as an exported class (a family of events as subclasses of a base
+class the listener can listen to), give the method exactly one parameter typed with that class, and
+pass what a detached listener needs in the event. Migrating from `@nestjs/event-emitter`: replace the
+string name with the class, as the [migration guide](/guide/migrating-from-nestjs#application-events)
+shows.
