@@ -70,5 +70,6 @@ export {
 } from './exceptions.ts'
 export { TokenBucket } from './rate-limit.ts'
 export { type Broadcast, type ChannelMember, type MemberRef, RoomRegistry } from './rooms.ts'
+export { type GatewayChannel, type GatewayRef, type ServedGateway, WsServer } from './server.ts'
 export { MemoryClient, type MemoryCloseInfo, memoryTransport } from './transports/memory.ts'
 export { validatePayload } from './validate.ts'
