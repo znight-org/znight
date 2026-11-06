@@ -8,19 +8,20 @@ Znight is split into small packages, versioned together (all `@znight/*` package
 version; a mismatch is reported as [`ZNIGHT018`](/reference/error-codes#znight018)). Install only
 what you use.
 
-| Package                                    | What it gives you                                                                                                 | Install as    | Status                                |
-| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- | ------------- | ------------------------------------- |
-| [`@znight/core`](./core)                   | Container, application lifecycle, plugins, hooks, AOP, marker decorators                                          | dependency    | <Badge type="tip" text="available" /> |
-| [`@znight/compiler`](./compiler)           | Vite plugin, CLI/Bun integration: analysis, validation, code generation                                           | devDependency | <Badge type="tip" text="available" /> |
-| [`@znight/http`](./http)                   | Controllers, validation, guards, access decisions, files, cookies, SSE, CORS; `node:http`, Fastify, Express, Hono | dependency    | <Badge type="tip" text="available" /> |
-| [`@znight/openapi`](./openapi)             | OpenAPI 3.1 documents generated at build time; Scalar or Swagger UI                                               | dependency    | <Badge type="tip" text="available" /> |
-| [`@znight/graphql`](./graphql)             | GraphQL: schema from TypeScript types or SDL files checked at build time, loaders, subscriptions over SSE         | dependency    | <Badge type="tip" text="v0.2" />      |
-| [`@znight/messaging`](./messaging)         | Consumers, retries, dead-letter queues; RabbitMQ, SQS, Kafka, in-memory                                           | dependency    | <Badge type="tip" text="available" /> |
-| [`@znight/schedule`](./schedule)           | Cron, interval and timeout jobs checked at build time; locks across instances                                     | dependency    | <Badge type="tip" text="available" /> |
-| [`@znight/config`](./config)               | Typed config classes from env, `.env`, JSON/YAML, Vault, AWS Secrets Manager                                      | dependency    | <Badge type="tip" text="available" /> |
-| [`@znight/observability`](./observability) | Pino logger, Prometheus metrics, OpenTelemetry tracing                                                            | dependency    | <Badge type="tip" text="available" /> |
-| [`@znight/testing`](./testing)             | `TestBed` with auto-mocks, `TestApp` for in-memory end-to-end tests                                               | devDependency | <Badge type="tip" text="available" /> |
-| [`@znight/cli`](./cli)                     | `znight new`, `generate`, `dev`, `build`, `start`, `openapi`, code generators                                     | devDependency | <Badge type="tip" text="available" /> |
+| Package                                    | What it gives you                                                                                                 | Install as    | Status                                      |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- | ------------- | ------------------------------------------- |
+| [`@znight/core`](./core)                   | Container, application lifecycle, plugins, hooks, AOP, marker decorators                                          | dependency    | <Badge type="tip" text="available" />       |
+| [`@znight/compiler`](./compiler)           | Vite plugin, CLI/Bun integration: analysis, validation, code generation                                           | devDependency | <Badge type="tip" text="available" />       |
+| [`@znight/http`](./http)                   | Controllers, validation, guards, access decisions, files, cookies, SSE, CORS; `node:http`, Fastify, Express, Hono | dependency    | <Badge type="tip" text="available" />       |
+| [`@znight/openapi`](./openapi)             | OpenAPI 3.1 documents generated at build time; Scalar or Swagger UI                                               | dependency    | <Badge type="tip" text="available" />       |
+| [`@znight/graphql`](./graphql)             | GraphQL: schema from TypeScript types or SDL files checked at build time, loaders, subscriptions over SSE         | dependency    | <Badge type="tip" text="v0.2" />            |
+| [`@znight/websocket`](./websocket)         | WebSocket gateways on the HTTP server: validated events, replies, rooms, backpressure (not published yet)         | dependency    | <Badge type="warning" text="in progress" /> |
+| [`@znight/messaging`](./messaging)         | Consumers, retries, dead-letter queues; RabbitMQ, SQS, Kafka, in-memory                                           | dependency    | <Badge type="tip" text="available" />       |
+| [`@znight/schedule`](./schedule)           | Cron, interval and timeout jobs checked at build time; locks across instances                                     | dependency    | <Badge type="tip" text="available" />       |
+| [`@znight/config`](./config)               | Typed config classes from env, `.env`, JSON/YAML, Vault, AWS Secrets Manager                                      | dependency    | <Badge type="tip" text="available" />       |
+| [`@znight/observability`](./observability) | Pino logger, Prometheus metrics, OpenTelemetry tracing                                                            | dependency    | <Badge type="tip" text="available" />       |
+| [`@znight/testing`](./testing)             | `TestBed` with auto-mocks, `TestApp` for in-memory end-to-end tests                                               | devDependency | <Badge type="tip" text="available" />       |
+| [`@znight/cli`](./cli)                     | `znight new`, `generate`, `dev`, `build`, `start`, `openapi`, code generators                                     | devDependency | <Badge type="tip" text="available" />       |
 
 ## Not a package (on purpose)
 

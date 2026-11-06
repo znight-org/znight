@@ -9,19 +9,19 @@ RFCs in the [`rfcs/`](https://github.com/znight-org/znight/tree/main/rfcs) folde
 before they are implemented. This page summarises where each one stands. Until 1.0, minor versions
 may change APIs.
 
-| RFC                                                                                             | Title                                     | Status             |
-| ----------------------------------------------------------------------------------------------- | ----------------------------------------- | ------------------ |
-| [0001](https://github.com/znight-org/znight/blob/main/rfcs/0001-security.md)                    | Security (route decisions, CORS, headers) | Accepted (v0.1)    |
-| [0002](https://github.com/znight-org/znight/blob/main/rfcs/0002-openapi.md)                     | `@znight/openapi`                         | Accepted (v0.1)    |
-| [0003](https://github.com/znight-org/znight/blob/main/rfcs/0003-websocket.md)                   | `@znight/websocket`                       | Accepted (planned) |
-| [0004](https://github.com/znight-org/znight/blob/main/rfcs/0004-schedule.md)                    | `@znight/schedule`                        | Accepted (v0.1)    |
-| [0005](https://github.com/znight-org/znight/blob/main/rfcs/0005-graphql.md)                     | `@znight/graphql`                         | Accepted (v0.2)    |
-| [0006](https://github.com/znight-org/znight/blob/main/rfcs/0006-http-cookies-sse.md)            | HTTP cookies and Server-Sent Events       | Accepted (v0.1)    |
-| [0007](https://github.com/znight-org/znight/blob/main/rfcs/0007-graphql-schema-first.md)        | Schema-first GraphQL                      | Accepted (v0.2)    |
-| [0008](https://github.com/znight-org/znight/blob/main/rfcs/0008-graphql-errors-as-data.md)      | Errors as data in `@znight/graphql`       | Accepted (v0.2)    |
-| [0009](https://github.com/znight-org/znight/blob/main/rfcs/0009-graphql-drivers.md)             | GraphQL drivers (`@znight/graphql`)       | Accepted (planned) |
-| [0010](https://github.com/znight-org/znight/blob/main/rfcs/0010-custom-parameter-decorators.md) | Custom parameter decorators               | Accepted (v0.2)    |
-| [0011](https://github.com/znight-org/znight/blob/main/rfcs/0011-application-events.md)          | Application events (`@znight/events`)     | Proposed           |
+| RFC                                                                                             | Title                                     | Status                 |
+| ----------------------------------------------------------------------------------------------- | ----------------------------------------- | ---------------------- |
+| [0001](https://github.com/znight-org/znight/blob/main/rfcs/0001-security.md)                    | Security (route decisions, CORS, headers) | Accepted (v0.1)        |
+| [0002](https://github.com/znight-org/znight/blob/main/rfcs/0002-openapi.md)                     | `@znight/openapi`                         | Accepted (v0.1)        |
+| [0003](https://github.com/znight-org/znight/blob/main/rfcs/0003-websocket.md)                   | `@znight/websocket`                       | Accepted (in progress) |
+| [0004](https://github.com/znight-org/znight/blob/main/rfcs/0004-schedule.md)                    | `@znight/schedule`                        | Accepted (v0.1)        |
+| [0005](https://github.com/znight-org/znight/blob/main/rfcs/0005-graphql.md)                     | `@znight/graphql`                         | Accepted (v0.2)        |
+| [0006](https://github.com/znight-org/znight/blob/main/rfcs/0006-http-cookies-sse.md)            | HTTP cookies and Server-Sent Events       | Accepted (v0.1)        |
+| [0007](https://github.com/znight-org/znight/blob/main/rfcs/0007-graphql-schema-first.md)        | Schema-first GraphQL                      | Accepted (v0.2)        |
+| [0008](https://github.com/znight-org/znight/blob/main/rfcs/0008-graphql-errors-as-data.md)      | Errors as data in `@znight/graphql`       | Accepted (v0.2)        |
+| [0009](https://github.com/znight-org/znight/blob/main/rfcs/0009-graphql-drivers.md)             | GraphQL drivers (`@znight/graphql`)       | Accepted (planned)     |
+| [0010](https://github.com/znight-org/znight/blob/main/rfcs/0010-custom-parameter-decorators.md) | Custom parameter decorators               | Accepted (v0.2)        |
+| [0011](https://github.com/znight-org/znight/blob/main/rfcs/0011-application-events.md)          | Application events (`@znight/events`)     | Proposed               |
 
 ## v0.1: the first release {#v0-1}
 
@@ -94,7 +94,8 @@ parameters are unchanged.
 ### `@znight/websocket`
 
 WebSocket **gateways** ([RFC 0003](https://github.com/znight-org/znight/blob/main/rfcs/0003-websocket.md),
-accepted, not scheduled for a release yet): providers decorated with `@Gateway(path)` whose methods
+accepted, not scheduled for a release yet; implementation in progress, see
+[`@znight/websocket`](/packages/websocket)): providers decorated with `@Gateway(path)` whose methods
 handle connections and events, resolved and checked at build time like the rest of the graph. The handshake is an HTTP request served by
 `HttpPlugin`'s server, so it goes through the same request scope, hooks, guards, CORS and proxy
 settings and access decisions as any route. Payloads are validated with Standard Schemas, with

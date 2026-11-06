@@ -206,6 +206,7 @@ function sidebarPackages(): DefaultTheme.SidebarItem[] {
         { text: '@znight/http', link: '/packages/http' },
         { text: '@znight/openapi', link: '/packages/openapi' },
         { text: '@znight/graphql', link: '/packages/graphql' },
+        { text: '@znight/websocket', link: '/packages/websocket' },
         { text: '@znight/messaging', link: '/packages/messaging' },
         { text: '@znight/schedule', link: '/packages/schedule' },
         { text: '@znight/config', link: '/packages/config' },
