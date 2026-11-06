@@ -591,6 +591,13 @@
         "@znight/core": "workspace:*",
       },
     },
+    "packages/websocket": {
+      "name": "@znight/websocket",
+      "version": "0.0.0",
+      "dependencies": {
+        "@znight/core": "workspace:*",
+      },
+    },
   },
   "catalog": {
     "@types/bun": "1.4.4",
@@ -1402,6 +1409,8 @@
     "@znight/schedule": ["@znight/schedule@workspace:packages/schedule"],
 
     "@znight/testing": ["@znight/testing@workspace:packages/testing"],
+
+    "@znight/websocket": ["@znight/websocket@workspace:packages/websocket"],
 
     "abort-controller": ["abort-controller@3.0.0", "", { "dependencies": { "event-target-shim": "^5.0.0" } }, "sha512-h8lQ8tacZYnR3vNQTgibj+tODHI5/+l06Au2Pcriv/Gmet0eaj4TwWH41sO9wnHDiQsEj19q0drzdWdeAHtweg=="],
 
