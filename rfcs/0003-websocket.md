@@ -2,7 +2,7 @@
 
 |          |                                                                                                                                                                                                                                                                                |
 | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Status   | Accepted                                                                                                                                                                                                                                                                       |
+| Status   | Accepted (implementation in progress)                                                                                                                                                                                                                                          |
 | Date     | 2026-10-26                                                                                                                                                                                                                                                                     |
 | Affects  | New `@znight/websocket` (runtime, compiler extension, transports), `@znight/http` (upgrade routes, adapter capability, two compiler exports), `@znight/core` (two hooks, two error codes), `@znight/testing`, `@znight/observability`, CLI, docs                               |
 | Decision | Gateways served **by `HttpPlugin`'s server**: the handshake is an HTTP request (same scope, hooks, guards, CORS/proxy settings), then a transport takes the socket: **`ws`** on every `node:http` adapter (Node and Bun), **native `Bun.serve()`** with `honoAdapter()` on Bun |
@@ -18,7 +18,7 @@ below, "v0.1" means the first release of `@znight/websocket` and "v0.2" its foll
 inbound events (`@OnMessage(event)`), with Standard Schema validation of payloads, request/reply
 acknowledgements, rooms, broadcasts, backpressure, heartbeats and a graceful shutdown. Like every
 Znight feature, gateways are resolved **at build time**: `@znight/websocket/compiler` reads the
-decorators, validates the gateway graph (new diagnostics ZNIGHT030/031, plus the existing ZNIGHT003,
+decorators, validates the gateway graph (new diagnostics ZNIGHT050/031, plus the existing ZNIGHT003,
 005, 007, 017 and RFC 0001's ZNIGHT023) and generates one `invoke` function per handler. At runtime
 the plugin only wires generated code: no reflection, no per-message metadata lookup.
 
@@ -53,7 +53,7 @@ The design rests on five opinions:
 | HTTP decorators on a class owned by another extension are reported (`@UseGuard has no effect: X is not a controller`)                                                                                                                                                                                                                                                                                                         | `http/src/compiler/analyze.ts` `reportOutsideController`                         | Gateways need their own guard decorators; reusing `@znight/http#UseGuard` would be an error                                            |
 | Route decorators are recognised only by the http extension (`route-decorators.ts`, not exported)                                                                                                                                                                                                                                                                                                                              | `http/src/compiler/route-decorators.ts`                                          | The websocket extension needs a small public export from `@znight/http/compiler` (§6.4)                                                |
 | `ZnightHooks` lists `http:request`, `messaging:message`, `messaging:publish`; event types live in core                                                                                                                                                                                                                                                                                                                        | `core/src/hooks.ts`                                                              | Two WebSocket hooks are added to core, so observability does not depend on `@znight/websocket`                                         |
-| `ZNIGHT022` is the last code; RFC 0001 adds `ZNIGHT023`                                                                                                                                                                                                                                                                                                                                                                       | `core/src/errors.ts`, `rfcs/0001-security.md`                                    | This RFC opens the `ZNIGHT030`–`ZNIGHT039` range (§6.3)                                                                                |
+| `ZNIGHT022` is the last code; RFC 0001 adds `ZNIGHT023`                                                                                                                                                                                                                                                                                                                                                                       | `core/src/errors.ts`, `rfcs/0001-security.md`                                    | This RFC opens the `ZNIGHT050`–`ZNIGHT059` range (§6.3)                                                                                |
 | Node.js 24 has no WebSocket **server** in core (global `WebSocket` client only)                                                                                                                                                                                                                                                                                                                                               | Node 24.21                                                                       | A library is needed on Node: `ws`                                                                                                      |
 | `node:http` `'upgrade'` events work on **Bun 1.4.4** with a raw socket                                                                                                                                                                                                                                                                                                                                                        | scratch probe (raw RFC 6455 handshake, both runtimes)                            | The `node`, `express` and `fastify` adapters can serve WebSockets on Bun too                                                           |
 | On Bun, `import 'ws'` resolves to a **built-in** implementation (even without the npm package) backed by native code; `WebSocketServer.handleUpgrade` + `maxPayload` behave like npm `ws` (close 1009)                                                                                                                                                                                                                        | scratch probe, stack trace `ws:1003 nativeBufferedAmount`                        | `ws` is an optional peer **for Node only**; Bun users install nothing                                                                  |
@@ -114,7 +114,7 @@ The design rests on five opinions:
 | Protocol     | `events` (JSON envelope `{ event, data?, id? }`, replies `{ id, data }` / `{ id, error }`, `$`-prefixed reserved events) or `raw`                                           |
 | Guards       | Handshake: global HTTP guards then `@UseHandshakeGuard` (HTTP `CanActivate`). Messages: global then `@UseMessageGuard` (`WsGuard`)                                          |
 | Defaults     | `origins: 'same-origin'`, `maxPayload: 1 MiB`, outbound buffer 1 MiB then close `1013`, heartbeat 30 s, handler timeout 30 s, compression off, shutdown close `1001`        |
-| Codes        | `ZNIGHT030` InvalidGateway, `ZNIGHT031` WebSocketTransportUnavailable; range `030`–`039` reserved for the package                                                           |
+| Codes        | `ZNIGHT050` InvalidGateway, `ZNIGHT051` WebSocketTransportUnavailable; range `050`–`059` reserved for the package                                                           |
 
 ## 5. User-facing API
 
@@ -752,19 +752,19 @@ RFC 0001 required groups on handshakes, and the cross-handler rules of the table
 | ZNIGHT017 | Non-primitive `@Payload()` without schema (warning, error with `strictValidation`)                                                                                                                                                                                                                                                                                            |
 | ZNIGHT023 | (RFC 0001) a gateway without a decision of a required route decorator group; at boot, a handshake whose guard chain does not enforce it                                                                                                                                                                                                                                       |
 
-**New codes.** The range **`ZNIGHT030`–`ZNIGHT039` is reserved for `@znight/websocket`**.
+**New codes.** The range **`ZNIGHT050`–`ZNIGHT059` is reserved for `@znight/websocket`**.
 Codes below `030` stay with core and the shared packages (RFC 0001 took `023`; `024`–`029` remain
 free for them); later feature packages take the next decades (`040`–`049`, ...). Codes are still
 declared in `@znight/core` (`ErrorCode`, `ERROR_DESCRIPTIONS`), shared by compiler and runtime.
 
 | Code          | Name                            | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | Severity        | When           |
 | ------------- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------- | -------------- |
-| ZNIGHT030     | `InvalidGateway`                | Invalid gateway: unknown or invalid `@Gateway` option (scope `'transient'`, protocol, subprotocol tokens, `maxPayload`, `concurrency`, `rateLimit`, `backpressure`); several `@OnConnect` or `@OnDisconnect` methods; an event handled twice; several default handlers; an invalid or reserved (`$`) event name; `@OnMessage(event)` or several handlers on a `raw` gateway; `@Payload` / `@Ctx` outside `@OnMessage`, two `@Payload`; an undecorated required handler parameter; a method with several roles; a gateway without handler (warning). At boot: invalid `WebSocketPlugin` options, malformed `metadata.extensions.websocket` | error / warning | build, startup |
-| ZNIGHT031     | `WebSocketTransportUnavailable` | Gateways cannot be served: no `HttpPlugin` in the application; an adapter without upgrade support; `ws` not installed on Node.js; `bunTransport()` outside `Bun.serve()`, `wsTransport()` with `honoAdapter()` on Bun; upgrade routes added after the server started listening                                                                                                                                                                                                                                                                                                                                                            | error           | startup        |
+| ZNIGHT050     | `InvalidGateway`                | Invalid gateway: unknown or invalid `@Gateway` option (scope `'transient'`, protocol, subprotocol tokens, `maxPayload`, `concurrency`, `rateLimit`, `backpressure`); several `@OnConnect` or `@OnDisconnect` methods; an event handled twice; several default handlers; an invalid or reserved (`$`) event name; `@OnMessage(event)` or several handlers on a `raw` gateway; `@Payload` / `@Ctx` outside `@OnMessage`, two `@Payload`; an undecorated required handler parameter; a method with several roles; a gateway without handler (warning). At boot: invalid `WebSocketPlugin` options, malformed `metadata.extensions.websocket` | error / warning | build, startup |
+| ZNIGHT051     | `WebSocketTransportUnavailable` | Gateways cannot be served: no `HttpPlugin` in the application; an adapter without upgrade support; `ws` not installed on Node.js; `bunTransport()` outside `Bun.serve()`, `wsTransport()` with `honoAdapter()` on Bun; upgrade routes added after the server started listening                                                                                                                                                                                                                                                                                                                                                            | error           | startup        |
 | ZNIGHT032–039 | —                               | Reserved                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |                 |                |
 
 ```text
-✗ ZNIGHT030: ChatGateway handles "message.send" twice: ChatGateway.send and ChatGateway.post
+✗ ZNIGHT050: ChatGateway handles "message.send" twice: ChatGateway.send and ChatGateway.post
   --> src/chat/chat.gateway.ts:58:3
    |
 58 |   @OnMessage('message.send')
@@ -772,14 +772,14 @@ declared in `@znight/core` (`ErrorCode`, `ERROR_DESCRIPTIONS`), shared by compil
    = hint: An event has a single handler per gateway: merge the methods, or rename one of the events
   ::: src/chat/chat.gateway.ts:41:3 first handled here
 
-✗ ZNIGHT030: Event name "$ping" is reserved (ChatGateway.ping)
+✗ ZNIGHT050: Event name "$ping" is reserved (ChatGateway.ping)
   --> src/chat/chat.gateway.ts:70:14
    = hint: Names starting with "$" are protocol events; "$ping" is answered by Znight itself
 
-✗ ZNIGHT031: WebSocketPlugin needs HttpPlugin: gateways are served by the HTTP server
+✗ ZNIGHT051: WebSocketPlugin needs HttpPlugin: gateways are served by the HTTP server
    = hint: Add HttpPlugin.configure() to the plugins (without controllers for a WebSocket-only service)
 
-✗ ZNIGHT031: The "ws" package is required to serve WebSocket gateways on Node.js
+✗ ZNIGHT051: The "ws" package is required to serve WebSocket gateways on Node.js
    = hint: npm i ws (Bun provides it: nothing to install there)
 ```
 
@@ -995,7 +995,7 @@ type BunUpgrade = { readonly kind: 'bun'; readonly request: Request; readonly se
 type MemoryUpgrade = { readonly kind: 'memory'; readonly peer: unknown }
 
 class HttpPlugin {
-  /** From another plugin's register/onBootstrap, before the server listens (ZNIGHT031 afterwards). */
+  /** From another plugin's register/onBootstrap, before the server listens (ZNIGHT051 afterwards). */
   addUpgradeProvider(provider: UpgradeProvider): void
   /** In-memory handshake (WebSocketPlugin.connect): the same pipeline, without the adapter. */
   upgradeInMemory(request: InjectRequest, native: MemoryUpgrade): Promise<InjectResponse | undefined>
@@ -1040,7 +1040,7 @@ for `node`, a `Response` for `bun`, a `WsHandshakeError` for `memory`). The hand
 ```ts
 interface HttpAdapter {
   // ...existing members
-  /** Optional: WebSocket upgrades. Absent → ZNIGHT031 when gateways exist. */
+  /** Optional: WebSocket upgrades. Absent → ZNIGHT051 when gateways exist. */
   readonly upgrades?: AdapterUpgrades
 }
 interface AdapterUpgrades {
@@ -1072,7 +1072,7 @@ interface AdapterUpgrades {
   `shouldUpgradeCallback`), Znight answers every websocket upgrade: `404` on non-gateway paths.
   `@znight/websocket` declares `engines.node >= 24.12`.
 - `@fastify/websocket` (or any other upgrade handler) must not claim gateway paths; documented.
-- `honoAdapter().fetch` (a server Znight does not own) cannot upgrade: ZNIGHT031.
+- `honoAdapter().fetch` (a server Znight does not own) cannot upgrade: ZNIGHT051.
 
 #### 8.2.4 Two small http API changes
 
@@ -1264,8 +1264,8 @@ membership in Bun, exclude the sender by default and bypass the per-recipient po
 
 | Hook          | `WebSocketPlugin`                                                                                                                                                                                                                                                             |
 | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `register`    | Declares `WsConnection` (request external), registers `WsServer` and itself; finds `HttpPlugin` (`ctx.getPlugin('http')`, else ZNIGHT031)                                                                                                                                     |
-| `onBootstrap` | Resolves and validates options and metadata (ZNIGHT030), resolves guards and mappers (ZNIGHT001), selects the transport (ZNIGHT031), builds gateway plans (effective meta per handler), calls `http.addUpgradeProvider()`                                                     |
+| `register`    | Declares `WsConnection` (request external), registers `WsServer` and itself; finds `HttpPlugin` (`ctx.getPlugin('http')`, else ZNIGHT051)                                                                                                                                     |
+| `onBootstrap` | Resolves and validates options and metadata (ZNIGHT050), resolves guards and mappers (ZNIGHT001), selects the transport (ZNIGHT051), builds gateway plans (effective meta per handler), calls `http.addUpgradeProvider()`                                                     |
 | `onStart`     | Starts the heartbeat timer. The server itself listens in `HttpPlugin.onStart`                                                                                                                                                                                                 |
 | `onStop`      | `drain()`: refuse handshakes (`503`), stop the heartbeat, close every connection with `shutdown.code` / `reason` (in parallel), wait for close frames, running handlers and `@OnDisconnect` up to `shutdown.timeoutMs`, terminate the rest (their `@OnDisconnect` still runs) |
 | `onDispose`   | `transport.close()` (`wss.close()`), release timers                                                                                                                                                                                                                           |
@@ -1388,7 +1388,7 @@ Socket.IO, uWebSockets.js and `express-ws` rely on prior knowledge.
 
 | #   | Question                                                                 | Recommendation                                                                                                                                                                 |
 | --- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Q1  | Should the plugin run its own server when there is no `HttpPlugin`?      | **No.** One server keeps one set of guards, hooks, proxy and CORS settings, and one drain. A WebSocket-only service uses `HttpPlugin` without controllers (ZNIGHT031 says so)  |
+| Q1  | Should the plugin run its own server when there is no `HttpPlugin`?      | **No.** One server keeps one set of guards, hooks, proxy and CORS settings, and one drain. A WebSocket-only service uses `HttpPlugin` without controllers (ZNIGHT051 says so)  |
 | Q2  | Handshake guards: reuse HTTP guards, or a WebSocket-specific auth layer? | **Reuse HTTP guards.** The handshake _is_ HTTP; message guards cover per-event decisions                                                                                       |
 | Q3  | Request scope per connection or per message?                             | **Per connection** (Spring's session scope; NestJS has none). Per-message values are arguments. Revisit a `messageScope` option only on demand: it needs nested scopes in core |
 | Q4  | Envelope: Socket.IO-compatible, JSON-RPC 2.0, or our own?                | **Our own minimal envelope** (`event`/`data`/`id`), plus `raw` and pluggable codecs. Socket.IO compatibility drags its transports; JSON-RPC lacks server events                |
@@ -1411,7 +1411,7 @@ Socket.IO, uWebSockets.js and `express-ws` rely on prior knowledge.
 | #      | Milestone / task                                                                                                                                                                                                                                      | Priority      | Days       |
 | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- | ---------- |
 | **M0** | **Prerequisites in core and http**                                                                                                                                                                                                                    |               |            |
-| T1     | Core: `ZNIGHT030`/`031` (`ErrorCode`, descriptions, error-codes page), `websocket:message` / `websocket:connection` hook types                                                                                                                        | P0            | 0.5        |
+| T1     | Core: `ZNIGHT050`/`031` (`ErrorCode`, descriptions, error-codes page), `websocket:message` / `websocket:connection` hook types                                                                                                                        | P0            | 0.5        |
 | T2     | Http: `UpgradeProvider`, upgrade route table, `upgrade` pipeline target with scope hold, protocol checks, 426 fallback, route summaries, drain integration, `upgradeInMemory`                                                                         | P0            | 3          |
 | T3     | Http adapters: `upgrades` capability for node, express, fastify, hono/Node (composed `shouldUpgradeCallback`, raw refusal writer) and hono/Bun (fetch interception, `websocket` handlers)                                                             | P0            | 2          |
 | T4     | Http: `RouteMetaCarrier`, `readRouteMeta`, `requiredRouteGroups` exports; boundaries test update                                                                                                                                                      | P0            | 0.5        |
@@ -1439,8 +1439,8 @@ ZNIGHT023 checks cover handshakes (one test each side).
   `@OnDisconnect` last and only after a successful connect), pause/resume thresholds, rate limiter,
   handler timeout (fake timers), rooms (join/leave/auto-leave, empty room removal, union and
   except), broadcast encode-once (codec spy), backpressure (`close` vs `drop`, `drained()`),
-  heartbeat (fake timers; one timer for N connections), stats, options validation (ZNIGHT030),
-  transport selection (ZNIGHT031), detached handshake context.
+  heartbeat (fake timers; one timer for N connections), stats, options validation (ZNIGHT050),
+  transport selection (ZNIGHT051), detached handshake context.
 - **Transport conformance** (one suite, three transports): accept with headers and subprotocol,
   text/binary frames, size limit `1009`, send statuses, pause, ping/pong, close handshake and close
   timeout, terminate, error listener present.
@@ -1455,7 +1455,7 @@ ZNIGHT023 checks cover handshakes (one test each side).
   routes, shutdown with `1001`. Runs under **Node** (`ws` npm) and **Bun** (built-in `ws`, and the
   native transport through `hono-bun.test.ts`).
 - **Compiler (`test/compiler`)**: fixture app; analysis of options, handlers, inheritance,
-  parameters; every ZNIGHT030 case with location, hint and related location; reused codes (003,
+  parameters; every ZNIGHT050 case with location, hint and related location; reused codes (003,
   005, 007, 017, and 023 with RFC 0001); cross-package parameter decorators both ways (with the http
   and messaging extensions loaded); generated section snapshot; byte-identical output across
   incremental compiles; `tsc` type-checks a handler whose parameter does not match its schema
@@ -1525,10 +1525,10 @@ examples/realtime-chat/
 │  ├─ ticker.ws.test.ts            binary frames, backpressure, 4404
 │  ├─ shutdown.ws.test.ts          app.stop(): 1001 received, @OnDisconnect ran, RequestUser disposed
 │  ├─ gateway.unit.test.ts         TestBed + createTestConnection / createTestServer
-│  ├─ build-check.test.ts          compile() of a fixture with a duplicate event → ZNIGHT030 at its location
+│  ├─ build-check.test.ts          compile() of a fixture with a duplicate event → ZNIGHT050 at its location
 │  └─ e2e.test.ts                  ZNIGHT_E2E: build, run on Node and on Bun for each adapter, connectWebSocket
 └─ README.md                       "What it shows", protocol cheat sheet, "Try breaking it" (duplicate event,
-                                   singleton gateway injecting WsConnection → ZNIGHT003, missing HttpPlugin → ZNIGHT031)
+                                   singleton gateway injecting WsConnection → ZNIGHT003, missing HttpPlugin → ZNIGHT051)
 ```
 
 The guide (`docs/guide/websockets.md`) covers: gateways, protocol, rooms, auth (ticket, origins),
