@@ -20,6 +20,8 @@ import { ErrorCode, ZnightError } from '@znight/core'
 
 /** The part of a `ws` `WebSocket` the transport uses (no `@types/ws`). */
 interface WsSocket {
+  /** `1` while open. */
+  readonly readyState: number
   readonly bufferedAmount: number
   readonly extensions: string
   send(data: string | Uint8Array, options: { binary: boolean }, callback: (error?: Error) => void): void
@@ -99,6 +101,7 @@ class WsTransportSocket implements TransportSocket {
   }
 
   send(frame: string | Uint8Array, binary: boolean): SendStatus {
+    if (this.#ws.readyState !== 1) return 'dropped'
     this.#ws.send(frame, { binary }, () => this.#flushed())
     if (this.#ws.bufferedAmount <= this.#limit) return 'sent'
     this.#waitingDrain = true
