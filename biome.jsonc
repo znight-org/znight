@@ -103,7 +103,7 @@
     {
       // NestJS reads constructor parameter types from the metadata emitted by tsc
       // (emitDecoratorMetadata): an `import type` of an injected class breaks its injection
-      "includes": ["benchmarks/apps/nestjs/**"],
+      "includes": ["benchmarks/apps/nestjs/**", "benchmarks/apps/nestjs-graphql/**"],
       "linter": { "rules": { "style": { "useImportType": "off" } } }
     }
   ],

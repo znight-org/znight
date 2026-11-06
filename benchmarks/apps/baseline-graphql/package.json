@@ -1,0 +1,20 @@
+{
+  "name": "@znight-benchmarks/baseline-graphql",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "dataloader": "2.2.3",
+    "graphql": "17.0.2",
+    "graphql-yoga": "6.0.1",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:"
+  }
+}

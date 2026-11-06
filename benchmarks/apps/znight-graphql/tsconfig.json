@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "target": "ES2024",
+    "lib": ["ES2024", "ESNext.Disposable"],
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "moduleDetection": "force",
+    "types": ["bun"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    // Znight decorators are TypeScript decorators: no emitDecoratorMetadata nor reflect-metadata
+    "experimentalDecorators": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    // In-repo only: type-check against the TypeScript sources of the @znight/* workspace packages
+    "customConditions": ["@znight/source"],
+    "allowImportingTsExtensions": true,
+    "paths": {
+      // The typings of @whatwg-node/fetch (graphql-yoga) reference the DOM lib, whose BodyInit
+      // breaks the Node.js globals: the same declarations on the existing globals, like packages/graphql
+      "@whatwg-node/fetch": ["../../../packages/graphql/types/whatwg-fetch.d.ts"]
+    }
+  },
+  "include": ["src", "vite.config.ts"]
+}
