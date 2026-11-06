@@ -1,8 +1,7 @@
 {
   "name": "@znight/websocket",
-  "version": "0.3.0",
-  "private": true,
-  "description": "Znight WebSocket gateways served by the HTTP server, validated at build time (RFC 0003, in progress)",
+  "version": "0.5.1",
+  "description": "Znight WebSocket gateways served by the HTTP server, validated at build time",
   "license": "MIT",
   "author": "Ugho STEPHAN",
   "homepage": "https://github.com/znight-org/znight/tree/main/packages/websocket#readme",
@@ -52,6 +51,9 @@
     "build": "tsdown",
     "typecheck": "tsc --noEmit && tsc --noEmit -p test",
     "test": "bun test --conditions=@znight/source test"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "dependencies": {
     "@znight/core": "workspace:*",
