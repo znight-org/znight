@@ -48,6 +48,8 @@ interface MemberAnalysis {
   readonly onConnect: LifecycleData | undefined
   readonly onDisconnect: LifecycleData | undefined
   readonly handlers: readonly HandlerData[]
+  /** The method has a role decorator (valid or not). */
+  readonly role: boolean
 }
 
 /** Types a `@Payload()` without schema may have (RFC 0003 §5.5). */
@@ -115,7 +117,7 @@ export function analyzeWebSocketClass(cls: ClassInfo, ctx: Context): void {
   const onConnect = single(ctx, cls, members, 'onConnect', '@OnConnect')
   const onDisconnect = single(ctx, cls, members, 'onDisconnect', '@OnDisconnect')
   checkHandlers(cls, read.options.protocol, handlers, ctx)
-  if (handlers.length === 0 && onConnect === undefined && onDisconnect === undefined) {
+  if (!members.some(member => member.role)) {
     report(
       ctx,
       INVALID_GATEWAY,
@@ -514,6 +516,7 @@ function analyzeMethod(cls: ClassInfo, method: MethodInfo, ctx: Context, host: C
       onConnect: undefined,
       onDisconnect: undefined,
       handlers: [],
+      role: false,
     }
   }
   checkMethodShape(method, primary, where, ctx)
@@ -554,6 +557,7 @@ function analyzeMethod(cls: ClassInfo, method: MethodInfo, ctx: Context, host: C
       onConnect: onConnect.length > 0 ? lifecycle : undefined,
       onDisconnect: onConnect.length === 0 ? lifecycle : undefined,
       handlers: [],
+      role: true,
     }
   }
   const params = analyzeParams(method, where, 'message', ctx)
@@ -574,7 +578,14 @@ function analyzeMethod(cls: ClassInfo, method: MethodInfo, ctx: Context, host: C
       }),
     ]
   })
-  return { method: method.name, declaredBy: cls.displayName, onConnect: undefined, onDisconnect: undefined, handlers }
+  return {
+    method: method.name,
+    declaredBy: cls.displayName,
+    onConnect: undefined,
+    onDisconnect: undefined,
+    handlers,
+    role: true,
+  }
 }
 
 /** The event of `@OnMessage(event?)`: a string, `undefined` (default handler) or `false` (invalid). */

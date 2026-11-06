@@ -236,7 +236,11 @@ export class WebSocketPlugin implements Plugin, PluginHttpUpgrades {
   httpUpgrades(context: PluginHttpUpgradesContext): PluginUpgrades {
     const plans = this.#prepare(context)
     if (plans.length === 0) return { routes: [] }
-    const groups = (this.#context().metadata.extensions?.http as HttpMetadata | undefined)?.groups ?? {}
+    const extensions = this.#context().metadata.extensions
+    const groups = {
+      ...(extensions?.http as HttpMetadata | undefined)?.groups,
+      ...(extensions?.websocket as WebSocketMetadata | undefined)?.groups,
+    }
     const options = this.#resolve()
     const routes = plans.map(
       (plan): PluginUpgradeRoute => ({

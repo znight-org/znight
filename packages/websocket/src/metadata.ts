@@ -6,6 +6,11 @@ import type { WsMessageContext } from './context.ts'
 /** The gateways of the application, sorted by token. */
 export interface WebSocketMetadata {
   readonly gateways: readonly GatewayDefinition[]
+  /**
+   * Route decorator groups the runtime needs (required, holding several keys, or named differently
+   * from their key), as `metadata.extensions.http.groups`. Absent when no group needs it.
+   */
+  readonly groups?: Readonly<Record<string, { readonly keys: readonly string[]; readonly required: boolean }>>
 }
 
 /** One `@Gateway` class. Optional fields are omitted when absent. */
