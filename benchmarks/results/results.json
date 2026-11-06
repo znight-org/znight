@@ -2532,5 +2532,1862 @@
         }
       }
     ]
+  },
+  "graphql": {
+    "environment": {
+      "date": "2026-11-06T21:56:37.990Z",
+      "commit": "0143f57",
+      "machine": "Apple M5",
+      "cpus": 10,
+      "memoryGiB": 16,
+      "os": "macOS 26.6.2",
+      "runtimes": {
+        "node": "24.21.0",
+        "bun": "1.4.4"
+      },
+      "packages": {
+        "graphql": "17.0.2",
+        "graphql-yoga": "6.0.1",
+        "@graphql-tools/executor": "4.1.7",
+        "dataloader": "2.2.3",
+        "@znight/graphql": "0.6.0",
+        "@znight/http": "0.6.0",
+        "fastify": "5.12.7",
+        "@nestjs/core": "12.3.2",
+        "@nestjs/graphql": "14.1.2",
+        "@graphql-yoga/nestjs": "5.0.1",
+        "@nestjs/platform-fastify": "12.3.2",
+        "@nestjs/platform-express": "12.3.2",
+        "zod": "4.6.7",
+        "autocannon": "8.0.0"
+      }
+    },
+    "settings": {
+      "tool": "autocannon",
+      "connections": 100,
+      "pipelining": 1,
+      "warmupSeconds": 3,
+      "durationSeconds": 10,
+      "rounds": 3
+    },
+    "results": [
+      {
+        "variant": "baseline-graphql",
+        "framework": "baseline",
+        "runtime": "node",
+        "operation": "user",
+        "rounds": [
+          {
+            "requestsPerSecond": 72451,
+            "latencyP99Ms": 2
+          },
+          {
+            "requestsPerSecond": 70246,
+            "latencyP99Ms": 2
+          },
+          {
+            "requestsPerSecond": 70868,
+            "latencyP99Ms": 2
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 70868,
+          "p25": 70557,
+          "p75": 71660,
+          "min": 70246,
+          "max": 72451
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 2,
+          "p25": 2,
+          "p75": 2,
+          "min": 2,
+          "max": 2
+        }
+      },
+      {
+        "variant": "baseline-graphql",
+        "framework": "baseline",
+        "runtime": "node",
+        "operation": "books",
+        "rounds": [
+          {
+            "requestsPerSecond": 19058,
+            "latencyP99Ms": 10
+          },
+          {
+            "requestsPerSecond": 18801,
+            "latencyP99Ms": 10
+          },
+          {
+            "requestsPerSecond": 19234,
+            "latencyP99Ms": 9
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 19058,
+          "p25": 18930,
+          "p75": 19146,
+          "min": 18801,
+          "max": 19234
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 10,
+          "p25": 9.5,
+          "p75": 10,
+          "min": 9,
+          "max": 10
+        }
+      },
+      {
+        "variant": "baseline-graphql",
+        "framework": "baseline",
+        "runtime": "node",
+        "operation": "createUser",
+        "rounds": [
+          {
+            "requestsPerSecond": 64041,
+            "latencyP99Ms": 3
+          },
+          {
+            "requestsPerSecond": 65166,
+            "latencyP99Ms": 2
+          },
+          {
+            "requestsPerSecond": 67005,
+            "latencyP99Ms": 2
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 65166,
+          "p25": 64604,
+          "p75": 66086,
+          "min": 64041,
+          "max": 67005
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 2,
+          "p25": 2,
+          "p75": 2.5,
+          "min": 2,
+          "max": 3
+        }
+      },
+      {
+        "variant": "yoga",
+        "framework": "yoga",
+        "runtime": "node",
+        "operation": "user",
+        "rounds": [
+          {
+            "requestsPerSecond": 32620,
+            "latencyP99Ms": 5
+          },
+          {
+            "requestsPerSecond": 32659,
+            "latencyP99Ms": 5
+          },
+          {
+            "requestsPerSecond": 34067,
+            "latencyP99Ms": 5
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 32659,
+          "p25": 32640,
+          "p75": 33363,
+          "min": 32620,
+          "max": 34067
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 5,
+          "p25": 5,
+          "p75": 5,
+          "min": 5,
+          "max": 5
+        }
+      },
+      {
+        "variant": "yoga",
+        "framework": "yoga",
+        "runtime": "node",
+        "operation": "books",
+        "rounds": [
+          {
+            "requestsPerSecond": 18648,
+            "latencyP99Ms": 10
+          },
+          {
+            "requestsPerSecond": 18088,
+            "latencyP99Ms": 9
+          },
+          {
+            "requestsPerSecond": 19138,
+            "latencyP99Ms": 10
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 18648,
+          "p25": 18368,
+          "p75": 18893,
+          "min": 18088,
+          "max": 19138
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 10,
+          "p25": 9.5,
+          "p75": 10,
+          "min": 9,
+          "max": 10
+        }
+      },
+      {
+        "variant": "yoga",
+        "framework": "yoga",
+        "runtime": "node",
+        "operation": "createUser",
+        "rounds": [
+          {
+            "requestsPerSecond": 31559,
+            "latencyP99Ms": 5
+          },
+          {
+            "requestsPerSecond": 31357,
+            "latencyP99Ms": 5
+          },
+          {
+            "requestsPerSecond": 34445,
+            "latencyP99Ms": 5
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 31559,
+          "p25": 31458,
+          "p75": 33002,
+          "min": 31357,
+          "max": 34445
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 5,
+          "p25": 5,
+          "p75": 5,
+          "min": 5,
+          "max": 5
+        }
+      },
+      {
+        "variant": "znight-graphql-node",
+        "framework": "znight",
+        "runtime": "node",
+        "operation": "user",
+        "rounds": [
+          {
+            "requestsPerSecond": 61811,
+            "latencyP99Ms": 2
+          },
+          {
+            "requestsPerSecond": 58556,
+            "latencyP99Ms": 3
+          },
+          {
+            "requestsPerSecond": 59519,
+            "latencyP99Ms": 3
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 59519,
+          "p25": 59038,
+          "p75": 60665,
+          "min": 58556,
+          "max": 61811
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 3,
+          "p25": 2.5,
+          "p75": 3,
+          "min": 2,
+          "max": 3
+        }
+      },
+      {
+        "variant": "znight-graphql-node",
+        "framework": "znight",
+        "runtime": "node",
+        "operation": "books",
+        "rounds": [
+          {
+            "requestsPerSecond": 18376,
+            "latencyP99Ms": 10
+          },
+          {
+            "requestsPerSecond": 18846,
+            "latencyP99Ms": 10
+          },
+          {
+            "requestsPerSecond": 18290,
+            "latencyP99Ms": 10
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 18376,
+          "p25": 18333,
+          "p75": 18611,
+          "min": 18290,
+          "max": 18846
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 10,
+          "p25": 10,
+          "p75": 10,
+          "min": 10,
+          "max": 10
+        }
+      },
+      {
+        "variant": "znight-graphql-node",
+        "framework": "znight",
+        "runtime": "node",
+        "operation": "createUser",
+        "rounds": [
+          {
+            "requestsPerSecond": 54589,
+            "latencyP99Ms": 3
+          },
+          {
+            "requestsPerSecond": 57465,
+            "latencyP99Ms": 3
+          },
+          {
+            "requestsPerSecond": 53185,
+            "latencyP99Ms": 3
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 54589,
+          "p25": 53887,
+          "p75": 56027,
+          "min": 53185,
+          "max": 57465
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 3,
+          "p25": 3,
+          "p75": 3,
+          "min": 3,
+          "max": 3
+        }
+      },
+      {
+        "variant": "znight-graphql-yoga",
+        "framework": "znight",
+        "runtime": "node",
+        "operation": "user",
+        "rounds": [
+          {
+            "requestsPerSecond": 29890,
+            "latencyP99Ms": 6
+          },
+          {
+            "requestsPerSecond": 31143,
+            "latencyP99Ms": 5
+          },
+          {
+            "requestsPerSecond": 29765,
+            "latencyP99Ms": 6
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 29890,
+          "p25": 29828,
+          "p75": 30517,
+          "min": 29765,
+          "max": 31143
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 6,
+          "p25": 5.5,
+          "p75": 6,
+          "min": 5,
+          "max": 6
+        }
+      },
+      {
+        "variant": "znight-graphql-yoga",
+        "framework": "znight",
+        "runtime": "node",
+        "operation": "books",
+        "rounds": [
+          {
+            "requestsPerSecond": 14163,
+            "latencyP99Ms": 13
+          },
+          {
+            "requestsPerSecond": 14706,
+            "latencyP99Ms": 13
+          },
+          {
+            "requestsPerSecond": 13998,
+            "latencyP99Ms": 13
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 14163,
+          "p25": 14081,
+          "p75": 14435,
+          "min": 13998,
+          "max": 14706
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 13,
+          "p25": 13,
+          "p75": 13,
+          "min": 13,
+          "max": 13
+        }
+      },
+      {
+        "variant": "znight-graphql-yoga",
+        "framework": "znight",
+        "runtime": "node",
+        "operation": "createUser",
+        "rounds": [
+          {
+            "requestsPerSecond": 29116,
+            "latencyP99Ms": 6
+          },
+          {
+            "requestsPerSecond": 27589,
+            "latencyP99Ms": 7
+          },
+          {
+            "requestsPerSecond": 28687,
+            "latencyP99Ms": 6
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 28687,
+          "p25": 28138,
+          "p75": 28902,
+          "min": 27589,
+          "max": 29116
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 6,
+          "p25": 6,
+          "p75": 6.5,
+          "min": 6,
+          "max": 7
+        }
+      },
+      {
+        "variant": "znight-graphql-fastify",
+        "framework": "znight",
+        "runtime": "node",
+        "operation": "user",
+        "rounds": [
+          {
+            "requestsPerSecond": 60127,
+            "latencyP99Ms": 3
+          },
+          {
+            "requestsPerSecond": 55708,
+            "latencyP99Ms": 3
+          },
+          {
+            "requestsPerSecond": 58884,
+            "latencyP99Ms": 3
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 58884,
+          "p25": 57296,
+          "p75": 59506,
+          "min": 55708,
+          "max": 60127
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 3,
+          "p25": 3,
+          "p75": 3,
+          "min": 3,
+          "max": 3
+        }
+      },
+      {
+        "variant": "znight-graphql-fastify",
+        "framework": "znight",
+        "runtime": "node",
+        "operation": "books",
+        "rounds": [
+          {
+            "requestsPerSecond": 17559,
+            "latencyP99Ms": 11
+          },
+          {
+            "requestsPerSecond": 18168,
+            "latencyP99Ms": 10
+          },
+          {
+            "requestsPerSecond": 17655,
+            "latencyP99Ms": 10
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 17655,
+          "p25": 17607,
+          "p75": 17912,
+          "min": 17559,
+          "max": 18168
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 10,
+          "p25": 10,
+          "p75": 10.5,
+          "min": 10,
+          "max": 11
+        }
+      },
+      {
+        "variant": "znight-graphql-fastify",
+        "framework": "znight",
+        "runtime": "node",
+        "operation": "createUser",
+        "rounds": [
+          {
+            "requestsPerSecond": 53049,
+            "latencyP99Ms": 3
+          },
+          {
+            "requestsPerSecond": 39740,
+            "latencyP99Ms": 7
+          },
+          {
+            "requestsPerSecond": 51652,
+            "latencyP99Ms": 3
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 51652,
+          "p25": 45696,
+          "p75": 52351,
+          "min": 39740,
+          "max": 53049
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 3,
+          "p25": 3,
+          "p75": 5,
+          "min": 3,
+          "max": 7
+        }
+      },
+      {
+        "variant": "nestjs-graphql-fastify",
+        "framework": "nestjs",
+        "runtime": "node",
+        "operation": "user",
+        "rounds": [
+          {
+            "requestsPerSecond": 31019,
+            "latencyP99Ms": 4
+          },
+          {
+            "requestsPerSecond": 31188,
+            "latencyP99Ms": 3
+          },
+          {
+            "requestsPerSecond": 30364,
+            "latencyP99Ms": 4
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 31019,
+          "p25": 30692,
+          "p75": 31104,
+          "min": 30364,
+          "max": 31188
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 4,
+          "p25": 3.5,
+          "p75": 4,
+          "min": 3,
+          "max": 4
+        }
+      },
+      {
+        "variant": "nestjs-graphql-fastify",
+        "framework": "nestjs",
+        "runtime": "node",
+        "operation": "books",
+        "rounds": [
+          {
+            "requestsPerSecond": 8648,
+            "latencyP99Ms": 21
+          },
+          {
+            "requestsPerSecond": 8638,
+            "latencyP99Ms": 22
+          },
+          {
+            "requestsPerSecond": 8694,
+            "latencyP99Ms": 22
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 8648,
+          "p25": 8643,
+          "p75": 8671,
+          "min": 8638,
+          "max": 8694
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 22,
+          "p25": 21.5,
+          "p75": 22,
+          "min": 21,
+          "max": 22
+        }
+      },
+      {
+        "variant": "nestjs-graphql-fastify",
+        "framework": "nestjs",
+        "runtime": "node",
+        "operation": "createUser",
+        "rounds": [
+          {
+            "requestsPerSecond": 29969,
+            "latencyP99Ms": 4
+          },
+          {
+            "requestsPerSecond": 29611,
+            "latencyP99Ms": 5
+          },
+          {
+            "requestsPerSecond": 30206,
+            "latencyP99Ms": 4
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 29969,
+          "p25": 29790,
+          "p75": 30088,
+          "min": 29611,
+          "max": 30206
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 4,
+          "p25": 4,
+          "p75": 4.5,
+          "min": 4,
+          "max": 5
+        }
+      },
+      {
+        "variant": "nestjs-graphql-express",
+        "framework": "nestjs",
+        "runtime": "node",
+        "operation": "user",
+        "rounds": [
+          {
+            "requestsPerSecond": 32845,
+            "latencyP99Ms": 3
+          },
+          {
+            "requestsPerSecond": 32708,
+            "latencyP99Ms": 3
+          },
+          {
+            "requestsPerSecond": 33383,
+            "latencyP99Ms": 5
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 32845,
+          "p25": 32777,
+          "p75": 33114,
+          "min": 32708,
+          "max": 33383
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 3,
+          "p25": 3,
+          "p75": 4,
+          "min": 3,
+          "max": 5
+        }
+      },
+      {
+        "variant": "nestjs-graphql-express",
+        "framework": "nestjs",
+        "runtime": "node",
+        "operation": "books",
+        "rounds": [
+          {
+            "requestsPerSecond": 8714,
+            "latencyP99Ms": 21
+          },
+          {
+            "requestsPerSecond": 9032,
+            "latencyP99Ms": 21
+          },
+          {
+            "requestsPerSecond": 9565,
+            "latencyP99Ms": 20
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 9032,
+          "p25": 8873,
+          "p75": 9299,
+          "min": 8714,
+          "max": 9565
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 21,
+          "p25": 20.5,
+          "p75": 21,
+          "min": 20,
+          "max": 21
+        }
+      },
+      {
+        "variant": "nestjs-graphql-express",
+        "framework": "nestjs",
+        "runtime": "node",
+        "operation": "createUser",
+        "rounds": [
+          {
+            "requestsPerSecond": 31279,
+            "latencyP99Ms": 5
+          },
+          {
+            "requestsPerSecond": 31644,
+            "latencyP99Ms": 3
+          },
+          {
+            "requestsPerSecond": 32975,
+            "latencyP99Ms": 4
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 31644,
+          "p25": 31462,
+          "p75": 32310,
+          "min": 31279,
+          "max": 32975
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 4,
+          "p25": 3.5,
+          "p75": 4.5,
+          "min": 3,
+          "max": 5
+        }
+      },
+      {
+        "variant": "baseline-graphql",
+        "framework": "baseline",
+        "runtime": "bun",
+        "operation": "user",
+        "rounds": [
+          {
+            "requestsPerSecond": 113638,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 113452,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 119933,
+            "latencyP99Ms": 1
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 113638,
+          "p25": 113545,
+          "p75": 116786,
+          "min": 113452,
+          "max": 119933
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 1,
+          "p25": 1,
+          "p75": 1,
+          "min": 1,
+          "max": 1
+        }
+      },
+      {
+        "variant": "baseline-graphql",
+        "framework": "baseline",
+        "runtime": "bun",
+        "operation": "books",
+        "rounds": [
+          {
+            "requestsPerSecond": 28225,
+            "latencyP99Ms": 4
+          },
+          {
+            "requestsPerSecond": 29086,
+            "latencyP99Ms": 4
+          },
+          {
+            "requestsPerSecond": 31099,
+            "latencyP99Ms": 5
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 29086,
+          "p25": 28656,
+          "p75": 30093,
+          "min": 28225,
+          "max": 31099
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 4,
+          "p25": 4,
+          "p75": 4.5,
+          "min": 4,
+          "max": 5
+        }
+      },
+      {
+        "variant": "baseline-graphql",
+        "framework": "baseline",
+        "runtime": "bun",
+        "operation": "createUser",
+        "rounds": [
+          {
+            "requestsPerSecond": 98534,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 100343,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 109373,
+            "latencyP99Ms": 1
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 100343,
+          "p25": 99439,
+          "p75": 104858,
+          "min": 98534,
+          "max": 109373
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 1,
+          "p25": 1,
+          "p75": 1,
+          "min": 1,
+          "max": 1
+        }
+      },
+      {
+        "variant": "yoga",
+        "framework": "yoga",
+        "runtime": "bun",
+        "operation": "user",
+        "rounds": [
+          {
+            "requestsPerSecond": 47655,
+            "latencyP99Ms": 3
+          },
+          {
+            "requestsPerSecond": 45345,
+            "latencyP99Ms": 3
+          },
+          {
+            "requestsPerSecond": 50515,
+            "latencyP99Ms": 3
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 47655,
+          "p25": 46500,
+          "p75": 49085,
+          "min": 45345,
+          "max": 50515
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 3,
+          "p25": 3,
+          "p75": 3,
+          "min": 3,
+          "max": 3
+        }
+      },
+      {
+        "variant": "yoga",
+        "framework": "yoga",
+        "runtime": "bun",
+        "operation": "books",
+        "rounds": [
+          {
+            "requestsPerSecond": 24299,
+            "latencyP99Ms": 5
+          },
+          {
+            "requestsPerSecond": 24147,
+            "latencyP99Ms": 5
+          },
+          {
+            "requestsPerSecond": 26066,
+            "latencyP99Ms": 6
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 24299,
+          "p25": 24223,
+          "p75": 25183,
+          "min": 24147,
+          "max": 26066
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 5,
+          "p25": 5,
+          "p75": 5.5,
+          "min": 5,
+          "max": 6
+        }
+      },
+      {
+        "variant": "yoga",
+        "framework": "yoga",
+        "runtime": "bun",
+        "operation": "createUser",
+        "rounds": [
+          {
+            "requestsPerSecond": 41881,
+            "latencyP99Ms": 4
+          },
+          {
+            "requestsPerSecond": 41232,
+            "latencyP99Ms": 4
+          },
+          {
+            "requestsPerSecond": 44371,
+            "latencyP99Ms": 3
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 41881,
+          "p25": 41557,
+          "p75": 43126,
+          "min": 41232,
+          "max": 44371
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 4,
+          "p25": 3.5,
+          "p75": 4,
+          "min": 3,
+          "max": 4
+        }
+      },
+      {
+        "variant": "znight-graphql-node",
+        "framework": "znight",
+        "runtime": "bun",
+        "operation": "user",
+        "rounds": [
+          {
+            "requestsPerSecond": 91424,
+            "latencyP99Ms": 2
+          },
+          {
+            "requestsPerSecond": 85945,
+            "latencyP99Ms": 2
+          },
+          {
+            "requestsPerSecond": 96771,
+            "latencyP99Ms": 1
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 91424,
+          "p25": 88685,
+          "p75": 94098,
+          "min": 85945,
+          "max": 96771
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 2,
+          "p25": 1.5,
+          "p75": 2,
+          "min": 1,
+          "max": 2
+        }
+      },
+      {
+        "variant": "znight-graphql-node",
+        "framework": "znight",
+        "runtime": "bun",
+        "operation": "books",
+        "rounds": [
+          {
+            "requestsPerSecond": 26692,
+            "latencyP99Ms": 5
+          },
+          {
+            "requestsPerSecond": 26473,
+            "latencyP99Ms": 5
+          },
+          {
+            "requestsPerSecond": 28881,
+            "latencyP99Ms": 6
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 26692,
+          "p25": 26583,
+          "p75": 27787,
+          "min": 26473,
+          "max": 28881
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 5,
+          "p25": 5,
+          "p75": 5.5,
+          "min": 5,
+          "max": 6
+        }
+      },
+      {
+        "variant": "znight-graphql-node",
+        "framework": "znight",
+        "runtime": "bun",
+        "operation": "createUser",
+        "rounds": [
+          {
+            "requestsPerSecond": 81747,
+            "latencyP99Ms": 2
+          },
+          {
+            "requestsPerSecond": 81143,
+            "latencyP99Ms": 2
+          },
+          {
+            "requestsPerSecond": 86403,
+            "latencyP99Ms": 2
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 81747,
+          "p25": 81445,
+          "p75": 84075,
+          "min": 81143,
+          "max": 86403
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 2,
+          "p25": 2,
+          "p75": 2,
+          "min": 2,
+          "max": 2
+        }
+      },
+      {
+        "variant": "znight-graphql-yoga",
+        "framework": "znight",
+        "runtime": "bun",
+        "operation": "user",
+        "rounds": [
+          {
+            "requestsPerSecond": 42716,
+            "latencyP99Ms": 4
+          },
+          {
+            "requestsPerSecond": 42905,
+            "latencyP99Ms": 4
+          },
+          {
+            "requestsPerSecond": 46631,
+            "latencyP99Ms": 3
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 42905,
+          "p25": 42811,
+          "p75": 44768,
+          "min": 42716,
+          "max": 46631
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 4,
+          "p25": 3.5,
+          "p75": 4,
+          "min": 3,
+          "max": 4
+        }
+      },
+      {
+        "variant": "znight-graphql-yoga",
+        "framework": "znight",
+        "runtime": "bun",
+        "operation": "books",
+        "rounds": [
+          {
+            "requestsPerSecond": 19375,
+            "latencyP99Ms": 6
+          },
+          {
+            "requestsPerSecond": 19400,
+            "latencyP99Ms": 6
+          },
+          {
+            "requestsPerSecond": 21128,
+            "latencyP99Ms": 8
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 19400,
+          "p25": 19388,
+          "p75": 20264,
+          "min": 19375,
+          "max": 21128
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 6,
+          "p25": 6,
+          "p75": 7,
+          "min": 6,
+          "max": 8
+        }
+      },
+      {
+        "variant": "znight-graphql-yoga",
+        "framework": "znight",
+        "runtime": "bun",
+        "operation": "createUser",
+        "rounds": [
+          {
+            "requestsPerSecond": 37948,
+            "latencyP99Ms": 4
+          },
+          {
+            "requestsPerSecond": 37606,
+            "latencyP99Ms": 4
+          },
+          {
+            "requestsPerSecond": 41779,
+            "latencyP99Ms": 4
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 37948,
+          "p25": 37777,
+          "p75": 39864,
+          "min": 37606,
+          "max": 41779
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 4,
+          "p25": 4,
+          "p75": 4,
+          "min": 4,
+          "max": 4
+        }
+      },
+      {
+        "variant": "znight-graphql-fastify",
+        "framework": "znight",
+        "runtime": "bun",
+        "operation": "user",
+        "rounds": [
+          {
+            "requestsPerSecond": 90801,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 92147,
+            "latencyP99Ms": 1
+          },
+          {
+            "requestsPerSecond": 96399,
+            "latencyP99Ms": 1
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 92147,
+          "p25": 91474,
+          "p75": 94273,
+          "min": 90801,
+          "max": 96399
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 1,
+          "p25": 1,
+          "p75": 1,
+          "min": 1,
+          "max": 1
+        }
+      },
+      {
+        "variant": "znight-graphql-fastify",
+        "framework": "znight",
+        "runtime": "bun",
+        "operation": "books",
+        "rounds": [
+          {
+            "requestsPerSecond": 27068,
+            "latencyP99Ms": 5
+          },
+          {
+            "requestsPerSecond": 27177,
+            "latencyP99Ms": 5
+          },
+          {
+            "requestsPerSecond": 28693,
+            "latencyP99Ms": 6
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 27177,
+          "p25": 27123,
+          "p75": 27935,
+          "min": 27068,
+          "max": 28693
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 5,
+          "p25": 5,
+          "p75": 5.5,
+          "min": 5,
+          "max": 6
+        }
+      },
+      {
+        "variant": "znight-graphql-fastify",
+        "framework": "znight",
+        "runtime": "bun",
+        "operation": "createUser",
+        "rounds": [
+          {
+            "requestsPerSecond": 80649,
+            "latencyP99Ms": 2
+          },
+          {
+            "requestsPerSecond": 81132,
+            "latencyP99Ms": 2
+          },
+          {
+            "requestsPerSecond": 85466,
+            "latencyP99Ms": 2
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 81132,
+          "p25": 80891,
+          "p75": 83299,
+          "min": 80649,
+          "max": 85466
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 2,
+          "p25": 2,
+          "p75": 2,
+          "min": 2,
+          "max": 2
+        }
+      },
+      {
+        "variant": "nestjs-graphql-fastify",
+        "framework": "nestjs",
+        "runtime": "bun",
+        "operation": "user",
+        "rounds": [
+          {
+            "requestsPerSecond": 46640,
+            "latencyP99Ms": 3
+          },
+          {
+            "requestsPerSecond": 46794,
+            "latencyP99Ms": 3
+          },
+          {
+            "requestsPerSecond": 49651,
+            "latencyP99Ms": 3
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 46794,
+          "p25": 46717,
+          "p75": 48223,
+          "min": 46640,
+          "max": 49651
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 3,
+          "p25": 3,
+          "p75": 3,
+          "min": 3,
+          "max": 3
+        }
+      },
+      {
+        "variant": "nestjs-graphql-fastify",
+        "framework": "nestjs",
+        "runtime": "bun",
+        "operation": "books",
+        "rounds": [
+          {
+            "requestsPerSecond": 11704,
+            "latencyP99Ms": 9
+          },
+          {
+            "requestsPerSecond": 11611,
+            "latencyP99Ms": 9
+          },
+          {
+            "requestsPerSecond": 12193,
+            "latencyP99Ms": 11
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 11704,
+          "p25": 11658,
+          "p75": 11949,
+          "min": 11611,
+          "max": 12193
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 9,
+          "p25": 9,
+          "p75": 10,
+          "min": 9,
+          "max": 11
+        }
+      },
+      {
+        "variant": "nestjs-graphql-fastify",
+        "framework": "nestjs",
+        "runtime": "bun",
+        "operation": "createUser",
+        "rounds": [
+          {
+            "requestsPerSecond": 40577,
+            "latencyP99Ms": 3
+          },
+          {
+            "requestsPerSecond": 41407,
+            "latencyP99Ms": 3
+          },
+          {
+            "requestsPerSecond": 43265,
+            "latencyP99Ms": 3
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 41407,
+          "p25": 40992,
+          "p75": 42336,
+          "min": 40577,
+          "max": 43265
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 3,
+          "p25": 3,
+          "p75": 3,
+          "min": 3,
+          "max": 3
+        }
+      },
+      {
+        "variant": "nestjs-graphql-express",
+        "framework": "nestjs",
+        "runtime": "bun",
+        "operation": "user",
+        "rounds": [
+          {
+            "requestsPerSecond": 41255,
+            "latencyP99Ms": 3
+          },
+          {
+            "requestsPerSecond": 40447,
+            "latencyP99Ms": 3
+          },
+          {
+            "requestsPerSecond": 44173,
+            "latencyP99Ms": 4
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 41255,
+          "p25": 40851,
+          "p75": 42714,
+          "min": 40447,
+          "max": 44173
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 3,
+          "p25": 3,
+          "p75": 3.5,
+          "min": 3,
+          "max": 4
+        }
+      },
+      {
+        "variant": "nestjs-graphql-express",
+        "framework": "nestjs",
+        "runtime": "bun",
+        "operation": "books",
+        "rounds": [
+          {
+            "requestsPerSecond": 11315,
+            "latencyP99Ms": 9
+          },
+          {
+            "requestsPerSecond": 11313,
+            "latencyP99Ms": 9
+          },
+          {
+            "requestsPerSecond": 12160,
+            "latencyP99Ms": 11
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 11315,
+          "p25": 11314,
+          "p75": 11738,
+          "min": 11313,
+          "max": 12160
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 9,
+          "p25": 9,
+          "p75": 10,
+          "min": 9,
+          "max": 11
+        }
+      },
+      {
+        "variant": "nestjs-graphql-express",
+        "framework": "nestjs",
+        "runtime": "bun",
+        "operation": "createUser",
+        "rounds": [
+          {
+            "requestsPerSecond": 38077,
+            "latencyP99Ms": 3
+          },
+          {
+            "requestsPerSecond": 37529,
+            "latencyP99Ms": 3
+          },
+          {
+            "requestsPerSecond": 40257,
+            "latencyP99Ms": 3
+          }
+        ],
+        "requestsPerSecond": {
+          "n": 3,
+          "median": 38077,
+          "p25": 37803,
+          "p75": 39167,
+          "min": 37529,
+          "max": 40257
+        },
+        "latencyP99Ms": {
+          "n": 3,
+          "median": 3,
+          "p25": 3,
+          "p75": 3,
+          "min": 3,
+          "max": 3
+        }
+      }
+    ],
+    "skipped": [],
+    "micro": {
+      "settings": {
+        "schemaRuns": 30,
+        "types": 200,
+        "executeRuns": 5,
+        "fields": 50,
+        "rounds": 7,
+        "iterations": 20000
+      },
+      "schema": [
+        {
+          "runtime": "node",
+          "znightMs": {
+            "n": 30,
+            "median": 5.85,
+            "p25": 5.82,
+            "p75": 5.88,
+            "min": 5.72,
+            "max": 6.03
+          },
+          "buildSchemaMs": {
+            "n": 30,
+            "median": 7.87,
+            "p25": 7.81,
+            "p75": 8,
+            "min": 7.74,
+            "max": 8.15
+          }
+        },
+        {
+          "runtime": "bun",
+          "znightMs": {
+            "n": 30,
+            "median": 5.52,
+            "p25": 5.49,
+            "p75": 5.55,
+            "min": 5.4,
+            "max": 5.67
+          },
+          "buildSchemaMs": {
+            "n": 30,
+            "median": 8.08,
+            "p25": 7.98,
+            "p75": 8.15,
+            "min": 7.84,
+            "max": 8.51
+          }
+        }
+      ],
+      "execute": [
+        {
+          "runtime": "node",
+          "scope": "direct",
+          "path": "graphql-js",
+          "nsPerOp": {
+            "n": 5,
+            "median": 10924,
+            "p25": 10901,
+            "p75": 10998,
+            "min": 10849,
+            "max": 11015
+          },
+          "overheadPercent": {
+            "n": 5,
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "min": 0,
+            "max": 0
+          }
+        },
+        {
+          "runtime": "node",
+          "scope": "direct",
+          "path": "plugin",
+          "nsPerOp": {
+            "n": 5,
+            "median": 11616,
+            "p25": 11569,
+            "p75": 11624,
+            "min": 11518,
+            "max": 11714
+          },
+          "overheadPercent": {
+            "n": 5,
+            "median": 6.2,
+            "p25": 6.1,
+            "p75": 6.4,
+            "min": 5.5,
+            "max": 6.5
+          }
+        },
+        {
+          "runtime": "node",
+          "scope": "direct",
+          "path": "engine",
+          "nsPerOp": {
+            "n": 5,
+            "median": 11416,
+            "p25": 11357,
+            "p75": 11444,
+            "min": 11284,
+            "max": 11509
+          },
+          "overheadPercent": {
+            "n": 5,
+            "median": 4.2,
+            "p25": 4,
+            "p75": 4.5,
+            "min": 3.9,
+            "max": 4.6
+          }
+        },
+        {
+          "runtime": "node",
+          "scope": "request",
+          "path": "graphql-js",
+          "nsPerOp": {
+            "n": 5,
+            "median": 10919,
+            "p25": 10798,
+            "p75": 10921,
+            "min": 10727,
+            "max": 10969
+          },
+          "overheadPercent": {
+            "n": 5,
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "min": 0,
+            "max": 0
+          }
+        },
+        {
+          "runtime": "node",
+          "scope": "request",
+          "path": "plugin",
+          "nsPerOp": {
+            "n": 5,
+            "median": 11403,
+            "p25": 11377,
+            "p75": 11404,
+            "min": 11306,
+            "max": 11412
+          },
+          "overheadPercent": {
+            "n": 5,
+            "median": 4.5,
+            "p25": 4.4,
+            "p75": 5.4,
+            "min": 4,
+            "max": 5.4
+          }
+        },
+        {
+          "runtime": "node",
+          "scope": "request",
+          "path": "engine",
+          "nsPerOp": {
+            "n": 5,
+            "median": 11165,
+            "p25": 11139,
+            "p75": 11188,
+            "min": 11136,
+            "max": 11244
+          },
+          "overheadPercent": {
+            "n": 5,
+            "median": 2.5,
+            "p25": 2.5,
+            "p75": 3.4,
+            "min": 2,
+            "max": 3.8
+          }
+        },
+        {
+          "runtime": "bun",
+          "scope": "direct",
+          "path": "graphql-js",
+          "nsPerOp": {
+            "n": 5,
+            "median": 6900,
+            "p25": 6846,
+            "p75": 6977,
+            "min": 6667,
+            "max": 6996
+          },
+          "overheadPercent": {
+            "n": 5,
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "min": 0,
+            "max": 0
+          }
+        },
+        {
+          "runtime": "bun",
+          "scope": "direct",
+          "path": "plugin",
+          "nsPerOp": {
+            "n": 5,
+            "median": 7931,
+            "p25": 7687,
+            "p75": 8003,
+            "min": 7627,
+            "max": 8021
+          },
+          "overheadPercent": {
+            "n": 5,
+            "median": 14.9,
+            "p25": 14.4,
+            "p75": 15,
+            "min": 11.4,
+            "max": 15.3
+          }
+        },
+        {
+          "runtime": "bun",
+          "scope": "direct",
+          "path": "engine",
+          "nsPerOp": {
+            "n": 5,
+            "median": 7985,
+            "p25": 7948,
+            "p75": 8152,
+            "min": 7936,
+            "max": 8254
+          },
+          "overheadPercent": {
+            "n": 5,
+            "median": 19.1,
+            "p25": 14.2,
+            "p75": 19.2,
+            "min": 13.7,
+            "max": 19.6
+          }
+        },
+        {
+          "runtime": "bun",
+          "scope": "request",
+          "path": "graphql-js",
+          "nsPerOp": {
+            "n": 5,
+            "median": 7418,
+            "p25": 7172,
+            "p75": 7487,
+            "min": 7023,
+            "max": 7528
+          },
+          "overheadPercent": {
+            "n": 5,
+            "median": 0,
+            "p25": 0,
+            "p75": 0,
+            "min": 0,
+            "max": 0
+          }
+        },
+        {
+          "runtime": "bun",
+          "scope": "request",
+          "path": "plugin",
+          "nsPerOp": {
+            "n": 5,
+            "median": 7956,
+            "p25": 7816,
+            "p75": 8016,
+            "min": 7741,
+            "max": 8051
+          },
+          "overheadPercent": {
+            "n": 5,
+            "median": 7.3,
+            "p25": 7.1,
+            "p75": 7.9,
+            "min": 6.9,
+            "max": 11.3
+          }
+        },
+        {
+          "runtime": "bun",
+          "scope": "request",
+          "path": "engine",
+          "nsPerOp": {
+            "n": 5,
+            "median": 7633,
+            "p25": 7572,
+            "p75": 7897,
+            "min": 7119,
+            "max": 8108
+          },
+          "overheadPercent": {
+            "n": 5,
+            "median": 4.9,
+            "p25": 2,
+            "p75": 7.8,
+            "min": -0.7,
+            "max": 9.3
+          }
+        }
+      ]
+    }
   }
 }

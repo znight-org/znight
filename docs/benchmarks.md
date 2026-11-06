@@ -305,7 +305,69 @@ exactly one `users.findMany()` call.
 
 <!-- benchmarks:graphql -->
 
-_No results yet._
+- **Znight is ahead of NestJS on Node.js** with Fastify: 17,655 `books` queries per second, against 8,648 for NestJS (104.2% more) and 19,058 for graphql-js on node:http.
+- **Plugin overhead**: `GraphQLPlugin.execute()` adds 4.5% to graphql-js `execute()` for a cached 50-field query on Node.js, under the 10% target of RFC 0005 (4.0 to 5.4% across 5 processes).
+
+#### `user(id)`: one object
+
+![Requests per second of each GraphQL application for the user operation, on Node.js and Bun](/benchmarks/graphql-user.svg)
+
+| Application                          |                     Node.js: requests/s | Node.js: p99 |                         Bun: requests/s | Bun: p99 |
+| ------------------------------------ | --------------------------------------: | -----------: | --------------------------------------: | -------: |
+| graphql-js on node:http              |     70,868 <small>70,246–72,451</small> |         2 ms |  113,638 <small>113,452–119,933</small> |     1 ms |
+| GraphQL Yoga                         |     32,659 <small>32,620–34,067</small> |         5 ms |     47,655 <small>45,345–50,515</small> |     3 ms |
+| **Znight (node:http)**               | **59,519** <small>58,556–61,811</small> |         3 ms | **91,424** <small>85,945–96,771</small> |     2 ms |
+| **Znight + Yoga driver (node:http)** | **29,890** <small>29,765–31,143</small> |         6 ms | **42,905** <small>42,716–46,631</small> |     4 ms |
+| **Znight (Fastify)**                 | **58,884** <small>55,708–60,127</small> |         3 ms | **92,147** <small>90,801–96,399</small> |     1 ms |
+| NestJS + Yoga (Fastify)              |     31,019 <small>30,364–31,188</small> |         4 ms |     46,794 <small>46,640–49,651</small> |     3 ms |
+| NestJS + Yoga (Express)              |     32,845 <small>32,708–33,383</small> |         3 ms |     41,255 <small>40,447–44,173</small> |     3 ms |
+
+#### `books(limit: 20)`: a list and its authors, batched
+
+![Requests per second of each GraphQL application for the books operation, on Node.js and Bun](/benchmarks/graphql-books.svg)
+
+| Application                          |                     Node.js: requests/s | Node.js: p99 |                         Bun: requests/s | Bun: p99 |
+| ------------------------------------ | --------------------------------------: | -----------: | --------------------------------------: | -------: |
+| graphql-js on node:http              |     19,058 <small>18,801–19,234</small> |        10 ms |     29,086 <small>28,225–31,099</small> |     4 ms |
+| GraphQL Yoga                         |     18,648 <small>18,088–19,138</small> |        10 ms |     24,299 <small>24,147–26,066</small> |     5 ms |
+| **Znight (node:http)**               | **18,376** <small>18,290–18,846</small> |        10 ms | **26,692** <small>26,473–28,881</small> |     5 ms |
+| **Znight + Yoga driver (node:http)** | **14,163** <small>13,998–14,706</small> |        13 ms | **19,400** <small>19,375–21,128</small> |     6 ms |
+| **Znight (Fastify)**                 | **17,655** <small>17,559–18,168</small> |        10 ms | **27,177** <small>27,068–28,693</small> |     5 ms |
+| NestJS + Yoga (Fastify)              |        8,648 <small>8,638–8,694</small> |        22 ms |     11,704 <small>11,611–12,193</small> |     9 ms |
+| NestJS + Yoga (Express)              |        9,032 <small>8,714–9,565</small> |        21 ms |     11,315 <small>11,313–12,160</small> |     9 ms |
+
+#### `createUser(input)`: a validated mutation
+
+![Requests per second of each GraphQL application for the createUser operation, on Node.js and Bun](/benchmarks/graphql-createUser.svg)
+
+| Application                          |                     Node.js: requests/s | Node.js: p99 |                         Bun: requests/s | Bun: p99 |
+| ------------------------------------ | --------------------------------------: | -----------: | --------------------------------------: | -------: |
+| graphql-js on node:http              |     65,166 <small>64,041–67,005</small> |         2 ms |   100,343 <small>98,534–109,373</small> |     1 ms |
+| GraphQL Yoga                         |     31,559 <small>31,357–34,445</small> |         5 ms |     41,881 <small>41,232–44,371</small> |     4 ms |
+| **Znight (node:http)**               | **54,589** <small>53,185–57,465</small> |         3 ms | **81,747** <small>81,143–86,403</small> |     2 ms |
+| **Znight + Yoga driver (node:http)** | **28,687** <small>27,589–29,116</small> |         6 ms | **37,948** <small>37,606–41,779</small> |     4 ms |
+| **Znight (Fastify)**                 | **51,652** <small>39,740–53,049</small> |         3 ms | **81,132** <small>80,649–85,466</small> |     2 ms |
+| NestJS + Yoga (Fastify)              |     29,969 <small>29,611–30,206</small> |         4 ms |     41,407 <small>40,577–43,265</small> |     3 ms |
+| NestJS + Yoga (Express)              |     31,644 <small>31,279–32,975</small> |         4 ms |     38,077 <small>37,529–40,257</small> |     3 ms |
+
+Median of 3 rounds of 10 seconds (minimum–maximum in small type), each after a 3-second warm-up, 100 connections, no pipelining, every response checked. Latency: the 99th percentile reported by autocannon, which records whole milliseconds. Measured on 2026-11-06, commit `0143f57`, with:
+
+| Package                    | Version |
+| -------------------------- | ------: |
+| `graphql`                  |  17.0.2 |
+| `graphql-yoga`             |   6.0.1 |
+| `@graphql-tools/executor`  |   4.1.7 |
+| `dataloader`               |   2.2.3 |
+| `@znight/graphql`          |   0.6.0 |
+| `@znight/http`             |   0.6.0 |
+| `fastify`                  |  5.12.7 |
+| `@nestjs/core`             |  12.3.2 |
+| `@nestjs/graphql`          |  14.1.2 |
+| `@graphql-yoga/nestjs`     |   5.0.1 |
+| `@nestjs/platform-fastify` |  12.3.2 |
+| `@nestjs/platform-express` |  12.3.2 |
+| `zod`                      |   4.6.7 |
+| `autocannon`               |   8.0.0 |
 
 <!-- /benchmarks:graphql -->
 
@@ -319,7 +381,20 @@ plugin adds to graphql-js `execute()` for a query whose document is cached, thro
 
 <!-- benchmarks:graphql-micro -->
 
-_No results yet._
+**Schema build**: a generated schema of 200 object types, built at boot. Median of 30 fresh processes, with the interquartile range in small type. RFC 0005 target: under 20 ms.
+
+| Schema build                          |                           Node.js |                               Bun |
+| ------------------------------------- | --------------------------------: | --------------------------------: |
+| **Znight**: `GraphQLPlugin` bootstrap | **5.8 ms** <small>5.8–5.9</small> | **5.5 ms** <small>5.5–5.5</small> |
+| graphql-js `buildSchema()`, same SDL  |     7.9 ms <small>7.8–8.0</small> |     8.1 ms <small>8.0–8.2</small> |
+
+**Per-operation overhead**: a cached 50-field query, the time per operation and, in small type, the time added to graphql-js `execute()` on the same schema, with its range across the processes. "Direct": outside any scope, the plugin opens one per operation; "request scope": inside the scope a GraphQL-over-HTTP request already has. Median of 5 processes of 7 interleaved rounds of 20,000 operations. RFC 0005 target: under 10%.
+
+| Execution                                   |                                 Node.js: direct |                          Node.js: request scope |                                       Bun: direct |                              Bun: request scope |
+| ------------------------------------------- | ----------------------------------------------: | ----------------------------------------------: | ------------------------------------------------: | ----------------------------------------------: |
+| graphql-js `execute()`, pre-parsed document |                                         10.9 µs |                                         10.9 µs |                                            6.9 µs |                                          7.4 µs |
+| **`GraphQLPlugin.execute()`**               | **11.6 µs** <small>+6.2% (+5.5 to +6.5)</small> | **11.4 µs** <small>+4.5% (+4.0 to +5.4)</small> | **7.9 µs** <small>+14.9% (+11.4 to +15.3)</small> | **8.0 µs** <small>+7.3% (+6.9 to +11.3)</small> |
+| **`GraphQLEngine.execute()` (drivers)**     | **11.4 µs** <small>+4.2% (+3.9 to +4.6)</small> | **11.2 µs** <small>+2.5% (+2.0 to +3.8)</small> | **8.0 µs** <small>+19.1% (+13.7 to +19.6)</small> |  **7.6 µs** <small>+4.9% (-0.7 to +9.3)</small> |
 
 <!-- /benchmarks:graphql-micro -->
 
