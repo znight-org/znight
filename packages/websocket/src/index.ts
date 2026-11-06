@@ -5,6 +5,14 @@
  * extension come with the next milestones.
  */
 
+export type { WsGuard, WsMessageContext } from './context.ts'
+export type {
+  GatewayDefinition,
+  WebSocketMetadata,
+  WsHandlerDefinition,
+  WsLifecycleDefinition,
+  WsParamDefinition,
+} from './metadata.ts'
 export type { BackpressureOptions, GatewayOptions, RateLimitOptions } from './options.ts'
 export type {
   AcceptInit,
@@ -63,3 +71,4 @@ export {
 export { TokenBucket } from './rate-limit.ts'
 export { type Broadcast, type ChannelMember, type MemberRef, RoomRegistry } from './rooms.ts'
 export { MemoryClient, type MemoryCloseInfo, memoryTransport } from './transports/memory.ts'
+export { validatePayload } from './validate.ts'
