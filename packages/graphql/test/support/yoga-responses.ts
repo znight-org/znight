@@ -2,8 +2,8 @@
  * How the Yoga driver sends Yoga's responses (whatever Fetch API made them: the `@whatwg-node`
  * ponyfills on Node.js, the runtime's own on Bun), on a real socket of every adapter: the status,
  * the headers and each `set-cookie` line; a JSON body as text with its `content-length`; another
- * body streamed as it is; an event stream delivered as it is produced and cancelled when the client
- * leaves. Framework-neutral (`node:assert`): run by `yoga-responses.test.ts` on Bun and by
+ * body (bytes, a compressed JSON body, text in another charset) streamed as it is; an event stream
+ * delivered as it is produced and cancelled when the client leaves. Framework-neutral (`node:assert`): run by `yoga-responses.test.ts` on Bun and by
  * `fixtures/yoga-responses-node.ts` on Node.js.
  */
 // biome-ignore-all lint/suspicious/useExpect: a framework-neutral suite, asserting with node:assert
@@ -12,6 +12,8 @@ import type { Plugin as YogaPlugin } from 'graphql-yoga'
 import type { LibraryApp } from './library.ts'
 
 import { deepStrictEqual, ok, strictEqual } from 'node:assert/strict'
+import { request } from 'node:http'
+import { gunzipSync } from 'node:zlib'
 
 import { yogaDriver } from '../../src/yoga.ts'
 import { observed, startLibrary } from './library.ts'
@@ -26,6 +28,9 @@ export interface ScenarioTestApi {
 
 const BYTES = [0, 1, 2, 255, 128]
 
+/** "Zoé" in ISO-8859-1: not UTF-8. */
+const LATIN1 = [0x5a, 0x6f, 0xe9]
+
 /** A Yoga plugin adding headers and cookies to every response, and answering bytes on `x-bytes`. */
 const plugin: YogaPlugin = {
   onRequest({ request, endResponse, fetchAPI }) {
@@ -34,6 +39,12 @@ const plugin: YogaPlugin = {
         new fetchAPI.Response(new Uint8Array(BYTES), {
           status: 203,
           headers: { 'content-type': 'application/octet-stream', 'x-kind': 'bytes' },
+        }),
+      )
+    } else if (request.headers.get('x-latin1') !== null) {
+      endResponse(
+        new fetchAPI.Response(new Uint8Array(LATIN1), {
+          headers: { 'content-type': 'text/plain; charset=iso-8859-1' },
         }),
       )
     }
@@ -45,11 +56,47 @@ const plugin: YogaPlugin = {
   },
 }
 
+/**
+ * Gzips the response on `x-gzip` with the Fetch API Yoga runs on, like `useContentEncoding()`:
+ * the JSON content type is kept, `content-encoding: gzip` added.
+ */
+const gzip: YogaPlugin = {
+  onResponse({ request, response, setResponse, fetchAPI }) {
+    if (request.headers.get('x-gzip') === null || response.body === null) return
+    const headers = new fetchAPI.Headers(response.headers)
+    headers.set('content-encoding', 'gzip')
+    headers.delete('content-length')
+    const body = response.body.pipeThrough(new fetchAPI.CompressionStream('gzip'))
+    setResponse(new fetchAPI.Response(body, { status: response.status, headers }))
+  },
+}
+
 function post(app: LibraryApp, body: unknown, headers: Record<string, string> = {}): Promise<Response> {
   return fetch(app.url, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...headers },
     body: JSON.stringify(body),
+  })
+}
+
+/** A `POST` read with `node:http`: the bytes as sent (`fetch()` would decompress them). */
+function rawPost(
+  app: LibraryApp,
+  body: unknown,
+  headers: Record<string, string>,
+): Promise<{ status: number; headers: Record<string, unknown>; body: Buffer }> {
+  return new Promise((resolve, reject) => {
+    const outgoing = request(app.url, { method: 'POST', headers: { 'content-type': 'application/json', ...headers } })
+    outgoing.on('error', reject)
+    outgoing.on('response', incoming => {
+      const chunks: Buffer[] = []
+      incoming.on('data', (chunk: Buffer) => chunks.push(chunk))
+      incoming.on('error', reject)
+      incoming.on('end', () =>
+        resolve({ status: incoming.statusCode ?? 0, headers: incoming.headers, body: Buffer.concat(chunks) }),
+      )
+    })
+    outgoing.end(JSON.stringify(body))
   })
 }
 
@@ -89,7 +136,7 @@ export function describeYogaResponses(
       test.describe(`${name} adapter`, () => {
         let app: LibraryApp
         test.beforeAll(async () => {
-          app = await startLibrary({ adapter: adapter(), graphql: { driver: yogaDriver({ plugins: [plugin] }) } })
+          app = await startLibrary({ adapter: adapter(), graphql: { driver: yogaDriver({ plugins: [plugin, gzip] }) } })
         })
         test.afterAll(async () => {
           await app?.stop()
@@ -127,6 +174,23 @@ export function describeYogaResponses(
           strictEqual(response.headers.get('x-kind'), 'bytes')
           strictEqual(response.headers.get('x-yoga'), 'yes')
           deepStrictEqual([...new Uint8Array(await response.arrayBuffer())], BYTES)
+        })
+
+        test.it('sends a compressed JSON body as its bytes, with its content-encoding', async () => {
+          const response = await rawPost(app, { query: '{ hello(name: "Zoé ✓") }' }, { 'x-gzip': '1' })
+          strictEqual(response.status, 200)
+          strictEqual(response.headers['content-type'], 'application/json; charset=utf-8')
+          strictEqual(response.headers['content-encoding'], 'gzip')
+          deepStrictEqual([...response.body.subarray(0, 2)], [0x1f, 0x8b])
+          deepStrictEqual(JSON.parse(gunzipSync(response.body).toString('utf8')), { data: { hello: 'Hello Zoé ✓' } })
+          deepStrictEqual(response.headers['set-cookie'], ['first=1; Path=/', 'second=2; Path=/; HttpOnly'])
+        })
+
+        test.it('sends text in another charset as its bytes', async () => {
+          const response = await rawPost(app, { query: '{ hello }' }, { 'x-latin1': '1' })
+          strictEqual(response.status, 200)
+          strictEqual(response.headers['content-type'], 'text/plain; charset=iso-8859-1')
+          deepStrictEqual([...response.body], LATIN1)
         })
 
         test.it(

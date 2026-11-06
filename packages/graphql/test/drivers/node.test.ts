@@ -38,6 +38,6 @@ describe("the Yoga driver's responses on Node.js", () => {
   it('sends the ponyfill responses of Yoga on every adapter (text, bytes, headers, cookies, event streams)', async () => {
     const { pass, ...outcome } = await nodeTest('yoga-responses-node.ts')
     expect(outcome).toEqual({ code: 0, fail: 0, stderr: '' })
-    expect(pass).toBe(16)
+    expect(pass).toBe(24)
   }, 60_000)
 })

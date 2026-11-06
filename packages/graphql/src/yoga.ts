@@ -277,16 +277,17 @@ const UNREACHABLE = '/.znight/unreachable'
  * `@whatwg-node` ponyfills on Node.js, the runtime's own on Bun; a `@hono/node-server` class...):
  * an `HttpResponse` with its status and headers (`set-cookie` lines kept apart) and
  *
- * - its text, for a JSON, HTML or plain text body (Yoga's results, GraphiQL, its errors): complete
- *   once the response exists (a ponyfill response holds the string), it is sent with a
- *   `content-length`, never streamed;
- * - otherwise its body as a native `ReadableStream`, read as the client receives it and cancelled
- *   when the client leaves (GraphQL over SSE, incremental delivery): never buffered.
+ * - its text, for a JSON, HTML or plain text body in UTF-8, not content-encoded (Yoga's results,
+ *   GraphiQL, its errors): complete once the response exists (a ponyfill response holds the
+ *   string), it is sent with a `content-length`, never streamed;
+ * - otherwise its body as a native `ReadableStream`, its bytes as they are (a body compressed by a
+ *   plugin such as `useContentEncoding()`, another charset), read as the client receives it and
+ *   cancelled when the client leaves (GraphQL over SSE, incremental delivery): never buffered.
  */
 function httpReply(response: Response): HttpResponse<unknown> | Promise<HttpResponse<unknown>> {
   const headers = responseHeaders(response.headers)
   const init = { status: response.status, headers }
-  if (isTextType(response.headers.get('content-type'))) {
+  if (isUtf8Text(headers)) {
     delete headers['content-length'] // the length of the text, set by HttpPlugin
     return response.text().then(text => new HttpResponse(text, init))
   }
@@ -308,8 +309,23 @@ function responseHeaders(source: Headers): Record<string, HeaderValue> {
 /** Media types whose body is complete with the response (JSON, HTML, plain text): sent as text. */
 const TEXT_TYPE = /^\s*(?:application\/(?:[\w.-]+\+)?json|text\/(?:html|plain))\s*(?:;|$)/i
 
-function isTextType(type: string | null): boolean {
-  return type !== null && TEXT_TYPE.test(type)
+/** The `charset` parameter of a media type (quoted or not). */
+const CHARSET = /;\s*charset\s*=\s*"?([^";\s]*)/i
+
+/**
+ * Whether a body is sent as its text: a {@link TEXT_TYPE} in UTF-8 (no charset, or `utf-8`) and
+ * not content-encoded (no `content-encoding`, or `identity`). Decoding compressed bytes, or text in
+ * another charset, as UTF-8 would corrupt them: such a body is streamed as it is.
+ */
+function isUtf8Text(headers: Record<string, HeaderValue>): boolean {
+  const type = headers['content-type']
+  if (typeof type !== 'string' || !TEXT_TYPE.test(type)) return false
+  const encoding = headers['content-encoding']
+  if (encoding !== undefined && (typeof encoding !== 'string' || encoding.trim().toLowerCase() !== 'identity')) {
+    return false
+  }
+  const charset = CHARSET.exec(type)?.[1]
+  return charset === undefined || /^utf-?8$/i.test(charset)
 }
 
 /** A native `ReadableStream` reading `body` (another implementation's stream: the ponyfill's). */

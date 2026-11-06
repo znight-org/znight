@@ -3374,9 +3374,10 @@ interface GraphQLDriver {
   raw target), a copy of the headers, `ctx.signal` and the body of `ctx.rawBody()` (so the body
   limit is `HttpPlugin`'s 413). Yoga's `Response`, whatever Fetch API made it, is returned as an
   `HttpResponse` with its status and headers (each `set-cookie` line kept): a JSON, HTML or plain
-  text body as its text (with its `content-length`), any other body (GraphQL over SSE, incremental
-  delivery) as a native `ReadableStream` reading it as the client receives it, cancelled when the
-  client leaves. `GET` without `http.get` answers 405 (`allow: POST`) unless it asks for GraphiQL (`accept: text/html`)
+  text body in UTF-8 (no `charset`, or `utf-8`) and not content-encoded (no `content-encoding`, or
+  `identity`) as its text (with its `content-length`); any other body (GraphQL over SSE, incremental
+  delivery, a body compressed by a Yoga plugin, another charset) as its bytes, in a native
+  `ReadableStream` reading it as the client receives it, cancelled when the client leaves. `GET` without `http.get` answers 405 (`allow: POST`) unless it asks for GraphiQL (`accept: text/html`)
   with `graphiql` on; a mutation over `GET` is Yoga's 405 (`allow: POST`). A `POST` whose
   `content-type` is not JSON (the built-in transport's test: `application/json`, UTF-8) MUST be
   answered with the built-in transport's 415 before Yoga parses it, so that no form, multipart or
