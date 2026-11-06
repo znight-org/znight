@@ -180,6 +180,26 @@ with the import to use. Field methods are not inherited. The JSDoc tags `@param`
 
 Guide: [GraphQL](/guide/graphql)
 
+## `@znight/websocket` <Badge type="warning" text="in progress" />
+
+| Decorator                       | Target        | Arguments / notes                                                                                                                             |
+| ------------------------------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@Gateway(path?)`               | class         | static path (`'/chat'`, `'/docs/:docId'`) or `{ path?, scope?, protocol?, protocols?, maxPayload?, concurrency?, rateLimit?, backpressure? }` |
+| `@OnConnect()`                  | method        | once per gateway; runs before any message; throwing closes the connection                                                                     |
+| `@OnMessage(event?)`            | method        | static event name (`$` reserved); without event: the default handler (every frame of a `raw` gateway)                                         |
+| `@OnDisconnect()`               | method        | once per gateway; after the running handlers                                                                                                  |
+| `@Payload(schema?)`             | parameter     | the message `data` (or the raw frame), validated by a Standard Schema                                                                         |
+| `@Conn()`                       | parameter     | the `WsConnection`                                                                                                                            |
+| `@Ctx()`                        | parameter     | the `WsMessageContext` (`@OnMessage` handlers)                                                                                                |
+| `@UseHandshakeGuard(...guards)` | class         | HTTP guards (`CanActivate`) of the handshake, after the `HttpPlugin` global guards                                                            |
+| `@UseMessageGuard(...guards)`   | class, method | `WsGuard`s (`canHandle(ctx)`) run before each handler                                                                                         |
+
+A gateway is a provider (`singleton` or `request`: one instance per connection). Route decorators
+(`createRouteDecorator`) on the class decide the handshake and the messages. Invalid gateways are
+[`ZNIGHT050`](/reference/error-codes#znight050).
+
+Reference: [`@znight/websocket`](/packages/websocket)
+
 ## `@znight/config`
 
 | Decorator          | Target   | Arguments / notes                                                                        |
