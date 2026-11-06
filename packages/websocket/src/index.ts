@@ -1,5 +1,5 @@
 /**
- * `@znight/websocket` (RFC 0003, implementation in progress): WebSocket gateways served by the
+ * `@znight/websocket` (RFC 0003): WebSocket gateways served by the
  * `HttpPlugin` server. This entry holds the marker decorators, `WebSocketPlugin`, `WsServer`, the
  * exceptions, the envelope of the wire protocol and the helpers of the generated code.
  */

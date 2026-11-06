@@ -1,11 +1,11 @@
 ---
-description: Real time with Znight (in progress) - WebSocket gateways on the HTTP server, the handshake as an HTTP request, validated events, replies, rooms, tickets for browsers, guards, backpressure, testing and observability, from the realtime-chat example.
+description: Real time with Znight - WebSocket gateways on the HTTP server, the handshake as an HTTP request, validated events, replies, rooms, tickets for browsers, guards, backpressure, testing and observability, from the realtime-chat example.
 ---
 
-# WebSockets <Badge type="warning" text="in progress" />
+# WebSockets
 
 [`@znight/websocket`](/packages/websocket) ([RFC 0003](https://github.com/znight-org/znight/blob/main/rfcs/0003-websocket.md))
-is implemented in the repository but **not published yet**. This guide follows the
+serves WebSocket gateways on the HTTP server. This guide follows the
 [`realtime-chat`](../../examples/realtime-chat/README.md) example: every file shown here is a file
 of the example, and its tests are the tests of this guide.
 

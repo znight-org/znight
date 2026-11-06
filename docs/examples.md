@@ -4,7 +4,7 @@ description: The example applications of the Znight repository - a REST API with
 
 # Examples
 
-The repository ships eight example applications in
+The repository ships nine example applications in
 [`examples/`](https://github.com/znight-org/znight/tree/main/examples) (the monorepo one holds two
 services and a shared library). They are production-shaped rather than minimal: configuration
 validated at boot, structured logs, graceful shutdown, and tests at every level, including
@@ -18,7 +18,7 @@ them: their code samples are files of the examples.
 | [`storefront-api`](#storefront-api) | OpenAPI generated from the code, committed, served and checked; a typed client     | Hono         |
 | [`uptime-monitor`](#uptime-monitor) | Scheduled and dynamic jobs, one runner across instances, live results over SSE     | Hono         |
 | [`graphql-api`](#graphql-api)       | A GraphQL schema derived from the types, loaders, subscriptions, per-field access  | Hono         |
-| [`realtime-chat`](#realtime-chat)   | WebSocket gateways (in progress): rooms, tickets, guards, a raw binary feed        | `node:http`  |
+| [`realtime-chat`](#realtime-chat)   | WebSocket gateways: rooms, tickets, guards, a raw binary feed                      | `node:http`  |
 | [`microservice`](#microservice)     | HTTP and messaging in one service, retries, dead letters, distributed tracing      | Hono         |
 | [`worker`](#worker)                 | Message consumers without HTTP, request scope per message, draining on shutdown    | —            |
 | [`monorepo`](#monorepo)             | Two services sharing a provider library, overriding its providers                  | Express      |
@@ -140,8 +140,8 @@ Libraries: Hono, PGlite, Zod; Testcontainers for `bun run test:integration` (Doc
 
 ## realtime-chat
 
-**Chat rooms over WebSockets** (in progress: [`@znight/websocket`](/packages/websocket) is not
-published yet), served by the `HttpPlugin` server on one port, plus a binary price ticker.
+**Chat rooms over WebSockets** with [`@znight/websocket`](/packages/websocket), served by the
+`HttpPlugin` server on one port, plus a binary price ticker.
 
 - Gateways with Zod payloads, replies, rooms and broadcasts encoded once.
 - The handshake is an HTTP request: the global `AuthGuard` checks an API key, or a single-use

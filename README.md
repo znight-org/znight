@@ -316,21 +316,21 @@ specification of the framework.
 All `@znight/*` packages are versioned together. Install only what you use: integrations (Fastify,
 amqplib, prom-client...) are optional peer dependencies loaded from subpath exports.
 
-| Package                                             | Description                                                                          | Install as    |
-| --------------------------------------------------- | ------------------------------------------------------------------------------------ | ------------- |
-| [`@znight/core`](./packages/core)                   | Container, application lifecycle, plugins, hooks, AOP, marker decorators             | dependency    |
-| [`@znight/compiler`](./packages/compiler)           | Analysis, validation and code generation: Vite plugin, Bun preload, API              | devDependency |
-| [`@znight/http`](./packages/http)                   | Controllers, validation, files, cookies, SSE, security; node, Fastify, Express, Hono | dependency    |
-| [`@znight/messaging`](./packages/messaging)         | Consumers, retries, dead-letter queues; RabbitMQ, SQS, Kafka, in-memory              | dependency    |
-| [`@znight/config`](./packages/config)               | Typed config classes from env, `.env`, JSON/YAML, Vault, AWS Secrets Manager         | dependency    |
-| [`@znight/observability`](./packages/observability) | Pino logging, Prometheus metrics, OpenTelemetry tracing                              | dependency    |
-| [`@znight/openapi`](./packages/openapi)             | OpenAPI 3.1 document built at compile time, served with Scalar or Swagger UI         | dependency    |
-| [`@znight/schedule`](./packages/schedule)           | Cron, interval and timeout jobs checked at build time, locks across instances        | dependency    |
-| [`@znight/graphql`](./packages/graphql)             | GraphQL: schema from TypeScript types or SDL files, checked at build time, SSE       | dependency    |
-| [`@znight/websocket`](./packages/websocket)         | WebSocket gateways on the HTTP server (RFC 0003, in progress, not published yet)     | dependency    |
-| [`@znight/events`](./packages/events)               | In-process application events: listeners wired at build time, inline or detached     | dependency    |
-| [`@znight/testing`](./packages/testing)             | `TestBed` with auto-mocks, `TestApp` for in-memory end-to-end tests                  | devDependency |
-| [`@znight/cli`](./packages/cli)                     | `znight new`, generators, `generate`, `dev`, `build`, `start`, `openapi`             | devDependency |
+| Package                                             | Description                                                                           | Install as    |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------- | ------------- |
+| [`@znight/core`](./packages/core)                   | Container, application lifecycle, plugins, hooks, AOP, marker decorators              | dependency    |
+| [`@znight/compiler`](./packages/compiler)           | Analysis, validation and code generation: Vite plugin, Bun preload, API               | devDependency |
+| [`@znight/http`](./packages/http)                   | Controllers, validation, files, cookies, SSE, security; node, Fastify, Express, Hono  | dependency    |
+| [`@znight/messaging`](./packages/messaging)         | Consumers, retries, dead-letter queues; RabbitMQ, SQS, Kafka, in-memory               | dependency    |
+| [`@znight/config`](./packages/config)               | Typed config classes from env, `.env`, JSON/YAML, Vault, AWS Secrets Manager          | dependency    |
+| [`@znight/observability`](./packages/observability) | Pino logging, Prometheus metrics, OpenTelemetry tracing                               | dependency    |
+| [`@znight/openapi`](./packages/openapi)             | OpenAPI 3.1 document built at compile time, served with Scalar or Swagger UI          | dependency    |
+| [`@znight/schedule`](./packages/schedule)           | Cron, interval and timeout jobs checked at build time, locks across instances         | dependency    |
+| [`@znight/graphql`](./packages/graphql)             | GraphQL: schema from TypeScript types or SDL files, checked at build time, SSE        | dependency    |
+| [`@znight/websocket`](./packages/websocket)         | WebSocket gateways on the HTTP server: validated events, replies, rooms, backpressure | dependency    |
+| [`@znight/events`](./packages/events)               | In-process application events: listeners wired at build time, inline or detached      | dependency    |
+| [`@znight/testing`](./packages/testing)             | `TestBed` with auto-mocks, `TestApp` for in-memory end-to-end tests                   | devDependency |
+| [`@znight/cli`](./packages/cli)                     | `znight new`, generators, `generate`, `dev`, `build`, `start`, `openapi`              | devDependency |
 
 ## Examples
 
@@ -344,6 +344,7 @@ Runnable applications with their tests, in [`examples/`](./examples) (overview:
 | [`storefront-api`](./examples/storefront-api)                                 | Shop on Hono: OpenAPI document generated from the code, committed, checked in CI, with a typed client       |
 | [`uptime-monitor`](./examples/uptime-monitor)                                 | Scheduled probes and digests with time zones, a Postgres lock store, a live status page over SSE            |
 | [`graphql-api`](./examples/graphql-api)                                       | Book catalog over GraphQL on Hono: schema from the types, loaders, SSE subscriptions, per-field access      |
+| [`realtime-chat`](./examples/realtime-chat)                                   | Chat rooms over WebSockets on `node:http`: tickets for browsers, guards, rooms, a raw binary price ticker   |
 | [`microservice`](./examples/microservice)                                     | Orders service: Hono API publishing events, a consumer with retries and dead letters, logs, metrics, traces |
 | [`worker`](./examples/worker)                                                 | Background worker without HTTP: two queues, typed payloads, retries, a draining shutdown                    |
 | [`monorepo`](./examples/monorepo)                                             | Two services sharing providers through a library package of the monorepo                                    |
@@ -423,8 +424,10 @@ with `bun run docs:dev`.
   ([RFC 0007](./rfcs/0007-graphql-schema-first.md)): implemented in
   [`@znight/graphql`](./packages/graphql), see the [GraphQL guide](./docs/guide/graphql.md).
 
-Planned, without a date yet: **WebSocket** gateways served by the HTTP plugin
-([RFC 0003](./rfcs/0003-websocket.md), accepted), and a dedicated **cache** package. Today, caching
+**WebSocket** gateways served by the HTTP server ([RFC 0003](./rfcs/0003-websocket.md)) are implemented
+in [`@znight/websocket`](./packages/websocket): see the [WebSockets guide](./docs/guide/websockets.md).
+
+Planned, without a date yet: a dedicated **cache** package. Today, caching
 is a method interceptor: see the [recipe](./docs/guide/aop.md#cache).
 
 Later: a dedicated security package will be reconsidered once real applications show what belongs

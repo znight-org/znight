@@ -2,14 +2,17 @@
 
 |          |                                                                                                                                                                                                                                                                                |
 | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Status   | Accepted (implementation in progress)                                                                                                                                                                                                                                          |
+| Status   | Implemented                                                                                                                                                                                                                                                                    |
 | Date     | 2026-10-26                                                                                                                                                                                                                                                                     |
 | Affects  | New `@znight/websocket` (runtime, compiler extension, transports), `@znight/http` (upgrade routes, adapter capability, two compiler exports), `@znight/core` (two hooks, two error codes), `@znight/testing`, `@znight/observability`, CLI, docs                               |
 | Decision | Gateways served **by `HttpPlugin`'s server**: the handshake is an HTTP request (same scope, hooks, guards, CORS/proxy settings), then a transport takes the socket: **`ws`** on every `node:http` adapter (Node and Bun), **native `Bun.serve()`** with `honoAdapter()` on Bun |
 
-**Acceptance (2026-11-04).** Accepted, without a target version: `@znight/websocket` is planned, not
-scheduled for a release (see the roadmap). The text was written when the package targeted v0.1:
-below, "v0.1" means the first release of `@znight/websocket` and "v0.2" its follow-ups.
+**Acceptance (2026-11-04).** Accepted, without a target version. The text was written when the
+package targeted v0.1: below, "v0.1" means the first release of `@znight/websocket` and "v0.2" its
+follow-ups.
+
+**Implemented (2026-11-06).** `@znight/websocket` ships in lockstep with the other `@znight/*`
+packages; [`examples/realtime-chat`](../examples/realtime-chat) is its tested reference.
 
 ## 1. Summary
 

@@ -793,8 +793,6 @@ type name in `@Resolver` is ZNIGHT005 in code-first mode.
 
 ### `@znight/websocket`
 
-Work in progress (RFC 0003): the package is not published yet.
-
 | Decorator                                                                                                           | Target                                                                                 |
 | ------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
 | `@Gateway(path? \| { path?, scope?, protocol?, protocols?, maxPayload?, concurrency?, rateLimit?, backpressure? })` | class (provider) — static; `scope: 'transient'` is ZNIGHT050                           |
@@ -2054,7 +2052,7 @@ not call `next()` gets the same reply as in the general pipeline.
   close its event streams, and before awaiting the drain, whatever the plugin order. The plugin ends
   there the long-lived responses `HttpPlugin` does not track (streams another server produced); a
   returned promise joins the drain (bounded by `drainTimeoutMs`); a failure is logged, never thrown.
-- **Upgrade routes** (`PluginHttpUpgrades`, RFC 0003 §8.2, implementation in progress). A plugin
+- **Upgrade routes** (`PluginHttpUpgrades`, RFC 0003 §8.2). A plugin
   implementing `httpUpgrades(context): PluginUpgrades` has it called once in `HttpPlugin.onBootstrap`,
   after `httpRoutes()`, whatever the plugin order; `context` adds `adapter` (its name) and `upgrades`
   (`'node'`, `'bun'` or `undefined`, the native upgrades of the adapter) to the plugin routes
@@ -3451,9 +3449,6 @@ Runtime (`EventsPlugin`):
   `idle()`).
 
 ### 9.9 WebSocket (`@znight/websocket`)
-
-Work in progress (RFC 0003, accepted, no target version): the package is private until it is
-complete. What follows is the contract implemented so far.
 
 The compiler extension (`@znight/websocket/compiler`) owns the decorators of §5, registers each
 `@Gateway` class as a provider (`singleton` or `request`), binds `@UseHandshakeGuard` and

@@ -1,11 +1,11 @@
 ---
-description: "@znight/websocket (in progress, RFC 0003) - WebSocket gateways served by the HttpPlugin server: handshakes through the HTTP pipeline, validated events, replies, rooms, backpressure, heartbeats, checked at build time."
+description: "@znight/websocket - WebSocket gateways served by the HttpPlugin server: handshakes through the HTTP pipeline, validated events, replies, rooms, backpressure, heartbeats, checked at build time."
 ---
 
-# @znight/websocket <Badge type="warning" text="in progress" />
+# @znight/websocket <Badge type="tip" text="available" />
 
 WebSocket **gateways** for Znight ([RFC 0003](https://github.com/znight-org/znight/blob/main/rfcs/0003-websocket.md)).
-The package is implemented and tested in the repository but **not published yet**; the
+The
 [package README](../../packages/websocket/README.md) is the detailed reference.
 
 - **The handshake is an HTTP request.** It runs through the `HttpPlugin` pipeline: request scope,

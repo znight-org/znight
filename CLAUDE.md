@@ -64,6 +64,7 @@ Every change must keep these. A change that bends one starts with an RFC (see [R
 | `@znight/schedule`      | `@Cron`, `@Interval`, `@Timeout`, `SchedulerRegistry`, lock stores, virtual clock for tests (RFC 0004)                                                                           |
 | `@znight/graphql`       | Code-first GraphQL (schema derived from TypeScript types, RFC 0005) or schema-first (SDL files, resolvers checked against them, RFC 0007), loaders, guards, HTTP and SSE         |
 | `@znight/events`        | In-process application events: `@OnEvent` listeners wired at build time, `EventPublisher`, inline or detached dispatch (RFC 0011)                                                |
+| `@znight/websocket`     | WebSocket gateways on the HTTP server (RFC 0003): handshakes through the HTTP pipeline, validated events, replies, rooms, backpressure; `/ws`                                    |
 | `@znight/config`        | Typed config classes loaded from env, `.env`, JSON/YAML, Vault, AWS Secrets Manager                                                                                              |
 | `@znight/observability` | Pino logger, Prometheus metrics (prom-client), OpenTelemetry tracing, `@Logged`, `@Traced`, `@Metric`                                                                            |
 | `@znight/testing`       | `TestBed` (auto-mocked dependencies), `TestApp` (in-memory end-to-end tests), mocks and spies                                                                                    |
@@ -92,14 +93,14 @@ Respect them; do not reopen them in passing.
   (entities, columns, repositories, queries) are explicitly **not** on the roadmap.
 - **Built-in sessions and server-side MVC** (a session store, templates, views) are out of scope.
   Signed cookies are built in, and `examples/secure-api` shows a cookie-session recipe.
-- **WebSocket** (RFC 0003) is accepted and planned, with no target version: do not tie it to a
-  release; its error code block is reserved. **GraphQL** (RFC 0005) ships as `@znight/graphql` with
+- **WebSocket** (RFC 0003) is implemented in `@znight/websocket` (`ZNIGHT050`–`051` allocated).
+  **GraphQL** (RFC 0005) ships as `@znight/graphql` with
   v0.2.
 
 ### Roadmap
 
 The roadmap page is [`docs/roadmap.md`](docs/roadmap.md): v0.2 brings `@znight/graphql` (RFC 0005,
-implemented); planned without a date, `@znight/websocket` (RFC 0003, accepted) and `@znight/cache`
+implemented); `@znight/websocket` (RFC 0003) is implemented; planned without a date, `@znight/cache`
 (no RFC yet); then what is considered and what is not planned. RFC statuses live in
 [`rfcs/README.md`](rfcs/README.md). There is no TODO list in this file: read the roadmap, the RFCs
 and the GitHub issues before starting a feature, and keep the roadmap page up to date when a
@@ -139,7 +140,8 @@ packages/compiler/src/   project/ (scan, parse, identities), analysis/, binding/
 examples/                runnable applications with their tests: rest-api, microservice, worker,
                          secure-api, storefront-api, uptime-monitor, monorepo (packages/shared,
                          services/users-api, services/notifications-worker)
-                         graphql-api (code-first GraphQL on Hono, SSE subscriptions, schema.graphql)
+                         graphql-api (code-first GraphQL on Hono, SSE subscriptions, schema.graphql),
+                         realtime-chat (WebSocket gateways on node:http, tickets, a raw binary feed)
 benchmarks/              performance benchmarks, run by hand (not in CI): apps/ (znight, nestjs,
                          hand-wired baseline), src/ (runner, report), results/results.json; they
                          feed docs/benchmarks.md, the home page and the README (checked by docs/test)
@@ -378,4 +380,6 @@ and docs updated with the code.
   the tested source of the security guide), `storefront-api` (OpenAPI, typed client),
   `uptime-monitor` (scheduled jobs, SSE: the tested source of the scheduling guide), `monorepo` (a
   shared provider library and two services).
-  `graphql-api` (Hono, `@znight/graphql`, loaders, SSE subscriptions: the source of the GraphQL guide).
+  `graphql-api` (Hono, `@znight/graphql`, loaders, SSE subscriptions: the source of the GraphQL guide),
+  `realtime-chat` (`node:http`, `@znight/websocket`, rooms, tickets, guards, a raw binary feed: the
+  tested source of the WebSockets guide).

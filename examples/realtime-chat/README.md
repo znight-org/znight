@@ -1,8 +1,5 @@
 # realtime-chat
 
-> Work in progress: `@znight/websocket` ([RFC 0003](../../rfcs/0003-websocket.md)) is not published
-> yet. This example is its tested reference.
-
 Chat rooms over WebSockets, served by the `HttpPlugin` server on one port, plus a binary price
 ticker. Data stays in memory.
 

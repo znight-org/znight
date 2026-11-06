@@ -180,7 +180,7 @@ with the import to use. Field methods are not inherited. The JSDoc tags `@param`
 
 Guide: [GraphQL](/guide/graphql)
 
-## `@znight/websocket` <Badge type="warning" text="in progress" />
+## `@znight/websocket`
 
 | Decorator                       | Target        | Arguments / notes                                                                                                                             |
 | ------------------------------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |

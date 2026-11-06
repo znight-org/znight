@@ -6,7 +6,7 @@ Design documents for significant changes. Each RFC is discussed before implement
 | --------------------------------------------- | ----------------------------------------- | ------------------ |
 | [0001](./0001-security.md)                    | Security (route decisions, CORS, headers) | Accepted (v0.1)    |
 | [0002](./0002-openapi.md)                     | `@znight/openapi`                         | Accepted (v0.1)    |
-| [0003](./0003-websocket.md)                   | `@znight/websocket`                       | Accepted (implementation in progress) |
+| [0003](./0003-websocket.md)                   | `@znight/websocket`                       | Implemented        |
 | [0004](./0004-schedule.md)                    | `@znight/schedule`                        | Accepted (v0.1)    |
 | [0005](./0005-graphql.md)                     | `@znight/graphql`                         | Accepted (v0.2)    |
 | [0006](./0006-http-cookies-sse.md)            | HTTP cookies and Server-Sent Events       | Accepted (v0.1)    |

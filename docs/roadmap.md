@@ -1,5 +1,5 @@
 ---
-description: What Znight v0.1 contains, what v0.2 brings (GraphQL, custom parameter decorators, application events), what is planned without a date (WebSocket gateways, a cache package), what is being considered, and what is deliberately not planned.
+description: What Znight v0.1 contains, what v0.2 brings (GraphQL, custom parameter decorators, application events), WebSocket gateways (implemented), what is planned without a date (a cache package), what is being considered, and what is deliberately not planned.
 ---
 
 # Roadmap
@@ -13,7 +13,7 @@ may change APIs.
 | ----------------------------------------------------------------------------------------------- | ----------------------------------------- | ------------------ |
 | [0001](https://github.com/znight-org/znight/blob/main/rfcs/0001-security.md)                    | Security (route decisions, CORS, headers) | Accepted (v0.1)    |
 | [0002](https://github.com/znight-org/znight/blob/main/rfcs/0002-openapi.md)                     | `@znight/openapi`                         | Accepted (v0.1)    |
-| [0003](https://github.com/znight-org/znight/blob/main/rfcs/0003-websocket.md)                   | `@znight/websocket`                       | Accepted (planned) |
+| [0003](https://github.com/znight-org/znight/blob/main/rfcs/0003-websocket.md)                   | `@znight/websocket`                       | Implemented        |
 | [0004](https://github.com/znight-org/znight/blob/main/rfcs/0004-schedule.md)                    | `@znight/schedule`                        | Accepted (v0.1)    |
 | [0005](https://github.com/znight-org/znight/blob/main/rfcs/0005-graphql.md)                     | `@znight/graphql`                         | Accepted (v0.2)    |
 | [0006](https://github.com/znight-org/znight/blob/main/rfcs/0006-http-cookies-sse.md)            | HTTP cookies and Server-Sent Events       | Accepted (v0.1)    |
@@ -104,21 +104,23 @@ are used for; `@znight/messaging` stays the tool for durable, out-of-process del
 demand: a transaction port (`phase: 'after-commit'`), `@Externalized` events relayed to a broker, a
 concurrency limit for detached listeners.
 
-## Planned, without a date {#planned}
+## Implemented {#implemented}
 
 ### `@znight/websocket`
 
-WebSocket **gateways** ([RFC 0003](https://github.com/znight-org/znight/blob/main/rfcs/0003-websocket.md),
-accepted, not scheduled for a release yet; implementation in progress, see
-[`@znight/websocket`](/packages/websocket)): providers decorated with `@Gateway(path)` whose methods
-handle connections and events, resolved and checked at build time like the rest of the graph. The handshake is an HTTP request served by
+**Implemented**: [package page](/packages/websocket), [WebSockets guide](/guide/websockets) and the
+[`realtime-chat`](/examples#realtime-chat) example
+([RFC 0003](https://github.com/znight-org/znight/blob/main/rfcs/0003-websocket.md)). Gateways are
+providers decorated with `@Gateway(path)` whose methods handle connections and events, resolved and
+checked at build time like the rest of the graph. The handshake is an HTTP request served by
 `HttpPlugin`'s server, so it goes through the same request scope, hooks, guards, CORS and proxy
 settings and access decisions as any route. Payloads are validated with Standard Schemas, with
-acknowledgements, rooms, broadcasts, backpressure, heartbeats and a graceful shutdown. The transport
-is `ws` on Node.js and Bun, and `Bun.serve()` natively with the Hono adapter on Bun. Error codes
-`ZNIGHT050`–`ZNIGHT059` are reserved for it.
+replies, rooms, broadcasts, backpressure, rate limits, heartbeats and a graceful shutdown. The
+transport is `ws` on Node.js and `Bun.serve()` natively on Bun; `TestApp.connect()` opens
+connections in memory, and `@znight/observability` traces, measures and logs every message. Error
+codes: `ZNIGHT050`–`ZNIGHT059`.
 
-Until it lands, [Server-Sent Events](/packages/http#server-sent-events) cover server-to-client streams.
+## Planned, without a date {#planned}
 
 ### `@znight/cache`
 

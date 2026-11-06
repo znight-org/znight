@@ -12,7 +12,7 @@ and the runtime (`ZnightError`). Messages link here: each code has its own ancho
 Codes `ZNIGHT001` to `ZNIGHT029` belong to the core, the compiler and the features of the first
 release (HTTP, messaging, configuration, observability). From `ZNIGHT030`, each package owns a block
 of ten: `ZNIGHT030`–`039` for `@znight/openapi`, `ZNIGHT040`–`049` for `@znight/schedule`,
-`ZNIGHT050`–`059` for `@znight/websocket` ([RFC 0003](../../rfcs/0003-websocket.md), in progress),
+`ZNIGHT050`–`059` for [`@znight/websocket`](/packages/websocket) ([RFC 0003](../../rfcs/0003-websocket.md)),
 `ZNIGHT060`–`069` for [`@znight/graphql`](/packages/graphql) ([RFC 0005](../../rfcs/0005-graphql.md),
 [RFC 0007](../../rfcs/0007-graphql-schema-first.md) for schema-first), `ZNIGHT070`–`079` for
 [`@znight/events`](/packages/events) ([RFC 0011](../../rfcs/0011-application-events.md)).

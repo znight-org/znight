@@ -1,8 +1,5 @@
 # @znight/websocket
 
-> Work in progress ([RFC 0003](../../rfcs/0003-websocket.md)): not published yet. The API below is
-> implemented and tested; the guide and the `realtime-chat` example come next.
-
 WebSocket **gateways** for Znight, served by the `HttpPlugin` server on the same port. A gateway is
 a provider class whose methods handle the connection lifecycle (`@OnConnect`, `@OnDisconnect`) and
 inbound events (`@OnMessage`), with Standard Schema validation, replies, rooms, broadcasts,
@@ -223,7 +220,7 @@ misuse, parameter decorators imported from another package), ZNIGHT007 (paths), 
 `WsConnection`), ZNIGHT023 (required route decisions). At boot: ZNIGHT050 (options, metadata) and
 ZNIGHT051 (no `HttpPlugin`, no upgrade support, `ws` missing, mismatched transport).
 
-## Limitations (work in progress)
+## Limitations
 
 - `conn.handshake` keeps the native request of the handshake.
 - Rooms are per process: broadcast across instances through `@znight/messaging`.
