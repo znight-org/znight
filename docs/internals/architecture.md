@@ -754,6 +754,18 @@ be a job and a route or message handler (ZNIGHT005). Names match `^[\w$][\w.:$-]
 invalid expression, duration, time zone or option is ZNIGHT040, located in the faulty field of a
 literal.
 
+### `@znight/events`
+
+| Decorator            | Target                                                    |
+| -------------------- | --------------------------------------------------------- |
+| `@OnEvent(options?)` | method — static `{ order?: integer, detached?: boolean }` |
+
+A listener is a public, non-static instance method with exactly one undecorated parameter whose type
+annotation is a class, a union of classes or a base class (the event); its host is any class provider,
+or becomes a singleton provider through `AnalyzeContext.addRoot` (§6.5). `@OnEvent` methods of an
+abstract class run on its concrete class providers. Everything else is ZNIGHT070 (ZNIGHT005 for the
+target and the method shape). RFC 0011.
+
 ### `@znight/graphql`
 
 | Decorator / function                                      | Target                                                                                                         |
@@ -1328,12 +1340,14 @@ Manifests of the `@znight/*` packages:
 | `@znight/openapi`       | `@znight/openapi/compiler`   | `OpenApi` → `OpenApiPlugin` (singleton)                                                                                                  | —                                                                                              |
 | `@znight/schedule`      | `@znight/schedule/compiler`  | `SchedulerRegistry` (singleton), `JobContext` (request) → `SchedulePlugin`                                                               | —                                                                                              |
 | `@znight/graphql`       | `@znight/graphql/compiler`   | `GraphQLContext` (request), `PubSub`, `GraphQLPlugin` (singleton) → `GraphQLPlugin`                                                      | —                                                                                              |
+| `@znight/events`        | `@znight/events/compiler`    | `EventPublisher` → `EventsPlugin` (singleton)                                                                                            | —                                                                                              |
 
 `@znight/compiler`, `@znight/testing` and `@znight/cli` have no manifest. Subpath exports:
 `@znight/http` (`/node`, `/fastify`, `/express`, `/hono`, `/path`, `/compiler`), `@znight/messaging`
 (`/memory`, `/rabbitmq`, `/sqs`, `/kafka`, `/compiler`), `@znight/config` (`/compiler`),
 `@znight/openapi` (`/compiler`, `/emit`, `/vite`, `/testing`; RFC 0002), `@znight/schedule`
-(`/compiler`, `/testing`; RFC 0004), `@znight/graphql` (`/compiler`, `/testing`; RFC 0005); the CLI has
+(`/compiler`, `/testing`; RFC 0004), `@znight/graphql` (`/compiler`, `/testing`; RFC 0005), `@znight/events` (`/compiler`, `/testing`; RFC
+0011); the CLI has
 the `znight` bin.
 
 ## 8. Core runtime (`@znight/core`)
@@ -3312,6 +3326,64 @@ interface GraphQLDriver {
 `GraphQLContext` entry (`@Ctx()` gets the right one). The SDL of a `GraphQLScalarType` definition
 lacks its `description` and `specifiedByURL` at build time (the compiler cannot evaluate it), so its
 `schemaHash` may differ from the runtime's `printSchema()`.
+
+### 9.8 Events (`@znight/events`)
+
+The compiler extension (`@znight/events/compiler`, RFC 0011) owns `#OnEvent`, reads the event classes
+from the parameter type of each listener (a union gives one entry per member; a member extending
+another member is dropped with a ZNIGHT070 warning), declares each concrete host with
+`AnalyzeContext.addRoot()` and generates `metadata.extensions.events` (absent without listener, so an
+application without `@OnEvent` generates the same module as before):
+
+```ts
+interface EventsMetadata {
+  listeners: {
+    event: abstract new (
+      ...args: never[]
+    ) => object // the listened class, imported as a value
+    eventName: string // its class name (logs, hooks)
+    token: Token // the host provider; an abstract declaring class gives one entry per concrete provider
+    method: string
+    order: number // integer, default 0
+    detached: boolean
+    invoke: (c: Host, e: Event) => unknown // (c: Mail, e: UserCreated) => c.send(e)
+  }[] // sorted by (order, token, method, eventName)
+}
+```
+
+Validation (ZNIGHT070): the listener shape and options (§4.8); a **detached** listener whose host's
+construction reaches a request-scoped external (`HttpContext`, `InboundMessage`, `JobContext`...)
+outside `Lazy<T>` is an error; `@OnEvent` on an abstract class no concrete provider extends is a
+warning.
+
+Runtime (`EventsPlugin`):
+
+- `register` supplies `EventPublisher` (singleton). `onBootstrap` builds a map from each listened
+  class's prototype to its listeners (ZNIGHT070 for malformed metadata, ZNIGHT001 for a missing
+  host); `publish()` and `emit()` reject with ZNIGHT021 before it and after `onDispose`.
+- **Matching (normative).** At the first publication of an instance of `C`, the plugin walks `C`'s
+  prototype chain, concatenates the listeners of each class on it, sorts them by (`order`, token,
+  method) and memoises the plan per prototype. A plain object, an array or a primitive is a
+  `TypeError`. Without listener, `publish()` returns a settled promise and no hook runs.
+- **Inline (normative).** Inline listeners run in order in the caller's async context, so a
+  request-scoped host is the publisher's instance; each is awaited before the next. When no scope is
+  active and an inline host is request-scoped, the phase runs in a scope of its own. The first error
+  stops the phase and rejects `publish()` with that error, unchanged; detached listeners are then
+  not scheduled.
+- **Detached (normative).** After a successful inline phase, detached listeners start on a macrotask
+  (`setImmediate`), each in a fresh scope (`container.runInScope()`), concurrently. Their errors go to
+  `EventsPlugin.configure({ onError })` (default: `logger.error`), never to the publisher.
+  `emit(event)` runs the whole publication on a macrotask in a fresh scope and reports every error.
+- **Shutdown.** `onStop` waits for detached listeners and `emit()` work in flight, bounded by
+  `drainTimeoutMs` (default 10 000), and logs those still running; from then on `publish()` awaits its
+  detached listeners itself, so none outlives provider disposal. List `EventsPlugin` before
+  `HttpPlugin`, `MessagingPlugin` and `SchedulePlugin` (plugins stop in reverse order).
+- **Hooks.** `events:publish` wraps the inline phase of a publication with listeners
+  (`failedListener` names the failing inline listener); `events:listener` wraps each invocation. The
+  events are built only when wrappers or listeners exist (§8.3).
+- **Testing.** `EventsPlugin.initRoots()` returns the listener hosts, so `TestApp` instantiates them;
+  `@znight/events/testing` exports `recordEvents(app)` (`publications`, `of(Class)`, `failures()`,
+  `idle()`).
 
 ## 10. Testing (`@znight/testing`)
 
