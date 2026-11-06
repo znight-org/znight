@@ -59,6 +59,20 @@ export type { ByteSize } from './size.ts'
 export type { SseBody, SseEvent, SseOptions, SseSource } from './sse.ts'
 export type { ParseSseOptions, SseItem, SseMessage } from './sse-parse.ts'
 export type { StreamSource } from './stream.ts'
+export type {
+  AdapterUpgrades,
+  BunSocketHandlers,
+  BunUpgrade,
+  MemoryUpgrade,
+  NativeUpgrade,
+  NodeUpgrade,
+  PendingUpgrade,
+  PluginHttpUpgrades,
+  PluginHttpUpgradesContext,
+  PluginUpgradeRoute,
+  PluginUpgrades,
+  UpgradeHandlerOptions,
+} from './upgrade.ts'
 
 export { type NodeAdapter, type NodeAdapterOptions, nodeAdapter } from './adapters/node.ts'
 export { isJsonType, type MediaType, parseBody, parseMediaType } from './body.ts'
