@@ -1,7 +1,7 @@
 ---
 title: Benchmarks
 pageClass: zn-benchmarks
-description: Cold start, memory, dependency injection and HTTP throughput of Znight against NestJS, tsyringe, InversifyJS and hand-wired Fastify, Express, Hono and node:http servers, with the method and the commands to reproduce every number.
+description: Cold start, memory, dependency injection, HTTP and GraphQL throughput of Znight against NestJS, tsyringe, InversifyJS, GraphQL Yoga and hand-wired Fastify, Express, Hono, node:http and graphql-js servers, with the method and the commands to reproduce every number.
 ---
 
 # Benchmarks
@@ -239,6 +239,165 @@ on Bun with 1,000 providers (tsyringe is faster with 100): it loads neither `ref
 decorator metadata, and its decorators do nothing at runtime. The analysis moves to the build, where
 generating the container takes a fraction of a second, once per build (incrementally in watch mode).
 
+## GraphQL
+
+The same comparison for a GraphQL API: every application serves one schema at `POST /graphql`
+(a JSON body, `200` and `application/json`), with a resolver, a service and in-memory repositories
+(100 users, 100 books), the same data everywhere.
+
+```graphql
+type Query {
+  user(id: ID!): User
+  books(limit: Int!): [Book!]!
+}
+type Mutation {
+  createUser(input: CreateUserInput!): User!
+}
+type User {
+  id: ID!
+  name: String!
+  email: String!
+}
+type Book {
+  id: ID!
+  title: String!
+  year: Int!
+  author: User!
+}
+input CreateUserInput {
+  name: String!
+  email: String!
+}
+```
+
+| Operation    | What happens                                                                                                |
+| ------------ | ----------------------------------------------------------------------------------------------------------- |
+| `user`       | `query User($id: ID!) { user(id: $id) { id name email } }`, one user read through the service               |
+| `books`      | `{ books(limit: 20) { id title year author { id name } } }`, the 20 authors loaded in one batch             |
+| `createUser` | `mutation Create($input: CreateUserInput!) { createUser(...) { id name email } }`, input validated by Zod 4 |
+
+`Book.author` goes through a DataLoader in every application (one `users.findMany()` per request):
+`@Loader()` and `BatchLoad` in Znight, a request-scoped `DataLoader` in NestJS, the `dataloader`
+package in the others. `createUser` validates its input with the Zod 4 schema of `POST /users`.
+
+| Application   | What serves the schema                                                                                 | Executor                               |
+| ------------- | ------------------------------------------------------------------------------------------------------ | -------------------------------------- |
+| graphql-js    | Hand-wired: graphql-js 17 `parse` and `validate`, cached by query text, then `execute`, on `node:http` | graphql-js `execute`                   |
+| GraphQL Yoga  | `graphql-yoga` 6 standalone: `node:http` on Node.js, `Bun.serve()` on Bun                              | `@graphql-tools/executor` (Yoga's)     |
+| Znight        | `@znight/graphql` code-first (schema derived from the types at build time), its built-in transport     | graphql-js `execute`                   |
+| Znight + Yoga | The same application with `yogaDriver()`: Yoga serves the schema, Znight executes it                   | graphql-js `execute` (Znight's engine) |
+| NestJS + Yoga | NestJS 12, `@nestjs/graphql` 14 and `@graphql-yoga/nestjs`, on Fastify and on Express                  | `@graphql-tools/executor` (Yoga's)     |
+
+Every application builds its schema, parses and validates on the same copy of graphql-js 17 (the
+runner checks, before a run, that every package of every application resolves the same one). They
+do not all execute with it: Yoga, and NestJS through Yoga, run the executor of
+`@graphql-tools/executor`, Yoga's default, a fork of graphql-js `execute`; graphql-js, Znight and
+Znight + Yoga run graphql-js `execute`.
+
+Every application keeps the defaults of its framework: its own document cache, no GraphiQL, no
+logging, no persisted queries, no JIT and no response cache. The load test is the one of
+[Throughput and latency](#throughput-and-latency): autocannon, 100 connections, rounds that change
+the order of the applications. Every response is checked: a status other than `200`, an `errors`
+key or data other than expected fails the run (the first body is parsed and checked, the next ones
+compared with it as text, so that checking costs the load generator almost nothing). Before the
+runs, each application is started once in a counting mode to check that one `books` request makes
+exactly one `users.findMany()` call.
+
+<!-- benchmarks:graphql -->
+
+- **Znight is ahead of NestJS on Node.js** with Fastify: 17,655 `books` queries per second, against 8,648 for NestJS (104.2% more) and 19,058 for graphql-js on node:http.
+- **Plugin overhead**: `GraphQLPlugin.execute()` adds 4.5% to graphql-js `execute()` for a cached 50-field query on Node.js, under the 10% target of RFC 0005 (4.0 to 5.4% across 5 processes).
+
+#### `user(id)`: one object
+
+![Requests per second of each GraphQL application for the user operation, on Node.js and Bun](/benchmarks/graphql-user.svg)
+
+| Application                          |                     Node.js: requests/s | Node.js: p99 |                         Bun: requests/s | Bun: p99 |
+| ------------------------------------ | --------------------------------------: | -----------: | --------------------------------------: | -------: |
+| graphql-js on node:http              |     70,868 <small>70,246–72,451</small> |         2 ms |  113,638 <small>113,452–119,933</small> |     1 ms |
+| GraphQL Yoga                         |     32,659 <small>32,620–34,067</small> |         5 ms |     47,655 <small>45,345–50,515</small> |     3 ms |
+| **Znight (node:http)**               | **59,519** <small>58,556–61,811</small> |         3 ms | **91,424** <small>85,945–96,771</small> |     2 ms |
+| **Znight + Yoga driver (node:http)** | **29,890** <small>29,765–31,143</small> |         6 ms | **42,905** <small>42,716–46,631</small> |     4 ms |
+| **Znight (Fastify)**                 | **58,884** <small>55,708–60,127</small> |         3 ms | **92,147** <small>90,801–96,399</small> |     1 ms |
+| NestJS + Yoga (Fastify)              |     31,019 <small>30,364–31,188</small> |         4 ms |     46,794 <small>46,640–49,651</small> |     3 ms |
+| NestJS + Yoga (Express)              |     32,845 <small>32,708–33,383</small> |         3 ms |     41,255 <small>40,447–44,173</small> |     3 ms |
+
+#### `books(limit: 20)`: a list and its authors, batched
+
+![Requests per second of each GraphQL application for the books operation, on Node.js and Bun](/benchmarks/graphql-books.svg)
+
+| Application                          |                     Node.js: requests/s | Node.js: p99 |                         Bun: requests/s | Bun: p99 |
+| ------------------------------------ | --------------------------------------: | -----------: | --------------------------------------: | -------: |
+| graphql-js on node:http              |     19,058 <small>18,801–19,234</small> |        10 ms |     29,086 <small>28,225–31,099</small> |     4 ms |
+| GraphQL Yoga                         |     18,648 <small>18,088–19,138</small> |        10 ms |     24,299 <small>24,147–26,066</small> |     5 ms |
+| **Znight (node:http)**               | **18,376** <small>18,290–18,846</small> |        10 ms | **26,692** <small>26,473–28,881</small> |     5 ms |
+| **Znight + Yoga driver (node:http)** | **14,163** <small>13,998–14,706</small> |        13 ms | **19,400** <small>19,375–21,128</small> |     6 ms |
+| **Znight (Fastify)**                 | **17,655** <small>17,559–18,168</small> |        10 ms | **27,177** <small>27,068–28,693</small> |     5 ms |
+| NestJS + Yoga (Fastify)              |        8,648 <small>8,638–8,694</small> |        22 ms |     11,704 <small>11,611–12,193</small> |     9 ms |
+| NestJS + Yoga (Express)              |        9,032 <small>8,714–9,565</small> |        21 ms |     11,315 <small>11,313–12,160</small> |     9 ms |
+
+#### `createUser(input)`: a validated mutation
+
+![Requests per second of each GraphQL application for the createUser operation, on Node.js and Bun](/benchmarks/graphql-createUser.svg)
+
+| Application                          |                     Node.js: requests/s | Node.js: p99 |                         Bun: requests/s | Bun: p99 |
+| ------------------------------------ | --------------------------------------: | -----------: | --------------------------------------: | -------: |
+| graphql-js on node:http              |     65,166 <small>64,041–67,005</small> |         2 ms |   100,343 <small>98,534–109,373</small> |     1 ms |
+| GraphQL Yoga                         |     31,559 <small>31,357–34,445</small> |         5 ms |     41,881 <small>41,232–44,371</small> |     4 ms |
+| **Znight (node:http)**               | **54,589** <small>53,185–57,465</small> |         3 ms | **81,747** <small>81,143–86,403</small> |     2 ms |
+| **Znight + Yoga driver (node:http)** | **28,687** <small>27,589–29,116</small> |         6 ms | **37,948** <small>37,606–41,779</small> |     4 ms |
+| **Znight (Fastify)**                 | **51,652** <small>39,740–53,049</small> |         3 ms | **81,132** <small>80,649–85,466</small> |     2 ms |
+| NestJS + Yoga (Fastify)              |     29,969 <small>29,611–30,206</small> |         4 ms |     41,407 <small>40,577–43,265</small> |     3 ms |
+| NestJS + Yoga (Express)              |     31,644 <small>31,279–32,975</small> |         4 ms |     38,077 <small>37,529–40,257</small> |     3 ms |
+
+Median of 3 rounds of 10 seconds (minimum–maximum in small type), each after a 3-second warm-up, 100 connections, no pipelining, every response checked. Latency: the 99th percentile reported by autocannon, which records whole milliseconds. Measured on 2026-11-06, commit `0143f57`, with:
+
+| Package                    | Version |
+| -------------------------- | ------: |
+| `graphql`                  |  17.0.2 |
+| `graphql-yoga`             |   6.0.1 |
+| `@graphql-tools/executor`  |   4.1.7 |
+| `dataloader`               |   2.2.3 |
+| `@znight/graphql`          |   0.6.0 |
+| `@znight/http`             |   0.6.0 |
+| `fastify`                  |  5.12.7 |
+| `@nestjs/core`             |  12.3.2 |
+| `@nestjs/graphql`          |  14.1.2 |
+| `@graphql-yoga/nestjs`     |   5.0.1 |
+| `@nestjs/platform-fastify` |  12.3.2 |
+| `@nestjs/platform-express` |  12.3.2 |
+| `zod`                      |   4.6.7 |
+| `autocannon`               |   8.0.0 |
+
+<!-- /benchmarks:graphql -->
+
+### Inside the process
+
+Two informative targets of [RFC 0005](../rfcs/0005-graphql.md),
+measured without HTTP, in fresh processes: the time to build the schema at boot, Znight from the
+metadata its compiler generates and graphql-js `buildSchema()` from the same SDL; and what the
+plugin adds to graphql-js `execute()` for a query whose document is cached, through
+`GraphQLPlugin.execute()` and through the `GraphQLEngine` that drivers such as Yoga call.
+
+<!-- benchmarks:graphql-micro -->
+
+**Schema build**: a generated schema of 200 object types, built at boot. Median of 30 fresh processes, with the interquartile range in small type. RFC 0005 target: under 20 ms.
+
+| Schema build                          |                           Node.js |                               Bun |
+| ------------------------------------- | --------------------------------: | --------------------------------: |
+| **Znight**: `GraphQLPlugin` bootstrap | **5.8 ms** <small>5.8–5.9</small> | **5.5 ms** <small>5.5–5.5</small> |
+| graphql-js `buildSchema()`, same SDL  |     7.9 ms <small>7.8–8.0</small> |     8.1 ms <small>8.0–8.2</small> |
+
+**Per-operation overhead**: a cached 50-field query, the time per operation and, in small type, the time added to graphql-js `execute()` on the same schema, with its range across the processes. "Direct": outside any scope, the plugin opens one per operation; "request scope": inside the scope a GraphQL-over-HTTP request already has. Median of 5 processes of 7 interleaved rounds of 20,000 operations. RFC 0005 target: under 10%.
+
+| Execution                                   |                                 Node.js: direct |                          Node.js: request scope |                                       Bun: direct |                              Bun: request scope |
+| ------------------------------------------- | ----------------------------------------------: | ----------------------------------------------: | ------------------------------------------------: | ----------------------------------------------: |
+| graphql-js `execute()`, pre-parsed document |                                         10.9 µs |                                         10.9 µs |                                            6.9 µs |                                          7.4 µs |
+| **`GraphQLPlugin.execute()`**               | **11.6 µs** <small>+6.2% (+5.5 to +6.5)</small> | **11.4 µs** <small>+4.5% (+4.0 to +5.4)</small> | **7.9 µs** <small>+14.9% (+11.4 to +15.3)</small> | **8.0 µs** <small>+7.3% (+6.9 to +11.3)</small> |
+| **`GraphQLEngine.execute()` (drivers)**     | **11.4 µs** <small>+4.2% (+3.9 to +4.6)</small> | **11.2 µs** <small>+2.5% (+2.0 to +3.8)</small> | **8.0 µs** <small>+19.1% (+13.7 to +19.6)</small> |  **7.6 µs** <small>+4.9% (-0.7 to +9.3)</small> |
+
+<!-- /benchmarks:graphql-micro -->
+
 ## Caveats
 
 - **A laptop, not a lab.** The machine also ran a desktop session. Rounds are interleaved so that
@@ -255,6 +414,14 @@ generating the container takes a fraction of a second, once per build (increment
   larger than any difference shown here.
 - **Defaults, not tuning.** No framework is tuned beyond turning NestJS's logger off. In particular,
   Znight's security headers and request ids are on, as they are in your application by default.
+- **GraphQL: one graphql-js 17, two executors.** graphql-js 17.0 `execute` creates an
+  `AbortController` per execution and aborts it when the execution ends, which builds a
+  `DOMException` with its stack trace: a few microseconds per operation on Node.js, much less on
+  Bun. Only the applications that execute with graphql-js pay it (graphql-js, Znight and Znight +
+  Yoga); Yoga and NestJS + Yoga execute with `@graphql-tools/executor`, which creates none. So Yoga
+  against Znight + Yoga, or NestJS against Znight, also compares two executors, and the graphql-js
+  application is not a floor for Yoga. Apollo Server is not measured: it does not support graphql-js 17. Where an application cannot
+  run on a runtime, its cells read "n/a" and the reason is given under the tables.
 - **Dependency injection projects are compiled with `tsc`.** A Znight application is normally built
   by Vite, which bundles the provider modules and strips the decorators: the dependency injection
   suite does not use that advantage.
@@ -275,7 +442,7 @@ bun run bench                       # builds the applications, then every suite
 bun run report                      # the charts and the tables of this page, from the results
 ```
 
-`bun run bench:boot`, `bench:http` and `bench:di` run one suite; `bun src/cli.ts http --runtimes node
+`bun run bench:boot`, `bench:http`, `bench:di` and `bench:graphql` run one suite; `bun src/cli.ts http --runtimes node
 --variants znight-fastify,nestjs-fastify` restricts a run; `--quick` checks the setup in a few
 minutes (its results go to `results/quick.json`). The
 [benchmarks README](../benchmarks/README.md) describes the layout and how to add a framework.

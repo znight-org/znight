@@ -5,8 +5,9 @@
  * `results/results.json`. `--check` writes nothing and fails when a file is out of date.
  */
 import type { BarRow } from './charts.ts'
+import type { GraphqlOperation } from './graphql-operations.ts'
 import type { Highlights } from './highlights.ts'
-import type { DiFramework, Endpoint, Results } from './results.ts'
+import type { DiFramework, Endpoint, GraphqlExecutePath, GraphqlScope, Results } from './results.ts'
 import type { Summary } from './stats.ts'
 import type { Runtime } from './variants.ts'
 
@@ -14,7 +15,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
 
 import { barChart, highlightsCard } from './charts.ts'
-import { formatCount, highlights } from './highlights.ts'
+import { GRAPHQL_OPERATIONS } from './graphql-operations.ts'
+import { GRAPHQL_VARIANTS, graphqlVariantLabel } from './graphql-variants.ts'
+import { formatCount, graphqlSummary, highlights } from './highlights.ts'
 import { readResults, toJson } from './results.ts'
 import { ADAPTER_NAMES, FRAMEWORK_NAMES, RUNTIME_NAMES, VARIANTS, variantLabel } from './variants.ts'
 
@@ -35,6 +38,22 @@ const ENDPOINT_NAMES: Readonly<Record<Endpoint, string>> = {
   get: '`GET /users/:id`',
   post: '`POST /users` (validated body)',
 }
+const OPERATION_NAMES: Readonly<Record<GraphqlOperation, string>> = {
+  user: '`user(id)`: one object',
+  books: '`books(limit: 20)`: a list and its authors, batched',
+  createUser: '`createUser(input)`: a validated mutation',
+}
+const OPERATION_TITLES: Readonly<Record<GraphqlOperation, string>> = {
+  user: 'GraphQL · one object',
+  books: 'GraphQL · list and batched authors',
+  createUser: 'GraphQL · validated mutation',
+}
+const SCOPE_NAMES: Readonly<Record<GraphqlScope, string>> = { direct: 'direct', request: 'request scope' }
+const PATH_NAMES: Readonly<Record<GraphqlExecutePath, string>> = {
+  'graphql-js': 'graphql-js `execute()`, pre-parsed document',
+  plugin: '`GraphQLPlugin.execute()`',
+  engine: '`GraphQLEngine.execute()` (drivers)',
+}
 
 /** A number and its unit: the unit is left out of the ranges of the tables. */
 interface Unit {
@@ -49,7 +68,7 @@ const mib = (value: number): string => MIB.number(value) + MIB.suffix
 const thousands = (value: number): string => `${Math.round(value / 1000)}k`
 const integer = (value: number): string => formatCount(Math.round(value))
 
-function seriesNames(results: Results, suite: 'boot' | 'http' | 'di'): string[] {
+function seriesNames(results: Results, suite: 'boot' | 'http' | 'di' | 'graphql'): string[] {
   const runtimes = results[suite]?.environment.runtimes
   return RUNTIMES.map(r => `${RUNTIME_NAMES[r]} ${runtimes?.[r] ?? ''}`.trim())
 }
@@ -184,6 +203,34 @@ export function renderCharts(results: Results): Map<string, string> {
         description: `Container creation, milliseconds. ${describe(rows, series, ms)}.`,
       }),
     )
+  }
+  const graphql = results.graphql
+  if (graphql !== undefined) {
+    const series = seriesNames(results, 'graphql')
+    for (const operation of GRAPHQL_OPERATIONS) {
+      const rows: BarRow[] = GRAPHQL_VARIANTS.map(variant => ({
+        group: variant.server,
+        label: variant.label,
+        highlight: variant.framework === 'znight',
+        values: RUNTIMES.map(
+          runtime =>
+            graphql.results.find(r => r.variant === variant.id && r.runtime === runtime && r.operation === operation)
+              ?.requestsPerSecond.median,
+        ),
+      }))
+      if (rows.every(row => row.values.every(value => value === undefined))) continue
+      charts.set(
+        `graphql-${operation}.svg`,
+        barChart({
+          title: OPERATION_TITLES[operation],
+          subtitle: `POST /graphql, ${operation} · requests per second, ${graphql.settings.connections} connections · median · higher is better`,
+          series,
+          rows,
+          format: thousands,
+          description: `Requests per second for the ${operation} operation. ${describe(rows, series, integer)}.`,
+        }),
+      )
+    }
   }
   const headline = highlights(results)
   if (headline.items.length > 0) charts.set('highlights.svg', highlightsCard(headline))
@@ -330,6 +377,114 @@ function diBlock(results: Results): string {
   ].join('\n')
 }
 
+function graphqlBlock(results: Results): string {
+  const graphql = results.graphql
+  if (graphql === undefined) return '_No results yet._'
+  const sections: string[] = []
+  const summary = graphqlSummary(results)
+  if (summary.length > 0) sections.push(...summary.map(line => `- ${line}`), '')
+  const skipped = (variant: string, runtime: Runtime): boolean =>
+    graphql.skipped.some(s => s.variant === variant && s.runtime === runtime)
+  for (const operation of GRAPHQL_OPERATIONS) {
+    if (!graphql.results.some(r => r.operation === operation)) continue
+    const rows = GRAPHQL_VARIANTS.map(variant => {
+      const bold = variant.framework === 'znight'
+      const label = bold ? `**${graphqlVariantLabel(variant)}**` : graphqlVariantLabel(variant)
+      return [
+        label,
+        ...RUNTIMES.flatMap(runtime => {
+          if (skipped(variant.id, runtime)) return ['n/a', 'n/a']
+          const result = graphql.results.find(
+            r => r.variant === variant.id && r.runtime === runtime && r.operation === operation,
+          )
+          if (result === undefined) return ['–', '–']
+          const rps = result.requestsPerSecond
+          const requests = `${bold ? `**${integer(rps.median)}**` : integer(rps.median)} <small>${integer(rps.min)}–${integer(rps.max)}</small>`
+          return [requests, `${Math.round(result.latencyP99Ms.median)} ms`]
+        }),
+      ]
+    })
+    sections.push(
+      `#### ${OPERATION_NAMES[operation]}`,
+      '',
+      `![Requests per second of each GraphQL application for the ${operation} operation, on Node.js and Bun](/benchmarks/graphql-${operation}.svg)`,
+      '',
+      table(['Application', 'Node.js: requests/s', 'Node.js: p99', 'Bun: requests/s', 'Bun: p99'], rows),
+      '',
+    )
+  }
+  for (const s of graphql.skipped) {
+    const variant = GRAPHQL_VARIANTS.find(v => v.id === s.variant)
+    const name = variant === undefined ? s.variant : graphqlVariantLabel(variant)
+    sections.push(`n/a: ${name} does not run on ${RUNTIME_NAMES[s.runtime]}: ${s.reason}`, '')
+  }
+  const s = graphql.settings
+  sections.push(
+    `Median of ${s.rounds} rounds of ${s.durationSeconds} seconds (minimum–maximum in small type), each after a ${s.warmupSeconds}-second warm-up, ${s.connections} connections, no pipelining, every response checked. Latency: the 99th percentile reported by ${s.tool}, which records whole milliseconds. Measured on ${graphql.environment.date.slice(0, 10)}, commit \`${graphql.environment.commit}\`, with:`,
+    '',
+    table(
+      ['Package', 'Version'],
+      Object.entries(graphql.environment.packages).map(([name, version]) => [`\`${name}\``, version]),
+    ),
+  )
+  return sections.join('\n')
+}
+
+function graphqlMicroBlock(results: Results): string {
+  const micro = results.graphql?.micro
+  if (micro === undefined) return '_No results yet._'
+  const runtimes = RUNTIMES.filter(runtime => micro.schema.some(r => r.runtime === runtime))
+  const schemaOf = (runtime: Runtime) => micro.schema.find(r => r.runtime === runtime)
+  const schema = table(
+    ['Schema build', ...runtimes.map(runtime => RUNTIME_NAMES[runtime])],
+    [
+      [
+        '**Znight**: `GraphQLPlugin` bootstrap',
+        ...runtimes.map(runtime => cell(schemaOf(runtime)?.znightMs, MS, true)),
+      ],
+      [
+        'graphql-js `buildSchema()`, same SDL',
+        ...runtimes.map(runtime => cell(schemaOf(runtime)?.buildSchemaMs, MS, false)),
+      ],
+    ],
+  )
+  const scopes: readonly GraphqlScope[] = ['direct', 'request']
+  const paths: readonly GraphqlExecutePath[] = ['graphql-js', 'plugin', 'engine']
+  const execute = table(
+    [
+      'Execution',
+      ...runtimes.flatMap(runtime => scopes.map(scope => `${RUNTIME_NAMES[runtime]}: ${SCOPE_NAMES[scope]}`)),
+    ],
+    paths.map(path => {
+      const bold = path !== 'graphql-js'
+      return [
+        bold ? `**${PATH_NAMES[path]}**` : PATH_NAMES[path],
+        ...runtimes.flatMap(runtime =>
+          scopes.map(scope => {
+            const result = micro.execute.find(r => r.runtime === runtime && r.scope === scope && r.path === path)
+            if (result === undefined) return '–'
+            const us = `${(result.nsPerOp.median / 1000).toFixed(1)} µs`
+            if (path === 'graphql-js') return us
+            const { median, min, max } = result.overheadPercent
+            const signed = (value: number): string => `${value >= 0 ? '+' : ''}${value.toFixed(1)}`
+            return `${bold ? `**${us}**` : us} <small>${signed(median)}% (${signed(min)} to ${signed(max)})</small>`
+          }),
+        ),
+      ]
+    }),
+  )
+  const s = micro.settings
+  return [
+    `**Schema build**: a generated schema of ${s.types} object types, built at boot. Median of ${s.schemaRuns} fresh processes, with the interquartile range in small type. RFC 0005 target: under 20 ms.`,
+    '',
+    schema,
+    '',
+    `**Per-operation overhead**: a cached ${s.fields}-field query, the time per operation and, in small type, the time added to graphql-js \`execute()\` on the same schema, with its range across the processes. "Direct": outside any scope, the plugin opens one per operation; "request scope": inside the scope a GraphQL-over-HTTP request already has. Median of ${s.executeRuns} processes of ${s.rounds} interleaved rounds of ${formatCount(s.iterations)} operations. RFC 0005 target: under 10%.`,
+    '',
+    execute,
+  ].join('\n')
+}
+
 function summaryBlock(results: Results): string {
   const headline = highlights(results)
   const lines = headline.items.map(item => `- **${item.value} ${item.label}**: ${item.detail}.`)
@@ -360,6 +515,8 @@ export function renderBlocks(results: Results): Map<string, string> {
     ['boot', bootBlock(results)],
     ['http', httpBlock(results)],
     ['di', diBlock(results)],
+    ['graphql', graphqlBlock(results)],
+    ['graphql-micro', graphqlMicroBlock(results)],
   ])
 }
 

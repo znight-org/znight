@@ -1,0 +1,28 @@
+{
+  "name": "@znight-benchmarks/nestjs-graphql",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@graphql-yoga/nestjs": "5.0.1",
+    "@nestjs/common": "12.3.2",
+    "@nestjs/core": "12.3.2",
+    "@nestjs/graphql": "14.1.2",
+    "@nestjs/platform-express": "12.3.2",
+    "@nestjs/platform-fastify": "12.3.2",
+    "dataloader": "2.2.3",
+    "graphql": "17.0.2",
+    "graphql-yoga": "6.0.1",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:"
+  }
+}

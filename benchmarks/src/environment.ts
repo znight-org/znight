@@ -2,16 +2,23 @@
 import type { Environment } from './results.ts'
 
 import { execFileSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { cpus, platform, release, totalmem } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 import { runtimeVersion } from './process.ts'
 
 const ROOT = join(import.meta.dir, '..')
 
-/** Packages whose version is recorded, and the workspace that installs each of them. */
-const PACKAGES: readonly (readonly [name: string, workspace: string])[] = [
+/**
+ * A package whose version is recorded, and the workspace that installs it. A transitive dependency
+ * names the chain that loads it: `apps/baseline-graphql>graphql-yoga` is the copy of the package
+ * that `graphql-yoga`, installed by `apps/baseline-graphql`, loads.
+ */
+export type RecordedPackage = readonly [name: string, workspace: string]
+
+/** Packages of the boot, HTTP and dependency injection suites. */
+const PACKAGES: readonly RecordedPackage[] = [
   ['@znight/core', 'apps/znight'],
   ['@znight/http', 'apps/znight'],
   ['@znight/compiler', 'apps/znight'],
@@ -31,8 +38,50 @@ const PACKAGES: readonly (readonly [name: string, workspace: string])[] = [
   ['vite', 'apps/znight'],
 ]
 
+/** Packages of the GraphQL suite. */
+export const GRAPHQL_PACKAGES: readonly RecordedPackage[] = [
+  ['graphql', 'apps/baseline-graphql'],
+  ['graphql-yoga', 'apps/baseline-graphql'],
+  // the executor of Yoga (and of NestJS with Yoga): graphql-yoga runs `execute` from it, not from graphql-js
+  ['@graphql-tools/executor', 'apps/baseline-graphql>graphql-yoga'],
+  ['dataloader', 'apps/baseline-graphql'],
+  ['@znight/graphql', 'apps/znight-graphql'],
+  ['@znight/http', 'apps/znight-graphql'],
+  ['fastify', 'apps/znight-graphql'],
+  ['@nestjs/core', 'apps/nestjs-graphql'],
+  ['@nestjs/graphql', 'apps/nestjs-graphql'],
+  ['@graphql-yoga/nestjs', 'apps/nestjs-graphql'],
+  ['@nestjs/platform-fastify', 'apps/nestjs-graphql'],
+  ['@nestjs/platform-express', 'apps/nestjs-graphql'],
+  ['zod', 'apps/baseline-graphql'],
+  ['autocannon', '.'],
+]
+
+/**
+ * Real directory of the package `name` that code in `from` loads: the first `node_modules/<name>`
+ * above it (the resolution of Node.js and Bun), symbolic links resolved.
+ */
+export function packageDir(name: string, from: string): string {
+  let current = realpathSync(from)
+  for (;;) {
+    const candidate = join(current, 'node_modules', name)
+    if (existsSync(join(candidate, 'package.json'))) return realpathSync(candidate)
+    const parent = dirname(current)
+    if (parent === current) throw new Error(`No package ${name} above ${from}`)
+    current = parent
+  }
+}
+
+/** Real directory of the package that a chain loads: `apps/x>a>b` is `b` as loaded by `a`, installed by `apps/x`. */
+export function chainDir(chain: string): string {
+  const [workspace = '.', ...names] = chain.split('>')
+  let dir = join(ROOT, workspace)
+  for (const name of names) dir = packageDir(name, dir)
+  return dir
+}
+
 function packageVersion(name: string, workspace: string): string {
-  const manifest = join(ROOT, workspace, 'node_modules', name, 'package.json')
+  const manifest = join(packageDir(name, chainDir(workspace)), 'package.json')
   return (JSON.parse(readFileSync(manifest, 'utf8')) as { version: string }).version
 }
 
@@ -50,7 +99,7 @@ function operatingSystem(): string {
   return pretty ?? `${platform()} ${release()}`
 }
 
-export function environment(): Environment {
+export function environment(packages: readonly RecordedPackage[] = PACKAGES): Environment {
   return {
     date: new Date().toISOString(),
     commit: run('git', ['rev-parse', '--short', 'HEAD']),
@@ -59,6 +108,6 @@ export function environment(): Environment {
     memoryGiB: Math.round(totalmem() / 1024 ** 3),
     os: operatingSystem(),
     runtimes: { node: runtimeVersion('node'), bun: runtimeVersion('bun') },
-    packages: Object.fromEntries(PACKAGES.map(([name, workspace]) => [name, packageVersion(name, workspace)])),
+    packages: Object.fromEntries(packages.map(([name, workspace]) => [name, packageVersion(name, workspace)])),
   }
 }

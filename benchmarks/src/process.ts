@@ -47,6 +47,12 @@ export interface StartOptions {
   readonly env: Readonly<Record<string, string>>
   /** Path requested until it answers `200`. */
   readonly probe: string
+  /** The probe request (default: `GET`); GraphQL applications are probed with a `POST` operation. */
+  readonly probeRequest?: {
+    readonly method: 'POST'
+    readonly headers: Readonly<Record<string, string>>
+    readonly body: string
+  }
   readonly timeoutMs?: number
 }
 
@@ -68,7 +74,7 @@ export async function start(options: StartOptions): Promise<Started> {
   })
   for (;;) {
     try {
-      const response = await fetch(url)
+      const response = await fetch(url, options.probeRequest)
       await response.arrayBuffer()
       if (response.status === 200) return { child, port, readyMs: performance.now() - started }
       throw new Error(`${url} answered ${response.status}`)
