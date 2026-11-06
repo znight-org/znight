@@ -309,7 +309,7 @@ export function checkHandshake(ctx: HttpContext): void {
 /** Internal: the pending upgrade of a handshake, created by the pipeline. */
 export class PendingUpgradeState implements PendingUpgrade {
   readonly native: NativeUpgrade
-  #headers: () => Readonly<Record<string, HeaderValue>>
+  readonly #headers: () => Readonly<Record<string, HeaderValue>>
   /** The transport completed the handshake (`101`). */
   accepted = false
   /** The handshake timed out: the transport must not complete it. */

@@ -855,7 +855,9 @@ export class Pipeline {
     const cookies = ctx.cookieLines
     if (cookies.length > 0) {
       const existing = headers['set-cookie']
-      const raw = existing === undefined ? [] : typeof existing === 'string' ? [existing] : [...existing]
+      const raw: string[] = []
+      if (typeof existing === 'string') raw.push(existing)
+      else if (existing !== undefined) raw.push(...existing)
       headers['set-cookie'] = [...raw, ...cookies.map(cookie => cookie.line)]
     }
     const idHeader = this.#options.requestIdHeader
