@@ -4,6 +4,7 @@ export default defineConfig({
   entry: {
     index: 'src/index.ts',
     ws: 'src/transports/ws.ts',
+    bun: 'src/transports/bun.ts',
   },
   format: 'esm',
   platform: 'node',
