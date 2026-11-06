@@ -1,5 +1,12 @@
 # @znight/config
 
+## 0.6.2
+
+### Patch Changes
+
+- @znight/compiler@0.6.2
+  - @znight/core@0.6.2
+
 ## 0.6.1
 
 ### Patch Changes
