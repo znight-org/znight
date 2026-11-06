@@ -3,8 +3,9 @@
  * class, validates their shape (ZNIGHT005), options and parameter (ZNIGHT070), reads the listened
  * classes from the parameter type, declares a concrete host as a root (`addRoot`: a singleton
  * provider when nothing else registers it) and stores one {@link ListenerData} per listened class.
- * Listeners of an abstract class are stored without root: its concrete providers inherit them
- * (`generate`).
+ * Listeners of an abstract class are stored without root: the concrete `@Injectable` classes
+ * inheriting the method (`inheritance.ts`) are declared as roots instead, and `validate` /
+ * `generate` expand the listeners to the providers inheriting them.
  */
 import type {
   AnalyzeContext,
@@ -20,6 +21,7 @@ import type {
 import type { EventsData, ListenerData } from './data.ts'
 
 import { INVALID_DECORATOR, INVALID_LISTENER, NEST_OPTIONS, ON_EVENT, OPTION_KEYS, ROOT_REASON } from './constants.ts'
+import { extendsClass, inheritsMethod } from './inheritance.ts'
 import { closest, describeValue, isRecord, propertyLocation } from './values.ts'
 
 type Context = AnalyzeContext<EventsData>
@@ -78,8 +80,49 @@ export function analyzeEventsClass(cls: ClassInfo, ctx: Context): void {
   if (listeners.length === 0) return
   // the host is an entry point of the plugin: a root of ZNIGHT019 and prune, a singleton when
   // nothing else registers it; an abstract class is never instantiated: its subclasses inherit
-  if (!cls.abstract) ctx.addRoot(cls, { reason: ROOT_REASON, location: first.location })
+  if (cls.abstract) {
+    const lookup = (identity: string): ClassInfo | undefined => ctx.classInfo(identity)
+    const names = [...new Set(listeners.map(listener => listener.method))]
+    for (const subclass of injectableClasses(ctx)) {
+      if (names.some(name => inheritsMethod(subclass, cls.identity, name, lookup))) {
+        ctx.addRoot(subclass, { reason: ROOT_REASON, location: first.location })
+      }
+    }
+  } else {
+    ctx.addRoot(cls, { reason: ROOT_REASON, location: first.location })
+  }
   for (const listener of listeners) ctx.store(listener)
+}
+
+/** Core decorators registering a class provider. */
+const PROVIDER_DECORATORS: ReadonlySet<string> = new Set(['@znight/core#Injectable', '@znight/core#Factory'])
+
+const INJECTABLES = new WeakMap<Context, readonly ClassInfo[]>()
+
+/**
+ * The concrete classes of the scanned files registered by `@Injectable` / `@Factory`: the providers
+ * that may inherit listeners without carrying `@OnEvent` (the compiler only calls `analyzeClass` on
+ * classes carrying it). Classes registered by an extension are roots already, and an undecorated
+ * class is not a provider: neither needs a root. Computed once per compile.
+ */
+function injectableClasses(ctx: Context): readonly ClassInfo[] {
+  let found = INJECTABLES.get(ctx)
+  if (found !== undefined) return found
+  const list: ClassInfo[] = []
+  for (const file of ctx.project.files()) {
+    for (const declarations of file.facts.declarations.values()) {
+      for (const declaration of declarations) {
+        if (declaration.kind !== 'class' || declaration.ambient) continue
+        const identity = ctx.project.identityOf(declaration)?.identity
+        const info = identity === undefined ? undefined : ctx.classInfo(identity)
+        if (info === undefined || info.abstract) continue
+        if (info.decorators.some(decorator => PROVIDER_DECORATORS.has(decorator.identity ?? ''))) list.push(info)
+      }
+    }
+  }
+  found = list
+  INJECTABLES.set(ctx, found)
+  return found
 }
 
 function isOnEvent(decorator: DecoratorInfo): boolean {
@@ -323,7 +366,8 @@ function writesTypeArguments(member: ReferenceType, param: ParameterInfo, ctx: C
 
 /**
  * A union whose members extend one another (`A | Base` with `A extends Base`): the base already
- * receives the subclass, so the subclass is dropped, with a warning.
+ * receives the subclass, so the subclass is dropped, with a warning. Only `extends` counts, like the
+ * prototype chain the runtime walks: `A implements Base` does not make an `A` reach `Base`'s listeners.
  */
 function withoutOverlaps(
   classes: readonly ClassInfo[],
@@ -334,7 +378,7 @@ function withoutOverlaps(
   const kept: ClassInfo[] = []
   for (const cls of classes) {
     const base = classes.find(
-      other => other !== cls && cls.heritage.some(reference => reference.identity === other.identity),
+      other => other !== cls && extendsClass(cls, other.identity, identity => ctx.classInfo(identity)),
     )
     if (base === undefined) {
       kept.push(cls)

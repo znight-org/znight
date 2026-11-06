@@ -133,6 +133,18 @@ describe('errors', () => {
     expect(mod.log).toEqual(['first'])
     expect(errors.map(info => [info.listener, info.mode])).toEqual([['First.run', 'emit']])
   })
+
+  it('reports the detached errors of emit() with mode emit', async () => {
+    mod.log.length = 0
+    const errors: EventErrorInfo[] = []
+    const plugin = EventsPlugin.configure({ onError: (_error, info) => errors.push(info) })
+    await using test = await TestApp.create({ metadata, plugins: [plugin], logger: silentLogger })
+    test.app.container.get(EventPublisher).emit(new mod.Boom('detached'))
+    await new Promise(resolve => setImmediate(resolve))
+    await plugin.idle()
+    expect(mod.log).toEqual(['first', 'second', 'detached-fail', 'detached-ok'])
+    expect(errors.map(info => [info.listener, info.detached, info.mode])).toEqual([['Later.fail', true, 'emit']])
+  })
 })
 
 describe('hooks', () => {

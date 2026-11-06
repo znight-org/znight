@@ -363,8 +363,11 @@ Rules, all checked at build time:
   value produced by a `@Provides` factory cannot, since the compiler analyses no class for it. Hosts
   are graph roots (`addRoot`), so they are never reported unused (ZNIGHT019) or pruned.
 - `@OnEvent` methods on an abstract base class are inherited by the concrete subclasses that are
-  providers; on a base class with no concrete provider subclass, a warning (ZNIGHT070) says they
-  never run.
+  providers, through `extends` only (`implements` copies no method, and the runtime walks the
+  prototype chain); these subclasses are graph roots too. The most-derived declaration of a method
+  wins: a subclass (or an intermediate class) that redeclares it replaces the inherited listener with
+  its own `@OnEvent` and options, or with none. On a base class with no concrete provider subclass, a
+  warning (ZNIGHT070) says they never run.
 - Method interceptors apply: the generated `invoke` calls the instance method, so `@Logged`,
   `@Traced` or an application `@Transactional()` interceptor wraps the listener.
 

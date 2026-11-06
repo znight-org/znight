@@ -763,7 +763,9 @@ literal.
 A listener is a public, non-static instance method with exactly one undecorated parameter whose type
 annotation is a class, a union of classes or a base class (the event); its host is any class provider,
 or becomes a singleton provider through `AnalyzeContext.addRoot` (§6.5). `@OnEvent` methods of an
-abstract class run on its concrete class providers. Everything else is ZNIGHT070 (ZNIGHT005 for the
+abstract class run on the concrete class providers that inherit them through `extends` (not
+`implements`), unless a class between them redeclares the method: the most-derived declaration wins,
+with its own `@OnEvent` or none. Those providers are roots, like concrete hosts. Everything else is ZNIGHT070 (ZNIGHT005 for the
 target and the method shape). RFC 0011.
 
 ### `@znight/graphql`
@@ -3347,11 +3349,11 @@ interface EventsMetadata {
       ...args: never[]
     ) => object // the listened class, imported as a value
     eventName: string // its class name (logs, hooks)
-    token: Token // the host provider; an abstract declaring class gives one entry per concrete provider
+    token: Token // the host provider; an abstract declaring class gives one entry per inheriting provider
     method: string
     order: number // integer, default 0
     detached: boolean
-    invoke: (c: Host, e: Event) => unknown // (c: Mail, e: UserCreated) => c.send(e)
+    invoke: (c: Host, e: Event) => unknown // (c: Mail, e: UserCreated) => c.send(e); Host is the provider class
   }[] // sorted by (order, token, method, eventName)
 }
 ```
@@ -3359,7 +3361,10 @@ interface EventsMetadata {
 Validation (ZNIGHT070): the listener shape and options (§4.8); a **detached** listener whose host's
 construction reaches a request-scoped external (`HttpContext`, `InboundMessage`, `JobContext`...)
 outside `Lazy<T>` is an error; `@OnEvent` on an abstract class no concrete provider extends is a
-warning.
+warning. A listener of an abstract class gives one entry per concrete class provider whose `extends`
+chain reaches the class without redeclaring the method (`implements` inherits nothing, as at runtime),
+and `addRoot()` declares the `@Injectable` / `@Factory` classes inheriting it, so `prune` and
+`reportUnused` keep them. Union members overlap through `extends` only.
 
 Runtime (`EventsPlugin`):
 

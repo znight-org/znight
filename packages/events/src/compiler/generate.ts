@@ -2,7 +2,8 @@
  * `generate` of the events extension: `metadata.extensions.events` (RFC 0011 §5.5). One entry per
  * (host provider, method, listened class), sorted by (`order`, token, method, event name), so that
  * the runtime only merges already sorted lists. A listener declared on an abstract class is emitted
- * for each concrete class provider extending it.
+ * for each concrete class provider inheriting its method (`inheritance.ts`), typed with that
+ * provider's class.
  *
  * ```ts
  * {
@@ -18,10 +19,11 @@
  * }
  * ```
  */
-import type { GenerateContext, GenNode, ProviderNode } from '@znight/compiler'
+import type { GenerateContext, GenNode } from '@znight/compiler'
 import type { EventsData, ListenerData } from './data.ts'
 
 import { compareStrings } from './constants.ts'
+import { recordedInheritors } from './inheritance.ts'
 
 type Context = GenerateContext<EventsData>
 
@@ -29,6 +31,8 @@ type Context = GenerateContext<EventsData>
 interface Entry {
   readonly listener: ListenerData
   readonly token: string
+  /** The class of the provider: the type of the instance in `invoke`. */
+  readonly classIdentity: string
 }
 
 /** Builds the events section; `undefined` (no section) when the application has no listener. */
@@ -59,7 +63,7 @@ export function generateEvents(ctx: Context): GenNode | undefined {
     [
       'listeners',
       ctx.arr(
-        entries.map(({ listener, token }) =>
+        entries.map(({ listener, token, classIdentity }) =>
           ctx.obj([
             ['event', eventValue(listener)],
             ['eventName', listener.event.name],
@@ -71,7 +75,7 @@ export function generateEvents(ctx: Context): GenNode | undefined {
               'invoke',
               ctx.arrow(
                 [
-                  ['c', typeOf(listener.host.identity)],
+                  ['c', typeOf(classIdentity)],
                   ['e', eventValue(listener)],
                 ],
                 (c, e) => ctx.call(ctx.member(c, listener.method), [e as GenNode]),
@@ -84,44 +88,25 @@ export function generateEvents(ctx: Context): GenNode | undefined {
   ])
 }
 
-/** Concrete hosts as themselves, abstract hosts as each concrete class provider extending them. */
+/**
+ * Concrete hosts as themselves, abstract hosts as each concrete class provider inheriting the method
+ * (computed by `validate`). Pruned providers are skipped.
+ */
 function expand(listeners: readonly ListenerData[], ctx: Context): Entry[] {
   const entries: Entry[] = []
-  const seen = new Set<string>()
-  let subclasses: Map<string, ProviderNode[]> | undefined
-  const push = (listener: ListenerData, token: string): void => {
-    const key = `${token}\u0000${listener.method}\u0000${listener.event.identity}`
-    if (seen.has(key)) return
-    seen.add(key)
-    entries.push({ listener, token })
-  }
   for (const listener of listeners) {
     if (!listener.host.abstract) {
       const token = ctx.tokenOf(listener.host)
-      if (token !== undefined && ctx.provider(token) !== undefined) push(listener, token)
+      if (token !== undefined && ctx.provider(token) !== undefined) {
+        entries.push({ listener, token, classIdentity: listener.host.identity })
+      }
       continue
     }
-    subclasses ??= concreteSubclasses(ctx)
-    for (const provider of subclasses.get(listener.host.identity) ?? []) push(listener, provider.token)
-  }
-  return entries
-}
-
-/** Class providers by the identity of each class of their heritage. */
-export function concreteSubclasses(ctx: Pick<Context, 'graph'>): Map<string, ProviderNode[]> {
-  const map = new Map<string, ProviderNode[]>()
-  for (const provider of ctx.graph.providers) {
-    if (provider.kind !== 'class') continue
-    for (const reference of provider.heritage) {
-      let list = map.get(reference.identity)
-      if (list === undefined) {
-        list = []
-        map.set(reference.identity, list)
-      }
-      list.push(provider)
+    for (const { token, classIdentity } of recordedInheritors(listener)) {
+      if (ctx.provider(token) !== undefined) entries.push({ listener, token, classIdentity })
     }
   }
-  return map
+  return entries
 }
 
 function byOrder(a: Entry, b: Entry): number {

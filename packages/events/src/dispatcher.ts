@@ -91,7 +91,9 @@ export class Dispatcher {
     if (this.#observed()) return this.#publishObserved(event, plan, 'publish', undefined)
     try {
       const inline = plan.inline.length === 0 ? undefined : this.#inlinePhase(event, plan)
-      return inline === undefined ? this.#afterInline(event, plan) : inline.then(() => this.#afterInline(event, plan))
+      return inline === undefined
+        ? this.#afterInline(event, plan, 'publish')
+        : inline.then(() => this.#afterInline(event, plan, 'publish'))
     } catch (error) {
       return Promise.reject(error)
     }
@@ -108,7 +110,7 @@ export class Dispatcher {
         .runInScope(() =>
           this.#observed()
             ? this.#publishObserved(event, plan, 'emit', failure)
-            : this.#runInlineTracked(event, plan, failure).then(() => this.#afterInline(event, plan)),
+            : this.#runInlineTracked(event, plan, failure).then(() => this.#afterInline(event, plan, 'emit')),
         )
         .then(undefined, error => this.#report(error, event, plan, failure.listener, 'emit'))
         .then(() => this.#end(work))
@@ -196,7 +198,7 @@ export class Dispatcher {
     const tracked = failure ?? { listener: undefined }
     if (!hooks.hasWrappers('events:publish') && !hooks.hasListeners('events:publish')) {
       await this.#runInlineTracked(event, plan, tracked)
-      await this.#afterInline(event, plan)
+      await this.#afterInline(event, plan, mode)
       return
     }
     const record: EventPublishEvent = {
@@ -217,7 +219,7 @@ export class Dispatcher {
           throw error
         }
         // inside the wrappers: detached listeners inherit the publication's trace context
-        await this.#afterInline(event, plan)
+        await this.#afterInline(event, plan, mode)
       })
     } finally {
       if (hooks.hasListeners('events:publish')) hooks.emit('events:publish', record)
@@ -257,31 +259,31 @@ export class Dispatcher {
    * Once the inline phase succeeded: schedules the detached listeners (running), or runs them and
    * waits for them (after `onStop`: none may outlive the providers). Never rejects.
    */
-  #afterInline(event: object, plan: DispatchPlan): Promise<void> {
+  #afterInline(event: object, plan: DispatchPlan, mode: 'publish' | 'emit'): Promise<void> {
     const listeners = plan.detached
     if (listeners.length === 0) return RESOLVED
-    if (this.#state !== 'running') return this.#runDetached(event, plan)
+    if (this.#state !== 'running') return this.#runDetached(event, plan, mode)
     const works = listeners.map(listener => this.#begin(`${listener.name} (${plan.eventName})`))
     setImmediate(() => {
       for (let index = 0; index < listeners.length; index++) {
         const work = works[index] as Work
-        void this.#detached(event, plan, listeners[index] as Listener).then(() => this.#end(work))
+        void this.#detached(event, plan, listeners[index] as Listener, mode).then(() => this.#end(work))
       }
     })
     return RESOLVED
   }
 
-  #runDetached(event: object, plan: DispatchPlan): Promise<void> {
-    return Promise.all(plan.detached.map(listener => this.#detached(event, plan, listener))).then(() => undefined)
+  #runDetached(event: object, plan: DispatchPlan, mode: 'publish' | 'emit'): Promise<void> {
+    return Promise.all(plan.detached.map(listener => this.#detached(event, plan, listener, mode))).then(() => undefined)
   }
 
-  /** One detached listener in a fresh scope; never rejects. */
-  #detached(event: object, plan: DispatchPlan, listener: Listener): Promise<void> {
+  /** One detached listener in a fresh scope; never rejects. `mode`: the publication that scheduled it. */
+  #detached(event: object, plan: DispatchPlan, listener: Listener, mode: 'publish' | 'emit'): Promise<void> {
     return this.#container
       .runInScope(() => this.#invoke(listener, event, plan, true))
       .then(
         () => undefined,
-        error => this.#report(error, event, plan, listener, 'publish'),
+        error => this.#report(error, event, plan, listener, mode),
       )
   }
 

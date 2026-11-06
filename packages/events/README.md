@@ -93,7 +93,9 @@ form) are build errors (ZNIGHT070).
 - **Detached** listeners start on a macrotask once the inline phase succeeded, concurrently, each in
   its own scope. A detached listener whose host depends on a request-scoped external (`HttpContext`,
   `InboundMessage`, `JobContext`) is a build error: pass what it needs in the event.
-- Listeners declared on an abstract class run on each concrete provider extending it.
+- Listeners declared on an abstract class run on each concrete provider extending it (`extends`, not
+  `implements`), which is then never reported unused nor pruned. A subclass that redeclares the
+  method replaces the inherited listener: its own `@OnEvent` (with its options) applies, or none.
 - Method interceptors (`@Logged`, `@Traced`, your own `@Intercept`) wrap listeners like any method.
 
 ## Publisher

@@ -1,13 +1,15 @@
 /**
  * `validate` of the events extension (RFC 0011 §6): checks that need the bound graph. Detached
  * listeners whose host reaches a request-scoped external (ZNIGHT070, error), listeners of an
- * abstract class that no concrete provider inherits (ZNIGHT070, warning).
+ * abstract class that no concrete provider extends (ZNIGHT070, warning). It also computes the
+ * providers inheriting the listeners of abstract classes, which `generate` reads back.
  */
 import type { GraphEdge, ValidateContext } from '@znight/compiler'
 import type { EventsData, ListenerData } from './data.ts'
+import type { ProviderClasses } from './inheritance.ts'
 
 import { compareStrings, INVALID_LISTENER } from './constants.ts'
-import { concreteSubclasses } from './generate.ts'
+import { inheritorsOf, isExtended, providerClasses } from './inheritance.ts'
 
 type Context = ValidateContext<EventsData>
 
@@ -24,19 +26,21 @@ const INSTANTIATING: ReadonlySet<GraphEdge['kind']> = new Set([
 export function validateEvents(ctx: Context): void {
   const listeners = ctx.stored.filter((data): data is ListenerData => data.kind === 'listener').sort(byLocation)
   if (listeners.length === 0) return
-  reportOrphans(listeners, ctx)
-  reportDetachedRequestValues(listeners, ctx)
+  const providers = providerClasses(ctx)
+  for (const listener of listeners) {
+    if (listener.host.abstract) inheritorsOf(listener, providers)
+  }
+  reportOrphans(listeners, providers, ctx)
+  reportDetachedRequestValues(listeners, providers, ctx)
 }
 
-function reportOrphans(listeners: readonly ListenerData[], ctx: Context): void {
+function reportOrphans(listeners: readonly ListenerData[], providers: ProviderClasses, ctx: Context): void {
   const reported = new Set<string>()
-  let subclasses: ReturnType<typeof concreteSubclasses> | undefined
   for (const listener of listeners) {
     if (!listener.host.abstract) continue
     const key = `${listener.host.identity}#${listener.method}`
     if (reported.has(key)) continue
-    subclasses ??= concreteSubclasses(ctx)
-    if ((subclasses.get(listener.host.identity)?.length ?? 0) > 0) continue
+    if (isExtended(listener.host, providers)) continue
     reported.add(key)
     ctx.report({
       code: INVALID_LISTENER,
@@ -54,21 +58,23 @@ function reportOrphans(listeners: readonly ListenerData[], ctx: Context): void {
  * A detached listener runs in a fresh scope, without HTTP request, message or job: when its host's
  * construction reaches a request-scoped external (outside `Lazy<T>`), every run fails with ZNIGHT013.
  */
-function reportDetachedRequestValues(listeners: readonly ListenerData[], ctx: Context): void {
+function reportDetachedRequestValues(
+  listeners: readonly ListenerData[],
+  providers: ProviderClasses,
+  ctx: Context,
+): void {
   const requestExternals = new Map<string, string>()
   for (const external of ctx.graph.externals) {
     if (external.scope === 'request') requestExternals.set(external.token, external.displayName)
   }
   if (requestExternals.size === 0) return
   const adjacency = edgesByProvider(ctx.graph.edges)
-  let subclasses: ReturnType<typeof concreteSubclasses> | undefined
   const reported = new Set<string>()
   for (const listener of listeners) {
     if (!listener.detached) continue
     let tokens: string[]
     if (listener.host.abstract) {
-      subclasses ??= concreteSubclasses(ctx)
-      tokens = (subclasses.get(listener.host.identity) ?? []).map(provider => provider.token)
+      tokens = inheritorsOf(listener, providers).map(inheritor => inheritor.token)
     } else {
       const token = ctx.provider(listener.host.identity)?.token
       tokens = token === undefined ? [] : [token]
