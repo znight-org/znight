@@ -1,5 +1,12 @@
 # @znight/observability
 
+## 0.5.0
+
+### Patch Changes
+
+- Updated dependencies [469d6bf]
+  - @znight/core@0.5.0
+
 ## 0.4.0
 
 ### Patch Changes
