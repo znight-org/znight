@@ -1,5 +1,14 @@
 # @znight/graphql
 
+## 0.5.1
+
+### Patch Changes
+
+- @znight/compiler@0.5.1
+  - @znight/core@0.5.1
+  - @znight/http@0.5.1
+  - @znight/testing@0.5.1
+
 ## 0.5.0
 
 ### Patch Changes

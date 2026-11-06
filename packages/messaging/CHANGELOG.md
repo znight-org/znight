@@ -1,5 +1,13 @@
 # @znight/messaging
 
+## 0.5.1
+
+### Patch Changes
+
+- 61bc2c8: RabbitMQ: a consumer whose queue is gone when it resubscribes (`404 NOT_FOUND`, e.g. a queue deleted while the driver was declaring it again after the broker cancelled the consumer) declares the queue again before the next attempt instead of retrying forever.
+- @znight/compiler@0.5.1
+  - @znight/core@0.5.1
+
 ## 0.5.0
 
 ### Patch Changes
