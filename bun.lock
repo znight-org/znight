@@ -596,6 +596,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@znight/core": "workspace:*",
+        "@znight/http": "workspace:*",
       },
     },
   },

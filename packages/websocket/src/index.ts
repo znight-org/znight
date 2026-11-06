@@ -6,6 +6,14 @@
  */
 
 export type { BackpressureOptions, GatewayOptions, RateLimitOptions } from './options.ts'
+export type {
+  AcceptInit,
+  SendStatus,
+  SocketEvents,
+  TransportSettings,
+  TransportSocket,
+  WebSocketTransport,
+} from './transport.ts'
 
 export {
   Conn,
@@ -45,3 +53,4 @@ export {
   WsValidationException,
   type WsValidationIssue,
 } from './exceptions.ts'
+export { MemoryClient, type MemoryCloseInfo, memoryTransport } from './transports/memory.ts'

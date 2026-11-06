@@ -34,6 +34,7 @@
     "test": "bun test --conditions=@znight/source test"
   },
   "dependencies": {
-    "@znight/core": "workspace:*"
+    "@znight/core": "workspace:*",
+    "@znight/http": "workspace:*"
   }
 }
