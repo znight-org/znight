@@ -405,7 +405,7 @@
     },
     "packages/events": {
       "name": "@znight/events",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "dependencies": {
         "@znight/core": "workspace:*",
       },
