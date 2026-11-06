@@ -2551,7 +2551,12 @@ the OpenTelemetry attributes `graphql.operation.type` and `graphql.operation.nam
 `graphql_operation_duration_seconds{type, name}`, `type` being `unknown` when no operation was
 selected and `name` being `anonymous` for an anonymous operation, capped at `maxOperationNames`
 (default 100) distinct names then `_OTHER`; one log entry per operation only with
-`logging.graphql` (off by default). A run vetoed by a
+`logging.graphql` (off by default). It wraps `events:publish` and `events:listener` (RFC 0011
+§5.12): an `INTERNAL` span `publish <Event>` around the inline phase and `<Event> → <Class.method>`
+per listener (detached listeners start inside the publication span: children of it), the metrics
+`znight_events_published_total{event}` and
+`znight_event_listener_duration_seconds{event, listener, detached, outcome}`, and a `debug` entry
+`event published` per publication (`tracing.events`, `metrics.events`, `logging.events`). A run vetoed by a
 `schedule:run` wrapper (§8.3) is `skipped` wherever that wrapper sits relative to the plugin's own:
 a `job skipped` entry at `warn` without `durationMs` nor `err`, counted `skipped` but neither timed
 nor recorded as a success (`last success` keeps aging, so a staleness alert keeps firing), and, when

@@ -1,3 +1,4 @@
+import type { EventsInstrumentationOptions } from '../events/events.ts'
 import type { GraphQLMetricsOptions, GraphQLOperationLogOptions, GraphQLTracingOptions } from '../graphql/operations.ts'
 import type { LoggerOptions } from '../logging/logger.ts'
 import type { HttpRequestLogOptions, MessageLogOptions } from '../logging/requests.ts'
@@ -18,6 +19,8 @@ export interface LoggingOptions extends Omit<LoggerOptions, 'scope'> {
   readonly jobs?: boolean | JobLogOptions
   /** One entry per GraphQL operation (`graphql:operation` hook of `@znight/graphql`). Default: `false`. */
   readonly graphql?: boolean | GraphQLOperationLogOptions
+  /** One `debug` entry per event publication (`events:publish` hook of `@znight/events`). Default: `true`. */
+  readonly events?: boolean | EventsInstrumentationOptions
   /**
    * Route the framework's own logs (core, plugins) through the logger, with `component: 'znight'`
    * (`app.setLogger()`). Default: `true`.
@@ -37,6 +40,8 @@ export interface MetricsOptions extends MetricsRegistryOptions {
   readonly schedule?: boolean | ScheduleMetricsOptions
   /** GraphQL operation metrics (`graphql:operation` hook of `@znight/graphql`). Default: `true`. */
   readonly graphql?: boolean | GraphQLMetricsOptions
+  /** Application event metrics (`events:*` hooks of `@znight/events`). Default: `true`. */
+  readonly events?: boolean | EventsInstrumentationOptions
 }
 
 /** `tracing` options of `ObservabilityPlugin.configure()`. */
@@ -60,6 +65,11 @@ export interface TracingOptions extends TracerOptions {
    * hook of `@znight/graphql`). Default: `true`.
    */
   readonly graphql?: boolean | GraphQLTracingOptions
+  /**
+   * An `INTERNAL` span per event publication and per listener (`events:*` hooks of
+   * `@znight/events`). Default: `true`.
+   */
+  readonly events?: boolean | EventsInstrumentationOptions
 }
 
 /** Options of `ObservabilityPlugin.configure()`. */

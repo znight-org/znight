@@ -43,8 +43,8 @@ export interface ObservabilityPluginInstance extends Plugin {
  * ```
  *
  * - `register`: provides `Logger`, `Tracer`, `MetricsRegistry` and the `@Logged` / `@Traced` /
- *   `@Metric` interceptors, wraps the `http:request`, `messaging:message`, `schedule:run` and
- *   `graphql:operation` hooks (spans → metrics → logs) and `messaging:publish` (producer spans),
+ *   `@Metric` interceptors, wraps the `http:request`, `messaging:message`, `schedule:run`,
+ *   `graphql:operation` and `events:*` hooks (spans → metrics → logs) and `messaging:publish` (producer spans),
  *   listens to `schedule:run` (run counters) and routes the framework logs through the logger; a
  *   hook whose features are all disabled is not registered (options given as a function: removed in
  *   `onBootstrap`, once they are evaluated); once the logger exists, `getLogger()` loggers write
@@ -165,6 +165,18 @@ class ObservabilityPluginImpl implements ObservabilityPluginInstance {
         this.#kit?.scheduleListener?.(event)
       }),
     )
+    this.#hook('events', () =>
+      hooks.wrap('events:publish', (event, next) => {
+        const wrapper = this.#kit?.events
+        return wrapper === undefined ? next() : wrapper(event, next)
+      }),
+    )
+    this.#hook('eventListener', () =>
+      hooks.wrap('events:listener', (event, next) => {
+        const wrapper = this.#kit?.eventListener
+        return wrapper === undefined ? next() : wrapper(event, next)
+      }),
+    )
     this.#hook('graphql', () =>
       hooks.wrap('graphql:operation', (event, next) => {
         const wrapper = this.#kit?.graphql
@@ -233,7 +245,15 @@ class ObservabilityPluginImpl implements ObservabilityPluginInstance {
 }
 
 /** The features of the kit served by a hook of the plugin. */
-type HookedFeature = 'http' | 'messaging' | 'publish' | 'schedule' | 'scheduleListener' | 'graphql'
+type HookedFeature =
+  | 'http'
+  | 'messaging'
+  | 'publish'
+  | 'schedule'
+  | 'scheduleListener'
+  | 'graphql'
+  | 'events'
+  | 'eventListener'
 
 /**
  * A runtime definition returning an object owned by the plugin. Transient: created on injection
