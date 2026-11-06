@@ -280,20 +280,28 @@ input CreateUserInput {
 `@Loader()` and `BatchLoad` in Znight, a request-scoped `DataLoader` in NestJS, the `dataloader`
 package in the others. `createUser` validates its input with the Zod 4 schema of `POST /users`.
 
-| Application   | What serves the schema                                                                                 |
-| ------------- | ------------------------------------------------------------------------------------------------------ |
-| graphql-js    | Hand-wired: graphql-js 17 `parse` and `validate`, cached by query text, then `execute`, on `node:http` |
-| GraphQL Yoga  | `graphql-yoga` 6 standalone: `node:http` on Node.js, `Bun.serve()` on Bun                              |
-| Znight        | `@znight/graphql` code-first (schema derived from the types at build time), its built-in transport     |
-| Znight + Yoga | The same application with `yogaDriver()`: Yoga serves the schema, Znight executes it                   |
-| NestJS + Yoga | NestJS 12, `@nestjs/graphql` 14 and `@graphql-yoga/nestjs`, on Fastify and on Express                  |
+| Application   | What serves the schema                                                                                 | Executor                               |
+| ------------- | ------------------------------------------------------------------------------------------------------ | -------------------------------------- |
+| graphql-js    | Hand-wired: graphql-js 17 `parse` and `validate`, cached by query text, then `execute`, on `node:http` | graphql-js `execute`                   |
+| GraphQL Yoga  | `graphql-yoga` 6 standalone: `node:http` on Node.js, `Bun.serve()` on Bun                              | `@graphql-tools/executor` (Yoga's)     |
+| Znight        | `@znight/graphql` code-first (schema derived from the types at build time), its built-in transport     | graphql-js `execute`                   |
+| Znight + Yoga | The same application with `yogaDriver()`: Yoga serves the schema, Znight executes it                   | graphql-js `execute` (Znight's engine) |
+| NestJS + Yoga | NestJS 12, `@nestjs/graphql` 14 and `@graphql-yoga/nestjs`, on Fastify and on Express                  | `@graphql-tools/executor` (Yoga's)     |
 
-Every application runs on the same copy of graphql-js 17 (the runner checks it before a run), with
-the defaults of its framework: its own document cache, no GraphiQL, no logging, no persisted
-queries, no JIT and no response cache. The load test is the one of
+Every application builds its schema, parses and validates on the same copy of graphql-js 17 (the
+runner checks, before a run, that every package of every application resolves the same one). They
+do not all execute with it: Yoga, and NestJS through Yoga, run the executor of
+`@graphql-tools/executor`, Yoga's default, a fork of graphql-js `execute`; graphql-js, Znight and
+Znight + Yoga run graphql-js `execute`.
+
+Every application keeps the defaults of its framework: its own document cache, no GraphiQL, no
+logging, no persisted queries, no JIT and no response cache. The load test is the one of
 [Throughput and latency](#throughput-and-latency): autocannon, 100 connections, rounds that change
 the order of the applications. Every response is checked: a status other than `200`, an `errors`
-key or data other than expected fails the run.
+key or data other than expected fails the run (the first body is parsed and checked, the next ones
+compared with it as text, so that checking costs the load generator almost nothing). Before the
+runs, each application is started once in a counting mode to check that one `books` request makes
+exactly one `users.findMany()` call.
 
 <!-- benchmarks:graphql -->
 
@@ -331,10 +339,13 @@ _No results yet._
   larger than any difference shown here.
 - **Defaults, not tuning.** No framework is tuned beyond turning NestJS's logger off. In particular,
   Znight's security headers and request ids are on, as they are in your application by default.
-- **GraphQL on one copy of graphql-js 17.** graphql-js 17.0 creates an `AbortController` per
-  execution and aborts it when the execution ends, which builds a `DOMException` with its stack
-  trace: a few microseconds per operation on Node.js, much less on Bun, paid by every application.
-  Apollo Server is not measured: it does not support graphql-js 17. Where an application cannot
+- **GraphQL: one graphql-js 17, two executors.** graphql-js 17.0 `execute` creates an
+  `AbortController` per execution and aborts it when the execution ends, which builds a
+  `DOMException` with its stack trace: a few microseconds per operation on Node.js, much less on
+  Bun. Only the applications that execute with graphql-js pay it (graphql-js, Znight and Znight +
+  Yoga); Yoga and NestJS + Yoga execute with `@graphql-tools/executor`, which creates none. So Yoga
+  against Znight + Yoga, or NestJS against Znight, also compares two executors, and the graphql-js
+  application is not a floor for Yoga. Apollo Server is not measured: it does not support graphql-js 17. Where an application cannot
   run on a runtime, its cells read "n/a" and the reason is given under the tables.
 - **Dependency injection projects are compiled with `tsc`.** A Znight application is normally built
   by Vite, which bundles the provider modules and strips the decorators: the dependency injection

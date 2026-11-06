@@ -10,11 +10,11 @@ import type { GraphqlVariant } from './graphql-variants.ts'
 import type { GraphqlResult, GraphqlSkipped, HttpRound, HttpSettings, Suite } from './results.ts'
 import type { Runtime } from './variants.ts'
 
-import { existsSync, readFileSync, realpathSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs'
+import { join } from 'node:path'
 
 import { rotate } from './boot.ts'
-import { environment, GRAPHQL_PACKAGES } from './environment.ts'
+import { environment, GRAPHQL_PACKAGES, packageDir } from './environment.ts'
 import { OPERATION_SPECS } from './graphql-operations.ts'
 import { GRAPHQL_ENDPOINT, unsupportedReason } from './graphql-variants.ts'
 import { runtimeBinary, start, stop } from './process.ts'
@@ -87,33 +87,95 @@ async function check(
   }
 }
 
-/** Root directory of the `graphql` package that code in `dir` loads. */
-function graphqlCopy(dir: string): string {
-  let current = dirname(Bun.resolveSync('graphql', dir))
-  for (;;) {
-    const manifest = join(current, 'package.json')
-    if (existsSync(manifest) && (JSON.parse(readFileSync(manifest, 'utf8')) as { name?: string }).name === 'graphql') {
-      return realpathSync(current)
-    }
-    const parent = dirname(current)
-    if (parent === current) throw new Error(`No graphql package above ${dir}`)
-    current = parent
-  }
+interface Manifest {
+  readonly dependencies?: Readonly<Record<string, string>>
+  readonly peerDependencies?: Readonly<Record<string, string>>
 }
 
-/** Every application, and the in-process suite, load the same copy of graphql-js. */
-export function checkGraphqlCopies(variants: readonly GraphqlVariant[]): string {
-  const copies = new Map<string, string[]>()
-  for (const dir of new Set([BENCHMARKS, ...variants.map(v => v.dir)])) {
-    const copy = graphqlCopy(dir)
-    copies.set(copy, [...(copies.get(copy) ?? []), dir])
+const manifestOf = (dir: string): Manifest => JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as Manifest
+
+/**
+ * Every copy of `graphql` that code in `root` can load: `root` and each package of its dependency
+ * tree (dependencies and installed peers, followed through their real directories, as Node.js and
+ * Bun resolve them) that depends on `graphql` resolve it from where they are. Maps each copy to the
+ * packages that load it.
+ */
+function graphqlCopies(root: string): Map<string, Set<string>> {
+  const copies = new Map<string, Set<string>>()
+  const seen = new Set<string>()
+  const queue: [dir: string, label: string][] = [[realpathSync(root), root]]
+  for (let item = queue.shift(); item !== undefined; item = queue.shift()) {
+    const [dir, label] = item
+    if (seen.has(dir)) continue
+    seen.add(dir)
+    const manifest = manifestOf(dir)
+    const names = new Set([
+      ...Object.keys(manifest.dependencies ?? {}),
+      ...Object.keys(manifest.peerDependencies ?? {}),
+    ])
+    for (const name of names) {
+      let found: string
+      try {
+        found = packageDir(name, dir)
+      } catch {
+        continue // an optional peer that is not installed
+      }
+      if (name === 'graphql') {
+        copies.set(found, (copies.get(found) ?? new Set()).add(label))
+      } else {
+        queue.push([found, name])
+      }
+    }
   }
-  if (copies.size !== 1) {
-    const lines = [...copies].map(([copy, dirs]) => `${copy}: ${dirs.join(', ')}`)
-    throw new Error(`The applications load different copies of graphql:\n${lines.join('\n')}`)
+  return copies
+}
+
+/**
+ * Every application, every package they load, and the in-process suite load the same copy of
+ * graphql-js, and the workspace installs only one.
+ */
+export function checkGraphqlCopies(variants: readonly GraphqlVariant[]): string {
+  const copies = new Map<string, Set<string>>()
+  for (const dir of new Set([BENCHMARKS, ...variants.map(v => v.dir)])) {
+    for (const [copy, users] of graphqlCopies(dir)) copies.set(copy, new Set([...(copies.get(copy) ?? []), ...users]))
+  }
+  const store = join(BENCHMARKS, '..', 'node_modules', '.bun')
+  const installed = existsSync(store) ? readdirSync(store).filter(entry => entry.startsWith('graphql@')) : []
+  if (copies.size !== 1 || installed.length > 1) {
+    const lines = [...copies].map(([copy, users]) => `${copy}: ${[...users].join(', ')}`)
+    throw new Error(
+      `The applications load different copies of graphql:\n${lines.join('\n')}\ninstalled: ${installed.join(', ')}`,
+    )
   }
   const [copy] = copies.keys()
   return copy ?? ''
+}
+
+/**
+ * The batching invariant of the contract, checked once per application and runtime, outside the
+ * measured runs: started with `BENCH_COUNT_FIND_MANY=1`, the users repository writes one stderr
+ * line per `findMany()` call, and one `books` request makes exactly one.
+ */
+async function checkBatching(variant: GraphqlVariant, runtime: Runtime): Promise<void> {
+  const { child, port } = await start({
+    runtime,
+    cwd: variant.dir,
+    entry: variant.entry,
+    env: { ...variant.env, BENCH_COUNT_FIND_MANY: '1' },
+    probe: GRAPHQL_ENDPOINT,
+    probeRequest: { method: 'POST', headers: JSON_HEADERS, body: OPERATION_SPECS.user.body },
+  })
+  let stderr = ''
+  try {
+    await check(variant, runtime, port, 'books')
+  } finally {
+    await stop(child)
+    stderr = await new Response(child.stderr).text()
+  }
+  const calls = stderr.split('\n').filter(line => line === 'findMany').length
+  if (calls !== 1) {
+    throw new Error(`${variant.id} on ${runtime}: one books request made ${calls} users.findMany() calls, not 1`)
+  }
 }
 
 export async function graphqlSuite(
@@ -124,7 +186,11 @@ export async function graphqlSuite(
   for (const runtime of options.runtimes) {
     for (const variant of options.variants) {
       const reason = unsupportedReason(variant, runtime)
-      if (reason !== undefined) skipped.push({ variant: variant.id, runtime, reason })
+      if (reason === undefined) {
+        await checkBatching(variant, runtime)
+      } else {
+        skipped.push({ variant: variant.id, runtime, reason })
+      }
     }
   }
 

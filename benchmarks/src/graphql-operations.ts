@@ -18,6 +18,12 @@ export interface OperationSpec {
   readonly body: string
   /** `true` when a response body is a successful result carrying the expected data. */
   readonly verify: (body: string) => boolean
+  /**
+   * A cheap check built from one body that passed `verify`: the bodies of the operation are
+   * byte-identical (or, for `createUser`, identical around the id), so the load generator compares
+   * strings instead of parsing JSON, and falls back to `verify` for a body that differs.
+   */
+  readonly same: (verified: string) => (body: string) => boolean
 }
 
 /** Books returned by `books(limit: 20)`: ids 1 to 20, in order. */
@@ -52,9 +58,33 @@ function dataOf(body: string, field: string): unknown {
   return hasKeys(data, field) ? data[field] : undefined
 }
 
-function spec(query: string, verify: (body: string) => boolean, variables?: Json): OperationSpec {
+const identical =
+  (verified: string) =>
+  (body: string): boolean =>
+    body === verified
+
+/** The same body but for the id of the created user: the text before and after it, and an id made of digits. */
+function identicalButId(verified: string): (body: string) => boolean {
+  const user = dataOf(verified, 'createUser')
+  const id = isObject(user) ? JSON.stringify(user['id']) : undefined
+  const at = id === undefined ? -1 : verified.indexOf(id)
+  if (id === undefined || at < 0) return () => false
+  const prefix = verified.slice(0, at)
+  const suffix = verified.slice(at + id.length)
+  return body => {
+    if (!body.startsWith(prefix) || !body.endsWith(suffix)) return false
+    return /^"\d+"$/.test(body.slice(prefix.length, body.length - suffix.length))
+  }
+}
+
+function spec(
+  query: string,
+  verify: (body: string) => boolean,
+  variables?: Json,
+  same: (verified: string) => (body: string) => boolean = identical,
+): OperationSpec {
   const request = variables === undefined ? { query } : { query, variables }
-  return { query, ...(variables === undefined ? {} : { variables }), body: JSON.stringify(request), verify }
+  return { query, ...(variables === undefined ? {} : { variables }), body: JSON.stringify(request), verify, same }
 }
 
 export const OPERATION_SPECS: Readonly<Record<GraphqlOperation, OperationSpec>> = {
@@ -93,6 +123,7 @@ export const OPERATION_SPECS: Readonly<Record<GraphqlOperation, OperationSpec>> 
       )
     },
     { input: { name: 'Ada', email: 'ada@example.com' } },
+    identicalButId,
   ),
 }
 

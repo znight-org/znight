@@ -10,7 +10,10 @@
  *   fields each) through graphql-js `execute()` on the plugin's schema with a pre-parsed document,
  *   through `GraphQLPlugin.execute()` (document cache, context, formatting) and through
  *   `GraphQLEngine.execute()` (what drivers call), outside any scope and inside a request scope;
- *   median nanoseconds per operation of interleaved rounds.
+ *   median nanoseconds per operation of interleaved rounds. Each operation starts from
+ *   `JSON.parse()` of the request body, as over HTTP: the plugin gets a new query string each time
+ *   (its document cache hashes and compares the text, as it does for a real request), and the other
+ *   paths parse the same body so that the comparison stays like for like.
  *
  * The metadata is written by hand in the shape the compiler generates (`metadata.extensions.graphql`,
  * specification §3.3 and RFC 0005 §7): the measurement starts from what a built application loads.
@@ -184,12 +187,19 @@ function measure(run: () => unknown, iterations: number): number {
 const median = (values: readonly number[]): number =>
   values.toSorted((a, b) => a - b)[Math.floor(values.length / 2)] ?? Number.NaN
 
-/** Interleaved rounds (the same noise for every case), then the median of each case. */
+/** `items` rotated left by `by` places. */
+const rotate = <T>(items: readonly T[], by: number): T[] =>
+  items.map((_, index) => items[(index + by) % items.length] as T)
+
+/**
+ * Interleaved rounds (the same noise for every case), in an order that changes every round (the
+ * garbage one case leaves does not always land on the same next case), then the median of each case.
+ */
 function rounds(cases: readonly Case[], count: number, iterations: number): Record<string, number> {
   for (const [, run] of cases) measure(run, iterations)
   const samples = new Map<string, number[]>(cases.map(([name]) => [name, []]))
   for (let index = 0; index < count; index++) {
-    for (const [name, run] of cases) samples.get(name)?.push(measure(run, iterations))
+    for (const [name, run] of rotate(cases, index)) samples.get(name)?.push(measure(run, iterations))
   }
   return Object.fromEntries([...samples].map(([name, values]) => [name, median(values)]))
 }
@@ -204,10 +214,13 @@ async function executeOverhead(count: number, iterations: number): Promise<void>
   const invalid = engine.validate(engine.schema, document)
   if (invalid.length > 0) throw new Error(`Invalid query: ${invalid.map(error => error.message).join(', ')}`)
 
+  // what the HTTP transport receives: every operation parses it into a new query string
+  const body = JSON.stringify({ query })
+  const request = (): { query: string } => JSON.parse(body) as { query: string }
   const cases: Case[] = [
-    ['graphql-js', () => execute({ schema, document: parsed, contextValue: {} })],
-    ['plugin', () => plugin.execute({ query })],
-    ['engine', () => engine.execute({ schema: engine.schema, document })],
+    ['graphql-js', () => request() && execute({ schema, document: parsed, contextValue: {} })],
+    ['plugin', () => plugin.execute(request())],
+    ['engine', () => request() && engine.execute({ schema: engine.schema, document })],
   ]
   // the same data from every path, synchronously: a promise would make the loop measure nothing
   const check = (): void => {
@@ -226,12 +239,12 @@ async function executeOverhead(count: number, iterations: number): Promise<void>
   check()
   const direct = rounds(cases, count, iterations)
   // what GraphQL over HTTP does: the request scope exists already
-  const request = await app.container.runInScope(() => {
+  const scoped = await app.container.runInScope(() => {
     check()
     return rounds(cases, count, iterations)
   })
   await app.stop()
-  print({ fields: QUERY_FIELDS, direct, request })
+  print({ fields: QUERY_FIELDS, direct, request: scoped })
 }
 
 const [mode, first, second] = process.argv.slice(2)
