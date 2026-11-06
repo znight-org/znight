@@ -21,6 +21,7 @@ export function plugins(options: PluginsOptions = {}): Plugin[] {
   return [
     HttpPlugin.configure({
       port: options.port ?? Number(process.env['PORT'] ?? 3000),
+      ...(process.env['HOST'] === undefined ? {} : { host: process.env['HOST'] }),
       guards: [AuthGuard],
       ...(options.adapter === undefined ? {} : { adapter: options.adapter }),
     }),
