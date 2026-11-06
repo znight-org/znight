@@ -54,5 +54,17 @@ export {
   type SseMessage,
   TestApp,
   type TestAppOptions,
+  WEBSOCKET_PLUGIN_NAME,
 } from './test-app.ts'
 export { type AopMode, TestBed, type TestBedOptions, type TestBedResult } from './testbed.ts'
+export {
+  type ConnectWebSocketOptions,
+  connectWebSocket,
+  type TestWsClient,
+  type TestWsCloseInfo,
+  type TestWsConnectOptions,
+  type TestWsWaitOptions,
+  type WebSocketConnector,
+  WsHandshakeError,
+  WsRequestError,
+} from './websocket.ts'

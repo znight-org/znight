@@ -25,10 +25,13 @@ import type { CollectedPluginRoute } from './plugin-routes.ts'
 import type { TrustPolicy, TrustProxy } from './proxy.ts'
 import type { SecurityHeadersOptions } from './security-headers.ts'
 import type { ByteSize } from './size.ts'
+import type { CollectedUpgradeRoute, MemoryUpgrade } from './upgrade.ts'
 
 import { displayName, ErrorCode, resolveOptions, ZnightError } from '@znight/core'
 
 import { nodeAdapter } from './adapters/node.ts'
+import { injectResponse, normalizeInject } from './adapters/shared.ts'
+import { MemoryUpgradeRequest, replyBytes } from './adapters/upgrade-io.ts'
 import { DEFAULT_COOKIE_SETTINGS, missingSecrets, signValue } from './cookie-settings.ts'
 import { type CookieSecret, CookieSigner, checkSecrets } from './cookie-signer.ts'
 import { DEFAULT_COOKIE_OPTIONS, decodeCookieValue, isCookieName, serializeResponseCookie } from './cookies.ts'
@@ -43,6 +46,7 @@ import {
   RouteGroups,
   type RouteMeta,
 } from './decisions.ts'
+import { HttpException, ServiceUnavailableException } from './exceptions.ts'
 import { isHeaderName } from './headers.ts'
 import { openInjectSse } from './inject-sse.ts'
 import { isMediaTypePattern } from './mime.ts'
@@ -51,10 +55,12 @@ import { compareRoutePaths, compareStrings, joinPaths, parseRoutePath, type Rout
 import {
   DEFAULT_SSE_SETTINGS,
   Pipeline,
+  pendingUpgradeOf,
   type Resolvable,
   type RoutePlan,
   randomRequestId,
   type SseSettings,
+  type UpgradePlan,
 } from './pipeline.ts'
 import { collectPluginRoutes, drainPlugins } from './plugin-routes.ts'
 import { resolveTrustProxy } from './proxy.ts'
@@ -64,6 +70,7 @@ import { parseByteSize } from './size.ts'
 import { MAX_SSE_TIMER_MS, MIN_SSE_INTERVAL_MS } from './sse.ts'
 import { isValidStatus } from './status.ts'
 import { HttpTokens } from './tokens.ts'
+import { checkHandshake, collectPluginUpgrades } from './upgrade.ts'
 import { bodyPlan, DEFAULT_UPLOAD_LIMITS, type ResolvedUploadLimits, type UploadLimits } from './uploads.ts'
 
 /** How requests whose path ends with an extra `/` are handled. */
@@ -197,6 +204,8 @@ export interface HttpRouteSummary {
   readonly meta: Readonly<Record<string, unknown>>
   /** Display names of the guards, in chain order (global, controller, route). */
   readonly guards: readonly string[]
+  /** `'websocket'` for a WebSocket upgrade route (RFC 0003): a gateway of `@znight/websocket`. */
+  readonly upgrade?: 'websocket'
 }
 
 interface Resolved {
@@ -236,6 +245,8 @@ interface Registration {
   readonly method: Exclude<HttpMethod, 'ALL'>
   readonly path: RoutePath
   readonly plan: RoutePlan
+  /** An upgrade route (RFC 0003): registered in the upgrade table, not on the adapter. */
+  readonly upgrade?: UpgradePlan
   /** `BookController.list`, `plugin "openapi" (document)`. */
   readonly label: string
   readonly source: string
@@ -451,6 +462,29 @@ export class HttpPlugin implements Plugin {
     return openInjectSse(stream => this.injectStream(stream), request)
   }
 
+  /**
+   * Runs a WebSocket handshake in memory (RFC 0003, `WebSocketPlugin.connect()`): the same pipeline
+   * as an upgrade request of the adapter (guards, hooks, the route's checks), without socket. The
+   * transport receives `{ kind: 'memory', peer }`. Resolves with the refusal, or `undefined` once
+   * the connection was accepted. Available after `onBootstrap`.
+   */
+  async upgradeInMemory(request: InjectRequest, native: MemoryUpgrade): Promise<InjectResponse | undefined> {
+    const runtime = this.#require('upgradeInMemory()')
+    const normalized = await normalizeInject(withSignedCookies(request, runtime.options.cookies, 'upgradeInMemory()'))
+    const headers = normalized.headers
+    headers['upgrade'] ??= 'websocket'
+    headers['connection'] ??= 'Upgrade'
+    headers['sec-websocket-version'] ??= '13'
+    headers['sec-websocket-key'] ??= btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))))
+    headers['host'] ??= 'localhost'
+    const reply = await runtime.pipeline.upgrade(
+      new MemoryUpgradeRequest(normalized.method, normalized.url, headers),
+      native,
+    )
+    if (reply === undefined) return undefined
+    return injectResponse(reply.status, reply.headers, await replyBytes(reply))
+  }
+
   register(ctx: PluginContext): void {
     if (this.#active) {
       throw new ZnightError(ErrorCode.DuplicateProvider, 'This HttpPlugin is already used by another application', {
@@ -504,17 +538,40 @@ export class HttpPlugin implements Plugin {
       },
       table,
     )
-    const pluginRoutes = collectPluginRoutes(ctx.app.plugins, this, {
-      prefix: options.prefix === '/' ? '' : options.prefix,
+    const prefix = options.prefix === '/' ? '' : options.prefix
+    const pluginRoutes = collectPluginRoutes(ctx.app.plugins, this, { prefix, container: ctx.container })
+    const support = options.adapter.upgrades
+    const upgrades = collectPluginUpgrades(ctx.app.plugins, this, {
+      prefix,
       container: ctx.container,
+      adapter: options.adapter.name,
+      upgrades: support?.kind,
     })
-    const { registrations, checked } = buildRegistrations(ctx, options, raw, pluginRoutes)
+    const { registrations, checked } = buildRegistrations(ctx, options, raw, pluginRoutes, upgrades.routes, pipeline)
     checkDecisions(checked.routes, checked.groups, options.enforcement, ctx.logger, checked.enforcers)
     const adapter = options.adapter
     const routes: HttpRouteSummary[] = []
+    let upgradeTable: RouteTable<UpgradePlan> | undefined
     for (const registration of registrations) {
-      table.add(registration.method, registration.path, registration.plan)
       const plan = registration.plan
+      if (registration.upgrade !== undefined) {
+        upgradeTable ??= new RouteTable<UpgradePlan>()
+        upgradeTable.add('GET', registration.path, registration.upgrade)
+        routes.push(
+          Object.freeze({
+            method: 'GET',
+            path: registration.path.path,
+            controller: displayName(plan.info.controller),
+            handler: plan.info.handler,
+            source: registration.source,
+            meta: plan.info.meta,
+            guards: registration.guards,
+            upgrade: 'websocket' as const,
+          }),
+        )
+        continue
+      }
+      table.add(registration.method, registration.path, registration.plan)
       adapter.registerRoute({
         method: registration.method,
         path: registration.path,
@@ -533,6 +590,22 @@ export class HttpPlugin implements Plugin {
       )
     }
     adapter.setFallbackHandler((request, error) => pipeline.fallback(request, error))
+    if (upgradeTable !== undefined) {
+      if (support === undefined) {
+        throw new ZnightError(
+          ErrorCode.WebSocketTransportUnavailable,
+          `HttpPlugin: the ${adapter.name} adapter cannot serve WebSocket upgrade routes`,
+          { hints: ['Use a built-in adapter (node, fastify, express, hono) or implement HttpAdapter.upgrades'] },
+        )
+      }
+      const found = upgradeTable
+      pipeline.upgrades = found
+      support.enable({
+        match: path => found.find('GET', path) !== undefined,
+        handle: (request, native) => pipeline.upgrade(request, native),
+        bunWebSocket: upgrades.bunWebSocket,
+      })
+    }
     this.#runtime = { adapter, pipeline, options, routes: Object.freeze(routes) }
   }
 
@@ -882,6 +955,8 @@ interface Declared {
   readonly guards: readonly GuardEntry[]
   /** Effective metadata (available once every group is known). */
   meta(): RouteMeta
+  /** An upgrade route (RFC 0003): its handshake time limit. */
+  readonly upgrade?: { readonly timeoutMs: number | undefined }
 }
 
 function buildRegistrations(
@@ -889,6 +964,8 @@ function buildRegistrations(
   options: Resolved,
   raw: HttpPluginOptions,
   pluginRoutes: readonly CollectedPluginRoute[],
+  upgradeRoutes: readonly CollectedUpgradeRoute[],
+  pipeline: Pipeline,
 ): { readonly registrations: Registration[]; readonly checked: Checked } {
   const { container, metadata } = ctx
   const http = httpMetadata(metadata)
@@ -1071,6 +1148,91 @@ function buildRegistrations(
     })
   }
 
+  for (const route of upgradeRoutes) {
+    const label = `plugin "${route.plugin}" (${route.name})`
+    const where = `${route.path.path} (${route.name})`
+    const invalidGuard = (ref: unknown): ZnightError =>
+      new ZnightError(
+        ErrorCode.InvalidRoute,
+        `HttpPlugin: plugin "${route.plugin}": the guards of the upgrade route ${where} must be provider tokens, classes or objects with a canActivate() method (received ${describeValue(ref)})`,
+      )
+    const guards = [
+      ...globalGuards,
+      ...route.guards.map(ref =>
+        typeof ref === 'string'
+          ? compiledGuard(ref, `guard of ${where}`)
+          : (guardEntries(container, metadata, [ref], invalidGuard)[0] as GuardEntry),
+      ),
+    ]
+    const values: Record<string, unknown> = {}
+    for (const entry of route.meta) {
+      groups.declare(entry, `the plugin "${route.plugin}"`)
+      values[entry.key] = entry.value
+    }
+    const meta: RouteMeta = Object.freeze(values)
+    pending.push(() => checkTargetMeta(meta, groupOf, `the upgrade route ${where} of the plugin "${route.plugin}"`))
+    const accept = route.accept
+    const precheck = route.precheck
+    // the protocol checks, the drain and the route's own checks run before the global guards
+    const checks: CanActivate = {
+      canActivate: (ctx: HttpContext): boolean | Promise<boolean> => {
+        checkHandshake(ctx)
+        if (pipeline.draining) {
+          throw new ServiceUnavailableException('The server is shutting down', undefined, {
+            headers: { 'retry-after': '1' },
+          })
+        }
+        if (precheck === undefined) return true
+        const done = precheck(ctx)
+        return done instanceof Promise ? done.then(() => true) : true
+      },
+    }
+    const definition: HttpRouteDefinition = Object.freeze({
+      method: 'GET',
+      path: route.relativePath,
+      fullPath: route.relativePath,
+      handler: route.name,
+      meta,
+      guards: [],
+      interceptors: [],
+      params: [],
+      rawResponse: true,
+      invoke: async (_plugin: unknown, http: HttpContext): Promise<undefined> => {
+        const upgrade = pendingUpgradeOf(http)
+        if (upgrade === undefined) throw new Error(`The upgrade route ${where} only serves upgrade requests`)
+        // answered 408 already: the late handshake is not completed
+        if (upgrade.expired) throw handshakeExpired()
+        await accept(http, upgrade)
+        if (!upgrade.accepted) throw new Error(`accept() of the upgrade route ${where} did not take the connection`)
+        return undefined
+      },
+    })
+    const instance: Resolvable<object> = { instance: route.instance }
+    const chain = [{ instance: checks }, ...guards.map(guard => guard.resolvable)]
+    const body = bodyPlan({}, options.bodyLimit, options.uploads)
+    const path = route.path
+    declared.push({
+      method: 'GET',
+      path,
+      plan: (method: string): RoutePlan => ({
+        definition,
+        invoke: definition.invoke,
+        path,
+        info: Object.freeze({ method, path: path.path, controller: route.owner, handler: route.name, meta }),
+        controller: instance,
+        guards: chain,
+        interceptors: [],
+        parseBody: false,
+        body,
+      }),
+      label,
+      source: route.plugin,
+      guards,
+      meta: () => meta,
+      upgrade: { timeoutMs: route.timeoutMs },
+    })
+  }
+
   // `enforces` of every guard class, read once per class. The guards of the chains declare their
   // groups; the guard classes of the application that sit in no chain only make their groups known,
   // so that a decision whose guard was forgotten everywhere (a second entrypoint, a worker, a test)
@@ -1108,18 +1270,30 @@ function buildRegistrations(
     }
   })
 
-  const registration = (route: Declared, method: Exclude<HttpMethod, 'ALL'>): Registration => ({
-    method,
-    path: route.path,
-    plan: route.plan(method),
-    label: route.label,
-    source: route.source,
-    guards: Object.freeze(route.guards.map(guard => guard.name)),
-  })
+  const registration = (route: Declared, method: Exclude<HttpMethod, 'ALL'>): Registration => {
+    const plan = route.plan(method)
+    return {
+      method,
+      path: route.path,
+      plan,
+      label: route.label,
+      source: route.source,
+      guards: Object.freeze(route.guards.map(guard => guard.name)),
+      ...(route.upgrade === undefined ? {} : { upgrade: { plan, timeoutMs: route.upgrade.timeoutMs } }),
+    }
+  }
   const explicit: Registration[] = []
   const catchAll: Declared[] = []
+  // upgrade routes have their own table: a page and its socket may share a path
+  const upgradeTable = new RouteTable<Registration>()
+  const upgrades: Registration[] = []
   for (const route of declared) {
-    if (route.method === 'ALL') catchAll.push(route)
+    if (route.upgrade !== undefined) {
+      const candidate = registration(route, 'GET')
+      const existing = upgradeTable.add('GET', candidate.path, candidate)
+      if (existing !== undefined) throw duplicateRoute(candidate, existing)
+      upgrades.push(candidate)
+    } else if (route.method === 'ALL') catchAll.push(route)
     else explicit.push(registration(route, route.method))
   }
 
@@ -1144,7 +1318,8 @@ function buildRegistrations(
     for (const method of CONCRETE_METHODS) add(method === 'GET' ? first : registration(route, method), false)
   }
 
-  // trailing-slash variants
+  // trailing-slash variants (an upgrade route never redirects: WebSocket clients do not follow redirects)
+  accepted.push(...upgrades)
   const result: Registration[] = [...accepted]
   if (options.trailingSlash !== 'strict') {
     for (const candidate of accepted) {
@@ -1158,10 +1333,11 @@ function buildRegistrations(
         shape: `${path.shape}/`,
       }
       const plan: RoutePlan =
-        options.trailingSlash === 'redirect'
+        options.trailingSlash === 'redirect' && candidate.upgrade === undefined
           ? { ...candidate.plan, path: variant, redirect: true }
           : { ...candidate.plan, path: variant }
-      result.push({ ...candidate, path: variant, plan })
+      const upgrade = candidate.upgrade === undefined ? {} : { upgrade: { ...candidate.upgrade, plan } }
+      result.push({ ...candidate, path: variant, plan, ...upgrade })
     }
   }
 
@@ -1477,4 +1653,9 @@ function resolveRef<T>(
     return { resolvable: { instance: ref as T }, cls, name: className || `${what} instance` }
   }
   throw invalid()
+}
+
+/** A handshake completed after its `408`: refused quietly (a 4xx is not logged as a server error). */
+function handshakeExpired(): HttpException {
+  return new HttpException(408, 'WebSocket handshake timed out')
 }

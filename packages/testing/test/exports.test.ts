@@ -6,7 +6,11 @@ it('exposes the public runtime API', () => {
     'HTTP_PLUGIN_NAME',
     'TestApp',
     'TestBed',
+    'WEBSOCKET_PLUGIN_NAME',
+    'WsHandshakeError',
+    'WsRequestError',
     'clearMock',
+    'connectWebSocket',
     'createMetadata',
     'createMock',
     'createSpy',
@@ -27,4 +31,5 @@ it('TestBed and TestApp cannot be instantiated directly', () => {
   expect(typeof entry.TestBed.create).toBe('function')
   expect(typeof entry.TestApp.create).toBe('function')
   expect(entry.HTTP_PLUGIN_NAME).toBe('http')
+  expect(entry.WEBSOCKET_PLUGIN_NAME).toBe('websocket')
 })

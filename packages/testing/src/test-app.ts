@@ -12,12 +12,22 @@ import type {
   TypedToken,
   ZnightMetadata,
 } from '@znight/core'
+import type { TestWsClient, TestWsConnectOptions, WebSocketConnector } from './websocket.ts'
 
 import { Application, createConsoleLogger, ErrorCode, ZnightError } from '@znight/core'
 
-import { readGraphQLRoots, readHttpRoots, readMessagingRoots, readScheduleRoots } from './extensions.ts'
+import {
+  readGraphQLRoots,
+  readHttpRoots,
+  readMessagingRoots,
+  readScheduleRoots,
+  readWebSocketRoots,
+} from './extensions.ts'
 import { MetadataIndex } from './metadata-index.ts'
 import { entriesOf } from './utils.ts'
+
+/** Name of the WebSocket plugin `TestApp.connect()` delegates to (`WebSocketPlugin` from `@znight/websocket`). */
+export const WEBSOCKET_PLUGIN_NAME = 'websocket'
 
 /** Name of the HTTP plugin `TestApp.inject()` delegates to (`HttpPlugin.configure()` from `@znight/http`). */
 export const HTTP_PLUGIN_NAME = 'http'
@@ -321,6 +331,39 @@ export class TestApp implements AsyncDisposable {
   }
 
   /**
+   * Opens an in-memory WebSocket connection through the WebSocket plugin (`WebSocketPlugin` of
+   * `@znight/websocket`): the real handshake through the HTTP pipeline (guards, origin and
+   * subprotocol checks), then an in-memory transport. `path` is the URL path, HTTP prefix included.
+   * Rejects with a `WsHandshakeError` when the handshake is refused.
+   *
+   * ```ts
+   * await using alice = await app.connect('/chat', { protocols: ['chat.v1'] })
+   * expect(await alice.request('room.join', { room: 'general' })).toEqual({ members: 1 })
+   * ```
+   *
+   * @throws ZnightError ZNIGHT001 when the application has no WebSocket plugin, ZNIGHT021 once closed.
+   */
+  connect(path: string, options?: TestWsConnectOptions): Promise<TestWsClient> {
+    try {
+      if (this.#closed) {
+        throw new ZnightError(ErrorCode.LifecycleFailed, 'TestApp.connect(): the application is closed')
+      }
+      if (typeof path !== 'string') throw new TypeError('[znight] TestApp.connect() expects a path')
+      const plugin = this.app.getPlugin<Plugin & Partial<WebSocketConnector>>(WEBSOCKET_PLUGIN_NAME)
+      if (plugin === undefined || typeof plugin.connect !== 'function') {
+        throw new ZnightError(ErrorCode.MissingProvider, 'TestApp.connect() requires the WebSocket plugin', {
+          hints: [
+            'Add WebSocketPlugin.configure() from @znight/websocket (and HttpPlugin) to TestApp.create({ plugins })',
+          ],
+        })
+      }
+      return plugin.connect(path, options)
+    } catch (error) {
+      return Promise.reject(error)
+    }
+  }
+
+  /**
    * Dispatches a request in memory and resolves at the response headers; the body is read as it is
    * produced (`response.body`). Cancelling the body (or aborting `signal`) disconnects the client.
    *
@@ -451,6 +494,7 @@ function initOptions(
       ...readMessagingRoots(metadata),
       ...readScheduleRoots(metadata),
       ...readGraphQLRoots(metadata),
+      ...readWebSocketRoots(metadata),
     ].filter(token => index.isProvider(token))
     // plugin roots complete the entry points; they never restrict the boot by themselves
     if (roots.length === 0) return {}

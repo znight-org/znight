@@ -8,6 +8,7 @@ import type { SetCookieInfo } from './cookies.ts'
 import type { HeaderValue } from './exceptions.ts'
 import type { HttpMethod } from './metadata.ts'
 import type { RoutePath } from './path.ts'
+import type { AdapterUpgrades } from './upgrade.ts'
 
 /** A request, as seen by the plugin. */
 export interface AdapterRequest {
@@ -243,4 +244,10 @@ export interface HttpAdapter {
    * adapters; the four built-in adapters implement it.
    */
   injectStream?(request: InjectStreamRequest): Promise<InjectStreamResponse>
+  /**
+   * WebSocket upgrades (RFC 0003): the adapter routes the upgrade requests `HttpPlugin` asks for
+   * to the pipeline, before its own routing. Optional: an adapter without it cannot serve
+   * `@znight/websocket` gateways. The four built-in adapters implement it.
+   */
+  readonly upgrades?: AdapterUpgrades
 }

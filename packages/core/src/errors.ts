@@ -6,8 +6,8 @@
  * - `ZNIGHT001`–`ZNIGHT029`: the core, the compiler and the features shipped in 0.1 (http,
  *   messaging, config, observability).
  * - From `ZNIGHT030`, each first-party package reserves a block of ten: `ZNIGHT030`–`039`
- *   `@znight/openapi`, `ZNIGHT040`–`049` `@znight/schedule`, `ZNIGHT050`–`059` `@znight/websocket`
- *   (reserved), `ZNIGHT060`–`069` `@znight/graphql`, `ZNIGHT070`–`079` `@znight/events`.
+ *   `@znight/openapi`, `ZNIGHT040`–`049` `@znight/schedule`, `ZNIGHT050`–`059` `@znight/websocket`,
+ *   `ZNIGHT060`–`069` `@znight/graphql`, `ZNIGHT070`–`079` `@znight/events`.
  *
  * Within a range, codes are allocated in order without gaps. A package uses its block for its own
  * failure modes, with one catch-all code for invalid usage and options, and reuses a lower code
@@ -101,6 +101,18 @@ export const ErrorCode = {
   /** A scheduled run was aborted (`ctx.signal.reason`, `JobAbortedError`); never thrown by the framework. */
   JobAborted: 'ZNIGHT044',
 
+  // ZNIGHT050–059: @znight/websocket (RFC 0003)
+  /**
+   * Invalid gateway: `@Gateway` options, lifecycle methods, events handled twice, reserved event
+   * names, parameters; at boot, invalid `WebSocketPlugin` options or `metadata.extensions.websocket`.
+   */
+  InvalidGateway: 'ZNIGHT050',
+  /**
+   * Gateways cannot be served: no `HttpPlugin`, an adapter without upgrade support, `ws` missing on
+   * Node.js, a transport that does not match the server.
+   */
+  WebSocketTransportUnavailable: 'ZNIGHT051',
+
   // ZNIGHT060–069: @znight/graphql (RFC 0005, RFC 0007)
   /** A TypeScript type cannot be mapped to a GraphQL type, or a resolver lacks the annotation it needs. */
   InvalidGraphQLType: 'ZNIGHT060',
@@ -188,6 +200,8 @@ export const ERROR_DESCRIPTIONS: Readonly<Record<ErrorCode, string>> = {
   ZNIGHT042: 'Unknown job: no job has this name',
   ZNIGHT043: 'Missing lock store: a job requires a lock but SchedulePlugin has no store',
   ZNIGHT044: 'Job aborted: a scheduled run was aborted (timeout, lost lock, removal or shutdown)',
+  ZNIGHT050: 'Invalid gateway: a WebSocket gateway, its handlers or the WebSocketPlugin options are invalid',
+  ZNIGHT051: 'WebSocket transport unavailable: gateways cannot be served by the HTTP server',
   ZNIGHT060: 'Invalid GraphQL type: a TypeScript type cannot be mapped to a GraphQL type',
   ZNIGHT061: 'GraphQL name conflict: two types or root fields share a name, or a name is invalid or reserved',
   ZNIGHT062: 'Invalid resolver: the structure of a GraphQL resolver is invalid',

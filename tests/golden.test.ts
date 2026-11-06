@@ -24,7 +24,13 @@ const TIMEOUT = 180_000
 
 /** Example applications: the standalone examples and every service of the monorepo example. */
 function exampleRoots(): string[] {
-  const roots = ['examples/rest-api', 'examples/microservice', 'examples/worker', 'examples/graphql-api']
+  const roots = [
+    'examples/rest-api',
+    'examples/microservice',
+    'examples/worker',
+    'examples/graphql-api',
+    'examples/realtime-chat',
+  ]
   const services = join(REPO, 'examples/monorepo/services')
   if (existsSync(services)) {
     for (const name of readdirSync(services).sort()) roots.push(`examples/monorepo/services/${name}`)

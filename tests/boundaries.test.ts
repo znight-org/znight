@@ -118,6 +118,7 @@ describe('repository boundaries (architecture §2)', () => {
       '@znight/messaging',
       '@znight/openapi',
       '@znight/schedule',
+      '@znight/websocket',
     ])
     expect(runtimeEntries.length).toBeGreaterThanOrEqual(packages.length)
   })
@@ -167,6 +168,20 @@ describe('repository boundaries (architecture §2)', () => {
         specifier.startsWith('graphql/') ||
         specifier === 'dataloader' ||
         (specifier.startsWith('@znight/http') && specifier !== '@znight/http/compiler'),
+    )
+    expect(forbidden.map(({ specifier, chain }) => `${specifier} (${show(chain)})`)).toEqual([])
+  })
+
+  it('@znight/websocket/compiler only imports the runtime-free entries of @znight/http, never ws (RFC 0003 §6.4)', () => {
+    const websocket = compilerEntries.find(({ pkg }) => pkg.manifest.name === '@znight/websocket')
+    expect(websocket).toBeDefined()
+    const { bare } = closure(websocket?.file ?? '')
+    const forbidden = bare.filter(
+      ({ specifier }) =>
+        specifier === 'ws' ||
+        (specifier.startsWith('@znight/http') &&
+          specifier !== '@znight/http/compiler' &&
+          specifier !== '@znight/http/path'),
     )
     expect(forbidden.map(({ specifier, chain }) => `${specifier} (${show(chain)})`)).toEqual([])
   })

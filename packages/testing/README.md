@@ -230,14 +230,15 @@ await using app = await TestApp.create({
 })
 ```
 
-| Member                  | Description                                                                                                              |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `inject(request)`       | In-memory request through the HTTP plugin: `{ method = 'GET', url, headers?, body?, query?, cookies?, signedCookies? }`. |
-| `injectSse(request)`    | An event stream (Server-Sent Events) read in memory like `EventSource` (see below).                                      |
-| `injectStream(request)` | In-memory request resolving at the response headers, its `body` a `ReadableStream` read as it is produced.               |
-| `get(key)`              | `app.container.get(key)` (class, token, alias or display name).                                                          |
-| `close()`               | Stops the application (idempotent). Also `await using app = await TestApp.create(...)`.                                  |
-| `app` / `container`     | The `Application` and its `Container`.                                                                                   |
+| Member                    | Description                                                                                                              |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `inject(request)`         | In-memory request through the HTTP plugin: `{ method = 'GET', url, headers?, body?, query?, cookies?, signedCookies? }`. |
+| `injectSse(request)`      | An event stream (Server-Sent Events) read in memory like `EventSource` (see below).                                      |
+| `injectStream(request)`   | In-memory request resolving at the response headers, its `body` a `ReadableStream` read as it is produced.               |
+| `connect(path, options?)` | In-memory WebSocket connection through `WebSocketPlugin` (`@znight/websocket`, see below).                               |
+| `get(key)`                | `app.container.get(key)` (class, token, alias or display name).                                                          |
+| `close()`                 | Stops the application (idempotent). Also `await using app = await TestApp.create(...)`.                                  |
+| `app` / `container`       | The `Application` and its `Container`.                                                                                   |
 
 `inject()` resolves with `{ status, headers, body, bytes, cookies, json() }` (`body` decoded as
 UTF-8, `bytes` the raw body, for downloads, `cookies` the `set-cookie` headers parsed by name); it
@@ -425,6 +426,27 @@ without importing any feature package:
 | `extensions.schedule.jobs[].token`                                                                 | `TestApp` boot roots                         |
 | `extensions.graphql.types[kind: 'object'].fields[].resolver.{ token, guards, loaders }`            | `TestApp` boot roots                         |
 
+### WebSocket connections
+
+`app.connect(path, { query?, headers?, protocols?, origin?, cookies? })` runs the real WebSocket
+handshake of `WebSocketPlugin` (`@znight/websocket`) through the HTTP pipeline, in memory, and
+resolves with a `TestWsClient`: `request(event, data?)` (the reply's data; rejects with a
+`WsRequestError` `{ code, message, details }`), `next(event?)` (the oldest server event not taken
+yet: frames are buffered from the start), `send`, `sendRaw`, `nextRaw`, `frames`, `close()` and
+`closed`. A refused handshake rejects with a `WsHandshakeError` (`status`, `headers`, `body`,
+`json()`). `connectWebSocket(url, { headers?, protocols? })` gives the same client over the network
+(the global `WebSocket` of Node.js and Bun).
+
+```ts
+import { connectWebSocket, WsHandshakeError } from '@znight/testing'
+
+await using alice = await app.connect('/chat', { protocols: ['chat.v1'] })
+expect(await alice.request('room.join', { room: 'general' })).toEqual({ members: 1 })
+await expect(app.connect('/chat', { origin: 'https://evil.example' })).rejects.toBeInstanceOf(WsHandshakeError)
+
+await using remote = await connectWebSocket(`ws://127.0.0.1:${port}/chat`, { protocols: ['chat.v1'] })
+```
+
 Runtime contract with `@znight/http`: the plugin named `'http'` exposes
 `inject(request: { method: string; url: string; headers?; body?; query?; cookies?; signedCookies? }): Promise<{ status: number; headers; body: string; bytes?: Uint8Array; cookies?: Record<string, SetCookieInfo>; json<T>(): T }>`
 (`HttpInjector`, `HttpInjectResult`), dispatching in memory. `TestApp` forwards every request field
@@ -434,6 +456,12 @@ as is (signing `signedCookies` is the plugin's job), returns the plugin's respon
 `injectStream(request)` / `injectSse(request)` members of that plugin (`HttpStreamInjector`:
 `HttpPlugin` of `@znight/http` ≥ 0.1.0), the method defaulting to `GET`; the response shapes are
 `InjectStreamResponse` and `InjectSseResponse` (structural copies of the `@znight/http` types).
+
+Runtime contract with `@znight/websocket`: the plugin named `'websocket'` exposes
+`connect(path, options?): Promise<TestWsClient>` (`WebSocketConnector`). `WsHandshakeError` and
+`WsRequestError` match the errors of `@znight/websocket` structurally (`instanceof` checks their
+`name` and `status` / `code`). `TestApp` boots the gateways of `metadata.extensions.websocket` with
+their guards.
 
 Runtime contract with every plugin: the optional `initRoots(context: { metadata }): readonly ProviderKey[]`
 member of `Plugin` (`@znight/core`; `PluginInitRoots` names a plugin implementing it) returns the

@@ -213,7 +213,7 @@ services testable with mocks. Use the library that fits your data: for SQL, we r
 
 ## Learn from complete applications
 
-The repository ships eight production-shaped [example applications](/examples), each with unit,
+The repository ships nine production-shaped [example applications](/examples), each with unit,
 application and end-to-end tests on Node.js and Bun:
 
 - [**rest-api**](/examples#rest-api): the reference HTTP service, Drizzle on PostgreSQL, API keys,

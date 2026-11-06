@@ -206,6 +206,26 @@
         "vite": "catalog:",
       },
     },
+    "examples/realtime-chat": {
+      "name": "@znight-examples/realtime-chat",
+      "version": "0.0.0",
+      "dependencies": {
+        "@znight/core": "workspace:*",
+        "@znight/http": "workspace:*",
+        "@znight/websocket": "workspace:*",
+        "ws": "8.22.0",
+        "zod": "catalog:",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+        "@types/node": "catalog:",
+        "@znight/cli": "workspace:*",
+        "@znight/compiler": "workspace:*",
+        "@znight/testing": "workspace:*",
+        "typescript": "catalog:",
+        "vite": "catalog:",
+      },
+    },
     "examples/rest-api": {
       "name": "@znight-examples/rest-api",
       "version": "0.0.0",
@@ -608,6 +628,29 @@
       "dependencies": {
         "@znight/core": "workspace:*",
       },
+    },
+    "packages/websocket": {
+      "name": "@znight/websocket",
+      "version": "0.5.1",
+      "dependencies": {
+        "@znight/core": "workspace:*",
+        "@znight/http": "workspace:*",
+      },
+      "devDependencies": {
+        "@znight/compiler": "workspace:*",
+        "@znight/testing": "workspace:*",
+        "hono": "4.13.14",
+        "ws": "8.22.0",
+        "zod": "catalog:",
+      },
+      "peerDependencies": {
+        "@znight/compiler": "workspace:^",
+        "ws": "^8.21.0",
+      },
+      "optionalPeers": [
+        "@znight/compiler",
+        "ws",
+      ],
     },
   },
   "catalog": {
@@ -1383,6 +1426,8 @@
 
     "@znight-examples/notifications-worker": ["@znight-examples/notifications-worker@workspace:examples/monorepo/services/notifications-worker"],
 
+    "@znight-examples/realtime-chat": ["@znight-examples/realtime-chat@workspace:examples/realtime-chat"],
+
     "@znight-examples/rest-api": ["@znight-examples/rest-api@workspace:examples/rest-api"],
 
     "@znight-examples/secure-api": ["@znight-examples/secure-api@workspace:examples/secure-api"],
@@ -1422,6 +1467,8 @@
     "@znight/schedule": ["@znight/schedule@workspace:packages/schedule"],
 
     "@znight/testing": ["@znight/testing@workspace:packages/testing"],
+
+    "@znight/websocket": ["@znight/websocket@workspace:packages/websocket"],
 
     "abort-controller": ["abort-controller@3.0.0", "", { "dependencies": { "event-target-shim": "^5.0.0" } }, "sha512-h8lQ8tacZYnR3vNQTgibj+tODHI5/+l06Au2Pcriv/Gmet0eaj4TwWH41sO9wnHDiQsEj19q0drzdWdeAHtweg=="],
 
@@ -2246,6 +2293,8 @@
     "wrap-ansi-cjs": ["wrap-ansi@7.0.0", "", { "dependencies": { "ansi-styles": "^4.0.0", "string-width": "^4.1.0", "strip-ansi": "^6.0.0" } }, "sha512-YVGIj2kamLSTxw6NsZjoBxfSwsn0ycdesmc4p+Q21c5zPuZ1pl+NfxVdxPtdHvmNVOQ6XSYG4AUtyt/Fi7D16Q=="],
 
     "wrappy": ["wrappy@1.0.2", "", {}, "sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ=="],
+
+    "ws": ["ws@8.22.0", "", { "peerDependencies": { "bufferutil": "^4.0.1", "utf-8-validate": ">=5.0.2" }, "optionalPeers": ["bufferutil", "utf-8-validate"] }, "sha512-Ydggc987+RO0AnWtZ/7Wq9FtNvcrL1b/RO0ud9mWjUPgDrsAAwQSF51sm2hm1XofbU/4jkpGEsLFsZZxU+1DOg=="],
 
     "y18n": ["y18n@5.0.8", "", {}, "sha512-0pfFzegeDWJHJIAmTLRP2DwHjdF5s7jo9tuztdQxAhINCdvS+3nGINqPd00AphqJR/0LhANUS6/+7SCb98YOfA=="],
 

@@ -564,6 +564,8 @@ application provider, e.g. `class AppLogger implements CoreLogger`) nor package-
 | ZNIGHT042 | Unknown job name (`jobs` override, with a did-you-mean hint; `registry.trigger` / `remove`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | error                                          |
 | ZNIGHT043 | Missing lock store: a job requires a lock (`lock: true`) but `SchedulePlugin` has no store (boot; `registry.add*` at runtime)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | error                                          |
 | ZNIGHT044 | Job aborted: the reason of an aborted run's `ctx.signal` (`JobAbortedError`; `reason`: `timeout`, `lock-lost`, `removed`, `shutdown`); never thrown by the framework                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | error (a value)                                |
+| ZNIGHT050 | Invalid gateway: invalid `@Gateway` options, handlers or parameters of a WebSocket gateway; at boot, invalid `WebSocketPlugin` options or `metadata.extensions.websocket` (RFC 0003)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | error / warning                                |
+| ZNIGHT051 | WebSocket transport unavailable: gateways exist but cannot be served (no `HttpPlugin`, an adapter without upgrade support, `ws` missing on Node.js, a transport that does not match the server, upgrade routes added after listening; RFC 0003)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | error                                          |
 | ZNIGHT060 | Invalid GraphQL type: a TypeScript type reached from a resolver cannot be mapped to a GraphQL type (`any`, `unknown`, `object`, `void`, functions, tuples, `Map`, `Record` and index signatures, `Uint8Array`/`Blob`/`File`, unions mixing scalars or scalars and objects, anonymous object types and unions, opaque types, `Promise` outside a return type, async iterables outside `@Subscription`), or a resolver without the explicit return type it needs (RFC 0005 §6.2)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | error                                          |
 | ZNIGHT061 | GraphQL name conflict: two declarations or two root fields share a GraphQL name, an invalid or reserved name (`Query`, `Mutation`, `Subscription`, `__*`, enum values `true`/`false`/`null`), a field resolver conflicting with a property field, two field resolvers adding one field, duplicate argument names (a name clash in hand-written metadata is ZNIGHT066 at boot)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | error                                          |
 | ZNIGHT062 | Invalid resolver: `@ResolveField` without `@Parent()` (schema-first: without a type in `@Resolver`), a subscription not returning an async iterable, resolvers without any `@Query`, inherited handlers, a resolver in a compiled provider library; an unreachable field resolver (warning)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | error / warning                                |
@@ -788,6 +790,22 @@ is ZNIGHT005 with the import to use. `@Resolver` and `@Controller` on one class 
 schema mapping, naming and diagnostics are §9.7. In schema-first mode (RFC 0007) the return type
 annotation is optional (not checked without it), `@Parent()` is optional in a `@ResolveField`, and a
 type name in `@Resolver` is ZNIGHT005 in code-first mode.
+
+### `@znight/websocket`
+
+| Decorator                                                                                                           | Target                                                                                 |
+| ------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `@Gateway(path? \| { path?, scope?, protocol?, protocols?, maxPayload?, concurrency?, rateLimit?, backpressure? })` | class (provider) — static; `scope: 'transient'` is ZNIGHT050                           |
+| `@OnConnect()` `@OnDisconnect()`                                                                                    | method, one of each per gateway; parameters: `@Conn()` only                            |
+| `@OnMessage(event?)`                                                                                                | method — static event name (`^[A-Za-z][\w.:/-]{0,127}$`, `$` reserved); none = default |
+| `@Payload(schema?)` `@Conn()` `@Ctx()`                                                                              | param of `@OnMessage` handlers (`schema` value); `@Conn()` on lifecycle methods too    |
+| `@UseHandshakeGuard(...guards)`                                                                                     | class — HTTP `CanActivate` guards, after the `HttpPlugin` global guards                |
+| `@UseMessageGuard(...guards)`                                                                                       | class, method — `WsGuard`s (`canHandle(ctx: WsMessageContext)`), before each handler   |
+
+Handlers are inherited from analysable base classes (an abstract base needs no `@Gateway`). A
+method has one role; an event has one handler per gateway; a `raw` gateway has a single default
+handler and no event. Route decorators (`createRouteDecorator`) on the class decide the handshake
+and the messages, on a handler its messages only (nearest wins).
 
 ### `@znight/messaging`
 
@@ -1342,6 +1360,7 @@ Manifests of the `@znight/*` packages:
 | `@znight/openapi`       | `@znight/openapi/compiler`   | `OpenApi` → `OpenApiPlugin` (singleton)                                                                                                  | —                                                                                              |
 | `@znight/schedule`      | `@znight/schedule/compiler`  | `SchedulerRegistry` (singleton), `JobContext` (request) → `SchedulePlugin`                                                               | —                                                                                              |
 | `@znight/graphql`       | `@znight/graphql/compiler`   | `GraphQLContext` (request), `PubSub`, `GraphQLPlugin` (singleton) → `GraphQLPlugin`                                                      | —                                                                                              |
+| `@znight/websocket`     | `@znight/websocket/compiler` | `WsConnection` (request), `WsServer`, `WebSocketPlugin` (singleton) → `WebSocketPlugin`                                                  | —                                                                                              |
 | `@znight/events`        | `@znight/events/compiler`    | `EventPublisher` → `EventsPlugin` (singleton)                                                                                            | —                                                                                              |
 
 `@znight/compiler`, `@znight/testing` and `@znight/cli` have no manifest. Subpath exports:
@@ -1556,6 +1575,8 @@ interface ZnightHooks {
   'messaging:publish': MessagePublishEvent // produced by @znight/messaging (MessageBroker.publish)
   'schedule:run': ScheduledRunEvent // produced by @znight/schedule (one occurrence of a job)
   'graphql:operation': GraphQLOperationEvent // produced by @znight/graphql (one operation, RFC 0005)
+  'websocket:message': WebSocketMessageEvent // produced by @znight/websocket (one inbound message, RFC 0003)
+  'websocket:connection': WebSocketConnectionEvent // produced by @znight/websocket (opened or closed; emitted only)
   'events:publish': EventPublishEvent // produced by @znight/events (one publication with listeners, RFC 0011)
   'events:listener': EventListenerEvent // produced by @znight/events (one listener invocation, RFC 0011)
 } // augmentable by third-party packages
@@ -2031,6 +2052,28 @@ not call `next()` gets the same reply as in the general pipeline.
   close its event streams, and before awaiting the drain, whatever the plugin order. The plugin ends
   there the long-lived responses `HttpPlugin` does not track (streams another server produced); a
   returned promise joins the drain (bounded by `drainTimeoutMs`); a failure is logged, never thrown.
+- **Upgrade routes** (`PluginHttpUpgrades`, RFC 0003 §8.2). A plugin
+  implementing `httpUpgrades(context): PluginUpgrades` has it called once in `HttpPlugin.onBootstrap`,
+  after `httpRoutes()`, whatever the plugin order; `context` adds `adapter` (its name) and `upgrades`
+  (`'node'`, `'bun'` or `undefined`, the native upgrades of the adapter) to the plugin routes
+  context. A `PluginUpgradeRoute` is `{ path, name, owner?, meta?, guards?, timeoutMs?, precheck?,
+  accept }`, validated like plugin routes (ZNIGHT007 naming the plugin; required route groups,
+  ZNIGHT023). Upgrade routes are kept in their own `GET` table, never registered on the adapter, and
+  listed by `HttpPlugin.routes` with `upgrade: 'websocket'`. An adapter serves them through its
+  optional `upgrades: AdapterUpgrades` capability (`kind` and `enable(options)`, called before
+  `listen()`); the built-in adapters implement it (`node:http` `'upgrade'` events, `Bun.serve()`
+  for `honoAdapter()` on Bun); an application with upgrade routes on an adapter without it fails at
+  boot. A handshake runs the same pipeline as a request (hook, request scope, global guards, the
+  route's guards) with the RFC 6455 checks first (`GET`, `sec-websocket-version: 13` else `426`
+  with the supported version, a valid `sec-websocket-key` else `400`), then `precheck`, the guards
+  and `accept(ctx, upgrade)`; `accept` MUST call `upgrade.hold(closed)` once the transport completed
+  the handshake, which keeps the request scope and the in-flight count open until `closed` settles.
+  When `timeoutMs` elapses first, the handshake is answered `408` and `upgrade.expired` becomes
+  `true`: `accept` MUST NOT complete it (it checks the flag after every `await`, right before the
+  transport, and refuses with a `4xx`).
+  A refusal (an exception) is written as an HTTP response on the raw socket. A plain `GET` of an
+  upgrade path answers `426`. `HttpPlugin.upgradeInMemory(request, { kind: 'memory', peer })` runs
+  a handshake without socket (tests). Applications without upgrade routes run no upgrade code.
 - **Cookies** (RFC 0006; `cookies.ts` is import-free). Request: the `cookie` header is split on `;`
   only, pairs trimmed, quoted values unquoted, `%` sequences decoded (malformed: kept raw); pairs
   without `=` or with an empty name are ignored; the first occurrence of a name wins; repeated
@@ -2555,6 +2598,17 @@ the OpenTelemetry attributes `graphql.operation.type` and `graphql.operation.nam
 `graphql_operation_duration_seconds{type, name}`, `type` being `unknown` when no operation was
 selected and `name` being `anonymous` for an anonymous operation, capped at `maxOperationNames`
 (default 100) distinct names then `_OTHER`; one log entry per operation only with
+`logging.graphql` (off by default). It also wraps `websocket:message` and listens to
+`websocket:connection` (RFC 0003 §8.10, `tracing` / `metrics` / `logging.websocket`): one `SERVER`
+span `WS <path> <event>` per inbound message, the root of a new trace linked to the handshake's
+span (attributes `znight.websocket.gateway`, `.event`, `.handler`, `.connection_id`, `.outcome`,
+`znight.request.id`, `http.route`; status `ERROR` for the `error` and `timeout` outcomes); the
+metrics `websocket_connections_active{gateway}`, `websocket_connections_total{gateway, initiator}`,
+`websocket_messages_received_total` and `websocket_message_duration_seconds` (`gateway`, `event`,
+`outcome`; `event` is `unmatched` without handler, `raw` on raw gateways, capped at `maxEvents`
+(default 50) per gateway then `_OTHER`); one `websocket connection closed` entry per closed
+connection, a `websocket message failed` entry per failed message, and a `debug` entry per message
+with `logging.websocket.messages`. A run vetoed by a
 `logging.graphql` (off by default). It wraps `events:publish` and `events:listener` (RFC 0011
 §5.12): an `INTERNAL` span `publish <Event>` around the inline phase and `<Event> → <Class.method>`
 per listener (detached listeners start inside the publication span: children of it), the metrics
@@ -3397,6 +3451,111 @@ Runtime (`EventsPlugin`):
   `@znight/events/testing` exports `recordEvents(app)` (`publications`, `of(Class)`, `failures()`,
   `idle()`).
 
+### 9.9 WebSocket (`@znight/websocket`)
+
+The compiler extension (`@znight/websocket/compiler`) owns the decorators of §5, registers each
+`@Gateway` class as a provider (`singleton` or `request`), binds `@UseHandshakeGuard` and
+`@UseMessageGuard` arguments with `resolveClassRef(arg, { from: gateway, role: 'guard' })` (edges
+for ZNIGHT003 and ZNIGHT019), reads route decorators with `readRouteMeta` of
+`@znight/http/compiler`, and only imports that entry and `@znight/http/path` from `@znight/http`
+(`tests/boundaries.test.ts`). `validate` reports gateways sharing a path shape (ZNIGHT007), websocket
+decorators on a class that is neither a gateway nor one of its bases (ZNIGHT005), and gateways
+without a decision of a required route decorator group (ZNIGHT023, RFC 0001). It generates
+`metadata.extensions.websocket`:
+
+```ts
+interface WebSocketMetadata {
+  gateways: {
+    token: Token
+    path: string // normalised @Gateway path, WITHOUT the HttpPlugin prefix
+    protocol: 'events' | 'raw'
+    protocols?: string[]
+    maxPayload?: number // bytes
+    concurrency?: number
+    rateLimit?: { messages: number; intervalMs: number; onLimit: 'reject' | 'close' }
+    backpressure?: { limit?: number; onLimit?: 'close' | 'drop' } // bytes
+    meta: Record<string, unknown> // route decorators of the class
+    handshakeGuards: Token[]
+    messageGuards: Token[] // @UseMessageGuard on the class
+    onConnect?: { method: string; invoke: (g, c: WsConnection) => unknown } // (g: Chat, c: WsConnection) => g.open(c as never)
+    onDisconnect?: { method: string; invoke: (g, c: WsConnection) => unknown }
+    handlers: {
+      method: string
+      event?: string // absent: the default handler
+      meta: Record<string, unknown> // route decorators of the method
+      guards: Token[] // @UseMessageGuard on the method
+      params: { index: number; source: 'payload' | 'connection' | 'context'; schema?: true }[] // informational
+      invoke: (g, m: WsMessageContext) => unknown // async (g, m) => g.send(m.connection as never, await validatePayload(S, m.data))
+    }[] // declaration order, bases first
+  }[] // sorted by token
+  groups?: Record<string, { keys: string[]; required: boolean }> // as extensions.http.groups
+}
+```
+
+Optional fields are omitted when absent. `invoke` passes `@Payload()` as `m.data as never`,
+`@Payload(S)` as `await validatePayload(S, m.data)` (the arrow is then `async`), `@Conn()` as
+`m.connection as never` (`c as never` in lifecycle invokers), `@Ctx()` as `m`; unused parameters
+are omitted. `validatePayload(schema, value)` (exported by `@znight/websocket`) returns the schema
+output, synchronously for synchronous schemas, and throws `WsValidationException` (`BAD_REQUEST`,
+`details: [{ path, message }]`).
+
+`WebSocketPlugin.configure(options | (container) => options)` (name `websocket`; options
+`transport` (`'auto'`), `origins` (`'same-origin'`), `maxPayload` (`'1mb'`), `maxConnections`
+(`Infinity`), `maxPendingMessages` (32), `backpressure` (`{ limit: '1mb', onLimit: 'close' }`),
+`heartbeat` (`{ intervalMs: 30_000 }` or `false`), `handshakeTimeoutMs` (10 000), `handlerTimeoutMs`
+(30 000), `closeTimeoutMs` (2 000), `codec` (`jsonCodec`: `{ decode(frame, binary), encode(message) }`,
+used for every frame of `events` gateways, broadcasts included), `messageGuards`, `exceptionMappers`, `exposeErrors`,
+`shutdown` (`{ code: 1001, reason: 'Server shutting down', timeoutMs: 3_000 }`); invalid options
+are ZNIGHT050):
+
+- `register` refuses an application without `HttpPlugin` (ZNIGHT051), declares `WsConnection`
+  (request external) and registers `WsServer` and itself; `initRoots(context)` returns the classes
+  of `messageGuards` and `exceptionMappers` and the gateways of the metadata with their guards.
+- `httpUpgrades()` (the `PluginHttpUpgrades` contract of `@znight/http`, §9.1) returns one upgrade
+  route per gateway (path, owner = gateway token, meta entries with the groups of
+  `extensions.http.groups` and `extensions.websocket.groups`, handshake guards, `timeoutMs` =
+  `handshakeTimeoutMs`) and the `Bun.serve()` settings of the transport; no route, and no
+  transport, without gateways. `'auto'` selects Bun's native transport for `bun` upgrades and `ws`
+  (`@znight/websocket/ws`, optional peer, loaded lazily; Bun's built-in `ws` on Bun) for `node`
+  upgrades; an explicit transport for the other kind, or an adapter without upgrade support, is
+  ZNIGHT051.
+- `precheck`: `503` (`retry-after: 1`) while draining or at `maxConnections` (open connections
+  plus handshakes past their guards, which `accept` reserves synchronously); `403 Origin not
+  allowed` for an `Origin` the `origins` policy refuses (requests without `Origin` are accepted);
+  `400 Unsupported WebSocket subprotocol` when the gateway declares `protocols` and the client
+  offers none of them (the first declared one the client offers is selected).
+- `accept` creates the connection, sets it as `WsConnection` in the request scope of the
+  handshake, creates a request-scoped gateway (a factory error answers `500`), completes the
+  upgrade with the transport (an in-memory transport for `memory` upgrades), emits
+  `websocket:connection` (`open`) and holds the request scope until the connection is fully closed.
+  It checks `maxConnections` again and reserves a slot before its first `await`, and refuses
+  without completing the upgrade when `upgrade.expired` (`408`) or the drain began (`503`) by the
+  time the transport is called; a connection completed while the drain began is closed with
+  `shutdown.code` / `shutdown.reason` at once. A transport's `accept` MUST settle: the `ws`
+  transport rejects (`400`) when the socket closes before `ws` completes the handshake (client gone,
+  header `ws` refuses), and hands `ws` only the selected subprotocol.
+  Socket events run in the async context captured at the handshake (`AsyncLocalStorage.snapshot()`).
+- Each connection handles its messages in order (`concurrency`), `@OnConnect` first, through
+  `hooks.run('websocket:message')` (wrappers) then `hooks.emit` (listeners): decode (`$ping`
+  answered before the hook), handler selection (`UNKNOWN_EVENT`, outcome `unhandled`), message
+  guards (plugin, class, method; `FORBIDDEN`, outcome `rejected`), `invoke` bounded by
+  `handlerTimeoutMs` (`TIMEOUT`), reply `{ id, data }` or `{ id, error }` / `$error`; the plugin
+  `exceptionMappers` run first. Close codes and limits are those of RFC 0003 §5.8 and §8.6.
+- A heartbeat timer (one per plugin, `unref()`ed) pings the connections of `node` transports and
+  terminates those silent since the previous tick (`initiator: 'heartbeat'`); Bun pings by itself
+  (`idleTimeout`, `sendPings`).
+- `onHttpDrain()`, `onStop()` and `onDispose()` share one idempotent drain: refuse handshakes,
+  close every connection with `shutdown.code` / `reason`, wait up to `shutdown.timeoutMs`, then
+  terminate the rest; `onDispose` also closes the transports.
+- `connect(path, options?)` runs the handshake in memory (`HttpPlugin.upgradeInMemory()`) and
+  resolves with a `WsClient` (`request`, `next`, `send`, `sendRaw`, `nextRaw`, `frames`, `close`,
+  `closed`), or rejects with `WsHandshakeError`; `stats()` returns `{ connections, opened, closed,
+  messagesIn, messagesOut, bytesIn, bytesOut, dropped, slowConsumerCloses }`.
+
+`@znight/websocket/testing` provides `createTestConnection()` (a `WsConnection` recording
+`emitted`, `sent` and `broadcasts`) and `createTestServer({ paths? })` (a `WsServer` recording
+broadcasts).
+
 ## 10. Testing (`@znight/testing`)
 
 ```ts
@@ -3450,7 +3609,8 @@ res.json()
   parameter resolvers, RFC 0010), the message consumers (with their parameter resolvers), the hosts of scheduled jobs (`extensions.schedule.jobs[].token`, disabled jobs
   included: they can be triggered), the GraphQL resolvers with their guards, loaders and parameter resolvers (for every
   field of an object type bound to a resolver, `extensions.graphql.types[].fields[].resolver.token`,
-  `guards`, `loaders` and `paramResolvers`; RFC 0005 §7.1), the override keys and the **plugin roots** (everything
+  `guards`, `loaders` and `paramResolvers`; RFC 0005 §7.1), the WebSocket gateways with their handshake, class and
+  handler guards (`extensions.websocket.gateways[]`, RFC 0003), the override keys and the **plugin roots** (everything
   when there is no controller, consumer, job nor resolver; `only: 'all' | keys`, keys to which the
   override keys and plugin roots are added; `'all'` ignores plugin roots). Plugin roots are the
   providers a plugin resolves in `onBootstrap` although the metadata does not reference them
@@ -3472,6 +3632,12 @@ res.json()
   `app`, `container`. `inject()` resolves with `{ status, headers, body, bytes, cookies, json() }`
   (`bytes`: the raw body, derived from `body` when the plugin returns none; `cookies`: the parsed
   `set-cookie` headers by name, `SetCookieInfo`, `{}` when the plugin returns none).
+  `connect(path, options?)` delegates structurally to the `connect` of the plugin named `websocket`
+  (`WebSocketPlugin`, RFC 0003): an in-memory WebSocket connection resolving with a `TestWsClient`
+  (`request`, `next`, `send`, `sendRaw`, `nextRaw`, `frames`, `close`, `closed`); a refused handshake
+  rejects with an error matching `WsHandshakeError` (`instanceof` is structural: `name` and
+  `status`). `connectWebSocket(url, { headers?, protocols? })` gives the same client over the
+  global `WebSocket` (Node.js and Bun), for end-to-end tests.
   `injectStream(request)` and `injectSse(request)` (method defaulting to `GET`, plus an optional
   `signal`) delegate structurally to the `injectStream` / `injectSse` of the plugin named `http`
   (§9.1: the response at its headers with a `ReadableStream` body; an event stream read in memory

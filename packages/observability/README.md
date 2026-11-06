@@ -299,13 +299,14 @@ acquired`), and, when asked, per GraphQL operation of `@znight/graphql` (`graphq
 completed`, `graphql operation completed with errors`, `graphql operation rejected`, `graphql
 operation failed`):
 
-| Option              | Default | Description                                                                                                                                             |
-| ------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `requests`          | `true`  | `false`, or `{ level?, ignore?(event) }`. 4xx are `warn`, 5xx `error` (with `err`).                                                                     |
-| `messages`          | `true`  | `false`, or `{ level?, ignore?(event) }`. Retries are `warn`, dead letters `error`.                                                                     |
-| `jobs`              | `true`  | `false`, or `{ level?, ignore?(event) }`. Failed runs are `error` (with `err`), skipped `warn`, not acquired (another instance holds the lock) `debug`. |
-| `graphql`           | `false` | `true`, or `{ level?, ignore?(event) }`. `partial` and `rejected` operations are `warn`, `error` is `error`.                                            |
-| `replaceCoreLogger` | `true`  | Route the framework's own logs (core, plugins) through the logger, with `component: 'znight'`.                                                          |
+| Option              | Default | Description                                                                                                                                                           |
+| ------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `requests`          | `true`  | `false`, or `{ level?, ignore?(event) }`. 4xx are `warn`, 5xx `error` (with `err`).                                                                                   |
+| `messages`          | `true`  | `false`, or `{ level?, ignore?(event) }`. Retries are `warn`, dead letters `error`.                                                                                   |
+| `jobs`              | `true`  | `false`, or `{ level?, ignore?(event) }`. Failed runs are `error` (with `err`), skipped `warn`, not acquired (another instance holds the lock) `debug`.               |
+| `graphql`           | `false` | `true`, or `{ level?, ignore?(event) }`. `partial` and `rejected` operations are `warn`, `error` is `error`.                                                          |
+| `websocket`         | `true`  | `false`, or `{ level?, messages?, ignore?(event) }`: one entry per closed connection, `error` entries for failed messages, `debug` per message with `messages: true`. |
+| `replaceCoreLogger` | `true`  | Route the framework's own logs (core, plugins) through the logger, with `component: 'znight'`.                                                                        |
 
 ```ts
 ObservabilityPlugin.configure({
@@ -445,6 +446,22 @@ labelled, later ones are `_OTHER`. `outcome` is `success`, `partial` (data with 
 `error` (no data, or the execution threw) or `rejected` (parse, validation, variables or limits). A
 subscription is timed over its whole life: filter on `type` before reading latencies.
 
+### WebSocket metrics
+
+Connections and inbound messages of `@znight/websocket` (`websocket:*` hooks):
+
+| Metric                               | Type      | Labels                        |
+| ------------------------------------ | --------- | ----------------------------- |
+| `websocket_connections_active`       | gauge     | `gateway`                     |
+| `websocket_connections_total`        | counter   | `gateway`, `initiator`        |
+| `websocket_messages_received_total`  | counter   | `gateway`, `event`, `outcome` |
+| `websocket_message_duration_seconds` | histogram | `gateway`, `event`, `outcome` |
+
+`event` is `unmatched` for unknown events, `raw` on raw gateways, and at most `maxEvents` (50)
+distinct values per gateway (then `_OTHER`). `outcome` is `ok`, `error`, `rejected` (a message
+guard refused it), `unhandled` or `timeout`; `initiator` is `client`, `server`, `shutdown`,
+`heartbeat`, `backpressure` or `error`.
+
 ### Metrics options
 
 | Option           | Default        | Description                                                                                                               |
@@ -457,6 +474,7 @@ subscription is timed over its whole life: filter on `type` before reading laten
 | `messaging`      | `true`         | `false`, or `{ buckets?, ignore?(event), maxTypesPerHandler? }`                                                           |
 | `schedule`       | `true`         | `false`, or `{ buckets?, latenessBuckets?, ignore?(event), maxJobs? }`                                                    |
 | `graphql`        | `true`         | `false`, or `{ buckets?, ignore?(event), maxOperationNames? }`                                                            |
+| `websocket`      | `true`         | `false`, or `{ buckets?, ignore?(event), maxEvents? }`                                                                    |
 | `registry`       | a new registry | An existing `prom-client` registry (e.g. `client.register`, the global one)                                               |
 | `client`         | loaded lazily  | The `prom-client` module, for exotic bundling setups                                                                      |
 
@@ -546,6 +564,15 @@ whole life, and is active while it runs.
 
 The query text (`graphql.document`) may carry literal values, so it is recorded only with
 `tracing: { graphql: { document: true } }`.
+
+### WebSocket message spans
+
+One `SERVER` span per inbound message of `@znight/websocket`, `WS <path> <event>` (`WS <path>` on
+raw gateways), the root of a **new trace** linked to the span of the handshake: a connection lives
+for hours, its messages are not children of a long-ended HTTP span. Attributes:
+`znight.websocket.gateway`, `.event`, `.handler`, `.connection_id`, `.outcome`, `znight.request.id`
+(the handshake's) and `http.route`. The `error` and `timeout` outcomes set the status to `ERROR`.
+`tracing: { websocket: false }` disables them, `{ ignore?(event) }` filters them.
 
 ### The `Tracer`
 

@@ -15,6 +15,7 @@ what you use.
 | [`@znight/http`](./http)                   | Controllers, validation, guards, access decisions, files, cookies, SSE, CORS; `node:http`, Fastify, Express, Hono | dependency    | <Badge type="tip" text="available" /> |
 | [`@znight/openapi`](./openapi)             | OpenAPI 3.1 documents generated at build time; Scalar or Swagger UI                                               | dependency    | <Badge type="tip" text="available" /> |
 | [`@znight/graphql`](./graphql)             | GraphQL: schema from TypeScript types or SDL files checked at build time, loaders, subscriptions over SSE         | dependency    | <Badge type="tip" text="v0.2" />      |
+| [`@znight/websocket`](./websocket)         | WebSocket gateways on the HTTP server: validated events, replies, rooms, backpressure                             | dependency    | <Badge type="tip" text="available" /> |
 | [`@znight/messaging`](./messaging)         | Consumers, retries, dead-letter queues; RabbitMQ, SQS, Kafka, in-memory                                           | dependency    | <Badge type="tip" text="available" /> |
 | [`@znight/schedule`](./schedule)           | Cron, interval and timeout jobs checked at build time; locks across instances                                     | dependency    | <Badge type="tip" text="available" /> |
 | [`@znight/config`](./config)               | Typed config classes from env, `.env`, JSON/YAML, Vault, AWS Secrets Manager                                      | dependency    | <Badge type="tip" text="available" /> |
@@ -29,7 +30,6 @@ what you use.
 | Security           | Built into [`@znight/http`](./http): access decisions checked at build time and at boot, CORS, security headers, trusted proxies; recipes in the [Security guide](/guide/security) |
 | A database, an ORM | The client of your choice, provided by a `@Factory()`; Drizzle recommended for SQL ([Data access](/guide/data-access))                                                             |
 | Caching            | A method interceptor ([recipe](/guide/aop#cache)); `@znight/cache` is on the [roadmap](/roadmap#znight-cache)                                                                      |
-| WebSockets         | Planned, `@znight/websocket` ([roadmap](/roadmap#znight-websocket)); [Server-Sent Events](./http#server-sent-events) today                                                         |
 
 ## How a feature package is built
 

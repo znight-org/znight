@@ -445,6 +445,14 @@ export class ConnectionTracker {
   }
 }
 
+/**
+ * Marks a socket taken over by a WebSocket transport (RFC 0003) as busy: a graceful close of the
+ * server leaves it to its transport, which closes it with a close frame; a forced close destroys it.
+ */
+export function markUpgraded(socket: object): void {
+  ;(socket as TrackedSocket)[ACTIVE] = 1
+}
+
 /** Closes a `node:http` server: graceful (idle connections ended), then forced when asked. */
 export function closeServer(
   server: Server,

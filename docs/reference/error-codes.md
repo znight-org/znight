@@ -12,6 +12,7 @@ and the runtime (`ZnightError`). Messages link here: each code has its own ancho
 Codes `ZNIGHT001` to `ZNIGHT029` belong to the core, the compiler and the features of the first
 release (HTTP, messaging, configuration, observability). From `ZNIGHT030`, each package owns a block
 of ten: `ZNIGHT030`–`039` for `@znight/openapi`, `ZNIGHT040`–`049` for `@znight/schedule`,
+`ZNIGHT050`–`059` for [`@znight/websocket`](/packages/websocket) ([RFC 0003](../../rfcs/0003-websocket.md)),
 `ZNIGHT060`–`069` for [`@znight/graphql`](/packages/graphql) ([RFC 0005](../../rfcs/0005-graphql.md),
 [RFC 0007](../../rfcs/0007-graphql-schema-first.md) for schema-first), `ZNIGHT070`–`079` for
 [`@znight/events`](/packages/events) ([RFC 0011](../../rfcs/0011-application-events.md)).
@@ -55,6 +56,8 @@ Codes are allocated in order inside a block, so the numbering has gaps between b
 | [ZNIGHT042](#znight042) | Unknown job                                         | error                                                | startup, runtime           |
 | [ZNIGHT043](#znight043) | Missing lock store                                  | error                                                | startup, runtime           |
 | [ZNIGHT044](#znight044) | Job aborted                                         | error value (never thrown)                           | runtime                    |
+| [ZNIGHT050](#znight050) | Invalid gateway                                     | error, warning                                       | build, startup             |
+| [ZNIGHT051](#znight051) | WebSocket transport unavailable                     | error                                                | startup                    |
 | [ZNIGHT060](#znight060) | Invalid GraphQL type                                | error                                                | build                      |
 | [ZNIGHT061](#znight061) | GraphQL name conflict                               | error                                                | build                      |
 | [ZNIGHT062](#znight062) | Invalid resolver                                    | error / warning                                      | build                      |
@@ -1133,6 +1136,37 @@ async flush(ctx: JobContext): Promise<void> {
 **How to fix**: nothing is wrong with the scheduler. Check `ctx.signal` between steps and pass it to
 the APIs that accept one, so an aborted run stops quickly; raise `maxDuration` if runs are
 legitimately slower; keep the lock `ttl` comfortably above the time a heartbeat may be delayed.
+
+## ZNIGHT050: Invalid gateway {#znight050}
+
+<!-- TODO(api): verify against implementation -->
+
+A WebSocket gateway of `@znight/websocket` is invalid: an unknown or invalid `@Gateway` option, an
+event handled twice, a reserved (`$`) event name, several `@OnConnect` or `@OnDisconnect` methods, a
+handler parameter without a decorator. At boot, the same code reports invalid `WebSocketPlugin`
+options or a malformed `metadata.extensions.websocket`.
+
+```txt
+ZNIGHT050: ChatGateway handles "message.send" twice: ChatGateway.send and ChatGateway.post
+```
+
+**How to fix**: give each event a single handler, rename events starting with `$` and decorate every
+required handler parameter.
+
+## ZNIGHT051: WebSocket transport unavailable {#znight051}
+
+<!-- TODO(api): verify against implementation -->
+
+Gateways exist but cannot be served by the HTTP server: no `HttpPlugin` in the application, an
+adapter without upgrade support, the `ws` package missing on Node.js, a transport that does not match
+the server, or upgrade routes added after the server started listening.
+
+```txt
+ZNIGHT051: WebSocketPlugin needs HttpPlugin: gateways are served by the HTTP server
+```
+
+**How to fix**: add `HttpPlugin` (without controllers for a WebSocket-only service), install `ws` on
+Node.js, and pick the transport that matches the server.
 
 ## ZNIGHT060: Invalid GraphQL type {#znight060}
 

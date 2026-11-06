@@ -123,3 +123,16 @@ export {
   type TracerOptions,
   type WithSpanOptions,
 } from './tracing/tracer.ts'
+export {
+  DEFAULT_MAX_WEBSOCKET_EVENTS,
+  logWebSocket,
+  measureWebSocketMessages,
+  OTHER_WEBSOCKET_EVENT,
+  traceWebSocketMessages,
+  UNMATCHED_WEBSOCKET_EVENT,
+  type WebSocketLogOptions,
+  type WebSocketLogs,
+  type WebSocketMetrics,
+  type WebSocketMetricsOptions,
+  type WebSocketTracingOptions,
+} from './websocket/gateways.ts'

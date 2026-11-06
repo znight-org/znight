@@ -59,6 +59,10 @@ export {
   type ScheduledRunEvent,
   type ScheduledRunOutcome,
   type ScheduledRunTrigger,
+  type WebSocketCloseInitiator,
+  type WebSocketConnectionEvent,
+  type WebSocketMessageEvent,
+  type WebSocketMessageOutcome,
   type ZnightHooks,
 } from './hooks.ts'
 export {
