@@ -95,3 +95,53 @@ export function highlights(results: Results): Highlights {
       : `Medians on an ${environment.machine} with Node.js ${environment.runtimes.node} · HTTP applications on Fastify`
   return { items, context }
 }
+
+/** Within the noise stated in the caveats of the benchmarks page (about 10%), two numbers are level. */
+const NOISE = 0.1
+
+/** `ours` against `theirs`: `ahead of`, `behind` or `level with`, and the gap in percent. */
+export function compare(
+  ours: number,
+  theirs: number,
+): { readonly verdict: string; readonly gap: string; readonly sign: string } {
+  const ratio = ours / theirs - 1
+  let verdict = ratio > 0 ? 'ahead of' : 'behind'
+  if (Math.abs(ratio) <= NOISE) verdict = 'level with'
+  return { verdict, gap: (Math.abs(ratio) * 100).toFixed(1), sign: ratio >= 0 ? 'more' : 'fewer' }
+}
+
+/**
+ * The headline lines of the GraphQL section, from `results.graphql`: Znight against NestJS on
+ * Fastify and Node.js for `books` (the operation that goes through the DataLoader), and the
+ * per-operation overhead of the plugin in a request scope. Empty without GraphQL results.
+ */
+export function graphqlSummary(results: Results): string[] {
+  const graphql = results.graphql
+  if (graphql === undefined) return []
+  const lines: string[] = []
+  const rps = (variant: string): number | undefined =>
+    graphql.results.find(r => r.variant === variant && r.runtime === 'node' && r.operation === 'books')
+      ?.requestsPerSecond.median
+  const ours = rps('znight-graphql-fastify')
+  const nest = rps('nestjs-graphql-fastify')
+  const raw = rps('baseline-graphql')
+  if (ours !== undefined && nest !== undefined) {
+    const { verdict, gap, sign } = compare(ours, nest)
+    const floor = raw === undefined ? '' : ` and ${formatCount(Math.round(raw))} for graphql-js on node:http`
+    lines.push(
+      `**Znight is ${verdict} NestJS on Node.js** with Fastify: ${formatCount(Math.round(ours))} \`books\` queries per second, against ${formatCount(Math.round(nest))} for NestJS (${gap}% ${sign})${floor}.`,
+    )
+  }
+  const overhead = graphql.micro?.execute.find(
+    r => r.runtime === 'node' && r.scope === 'request' && r.path === 'plugin',
+  )
+  const fields = graphql.micro?.settings.fields
+  if (overhead !== undefined && fields !== undefined) {
+    const percent = overhead.overheadPercent.median
+    const target = percent < 10 ? 'under' : 'over'
+    lines.push(
+      `**Plugin overhead**: \`GraphQLPlugin.execute()\` adds ${percent.toFixed(1)}% to graphql-js \`execute()\` for a cached ${fields}-field query on Node.js, ${target} the 10% target of RFC 0005.`,
+    )
+  }
+  return lines
+}

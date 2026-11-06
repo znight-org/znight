@@ -1,7 +1,7 @@
 ---
 title: Benchmarks
 pageClass: zn-benchmarks
-description: Cold start, memory, dependency injection and HTTP throughput of Znight against NestJS, tsyringe, InversifyJS and hand-wired Fastify, Express, Hono and node:http servers, with the method and the commands to reproduce every number.
+description: Cold start, memory, dependency injection, HTTP and GraphQL throughput of Znight against NestJS, tsyringe, InversifyJS, GraphQL Yoga and hand-wired Fastify, Express, Hono, node:http and graphql-js servers, with the method and the commands to reproduce every number.
 ---
 
 # Benchmarks
@@ -239,6 +239,82 @@ on Bun with 1,000 providers (tsyringe is faster with 100): it loads neither `ref
 decorator metadata, and its decorators do nothing at runtime. The analysis moves to the build, where
 generating the container takes a fraction of a second, once per build (incrementally in watch mode).
 
+## GraphQL
+
+The same comparison for a GraphQL API: every application serves one schema at `POST /graphql`
+(a JSON body, `200` and `application/json`), with a resolver, a service and in-memory repositories
+(100 users, 100 books), the same data everywhere.
+
+```graphql
+type Query {
+  user(id: ID!): User
+  books(limit: Int!): [Book!]!
+}
+type Mutation {
+  createUser(input: CreateUserInput!): User!
+}
+type User {
+  id: ID!
+  name: String!
+  email: String!
+}
+type Book {
+  id: ID!
+  title: String!
+  year: Int!
+  author: User!
+}
+input CreateUserInput {
+  name: String!
+  email: String!
+}
+```
+
+| Operation    | What happens                                                                                                |
+| ------------ | ----------------------------------------------------------------------------------------------------------- |
+| `user`       | `query User($id: ID!) { user(id: $id) { id name email } }`, one user read through the service               |
+| `books`      | `{ books(limit: 20) { id title year author { id name } } }`, the 20 authors loaded in one batch             |
+| `createUser` | `mutation Create($input: CreateUserInput!) { createUser(...) { id name email } }`, input validated by Zod 4 |
+
+`Book.author` goes through a DataLoader in every application (one `users.findMany()` per request):
+`@Loader()` and `BatchLoad` in Znight, a request-scoped `DataLoader` in NestJS, the `dataloader`
+package in the others. `createUser` validates its input with the Zod 4 schema of `POST /users`.
+
+| Application   | What serves the schema                                                                                 |
+| ------------- | ------------------------------------------------------------------------------------------------------ |
+| graphql-js    | Hand-wired: graphql-js 17 `parse` and `validate`, cached by query text, then `execute`, on `node:http` |
+| GraphQL Yoga  | `graphql-yoga` 6 standalone: `node:http` on Node.js, `Bun.serve()` on Bun                              |
+| Znight        | `@znight/graphql` code-first (schema derived from the types at build time), its built-in transport     |
+| Znight + Yoga | The same application with `yogaDriver()`: Yoga serves the schema, Znight executes it                   |
+| NestJS + Yoga | NestJS 12, `@nestjs/graphql` 14 and `@graphql-yoga/nestjs`, on Fastify and on Express                  |
+
+Every application runs on the same copy of graphql-js 17 (the runner checks it before a run), with
+the defaults of its framework: its own document cache, no GraphiQL, no logging, no persisted
+queries, no JIT and no response cache. The load test is the one of
+[Throughput and latency](#throughput-and-latency): autocannon, 100 connections, rounds that change
+the order of the applications. Every response is checked: a status other than `200`, an `errors`
+key or data other than expected fails the run.
+
+<!-- benchmarks:graphql -->
+
+_No results yet._
+
+<!-- /benchmarks:graphql -->
+
+### Inside the process
+
+Two informative targets of [RFC 0005](../rfcs/0005-graphql.md),
+measured without HTTP, in fresh processes: the time to build the schema at boot, Znight from the
+metadata its compiler generates and graphql-js `buildSchema()` from the same SDL; and what the
+plugin adds to graphql-js `execute()` for a query whose document is cached, through
+`GraphQLPlugin.execute()` and through the `GraphQLEngine` that drivers such as Yoga call.
+
+<!-- benchmarks:graphql-micro -->
+
+_No results yet._
+
+<!-- /benchmarks:graphql-micro -->
+
 ## Caveats
 
 - **A laptop, not a lab.** The machine also ran a desktop session. Rounds are interleaved so that
@@ -255,6 +331,11 @@ generating the container takes a fraction of a second, once per build (increment
   larger than any difference shown here.
 - **Defaults, not tuning.** No framework is tuned beyond turning NestJS's logger off. In particular,
   Znight's security headers and request ids are on, as they are in your application by default.
+- **GraphQL on one copy of graphql-js 17.** graphql-js 17.0 creates an `AbortController` per
+  execution and aborts it when the execution ends, which builds a `DOMException` with its stack
+  trace: a few microseconds per operation on Node.js, much less on Bun, paid by every application.
+  Apollo Server is not measured: it does not support graphql-js 17. Where an application cannot
+  run on a runtime, its cells read "n/a" and the reason is given under the tables.
 - **Dependency injection projects are compiled with `tsc`.** A Znight application is normally built
   by Vite, which bundles the provider modules and strips the decorators: the dependency injection
   suite does not use that advantage.
@@ -275,7 +356,7 @@ bun run bench                       # builds the applications, then every suite
 bun run report                      # the charts and the tables of this page, from the results
 ```
 
-`bun run bench:boot`, `bench:http` and `bench:di` run one suite; `bun src/cli.ts http --runtimes node
+`bun run bench:boot`, `bench:http`, `bench:di` and `bench:graphql` run one suite; `bun src/cli.ts http --runtimes node
 --variants znight-fastify,nestjs-fastify` restricts a run; `--quick` checks the setup in a few
 minutes (its results go to `results/quick.json`). The
 [benchmarks README](../benchmarks/README.md) describes the layout and how to add a framework.

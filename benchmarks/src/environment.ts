@@ -10,8 +10,11 @@ import { runtimeVersion } from './process.ts'
 
 const ROOT = join(import.meta.dir, '..')
 
-/** Packages whose version is recorded, and the workspace that installs each of them. */
-const PACKAGES: readonly (readonly [name: string, workspace: string])[] = [
+/** A package whose version is recorded, and the workspace that installs it. */
+export type RecordedPackage = readonly [name: string, workspace: string]
+
+/** Packages of the boot, HTTP and dependency injection suites. */
+const PACKAGES: readonly RecordedPackage[] = [
   ['@znight/core', 'apps/znight'],
   ['@znight/http', 'apps/znight'],
   ['@znight/compiler', 'apps/znight'],
@@ -29,6 +32,23 @@ const PACKAGES: readonly (readonly [name: string, workspace: string])[] = [
   ['autocannon', '.'],
   ['typescript', '.'],
   ['vite', 'apps/znight'],
+]
+
+/** Packages of the GraphQL suite. */
+export const GRAPHQL_PACKAGES: readonly RecordedPackage[] = [
+  ['graphql', 'apps/baseline-graphql'],
+  ['graphql-yoga', 'apps/baseline-graphql'],
+  ['dataloader', 'apps/baseline-graphql'],
+  ['@znight/graphql', 'apps/znight-graphql'],
+  ['@znight/http', 'apps/znight-graphql'],
+  ['fastify', 'apps/znight-graphql'],
+  ['@nestjs/core', 'apps/nestjs-graphql'],
+  ['@nestjs/graphql', 'apps/nestjs-graphql'],
+  ['@graphql-yoga/nestjs', 'apps/nestjs-graphql'],
+  ['@nestjs/platform-fastify', 'apps/nestjs-graphql'],
+  ['@nestjs/platform-express', 'apps/nestjs-graphql'],
+  ['zod', 'apps/baseline-graphql'],
+  ['autocannon', '.'],
 ]
 
 function packageVersion(name: string, workspace: string): string {
@@ -50,7 +70,7 @@ function operatingSystem(): string {
   return pretty ?? `${platform()} ${release()}`
 }
 
-export function environment(): Environment {
+export function environment(packages: readonly RecordedPackage[] = PACKAGES): Environment {
   return {
     date: new Date().toISOString(),
     commit: run('git', ['rev-parse', '--short', 'HEAD']),
@@ -59,6 +79,6 @@ export function environment(): Environment {
     memoryGiB: Math.round(totalmem() / 1024 ** 3),
     os: operatingSystem(),
     runtimes: { node: runtimeVersion('node'), bun: runtimeVersion('bun') },
-    packages: Object.fromEntries(PACKAGES.map(([name, workspace]) => [name, packageVersion(name, workspace)])),
+    packages: Object.fromEntries(packages.map(([name, workspace]) => [name, packageVersion(name, workspace)])),
   }
 }

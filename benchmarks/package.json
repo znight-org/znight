@@ -9,6 +9,7 @@
     "bench:boot": "bun src/cli.ts boot",
     "bench:http": "bun src/cli.ts http",
     "bench:di": "bun src/cli.ts di",
+    "bench:graphql": "bun src/cli.ts graphql",
     "report": "bun src/report.ts",
     "report:check": "bun src/report.ts --check",
     "typecheck": "tsc --noEmit"
@@ -18,7 +19,10 @@
     "@nestjs/core": "12.3.2",
     "@znight/compiler": "workspace:*",
     "@znight/core": "workspace:*",
+    "@znight/graphql": "workspace:*",
+    "@znight/http": "workspace:*",
     "autocannon": "8.0.0",
+    "graphql": "17.0.2",
     "inversify": "8.2.3",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2",
