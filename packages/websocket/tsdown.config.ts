@@ -5,6 +5,7 @@ export default defineConfig({
     index: 'src/index.ts',
     ws: 'src/transports/ws.ts',
     bun: 'src/transports/bun.ts',
+    testing: 'src/testing/index.ts',
     compiler: 'src/compiler/index.ts',
   },
   format: 'esm',

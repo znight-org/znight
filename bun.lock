@@ -600,6 +600,7 @@
       },
       "devDependencies": {
         "@znight/compiler": "workspace:*",
+        "@znight/testing": "workspace:*",
         "hono": "4.13.14",
         "ws": "8.22.0",
         "zod": "catalog:",

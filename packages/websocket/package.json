@@ -34,6 +34,11 @@
       "types": "./dist/bun.d.mts",
       "default": "./dist/bun.mjs"
     },
+    "./testing": {
+      "@znight/source": "./src/testing/index.ts",
+      "types": "./dist/testing.d.mts",
+      "default": "./dist/testing.mjs"
+    },
     "./compiler": {
       "@znight/source": "./src/compiler/index.ts",
       "types": "./dist/compiler.d.mts",
@@ -66,6 +71,7 @@
   },
   "devDependencies": {
     "@znight/compiler": "workspace:*",
+    "@znight/testing": "workspace:*",
     "hono": "4.13.14",
     "ws": "8.22.0",
     "zod": "catalog:"

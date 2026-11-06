@@ -140,3 +140,19 @@ export function readGraphQLRoots(metadata: ZnightMetadata): Token[] {
   }
   return roots
 }
+
+/**
+ * Tokens a WebSocket application needs at boot (`extensions.websocket`, RFC 0003 §7.1): every
+ * gateway, its handshake and message guards and the guards of its handlers.
+ */
+export function readWebSocketRoots(metadata: ZnightMetadata): Token[] {
+  const roots: Token[] = []
+  for (const gateway of arrayOf(extension(metadata, 'websocket')?.['gateways'])) {
+    if (!isRecord(gateway) || typeof gateway['token'] !== 'string') continue
+    roots.push(gateway['token'], ...tokensOf(gateway['handshakeGuards']), ...tokensOf(gateway['messageGuards']))
+    for (const handler of arrayOf(gateway['handlers'])) {
+      if (isRecord(handler)) roots.push(...tokensOf(handler['guards']))
+    }
+  }
+  return roots
+}
