@@ -3,8 +3,9 @@ import type { Plugin, ZnightMetadata } from '@znight/core'
 import type { HttpContext, PendingUpgrade, PluginHttpUpgrades } from '@znight/http'
 import type { TransportSocket, WebSocketTransport } from '../src/index.ts'
 
+import { Duplex } from 'node:stream'
 import { Application, silentLogger } from '@znight/core'
-import { HttpPlugin } from '@znight/http'
+import { HttpException, HttpPlugin } from '@znight/http'
 import { nodeAdapter } from '@znight/http/node'
 
 import { wsTransport } from '../src/transports/ws.ts'
@@ -105,5 +106,83 @@ describe('ws transport', () => {
     await expect(
       transport.accept({ kind: 'memory', peer: {} }, { protocol: '', headers: {}, maxPayload: 1 }, events),
     ).rejects.toThrow('ZNIGHT051')
+  })
+
+  describe('settles accept() when ws aborts the handshake', () => {
+    const events = { message: () => undefined, pong: () => undefined, drain: () => undefined, close: () => undefined }
+
+    function handshake(headers: Record<string, string> = {}) {
+      const socket = Object.assign(
+        new Duplex({
+          read: () => undefined,
+          write: (_chunk, _encoding, done) => done(),
+        }),
+        { setTimeout: () => undefined, setNoDelay: () => undefined },
+      )
+      const request = {
+        method: 'GET',
+        url: '/chat',
+        headers: {
+          upgrade: 'websocket',
+          connection: 'Upgrade',
+          'sec-websocket-version': '13',
+          'sec-websocket-key': 'dGhlIHNhbXBsZSBub25jZQ==',
+          ...headers,
+        },
+        socket,
+      }
+      return { socket, native: { kind: 'node' as const, request, socket, head: new Uint8Array(0) } }
+    }
+
+    /** `'pending'` when `task` is still unsettled after 500 ms. */
+    function settled(accepted: unknown): Promise<unknown> {
+      const task = Promise.resolve(accepted)
+      return Promise.race([
+        task.then(
+          () => 'accepted',
+          (error: unknown) => error,
+        ),
+        Bun.sleep(500).then(() => 'pending'),
+      ])
+    }
+
+    it('completes a handshake whose Sec-WebSocket-Protocol header ws cannot parse', async () => {
+      const transport = wsTransport()
+      const { socket, native } = handshake({ 'sec-websocket-protocol': 'a b' })
+      try {
+        expect(await settled(transport.accept(native, { protocol: '', headers: {}, maxPayload: 64 }, events))).toBe(
+          'accepted',
+        )
+      } finally {
+        socket.destroy()
+        await transport.close()
+      }
+    })
+
+    it('rejects when the client left before the transport completes the handshake', async () => {
+      const transport = wsTransport()
+      const { socket, native } = handshake()
+      socket.end()
+      try {
+        const result = await settled(transport.accept(native, { protocol: '', headers: {}, maxPayload: 64 }, events))
+        expect(result).toBeInstanceOf(HttpException)
+        expect((result as HttpException).status).toBe(400)
+      } finally {
+        socket.destroy()
+        await transport.close()
+      }
+    })
+
+    it('rejects when ws refuses a malformed Sec-WebSocket-Extensions header', async () => {
+      const transport = wsTransport({ perMessageDeflate: true })
+      const { socket, native } = handshake({ 'sec-websocket-extensions': 'permessage-deflate; =' })
+      try {
+        const result = await settled(transport.accept(native, { protocol: '', headers: {}, maxPayload: 64 }, events))
+        expect(result).toBeInstanceOf(HttpException)
+      } finally {
+        socket.destroy()
+        await transport.close()
+      }
+    })
   })
 })

@@ -155,7 +155,7 @@ each recipient applies its own backpressure policy. Rooms are per gateway and pe
 | `transport`          | `'auto'`                                                           | `wsTransport()` (`@znight/websocket/ws`) or `bunTransport()` (`@znight/websocket/bun`)            |
 | `origins`            | `'same-origin'`                                                    | `'*'`, exact origins and anchored `RegExp`s, or `(origin, ctx) => boolean`; checked first (`403`) |
 | `maxPayload`         | `'1mb'`                                                            | Largest inbound message; gateways may lower it (`1009`)                                           |
-| `maxConnections`     | `Infinity`                                                         | Open connections per process; above, `503` with `retry-after: 1`                                  |
+| `maxConnections`     | `Infinity`                                                         | Open connections per process (handshakes in flight count); above, `503` with `retry-after: 1`     |
 | `maxPendingMessages` | `32`                                                               | Inbound queue per connection before reading pauses                                                |
 | `backpressure`       | `{ limit: '1mb', onLimit: 'close' }`                               | Outbound buffer per connection: close with `1013`, or `'drop'` frames                             |
 | `heartbeat`          | `{ intervalMs: 30_000 }`                                           | `false` disables it; silent connections are terminated after two intervals                        |

@@ -46,7 +46,7 @@ import {
   RouteGroups,
   type RouteMeta,
 } from './decisions.ts'
-import { ServiceUnavailableException } from './exceptions.ts'
+import { HttpException, ServiceUnavailableException } from './exceptions.ts'
 import { isHeaderName } from './headers.ts'
 import { openInjectSse } from './inject-sse.ts'
 import { isMediaTypePattern } from './mime.ts'
@@ -1201,7 +1201,7 @@ function buildRegistrations(
         const upgrade = pendingUpgradeOf(http)
         if (upgrade === undefined) throw new Error(`The upgrade route ${where} only serves upgrade requests`)
         // answered 408 already: the late handshake is not completed
-        if (upgrade.expired) throw new ServiceUnavailableException('WebSocket handshake timed out')
+        if (upgrade.expired) throw handshakeExpired()
         await accept(http, upgrade)
         if (!upgrade.accepted) throw new Error(`accept() of the upgrade route ${where} did not take the connection`)
         return undefined
@@ -1653,4 +1653,9 @@ function resolveRef<T>(
     return { resolvable: { instance: ref as T }, cls, name: className || `${what} instance` }
   }
   throw invalid()
+}
+
+/** A handshake completed after its `408`: refused quietly (a 4xx is not logged as a server error). */
+function handshakeExpired(): HttpException {
+  return new HttpException(408, 'WebSocket handshake timed out')
 }

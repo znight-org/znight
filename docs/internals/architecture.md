@@ -2068,6 +2068,9 @@ not call `next()` gets the same reply as in the general pipeline.
   with the supported version, a valid `sec-websocket-key` else `400`), then `precheck`, the guards
   and `accept(ctx, upgrade)`; `accept` MUST call `upgrade.hold(closed)` once the transport completed
   the handshake, which keeps the request scope and the in-flight count open until `closed` settles.
+  When `timeoutMs` elapses first, the handshake is answered `408` and `upgrade.expired` becomes
+  `true`: `accept` MUST NOT complete it (it checks the flag after every `await`, right before the
+  transport, and refuses with a `4xx`).
   A refusal (an exception) is written as an HTTP response on the raw socket. A plain `GET` of an
   upgrade path answers `426`. `HttpPlugin.upgradeInMemory(request, { kind: 'memory', peer })` runs
   a handshake without socket (tests). Applications without upgrade routes run no upgrade code.
@@ -3516,7 +3519,8 @@ are ZNIGHT050):
   (`@znight/websocket/ws`, optional peer, loaded lazily; Bun's built-in `ws` on Bun) for `node`
   upgrades; an explicit transport for the other kind, or an adapter without upgrade support, is
   ZNIGHT051.
-- `precheck`: `503` (`retry-after: 1`) while draining or at `maxConnections`; `403 Origin not
+- `precheck`: `503` (`retry-after: 1`) while draining or at `maxConnections` (open connections
+  plus handshakes past their guards, which `accept` reserves synchronously); `403 Origin not
   allowed` for an `Origin` the `origins` policy refuses (requests without `Origin` are accepted);
   `400 Unsupported WebSocket subprotocol` when the gateway declares `protocols` and the client
   offers none of them (the first declared one the client offers is selected).
@@ -3524,6 +3528,12 @@ are ZNIGHT050):
   handshake, creates a request-scoped gateway (a factory error answers `500`), completes the
   upgrade with the transport (an in-memory transport for `memory` upgrades), emits
   `websocket:connection` (`open`) and holds the request scope until the connection is fully closed.
+  It checks `maxConnections` again and reserves a slot before its first `await`, and refuses
+  without completing the upgrade when `upgrade.expired` (`408`) or the drain began (`503`) by the
+  time the transport is called; a connection completed while the drain began is closed with
+  `shutdown.code` / `shutdown.reason` at once. A transport's `accept` MUST settle: the `ws`
+  transport rejects (`400`) when the socket closes before `ws` completes the handshake (client gone,
+  header `ws` refuses), and hands `ws` only the selected subprotocol.
   Socket events run in the async context captured at the handshake (`AsyncLocalStorage.snapshot()`).
 - Each connection handles its messages in order (`concurrency`), `@OnConnect` first, through
   `hooks.run('websocket:message')` (wrappers) then `hooks.emit` (listeners): decode (`$ping`

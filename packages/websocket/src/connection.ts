@@ -23,6 +23,9 @@ export interface WsCloseInfo {
 /** The result of a send: written, buffered by the transport, or dropped. */
 export type WsSendResult = SendStatus
 
+/** How often a pending `conn.drained()` re-reads the outbound buffer (ms). */
+const DRAIN_POLL_MS = 10
+
 /** `conn.drained()` rejects with it once the connection is closed. */
 export class WsClosedError extends Error {
   constructor(message = 'The WebSocket connection is closed') {
@@ -172,6 +175,8 @@ export class WsConnectionImpl implements WsConnection, ChannelMember {
   readonly #drainWaiters: { resolve(): void; reject(error: Error): void }[] = []
   readonly #finished: PromiseWithResolvers<WsCloseInfo> = Promise.withResolvers()
   #socket: TransportSocket | undefined
+  /** Polls the buffer while `drained()` waits: a transport may only report a drain at its own limit. */
+  #drainPoll: ReturnType<typeof setInterval> | undefined
   #state: 'open' | 'closing' | 'closed' = 'open'
   #connecting = true
   #connected = false
@@ -306,6 +311,10 @@ export class WsConnectionImpl implements WsConnection, ChannelMember {
     if (this.bufferedAmount <= this.#limits.backpressureLimit / 4) return Promise.resolve()
     const { promise, resolve, reject } = Promise.withResolvers<void>()
     this.#drainWaiters.push({ resolve, reject })
+    if (this.#drainPoll === undefined) {
+      this.#drainPoll = setInterval(() => this.#drain(), DRAIN_POLL_MS)
+      this.#drainPoll.unref?.()
+    }
     return promise
   }
 
@@ -402,7 +411,13 @@ export class WsConnectionImpl implements WsConnection, ChannelMember {
 
   #drain(): void {
     if (this.bufferedAmount > this.#limits.backpressureLimit / 4) return
+    this.#stopDrainPoll()
     for (const waiter of this.#drainWaiters.splice(0)) waiter.resolve()
+  }
+
+  #stopDrainPoll(): void {
+    if (this.#drainPoll !== undefined) clearInterval(this.#drainPoll)
+    this.#drainPoll = undefined
   }
 
   #beginClose(code: number, reason: string, initiator: WsCloseInitiator, frame: boolean): void {
@@ -432,6 +447,7 @@ export class WsConnectionImpl implements WsConnection, ChannelMember {
     if (this.#connected) await this.#driver.disconnect(this).catch(() => undefined)
     this.#registry.remove(this)
     this.#state = 'closed'
+    this.#stopDrainPoll()
     for (const waiter of this.#drainWaiters.splice(0)) waiter.reject(new WsClosedError())
     this.#driver.closed(this, info)
     this.#finished.resolve(info)

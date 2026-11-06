@@ -1,5 +1,6 @@
 import type { HttpContext } from '@znight/http'
 import type { ConnectionDriver, ConnectionLimits, WsCloseInfo } from '../src/connection.ts'
+import type { SocketEvents, TransportSocket } from '../src/transport.ts'
 
 import { WsClosedError, WsConnectionImpl } from '../src/connection.ts'
 import { TokenBucket } from '../src/rate-limit.ts'
@@ -202,5 +203,52 @@ describe('heartbeat', () => {
     conn.heartbeat() // no pong since the last tick
     await conn.finished
     expect(recorded.closes).toEqual([{ code: 1006, reason: '', initiator: 'heartbeat' }])
+  })
+
+  it('resolves drained() once the buffer falls below limit / 4, even when the transport reports no drain there', async () => {
+    const { impl } = driver()
+    const conn = new WsConnectionImpl({
+      id: 'c2',
+      gateway: '/chat',
+      handshake,
+      protocol: '',
+      limits: LIMITS,
+      rooms: new RoomRegistry<WsConnectionImpl>(),
+      driver: impl,
+    })
+    let events: SocketEvents | undefined
+    // a transport that only reports drains at its own limit (ws below the full limit, Bun after a -1 send)
+    const socket: TransportSocket & { buffered: number } = {
+      buffered: 0,
+      get bufferedAmount() {
+        return this.buffered
+      },
+      extensions: '',
+      send: () => 'sent',
+      ping: () => undefined,
+      pause: () => true,
+      resume: () => undefined,
+      close: (code, reason) => events?.close(code, reason),
+      terminate: () => events?.close(1006, ''),
+    }
+    events = conn.socketEvents()
+    conn.start(socket)
+    // between limit / 4 (256) and the limit (1024): parked
+    socket.buffered = 600
+    let resolved = false
+    const waiting = conn.drained().then(() => {
+      resolved = true
+    })
+    // a drain between limit / 4 and the limit leaves it parked
+    socket.buffered = 400
+    events.drain()
+    await Bun.sleep(20)
+    expect(resolved).toBe(false)
+    // the buffer empties without any further drain event
+    socket.buffered = 100
+    await Promise.race([waiting, Bun.sleep(200)])
+    expect(resolved).toBe(true)
+    conn.close()
+    await conn.finished
   })
 })

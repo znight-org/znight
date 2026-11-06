@@ -17,6 +17,7 @@ import type {
 } from '../transport.ts'
 
 import { ErrorCode, ZnightError } from '@znight/core'
+import { HttpException } from '@znight/http'
 
 /** The part of a `ws` `WebSocket` the transport uses (no `@types/ws`). */
 interface WsSocket {
@@ -41,6 +42,20 @@ interface WsServer {
   handleUpgrade(request: unknown, socket: unknown, head: Uint8Array, callback: (ws: WsSocket) => void): void
   on(event: 'headers', listener: (headers: string[], request: unknown) => void): void
   close(): void
+}
+
+/** The part of the handshake's `net.Socket` the transport watches. */
+interface NodeSocket {
+  readonly destroyed: boolean
+  readonly writable: boolean
+  once(event: 'close', listener: () => void): void
+  removeListener(event: 'close', listener: () => void): void
+}
+
+/** The part of the handshake's `IncomingMessage` the transport rewrites. */
+interface NodeRequest {
+  znightProtocol?: string
+  readonly headers: Record<string, string | string[] | undefined>
 }
 
 interface WsModule {
@@ -83,8 +98,8 @@ function toFrame(data: Buffer | ArrayBuffer | Buffer[], binary: boolean): string
 class WsTransportSocket implements TransportSocket {
   readonly #ws: WsSocket
   readonly #limit: number
+  /** `drain` after every write: the connection compares the buffer with its own threshold. */
   readonly #events: SocketEvents
-  #waitingDrain = false
 
   constructor(ws: WsSocket, limit: number, events: SocketEvents) {
     this.#ws = ws
@@ -102,10 +117,8 @@ class WsTransportSocket implements TransportSocket {
 
   send(frame: string | Uint8Array, binary: boolean): SendStatus {
     if (this.#ws.readyState !== 1) return 'dropped'
-    this.#ws.send(frame, { binary }, () => this.#flushed())
-    if (this.#ws.bufferedAmount <= this.#limit) return 'sent'
-    this.#waitingDrain = true
-    return 'queued'
+    this.#ws.send(frame, { binary }, () => this.#events.drain())
+    return this.#ws.bufferedAmount <= this.#limit ? 'sent' : 'queued'
   }
 
   ping(): void {
@@ -127,13 +140,6 @@ class WsTransportSocket implements TransportSocket {
 
   terminate(): void {
     this.#ws.terminate()
-  }
-
-  #flushed(): void {
-    if (this.#waitingDrain && this.#ws.bufferedAmount <= this.#limit) {
-      this.#waitingDrain = false
-      this.#events.drain()
-    }
   }
 }
 
@@ -189,11 +195,26 @@ export function wsTransport(options: WsTransportOptions = {}): WebSocketTranspor
         )
       }
       const wss = await serverOf()
-      const request = native.request as { znightProtocol?: string }
+      const request = native.request as NodeRequest
+      const raw = native.socket as NodeSocket
+      // the plugin selected the subprotocol: ws would abort (400, no callback) on a header it cannot parse
+      if (init.protocol === '') delete request.headers['sec-websocket-protocol']
+      else request.headers['sec-websocket-protocol'] = init.protocol
       request.znightProtocol = init.protocol
       pendingHeaders.set(request, init.headers)
-      const ws = await new Promise<WsSocket>(resolve => wss.handleUpgrade(request, native.socket, native.head, resolve))
-      pendingHeaders.delete(request)
+      // ws destroys the socket without calling back when the client left or a header is malformed
+      const ws = await new Promise<WsSocket>((resolve, reject) => {
+        const aborted = (): void => reject(new HttpException(400, 'The WebSocket handshake was aborted'))
+        if (raw.destroyed || !raw.writable) {
+          aborted()
+          return
+        }
+        raw.once('close', aborted)
+        wss.handleUpgrade(request, raw, native.head, accepted => {
+          raw.removeListener('close', aborted)
+          resolve(accepted)
+        })
+      }).finally(() => pendingHeaders.delete(request))
       sockets.add(ws)
       const socket = new WsTransportSocket(ws, settings.backpressureLimit, events)
       ws.on('error', () => undefined) // reported through 'close'; an unhandled 'error' would kill the process

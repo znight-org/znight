@@ -64,6 +64,11 @@ export interface PendingUpgrade {
    */
   readonly headers: Readonly<Record<string, HeaderValue>>
   /**
+   * The handshake timed out and was answered `408`: the transport must not complete it. Check it
+   * after every `await`, right before completing the handshake.
+   */
+  readonly expired: boolean
+  /**
    * Keeps the request scope (and the in-flight count of `HttpPlugin`) open until `closed`
    * settles: the connection lives in the scope of its handshake. Call it once, after the transport
    * completed the handshake.

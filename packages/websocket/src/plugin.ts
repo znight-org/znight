@@ -32,7 +32,7 @@ import type { WsExceptionMapper, WsGuard } from './context.ts'
 import type { HandlerPlan } from './dispatcher.ts'
 import type { GatewayDefinition, WebSocketMetadata } from './metadata.ts'
 import type { ResolvedWebSocketOptions, WebSocketPluginOptions } from './options.ts'
-import type { SocketEvents, WebSocketTransport } from './transport.ts'
+import type { SocketEvents, TransportSocket, WebSocketTransport } from './transport.ts'
 
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { displayName, ErrorCode, resolveOptions, ZnightError } from '@znight/core'
@@ -113,6 +113,8 @@ export class WebSocketPlugin implements Plugin, PluginHttpUpgrades {
   #memory: WebSocketTransport | undefined
   #heartbeat: ReturnType<typeof setInterval> | undefined
   #draining = false
+  /** Handshakes past their guards and not yet registered: they count against `maxConnections`. */
+  #accepting = 0
   #drain: Promise<void> | undefined
   #active = false
 
@@ -474,12 +476,47 @@ export class WebSocketPlugin implements Plugin, PluginHttpUpgrades {
       if (!allowed) throw new ForbiddenException('Origin not allowed')
     }
     selectProtocol(plan, ctx)
-    if (this.#connections.size >= options.maxConnections) throw unavailable('Too many WebSocket connections')
+    if (this.#full(options)) throw unavailable('Too many WebSocket connections')
+  }
+
+  #full(options: ResolvedWebSocketOptions): boolean {
+    return this.#connections.size + this.#accepting >= options.maxConnections
   }
 
   /** After the guards: completes the upgrade and starts the connection in the handshake's scope. */
   async #accept(plan: GatewayPlan, ctx: HttpContext, upgrade: PendingUpgrade): Promise<void> {
     if (this.#draining) throw unavailable('The server is shutting down')
+    const options = this.#resolve()
+    // checked again and reserved synchronously: concurrent handshakes all passed the precheck
+    if (this.#full(options)) throw unavailable('Too many WebSocket connections')
+    this.#accepting++
+    let opened: { conn: WsConnectionImpl; socket: TransportSocket }
+    try {
+      opened = await this.#open(plan, ctx, upgrade)
+    } finally {
+      this.#accepting--
+    }
+    const { conn, socket } = opened
+    const ws = this.#context()
+    const openedAt = performance.now()
+    this.#connections.set(conn, openedAt)
+    if (upgrade.native.kind !== 'memory' && this.#transport?.accepts === 'node') this.#beating.add(conn)
+    this.#stats.opened++
+    if (ws.hooks.hasListeners(CONNECTION_HOOK)) {
+      ws.hooks.emit(CONNECTION_HOOK, connectionEvent('open', plan, conn, openedAt, undefined))
+    }
+    conn.start(socket)
+    upgrade.hold(conn.finished)
+    // the drain began while the handshake completed: it did not see this connection
+    if (this.#draining) conn.closeWith(options.shutdown.code, options.shutdown.reason, 'shutdown')
+  }
+
+  /** Creates the connection (and a request-scoped gateway) and completes the handshake. */
+  async #open(
+    plan: GatewayPlan,
+    ctx: HttpContext,
+    upgrade: PendingUpgrade,
+  ): Promise<{ conn: WsConnectionImpl; socket: TransportSocket }> {
     const ws = this.#context()
     const protocol = selectProtocol(plan, ctx)
     const rate = plan.rateLimit
@@ -517,20 +554,15 @@ export class WebSocketPlugin implements Plugin, PluginHttpUpgrades {
       drain: () => events.drain(),
       close: (code, reason) => run(() => events.close(code, reason)),
     }
+    // after every await: a handshake answered 408, or refused by a drain, is not completed
+    if (upgrade.expired) throw new HttpException(408, 'WebSocket handshake timed out')
+    if (this.#draining) throw unavailable('The server is shutting down')
     const socket = await transport.accept(
       upgrade.native,
       { protocol, headers: upgrade.headers, maxPayload: plan.maxPayload },
       scoped,
     )
-    const openedAt = performance.now()
-    this.#connections.set(conn, openedAt)
-    if (!memory && transport.accepts === 'node') this.#beating.add(conn)
-    this.#stats.opened++
-    if (ws.hooks.hasListeners(CONNECTION_HOOK)) {
-      ws.hooks.emit(CONNECTION_HOOK, connectionEvent('open', plan, conn, openedAt, undefined))
-    }
-    conn.start(socket)
-    upgrade.hold(conn.finished)
+    return { conn, socket }
   }
 
   /** A connection fully closed (after `@OnDisconnect`, rooms left). */

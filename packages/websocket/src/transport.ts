@@ -25,6 +25,10 @@ export interface AcceptInit {
 export interface SocketEvents {
   message(frame: string | Uint8Array, binary: boolean): void
   pong(): void
+  /**
+   * The outbound buffer may have shrunk (after a write, or Bun's `drain`): the connection compares it
+   * with its own threshold, and polls the buffer while `conn.drained()` waits.
+   */
   drain(): void
   close(code: number, reason: string): void
 }

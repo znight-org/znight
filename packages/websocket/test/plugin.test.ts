@@ -357,3 +357,118 @@ describe('WebSocketPlugin codec', () => {
     await expect(createApp({ codec: { decode: () => undefined } } as never)).rejects.toThrow('ZNIGHT050')
   })
 })
+
+describe('WebSocketPlugin handshakes in flight', () => {
+  const SLOW = 'src/slow.gateway.ts#SlowGateway'
+  const GATED = 'src/gated.gateway.ts#GatedGateway'
+  const SLOW_GUARD = 'src/slow.guard.ts#SlowGuard'
+
+  class SlowGateway {}
+  class GatedGateway {}
+
+  class SlowGuard implements CanActivate {
+    async canActivate(): Promise<boolean> {
+      await Bun.sleep(20)
+      return true
+    }
+  }
+
+  const raw = (token: string, path: string, guards: string[] = []): GatewayDefinition => ({
+    token,
+    path,
+    protocol: 'raw',
+    meta: {},
+    handshakeGuards: guards,
+    messageGuards: [],
+    handlers: [],
+  })
+
+  /** The request-scoped gateway factory waits for `gate`. */
+  function gatedApp(options: WebSocketPluginOptions, http: HttpPlugin = HttpPlugin.configure({ port: 0 })) {
+    const entered = Promise.withResolvers<void>()
+    const gate = Promise.withResolvers<void>()
+    const meta: ZnightMetadata = {
+      ...metadata,
+      providers: {
+        [SLOW]: singleton(SlowGateway),
+        [SLOW_GUARD]: singleton(SlowGuard),
+        [GATED]: {
+          scope: 'request',
+          class: GatedGateway as never,
+          deps: [],
+          factory: async () => {
+            entered.resolve()
+            await gate.promise
+            return new GatedGateway()
+          },
+        },
+      },
+      resolutionOrder: [SLOW, SLOW_GUARD],
+      extensions: {
+        http: { controllers: [] },
+        websocket: { gateways: [raw(SLOW, '/slow', [SLOW_GUARD]), raw(GATED, '/gated')] },
+      },
+    }
+    const websocket = WebSocketPlugin.configure(options)
+    const created = Application.create({
+      metadata: meta,
+      logger: silentLogger,
+      shutdown: { signals: false },
+      plugins: [websocket, http],
+    })
+    return { created, websocket, entered: entered.promise, release: () => gate.resolve() }
+  }
+
+  const outcome = (promise: Promise<unknown>) =>
+    promise.then(
+      () => 'open',
+      (error: unknown) => (error as { status?: number }).status,
+    )
+
+  it('reserves maxConnections for concurrent handshakes behind an async guard', async () => {
+    const { created, websocket } = gatedApp({ maxConnections: 2 })
+    const app = await created
+    try {
+      const results = await Promise.all(Array.from({ length: 5 }, () => outcome(websocket.connect('/slow'))))
+      expect(results.filter(result => result === 'open')).toHaveLength(2)
+      expect(results.filter(result => result === 503)).toHaveLength(3)
+      expect(websocket.connections).toBe(2)
+    } finally {
+      await app.stop()
+    }
+  })
+
+  it('refuses a handshake completing while the server drains, without waiting for the drain timeout', async () => {
+    const { created, websocket, entered, release } = gatedApp(
+      {},
+      HttpPlugin.configure({ port: 0, drainTimeoutMs: 5000 }),
+    )
+    const app = await created
+    const result = outcome(websocket.connect('/gated'))
+    await entered
+    const stopped = app.stop()
+    await Bun.sleep(5)
+    release()
+    expect(await result).toBe(503)
+    const started = performance.now()
+    await stopped
+    expect(performance.now() - started).toBeLessThan(1000)
+    expect(websocket.stats().opened).toBe(0)
+  })
+
+  it('does not complete a handshake that timed out while the gateway was created', async () => {
+    const { created, websocket, entered, release } = gatedApp({ handshakeTimeoutMs: 30 })
+    const app = await created
+    try {
+      const result = outcome(websocket.connect('/gated'))
+      await entered
+      expect(await result).toBe(408)
+      release()
+      await Bun.sleep(20)
+      expect(websocket.connections).toBe(0)
+      expect(websocket.stats().opened).toBe(0)
+    } finally {
+      await app.stop()
+    }
+  })
+})
