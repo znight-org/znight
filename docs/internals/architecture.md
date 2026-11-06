@@ -1540,6 +1540,8 @@ interface ZnightHooks {
   'messaging:publish': MessagePublishEvent // produced by @znight/messaging (MessageBroker.publish)
   'schedule:run': ScheduledRunEvent // produced by @znight/schedule (one occurrence of a job)
   'graphql:operation': GraphQLOperationEvent // produced by @znight/graphql (one operation, RFC 0005)
+  'websocket:message': WebSocketMessageEvent // produced by @znight/websocket (one inbound message, RFC 0003)
+  'websocket:connection': WebSocketConnectionEvent // produced by @znight/websocket (opened or closed; emitted only)
 } // augmentable by third-party packages
 class Hooks {
   on<K>(name: K, listener: (event) => unknown): () => void
@@ -2005,6 +2007,25 @@ not call `next()` gets the same reply as in the general pipeline.
   close its event streams, and before awaiting the drain, whatever the plugin order. The plugin ends
   there the long-lived responses `HttpPlugin` does not track (streams another server produced); a
   returned promise joins the drain (bounded by `drainTimeoutMs`); a failure is logged, never thrown.
+- **Upgrade routes** (`PluginHttpUpgrades`, RFC 0003 §8.2, implementation in progress). A plugin
+  implementing `httpUpgrades(context): PluginUpgrades` has it called once in `HttpPlugin.onBootstrap`,
+  after `httpRoutes()`, whatever the plugin order; `context` adds `adapter` (its name) and `upgrades`
+  (`'node'`, `'bun'` or `undefined`, the native upgrades of the adapter) to the plugin routes
+  context. A `PluginUpgradeRoute` is `{ path, name, owner?, meta?, guards?, timeoutMs?, precheck?,
+  accept }`, validated like plugin routes (ZNIGHT007 naming the plugin; required route groups,
+  ZNIGHT023). Upgrade routes are kept in their own `GET` table, never registered on the adapter, and
+  listed by `HttpPlugin.routes` with `upgrade: 'websocket'`. An adapter serves them through its
+  optional `upgrades: AdapterUpgrades` capability (`kind` and `enable(options)`, called before
+  `listen()`); the built-in adapters implement it (`node:http` `'upgrade'` events, `Bun.serve()`
+  for `honoAdapter()` on Bun); an application with upgrade routes on an adapter without it fails at
+  boot. A handshake runs the same pipeline as a request (hook, request scope, global guards, the
+  route's guards) with the RFC 6455 checks first (`GET`, `sec-websocket-version: 13` else `426`
+  with the supported version, a valid `sec-websocket-key` else `400`), then `precheck`, the guards
+  and `accept(ctx, upgrade)`; `accept` MUST call `upgrade.hold(closed)` once the transport completed
+  the handshake, which keeps the request scope and the in-flight count open until `closed` settles.
+  A refusal (an exception) is written as an HTTP response on the raw socket. A plain `GET` of an
+  upgrade path answers `426`. `HttpPlugin.upgradeInMemory(request, { kind: 'memory', peer })` runs
+  a handshake without socket (tests). Applications without upgrade routes run no upgrade code.
 - **Cookies** (RFC 0006; `cookies.ts` is import-free). Request: the `cookie` header is split on `;`
   only, pairs trimmed, quoted values unquoted, `%` sequences decoded (malformed: kept raw); pairs
   without `=` or with an empty name are ignored; the first occurrence of a name wins; repeated

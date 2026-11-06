@@ -1660,6 +1660,20 @@ export class StatusPlugin implements Plugin, PluginHttpRoutes {
   `drainTimeoutMs`. The drain waits for a returned promise too (within `drainTimeoutMs`); a failure
   is logged, never thrown.
 
+### Upgrade routes
+
+<!-- TODO(api): verify against implementation -->
+
+A plugin accepting WebSocket connections (`@znight/websocket`, RFC 0003, in progress) implements
+`PluginHttpUpgrades`: `httpUpgrades(context)` returns `{ routes, bunWebSocket? }`, called once in
+`HttpPlugin.onBootstrap` after `httpRoutes()`. Each `PluginUpgradeRoute` has a `path`, a `name`,
+optional `meta`, `guards`, `timeoutMs` and `precheck`, and an `accept(ctx, upgrade)` that completes
+the handshake on `upgrade.native` (a `node:http` socket, a `Bun.serve()` request or an in-memory
+peer) and calls `upgrade.hold(closed)`. The handshake runs the request pipeline (hook, request scope,
+global and route guards); a refusal is an HTTP response, and a plain `GET` of an upgrade path answers
+`426`. Every built-in adapter supports upgrades; `HttpPlugin.upgradeInMemory()` runs a handshake
+without socket. Applications without upgrade routes pay nothing.
+
 ## Adapters
 
 All adapters share the same pipeline, so responses (bodies, errors, statuses, HEAD, 404/405,
