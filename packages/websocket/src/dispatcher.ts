@@ -3,8 +3,9 @@
  * selection, message guards, `invoke` bounded by the handler timeout, replies and error mapping.
  * The plugin builds one {@link GatewayDispatcher} per gateway and gives it to its connections.
  */
+import type { Hooks, WebSocketMessageEvent, WebSocketMessageOutcome } from '@znight/core'
 import type { ConnectionDriver, WsCloseInfo, WsConnectionImpl } from './connection.ts'
-import type { WsGuard, WsMessageContext } from './context.ts'
+import type { WsExceptionMapper, WsGuard, WsMessageContext } from './context.ts'
 import type { MessageId, WireError } from './envelope.ts'
 import type { GatewayDefinition, WsHandlerDefinition } from './metadata.ts'
 
@@ -36,7 +37,23 @@ export interface DispatcherOptions {
   readonly logError: (message: string, error: unknown, conn: WsConnectionImpl) => void
   /** Once a connection is fully closed. */
   readonly closed: (conn: WsConnectionImpl, info: WsCloseInfo) => void
+  /** The `websocket:message` hook: run when it has wrappers, emitted when it has listeners. */
+  readonly hooks?: Hooks
+  /** Display name of the gateway (hook events). */
+  readonly name?: string
+  /** Plugin `exceptionMappers`, in order. */
+  readonly mappers?: readonly WsExceptionMapper[]
 }
+
+const MESSAGE_HOOK = 'websocket:message'
+
+/** How a message ended (the `websocket:message` outcome and error). */
+interface Settled {
+  readonly outcome: WebSocketMessageOutcome
+  readonly error?: unknown
+}
+
+const OK: Settled = Object.freeze({ outcome: 'ok' })
 
 class TimeoutError extends Error {}
 
@@ -57,6 +74,12 @@ export function toWireError(error: unknown, exposeErrors: boolean): WireError {
   if (error instanceof TimeoutError) return { code: WsErrorCode.Timeout, message: 'The handler timed out' }
   const message = exposeErrors && error instanceof Error ? error.message : 'Internal error'
   return { code: WsErrorCode.Internal, message }
+}
+
+function isForbidden(error: unknown): boolean {
+  if (error instanceof WsException)
+    return error.code === WsErrorCode.Forbidden || error.code === WsErrorCode.Unauthorized
+  return error instanceof HttpException && (error.status === 401 || error.status === 403)
 }
 
 function isExpected(error: unknown): boolean {
@@ -130,23 +153,24 @@ export class GatewayDispatcher implements ConnectionDriver {
     let event: string | undefined
     let id: MessageId | undefined
     let data: unknown = frame
+    let failure: WireError | undefined
     if (!this.raw) {
       const decoded = decodeFrame(frame)
       if (isFailure(decoded)) {
-        this.#fail(conn, decoded.id, undefined, { code: decoded.error, message: decoded.message })
-        return
-      }
-      ;({ event, id, data } = decoded)
-      if (event === '$ping') {
-        if (id !== undefined) conn.sendFrame(encodeReply(id, { t: Date.now() }))
-        return
+        id = decoded.id
+        failure = { code: decoded.error, message: decoded.message }
+      } else {
+        ;({ event, id, data } = decoded)
+        if (event === '$ping') {
+          if (id !== undefined) conn.sendFrame(encodeReply(id, { t: Date.now() }))
+          return
+        }
       }
     }
-    const plan = (event === undefined ? undefined : this.#byEvent.get(event)) ?? this.#fallback
-    if (plan === undefined) {
-      this.#fail(conn, id, event, { code: WsErrorCode.UnknownEvent, message: `Unknown event "${event}"` })
-      return
-    }
+    const plan =
+      failure === undefined
+        ? ((event === undefined ? undefined : this.#byEvent.get(event)) ?? this.#fallback)
+        : undefined
     const abort = new AbortController()
     const onClose = () => abort.abort(conn.signal.reason)
     conn.signal.addEventListener('abort', onClose, { once: true })
@@ -163,30 +187,113 @@ export class GatewayDispatcher implements ConnectionDriver {
       route: {
         path: this.#options.path,
         gateway: this.#options.definition.token,
-        handler: plan.definition.method,
+        handler: plan?.definition.method,
         event,
-        meta: plan.meta,
+        meta: plan?.meta ?? this.#options.definition.meta,
       },
     }
     try {
-      const result = await this.#bounded(this.#run(plan, conn, ctx), abort)
-      if (id !== undefined && conn.readyState === 'open') conn.sendFrame(encodeReply(id, result))
-    } catch (error) {
-      if (!isExpected(error)) this.#options.logError(`Handler ${plan.definition.method} failed`, error, conn)
-      if (this.raw) {
-        if (error instanceof WsException && error.close !== undefined) conn.close(error.close, error.message)
+      const hooks = this.#options.hooks
+      if (hooks === undefined || (!hooks.hasWrappers(MESSAGE_HOOK) && !hooks.hasListeners(MESSAGE_HOOK))) {
+        await this.#handle(plan, conn, ctx, failure, abort)
         return
       }
-      this.#fail(conn, id, event, toWireError(error, this.#options.exposeErrors))
-      if (error instanceof WsException && error.close !== undefined) conn.close(error.close, error.message)
+      const hookEvent: WebSocketMessageEvent = {
+        gateway: this.#options.name ?? String(this.#options.definition.token),
+        path: this.#options.path,
+        event,
+        handler: plan?.definition.method,
+        connectionId: conn.id,
+        requestId: conn.requestId,
+        bytes: ctx.bytes,
+        context: ctx,
+        startTime: receivedAt,
+      }
+      try {
+        await hooks.run(MESSAGE_HOOK, hookEvent, async () => {
+          const settled = await this.#handle(plan, conn, ctx, failure, abort)
+          hookEvent.outcome = settled.outcome
+          if (settled.error !== undefined) hookEvent.error = settled.error
+        })
+      } catch (error) {
+        this.#options.logError('A "websocket:message" hook wrapper failed', error, conn)
+      }
+      if (hooks.hasListeners(MESSAGE_HOOK)) hooks.emit(MESSAGE_HOOK, hookEvent)
     } finally {
       conn.signal.removeEventListener('abort', onClose)
     }
   }
 
-  async #run(plan: HandlerPlan, conn: WsConnectionImpl, ctx: WsMessageContext): Promise<unknown> {
+  /** Guards, handler, reply and error mapping of one message. Never rejects. */
+  async #handle(
+    plan: HandlerPlan | undefined,
+    conn: WsConnectionImpl,
+    ctx: WsMessageContext,
+    failure: WireError | undefined,
+    abort: AbortController,
+  ): Promise<Settled> {
+    if (failure !== undefined) {
+      this.#fail(conn, ctx.id, undefined, failure)
+      return { outcome: 'error', error: new WsException(failure.code, failure.message) }
+    }
+    if (plan === undefined) {
+      this.#fail(conn, ctx.id, ctx.event, {
+        code: WsErrorCode.UnknownEvent,
+        message: `Unknown event "${ctx.event}"`,
+      })
+      return { outcome: 'unhandled' }
+    }
+    let rejected = false
+    try {
+      const result = await this.#bounded(
+        this.#run(plan, conn, ctx, () => {
+          rejected = true
+        }),
+        abort,
+      )
+      if (ctx.id !== undefined && conn.readyState === 'open') conn.sendFrame(encodeReply(ctx.id, result))
+      return OK
+    } catch (thrown) {
+      const error = await this.#map(thrown, ctx, conn)
+      if (!isExpected(error)) this.#options.logError(`Handler ${plan.definition.method} failed`, error, conn)
+      if (!this.raw) this.#fail(conn, ctx.id, ctx.event, toWireError(error, this.#options.exposeErrors))
+      if (error instanceof WsException && error.close !== undefined) conn.close(error.close, error.message)
+      let outcome: WebSocketMessageOutcome = 'error'
+      if (thrown instanceof TimeoutError) outcome = 'timeout'
+      else if (rejected && isForbidden(error)) outcome = 'rejected'
+      return { outcome, error: thrown }
+    }
+  }
+
+  /** Runs the plugin exception mappers, in order: the first `WsException` wins. */
+  async #map(error: unknown, ctx: WsMessageContext, conn: WsConnectionImpl): Promise<unknown> {
+    const mappers = this.#options.mappers
+    if (mappers === undefined || mappers.length === 0 || error instanceof TimeoutError) return error
+    for (const mapper of mappers) {
+      try {
+        const mapped = await mapper.map(error, ctx)
+        if (mapped !== undefined) return mapped
+      } catch (failure) {
+        this.#options.logError('A WebSocket exception mapper failed', failure, conn)
+        return failure
+      }
+    }
+    return error
+  }
+
+  async #run(plan: HandlerPlan, conn: WsConnectionImpl, ctx: WsMessageContext, refused: () => void): Promise<unknown> {
     for (const guard of plan.guards) {
-      if (!(await guard.canActivate(ctx))) throw new WsException(WsErrorCode.Forbidden, 'Forbidden')
+      let allowed: boolean
+      try {
+        allowed = (await guard.canHandle(ctx)) === true
+      } catch (error) {
+        refused()
+        throw error
+      }
+      if (!allowed) {
+        refused()
+        throw new WsException(WsErrorCode.Forbidden, 'Forbidden')
+      }
     }
     const gateway = await this.#options.instance(conn)
     return await plan.definition.invoke(gateway, ctx)

@@ -170,6 +170,9 @@ export function wsTransport(options: WsTransportOptions = {}): WebSocketTranspor
     configure(next: TransportSettings): void {
       settings = next
     },
+    async ready(): Promise<void> {
+      await serverOf()
+    },
     async accept(
       native: NodeUpgrade | BunUpgrade | MemoryUpgrade,
       init: AcceptInit,

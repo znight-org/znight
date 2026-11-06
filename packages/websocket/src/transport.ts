@@ -57,6 +57,11 @@ export interface WebSocketTransport {
     init: AcceptInit,
     events: SocketEvents,
   ): TransportSocket | Promise<TransportSocket>
+  /**
+   * Loads what the transport needs before the server listens (the `ws` package), so that a missing
+   * dependency fails the startup (ZNIGHT051) rather than the first handshake.
+   */
+  ready?(): Promise<void>
   /** `Bun.serve()` transports only: the settings of its `websocket` option. */
   bunWebSocket?(): Readonly<Record<string, unknown>>
   close(): Promise<void>

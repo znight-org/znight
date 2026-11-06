@@ -1,6 +1,7 @@
 /** The context of one inbound message and the message guards (RFC 0003 §8.4, §5.6). */
 import type { Token } from '@znight/core'
 import type { WsConnection } from './connection.ts'
+import type { WsException } from './exceptions.ts'
 
 /** What handlers (`@Ctx()`) and message guards see of one message. */
 export interface WsMessageContext {
@@ -29,5 +30,14 @@ export interface WsMessageContext {
 
 /** A guard run before each message handler: `false` answers `FORBIDDEN`. */
 export interface WsGuard {
-  canActivate(ctx: WsMessageContext): boolean | Promise<boolean>
+  canHandle(ctx: WsMessageContext): boolean | Promise<boolean>
+}
+
+/**
+ * Maps an error thrown by a message handler or guard to the {@link WsException} answered to the
+ * client (plugin option `exceptionMappers`, run in order before the built-in mapping). `undefined`:
+ * not handled, the next mapper or the built-in mapping applies.
+ */
+export interface WsExceptionMapper {
+  map(error: unknown, ctx: WsMessageContext): WsException | undefined | Promise<WsException | undefined>
 }

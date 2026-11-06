@@ -54,6 +54,7 @@ export interface WsConnection<
   readonly bufferedAmount: number
   /** Aborted when the connection starts closing. */
   readonly signal: AbortSignal
+  /** How the connection closed: set once the socket closed, before `@OnDisconnect`. */
   readonly closeInfo: WsCloseInfo | undefined
   emit<K extends keyof E & string>(event: K, data: E[K]): WsSendResult
   send(frame: string | Uint8Array): WsSendResult
@@ -94,6 +95,49 @@ export interface ConnectionDriver {
   closed(conn: WsConnectionImpl, info: WsCloseInfo): void
 }
 
+/** Totals of the plugin (`WebSocketPlugin.stats()`), updated by the connections. */
+export interface WsStats {
+  /** Open connections. */
+  readonly connections: number
+  readonly opened: number
+  readonly closed: number
+  readonly messagesIn: number
+  readonly messagesOut: number
+  readonly bytesIn: number
+  readonly bytesOut: number
+  /** Outbound frames dropped by a `drop` backpressure policy or refused by the transport. */
+  readonly dropped: number
+  /** Connections closed with `1013` (slow consumer). */
+  readonly slowConsumerCloses: number
+}
+
+/** The mutable counters behind {@link WsStats} (internal). */
+export class StatsCounter {
+  opened = 0
+  closed = 0
+  messagesIn = 0
+  messagesOut = 0
+  bytesIn = 0
+  bytesOut = 0
+  dropped = 0
+  slowConsumerCloses = 0
+
+  /** A frozen snapshot, with the number of open connections. */
+  snapshot(connections: number): WsStats {
+    return Object.freeze({
+      connections,
+      opened: this.opened,
+      closed: this.closed,
+      messagesIn: this.messagesIn,
+      messagesOut: this.messagesOut,
+      bytesIn: this.bytesIn,
+      bytesOut: this.bytesOut,
+      dropped: this.dropped,
+      slowConsumerCloses: this.slowConsumerCloses,
+    })
+  }
+}
+
 /** What a connection is created with. */
 export interface ConnectionInit {
   readonly id: string
@@ -103,6 +147,8 @@ export interface ConnectionInit {
   readonly limits: ConnectionLimits
   readonly rooms: RoomRegistry<WsConnectionImpl>
   readonly driver: ConnectionDriver
+  /** Counters shared by the connections of a plugin. */
+  readonly stats?: StatsCounter
 }
 
 function sizeOf(frame: string | Uint8Array): number {
@@ -120,6 +166,7 @@ export class WsConnectionImpl implements WsConnection, ChannelMember {
   readonly #limits: ConnectionLimits
   readonly #registry: RoomRegistry<WsConnectionImpl>
   readonly #driver: ConnectionDriver
+  readonly #stats: StatsCounter | undefined
   readonly #abort = new AbortController()
   readonly #queue: { readonly frame: string | Uint8Array; readonly binary: boolean }[] = []
   readonly #running = new Set<Promise<void>>()
@@ -133,6 +180,8 @@ export class WsConnectionImpl implements WsConnection, ChannelMember {
   #closing: WsCloseInfo | undefined
   #closeInfo: WsCloseInfo | undefined
   #closeTimer: ReturnType<typeof setTimeout> | undefined
+  /** Seen alive (a frame or a pong) since the last heartbeat tick. */
+  #alive = true
 
   constructor(init: ConnectionInit) {
     this.id = init.id
@@ -142,6 +191,7 @@ export class WsConnectionImpl implements WsConnection, ChannelMember {
     this.#limits = init.limits
     this.#registry = init.rooms
     this.#driver = init.driver
+    this.#stats = init.stats
   }
 
   get requestId(): string {
@@ -181,7 +231,9 @@ export class WsConnectionImpl implements WsConnection, ChannelMember {
   socketEvents(): SocketEvents {
     return {
       message: (frame, binary) => this.#receive(frame, binary),
-      pong: () => undefined,
+      pong: () => {
+        this.#alive = true
+      },
       drain: () => this.#drain(),
       close: (code, reason) => this.#socketClosed(code, reason),
     }
@@ -218,12 +270,24 @@ export class WsConnectionImpl implements WsConnection, ChannelMember {
   sendFrame(frame: string | Uint8Array): WsSendResult {
     const socket = this.#socket
     if (this.#state !== 'open' || socket === undefined) return 'dropped'
-    if (socket.bufferedAmount + sizeOf(frame) > this.#limits.backpressureLimit) {
+    const size = sizeOf(frame)
+    const stats = this.#stats
+    if (socket.bufferedAmount + size > this.#limits.backpressureLimit) {
+      if (stats !== undefined) stats.dropped++
       if (this.#limits.onBackpressure === 'drop') return 'dropped'
+      if (stats !== undefined) stats.slowConsumerCloses++
       this.#beginClose(WsCloseCode.TryAgainLater, 'Slow consumer', 'backpressure', true)
       return 'dropped'
     }
-    return socket.send(frame, typeof frame !== 'string')
+    const status = socket.send(frame, typeof frame !== 'string')
+    if (stats !== undefined) {
+      if (status === 'dropped') stats.dropped++
+      else {
+        stats.messagesOut++
+        stats.bytesOut += size
+      }
+    }
+    return status
   }
 
   join(room: string | readonly string[]): void {
@@ -256,13 +320,39 @@ export class WsConnectionImpl implements WsConnection, ChannelMember {
   }
 
   terminate(): void {
-    this.#beginClose(1006, '', 'server', false)
+    this.terminateWith('server')
+  }
+
+  /** Terminates without close frame (heartbeat timeout, shutdown deadline...): local code `1006`. */
+  terminateWith(initiator: WsCloseInitiator): void {
+    this.#beginClose(1006, '', initiator, false)
     this.#socket?.terminate()
+  }
+
+  /**
+   * One heartbeat tick (RFC 0003 §8.7): a connection not seen alive since the previous tick is
+   * terminated, the others are marked and pinged.
+   */
+  heartbeat(): void {
+    if (this.#state !== 'open' || this.#socket === undefined) return
+    if (!this.#alive) {
+      this.terminateWith('heartbeat')
+      return
+    }
+    this.#alive = false
+    this.#socket.ping()
   }
 
   #receive(frame: string | Uint8Array, binary: boolean): void {
     if (this.#state !== 'open') return
-    if (sizeOf(frame) > this.#limits.maxPayload) {
+    this.#alive = true
+    const size = sizeOf(frame)
+    const stats = this.#stats
+    if (stats !== undefined) {
+      stats.messagesIn++
+      stats.bytesIn += size
+    }
+    if (size > this.#limits.maxPayload) {
       this.#beginClose(WsCloseCode.MessageTooBig, 'Message too big', 'server', true)
       return
     }
@@ -336,11 +426,12 @@ export class WsConnectionImpl implements WsConnection, ChannelMember {
   }
 
   async #finish(): Promise<void> {
+    // known from now on: @OnDisconnect reads it
+    const info = this.#closing ?? { code: 1006, reason: '', initiator: 'error' as const }
+    this.#closeInfo = info
     while (this.#running.size > 0) await Promise.all([...this.#running])
     if (this.#connected) await this.#driver.disconnect(this).catch(() => undefined)
     this.#registry.remove(this)
-    const info = this.#closing ?? { code: 1006, reason: '', initiator: 'error' as const }
-    this.#closeInfo = info
     this.#state = 'closed'
     for (const waiter of this.#drainWaiters.splice(0)) waiter.reject(new WsClosedError())
     this.#driver.closed(this, info)

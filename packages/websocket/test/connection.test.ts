@@ -167,3 +167,40 @@ describe('WsConnectionImpl', () => {
     expect(conn.drained()).rejects.toBeInstanceOf(WsClosedError)
   })
 })
+
+describe('heartbeat', () => {
+  it('pings live connections and terminates silent ones at the next tick', async () => {
+    const { impl, recorded } = driver()
+    const pings: string[] = []
+    let events: { close(code: number, reason: string): void; pong(): void } | undefined
+    const conn = new WsConnectionImpl({
+      id: 'c1',
+      gateway: '/chat',
+      handshake,
+      protocol: '',
+      limits: LIMITS,
+      rooms: new RoomRegistry(),
+      driver: impl,
+    })
+    const socketEvents = conn.socketEvents()
+    events = socketEvents
+    conn.start({
+      bufferedAmount: 0,
+      extensions: '',
+      send: () => 'sent',
+      ping: () => pings.push('ping'),
+      pause: () => true,
+      resume: () => undefined,
+      close: () => undefined,
+      terminate: () => events?.close(1006, ''),
+    })
+    await Bun.sleep(1)
+    conn.heartbeat()
+    events.pong()
+    conn.heartbeat()
+    expect(pings).toEqual(['ping', 'ping'])
+    conn.heartbeat() // no pong since the last tick
+    await conn.finished
+    expect(recorded.closes).toEqual([{ code: 1006, reason: '', initiator: 'heartbeat' }])
+  })
+})

@@ -122,7 +122,7 @@ describe('GatewayDispatcher', () => {
         }),
         handler('slow', 'slow', () => Bun.sleep(200)),
       ],
-      { guards: [{ canActivate: ctx => ctx.event !== 'denied' }] },
+      { guards: [{ canHandle: ctx => ctx.event !== 'denied' }] },
     )
     for (const frame of [
       '{"event":"nope","id":1}',

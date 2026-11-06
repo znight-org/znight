@@ -48,6 +48,12 @@ export class WsServer {
     this.#byPath.set(gateway.declaredPath, gateway)
   }
 
+  /** @internal Called by the plugin when it serves a new application. */
+  reset(): void {
+    this.#byType.clear()
+    this.#byPath.clear()
+  }
+
   /** Open connections of every gateway of this process. */
   get connections(): number {
     let total = 0
