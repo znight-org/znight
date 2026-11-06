@@ -45,6 +45,11 @@ export interface DispatcherOptions {
   readonly mappers?: readonly WsExceptionMapper[]
   /** The codec of `events` gateways. Default: {@link jsonCodec}. */
   readonly codec?: WsCodec
+  /**
+   * Development aid: called once per handler whose result was ignored (a message without `id`
+   * answered by a value). Omitted in production.
+   */
+  readonly ignoredResult?: (handler: string, event: string | undefined) => void
 }
 
 const MESSAGE_HOOK = 'websocket:message'
@@ -103,6 +108,7 @@ export class GatewayDispatcher implements ConnectionDriver {
   readonly #byEvent = new Map<string, HandlerPlan>()
   readonly #fallback: HandlerPlan | undefined
   readonly #codec: WsCodec
+  readonly #ignored = new Set<string>()
 
   constructor(options: DispatcherOptions) {
     this.#options = options
@@ -257,6 +263,8 @@ export class GatewayDispatcher implements ConnectionDriver {
       )
       if (ctx.id !== undefined && conn.readyState === 'open') {
         conn.sendFrame(this.#codec.encode({ kind: 'reply', id: ctx.id, data: result }))
+      } else if (ctx.id === undefined && result !== undefined && !this.raw) {
+        this.#ignoredResult(plan.definition.method, ctx.event)
       }
       return OK
     } catch (thrown) {
@@ -269,6 +277,13 @@ export class GatewayDispatcher implements ConnectionDriver {
       else if (rejected && isForbidden(error)) outcome = 'rejected'
       return { outcome, error: thrown }
     }
+  }
+
+  #ignoredResult(method: string, event: string | undefined): void {
+    const report = this.#options.ignoredResult
+    if (report === undefined || this.#ignored.has(method)) return
+    this.#ignored.add(method)
+    report(method, event)
   }
 
   /** Runs the plugin exception mappers, in order: the first `WsException` wins. */

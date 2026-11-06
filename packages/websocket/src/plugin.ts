@@ -425,6 +425,15 @@ export class WebSocketPlugin implements Plugin, PluginHttpUpgrades {
           name,
           mappers,
           codec: options.codec,
+          ...(process.env['NODE_ENV'] === 'production'
+            ? {}
+            : {
+                ignoredResult: (handler: string, event: string | undefined) =>
+                  ctx.logger.debug(
+                    `WebSocketPlugin: the result of ${name}.${handler} is ignored: "${event}" was sent without id (fire and forget)`,
+                    { gateway: name, handler, event },
+                  ),
+              }),
           logError: (message, error, conn) => {
             ctx.logger.error(`WebSocketPlugin: ${message}`, {
               err: error,

@@ -107,6 +107,17 @@ describe('GatewayDispatcher', () => {
     expect(gateway.log).toEqual(['connected', 'gone'])
   })
 
+  it('reports once per handler a result sent to nobody (a message without id)', async () => {
+    const ignored: string[] = []
+    const { client, received } = await connect([handler('fire', 'fire', () => 'ignored')], {
+      ignoredResult: (method, event) => ignored.push(`${method}:${event}`),
+    })
+    client.send('{"event":"fire"}')
+    client.send('{"event":"fire"}')
+    expect(await received()).toEqual([])
+    expect(ignored).toEqual(['fire:fire'])
+  })
+
   it('answers unknown events, bad frames, guards and errors', async () => {
     const { client, received, errors } = await connect(
       [
