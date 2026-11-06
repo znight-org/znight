@@ -23,6 +23,9 @@ ticker. Data stays in memory.
 - **A raw gateway** (`src/ticker/ticker.gateway.ts`): `/ticker/:symbol`, binary frames sent at the
   client's pace (`conn.send(...) === 'queued'` → `await conn.drained()`), a `4404` close from
   `@OnConnect` for an unknown symbol.
+- **A gateway per connection** (`src/cursor/cursor.gateway.ts`): `scope: 'request'` injects
+  `WsConnection` and the request-scoped `RequestUser` in the constructor and keeps per-connection
+  state in fields; cursor updates are lossy (`backpressure: { onLimit: 'drop' }`).
 - **HTTP and WebSockets together**: `GET /rooms` reads live member counts from `WsServer`,
   `GET /health` counts connections.
 - **Tests** in memory with `app.connect()` (real handshake, no socket) and over the network with
