@@ -169,6 +169,7 @@ function sidebarGuide(): DefaultTheme.SidebarItem[] {
         { text: 'Data access', link: '/guide/data-access' },
         { text: 'Security', link: '/guide/security' },
         { text: 'GraphQL', link: '/guide/graphql' },
+        { text: 'WebSockets', link: '/guide/websockets' },
         { text: 'Scheduling', link: '/guide/scheduling' },
         { text: 'Testing', link: '/guide/testing' },
         { text: 'Deployment', link: '/guide/deployment' },
