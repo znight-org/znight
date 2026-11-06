@@ -1,5 +1,5 @@
 ---
-description: The Znight packages - core runtime, compiler, HTTP, OpenAPI, GraphQL, messaging, scheduling, config, observability, testing and CLI - and how they fit together.
+description: The Znight packages - core runtime, compiler, HTTP, OpenAPI, GraphQL, WebSocket, messaging, events, scheduling, config, observability, testing and CLI - and how they fit together.
 ---
 
 # Packages
@@ -14,8 +14,9 @@ what you use.
 | [`@znight/compiler`](./compiler)           | Vite plugin, CLI/Bun integration: analysis, validation, code generation                                           | devDependency | <Badge type="tip" text="available" /> |
 | [`@znight/http`](./http)                   | Controllers, validation, guards, access decisions, files, cookies, SSE, CORS; `node:http`, Fastify, Express, Hono | dependency    | <Badge type="tip" text="available" /> |
 | [`@znight/openapi`](./openapi)             | OpenAPI 3.1 documents generated at build time; Scalar or Swagger UI                                               | dependency    | <Badge type="tip" text="available" /> |
-| [`@znight/graphql`](./graphql)             | GraphQL: schema from TypeScript types or SDL files checked at build time, loaders, subscriptions over SSE         | dependency    | <Badge type="tip" text="v0.2" />      |
+| [`@znight/graphql`](./graphql)             | GraphQL: schema from TypeScript types or SDL files checked at build time, loaders, subscriptions over SSE         | dependency    | <Badge type="tip" text="available" /> |
 | [`@znight/websocket`](./websocket)         | WebSocket gateways on the HTTP server: validated events, replies, rooms, backpressure                             | dependency    | <Badge type="tip" text="available" /> |
+| [`@znight/events`](./events)               | In-process application events: `@OnEvent` listeners checked at build time, inline or detached dispatch            | dependency    | <Badge type="tip" text="available" /> |
 | [`@znight/messaging`](./messaging)         | Consumers, retries, dead-letter queues; RabbitMQ, SQS, Kafka, in-memory                                           | dependency    | <Badge type="tip" text="available" /> |
 | [`@znight/schedule`](./schedule)           | Cron, interval and timeout jobs checked at build time; locks across instances                                     | dependency    | <Badge type="tip" text="available" /> |
 | [`@znight/config`](./config)               | Typed config classes from env, `.env`, JSON/YAML, Vault, AWS Secrets Manager                                      | dependency    | <Badge type="tip" text="available" /> |

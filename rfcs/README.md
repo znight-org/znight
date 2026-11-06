@@ -2,19 +2,19 @@
 
 Design documents for significant changes. Each RFC is discussed before implementation.
 
-| RFC                                           | Title                                     | Status             |
-| --------------------------------------------- | ----------------------------------------- | ------------------ |
-| [0001](./0001-security.md)                    | Security (route decisions, CORS, headers) | Accepted (v0.1)    |
-| [0002](./0002-openapi.md)                     | `@znight/openapi`                         | Accepted (v0.1)    |
-| [0003](./0003-websocket.md)                   | `@znight/websocket`                       | Implemented        |
-| [0004](./0004-schedule.md)                    | `@znight/schedule`                        | Accepted (v0.1)    |
-| [0005](./0005-graphql.md)                     | `@znight/graphql`                         | Accepted (v0.2)    |
-| [0006](./0006-http-cookies-sse.md)            | HTTP cookies and Server-Sent Events       | Accepted (v0.1)    |
-| [0007](./0007-graphql-schema-first.md)        | Schema-first GraphQL (`@znight/graphql`)  | Accepted (v0.2)    |
-| [0008](./0008-graphql-errors-as-data.md)      | Errors as data in `@znight/graphql`       | Accepted (v0.2)    |
-| [0009](./0009-graphql-drivers.md)             | GraphQL drivers (`@znight/graphql`)       | Accepted (planned) |
-| [0010](./0010-custom-parameter-decorators.md) | Custom parameter decorators               | Accepted (v0.2)    |
-| [0011](./0011-application-events.md)          | Application events (`@znight/events`)     | Accepted (v0.2)    |
+| RFC                                           | Title                                     | Status                                |
+| --------------------------------------------- | ----------------------------------------- | ------------------------------------- |
+| [0001](./0001-security.md)                    | Security (route decisions, CORS, headers) | Implemented (0.1.0)                   |
+| [0002](./0002-openapi.md)                     | `@znight/openapi`                         | Implemented (0.1.0)                   |
+| [0003](./0003-websocket.md)                   | `@znight/websocket`                       | Implemented (0.6.0)                   |
+| [0004](./0004-schedule.md)                    | `@znight/schedule`                        | Implemented (0.1.0)                   |
+| [0005](./0005-graphql.md)                     | `@znight/graphql`                         | Implemented (0.2.0)                   |
+| [0006](./0006-http-cookies-sse.md)            | HTTP cookies and Server-Sent Events       | Implemented (0.1.0)                   |
+| [0007](./0007-graphql-schema-first.md)        | Schema-first GraphQL (`@znight/graphql`)  | Implemented (0.2.1)                   |
+| [0008](./0008-graphql-errors-as-data.md)      | Errors as data in `@znight/graphql`       | Implemented (0.2.1)                   |
+| [0009](./0009-graphql-drivers.md)             | GraphQL drivers (`@znight/graphql`)       | M1–M2 implemented (0.3.0), M3 planned |
+| [0010](./0010-custom-parameter-decorators.md) | Custom parameter decorators               | Implemented (0.4.0)                   |
+| [0011](./0011-application-events.md)          | Application events (`@znight/events`)     | Implemented (0.5.0)                   |
 
 ## Error code allocation
 

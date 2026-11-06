@@ -1,29 +1,33 @@
 ---
-description: What Znight v0.1 contains, what v0.2 brings (GraphQL, custom parameter decorators, application events), WebSocket gateways (implemented), what is planned without a date (a cache package), what is being considered, and what is deliberately not planned.
+description: What each Znight release brought (0.1 to 0.6, from the first packages to GraphQL, custom parameter decorators, application events and WebSocket gateways), what is planned without a date (a cache package), what is being considered, and what is deliberately not planned.
 ---
 
 # Roadmap
 
-Znight is preparing its first release, **v0.1**. Significant features are designed in public, as
-RFCs in the [`rfcs/`](https://github.com/znight-org/znight/tree/main/rfcs) folder of the repository,
-before they are implemented. This page summarises where each one stands. Until 1.0, minor versions
-may change APIs.
+Znight is published on npm, every `@znight/*` package under one version. Significant features are
+designed in public, as RFCs in the [`rfcs/`](https://github.com/znight-org/znight/tree/main/rfcs)
+folder of the repository, before they are implemented. This page summarises where each one stands
+and the release that brought it. Until 1.0, minor versions may change APIs; each package's
+`CHANGELOG.md` lists every change.
 
-| RFC                                                                                             | Title                                     | Status             |
-| ----------------------------------------------------------------------------------------------- | ----------------------------------------- | ------------------ |
-| [0001](https://github.com/znight-org/znight/blob/main/rfcs/0001-security.md)                    | Security (route decisions, CORS, headers) | Accepted (v0.1)    |
-| [0002](https://github.com/znight-org/znight/blob/main/rfcs/0002-openapi.md)                     | `@znight/openapi`                         | Accepted (v0.1)    |
-| [0003](https://github.com/znight-org/znight/blob/main/rfcs/0003-websocket.md)                   | `@znight/websocket`                       | Implemented        |
-| [0004](https://github.com/znight-org/znight/blob/main/rfcs/0004-schedule.md)                    | `@znight/schedule`                        | Accepted (v0.1)    |
-| [0005](https://github.com/znight-org/znight/blob/main/rfcs/0005-graphql.md)                     | `@znight/graphql`                         | Accepted (v0.2)    |
-| [0006](https://github.com/znight-org/znight/blob/main/rfcs/0006-http-cookies-sse.md)            | HTTP cookies and Server-Sent Events       | Accepted (v0.1)    |
-| [0007](https://github.com/znight-org/znight/blob/main/rfcs/0007-graphql-schema-first.md)        | Schema-first GraphQL                      | Accepted (v0.2)    |
-| [0008](https://github.com/znight-org/znight/blob/main/rfcs/0008-graphql-errors-as-data.md)      | Errors as data in `@znight/graphql`       | Accepted (v0.2)    |
-| [0009](https://github.com/znight-org/znight/blob/main/rfcs/0009-graphql-drivers.md)             | GraphQL drivers (`@znight/graphql`)       | Accepted (planned) |
-| [0010](https://github.com/znight-org/znight/blob/main/rfcs/0010-custom-parameter-decorators.md) | Custom parameter decorators               | Accepted (v0.2)    |
-| [0011](https://github.com/znight-org/znight/blob/main/rfcs/0011-application-events.md)          | Application events (`@znight/events`)     | Accepted (v0.2)    |
+| RFC                                                                                             | Title                                     | Status                                |
+| ----------------------------------------------------------------------------------------------- | ----------------------------------------- | ------------------------------------- |
+| [0001](https://github.com/znight-org/znight/blob/main/rfcs/0001-security.md)                    | Security (route decisions, CORS, headers) | Implemented (0.1.0)                   |
+| [0002](https://github.com/znight-org/znight/blob/main/rfcs/0002-openapi.md)                     | `@znight/openapi`                         | Implemented (0.1.0)                   |
+| [0003](https://github.com/znight-org/znight/blob/main/rfcs/0003-websocket.md)                   | `@znight/websocket`                       | Implemented (0.6.0)                   |
+| [0004](https://github.com/znight-org/znight/blob/main/rfcs/0004-schedule.md)                    | `@znight/schedule`                        | Implemented (0.1.0)                   |
+| [0005](https://github.com/znight-org/znight/blob/main/rfcs/0005-graphql.md)                     | `@znight/graphql`                         | Implemented (0.2.0)                   |
+| [0006](https://github.com/znight-org/znight/blob/main/rfcs/0006-http-cookies-sse.md)            | HTTP cookies and Server-Sent Events       | Implemented (0.1.0)                   |
+| [0007](https://github.com/znight-org/znight/blob/main/rfcs/0007-graphql-schema-first.md)        | Schema-first GraphQL                      | Implemented (0.2.1)                   |
+| [0008](https://github.com/znight-org/znight/blob/main/rfcs/0008-graphql-errors-as-data.md)      | Errors as data in `@znight/graphql`       | Implemented (0.2.1)                   |
+| [0009](https://github.com/znight-org/znight/blob/main/rfcs/0009-graphql-drivers.md)             | GraphQL drivers (`@znight/graphql`)       | M1–M2 implemented (0.3.0), M3 planned |
+| [0010](https://github.com/znight-org/znight/blob/main/rfcs/0010-custom-parameter-decorators.md) | Custom parameter decorators               | Implemented (0.4.0)                   |
+| [0011](https://github.com/znight-org/znight/blob/main/rfcs/0011-application-events.md)          | Application events (`@znight/events`)     | Implemented (0.5.0)                   |
+| Package                                                                                         | What it brings                            |
 
-## v0.1: the first release {#v0-1}
+## Released {#released}
+
+### 0.1: the first release {#v0-1}
 
 Ten packages, released together under one version, running on Node.js 24+ and Bun 1.3+:
 
@@ -46,53 +50,59 @@ And around them:
   access decision groups checked at build time ([`ZNIGHT023`](/reference/error-codes#znight023)) and
   at boot, CORS, security headers on by default and trusted proxies. Authentication and
   authorization are recipes of the [Security guide](/guide/security), tested in the `secure-api`
-  example. There is no `@znight/security` package in v0.1.
+  example. There is no `@znight/security` package (see [Considered](#considered)).
 - **Data access is yours.** Znight provides the wiring (factories, async init, disposal, interfaces)
   and leaves the choice of the database library to you; [Drizzle](https://orm.drizzle.team) is the
   recommended choice for SQL. See [Data access](/guide/data-access).
 - **Caching** is a method interceptor today: the [cache recipe](/guide/aop#cache).
-- Eight [example applications](/examples), each with its tests, running on Node.js and Bun.
+- [Example applications](/examples), each with its tests, running on Node.js and Bun.
 
-## v0.2: in progress {#v0-2}
+### 0.2: `@znight/graphql` {#v0-2}
 
-### `@znight/graphql`
+[Package page](/packages/graphql) and [guide](/guide/graphql).
 
-**Implemented**, released with v0.2: [package page](/packages/graphql) and
-[guide](/guide/graphql).
-
-Code-first GraphQL ([RFC 0005](https://github.com/znight-org/znight/blob/main/rfcs/0005-graphql.md)):
-the TypeScript types are the schema. Resolvers are providers marked with `@Resolver`, `@Query`,
-`@Mutation`, `@Subscription` and `@ResolveField`; the compiler derives the schema from their
-signatures at build time, with descriptions from JSDoc, and reports schema mistakes as diagnostics
-([`ZNIGHT060`](/reference/error-codes#znight060)–[`ZNIGHT066`](/reference/error-codes#znight066)).
+Code-first GraphQL ([RFC 0005](https://github.com/znight-org/znight/blob/main/rfcs/0005-graphql.md)),
+in 0.2.0: the TypeScript types are the schema. Resolvers are providers marked with `@Resolver`,
+`@Query`, `@Mutation`, `@Subscription` and `@ResolveField`; the compiler derives the schema from
+their signatures at build time, with descriptions from JSDoc, and reports schema mistakes as
+diagnostics ([`ZNIGHT060`](/reference/error-codes#znight060)–[`ZNIGHT066`](/reference/error-codes#znight066)).
 It runs on graphql-js 17, served over HTTP by `HttpPlugin` on every adapter, with subscriptions
 over Server-Sent Events, batching with loaders, access control with the same route decorators and
-guards as HTTP, errors as data through result mappers
-([RFC 0008](https://github.com/znight-org/znight/blob/main/rfcs/0008-graphql-errors-as-data.md)),
-and the `graphql:operation` hook. GraphQL interfaces in code-first and the follow-ups below are not part of
-this first version.
+guards as HTTP, and the `graphql:operation` hook.
 
-**Schema-first** ([RFC 0007](https://github.com/znight-org/znight/blob/main/rfcs/0007-graphql-schema-first.md)),
-implemented: with `graphql.configure({ schema })`, the `.graphql` files are the schema, resolvers
-are bound by name as in NestJS, and the compiler checks the coverage of the SDL and the conformance
-of every resolver signature at build time
-([`ZNIGHT067`](/reference/error-codes#znight067)–[`ZNIGHT068`](/reference/error-codes#znight068));
-interfaces are supported in this mode.
+In 0.2.1:
 
-### Custom parameter decorators
+- **Schema-first** ([RFC 0007](https://github.com/znight-org/znight/blob/main/rfcs/0007-graphql-schema-first.md)):
+  with `graphql.configure({ schema })`, the `.graphql` files are the schema, resolvers are bound by
+  name as in NestJS, and the compiler checks the coverage of the SDL and the conformance of every
+  resolver signature at build time
+  ([`ZNIGHT067`](/reference/error-codes#znight067)–[`ZNIGHT068`](/reference/error-codes#znight068));
+  interfaces are supported in this mode.
+- **Errors as data** ([RFC 0008](https://github.com/znight-org/znight/blob/main/rfcs/0008-graphql-errors-as-data.md)):
+  result mappers turn the errors of guards, argument validation and resolvers into values of the
+  field's union.
 
-**Implemented**, released with v0.2
-([RFC 0010](https://github.com/znight-org/znight/blob/main/rfcs/0010-custom-parameter-decorators.md),
-[guide](/guide/custom-parameters)): a `@CurrentUser()` of your own, defined once with
+### 0.3: GraphQL drivers {#v0-3}
+
+[RFC 0009](https://github.com/znight-org/znight/blob/main/rfcs/0009-graphql-drivers.md), milestones
+1 and 2: `GraphQLEngine` runs the schema with its guards, loaders, request scope and hook behind
+graphql-js-shaped `parse`, `validate`, `execute` and `subscribe`, and `@znight/graphql/yoga` serves
+it with GraphQL Yoga on every adapter, on Node.js and Bun. The built-in transport stays the default.
+`HttpPlugin` gains `onHttpDrain()` so plugins serving routes end their streams on shutdown. The
+Apollo Server driver (milestone 3) waits for Apollo Server to accept graphql-js 17.
+
+### 0.4: custom parameter decorators {#v0-4}
+
+[RFC 0010](https://github.com/znight-org/znight/blob/main/rfcs/0010-custom-parameter-decorators.md),
+[guide](/guide/custom-parameters): a `@CurrentUser()` of your own, defined once with
 `createParamDecorator` from `@znight/core` and usable on HTTP routes, GraphQL fields and message
 handlers. Its target, data argument and value type are checked at build time, resolvers may be
 providers in any scope, and the generated code calls them directly: handlers without custom
 parameters are unchanged.
 
-### `@znight/events`
+### 0.5: `@znight/events` {#v0-5}
 
-**Implemented**, released with v0.2: [package page](/packages/events) and
-[guide](/guide/events).
+[Package page](/packages/events) and [guide](/guide/events).
 
 Application events ([RFC 0011](https://github.com/znight-org/znight/blob/main/rfcs/0011-application-events.md)),
 in the spirit of Spring and Micronaut: events are classes, listeners are provider methods marked
@@ -104,11 +114,9 @@ are used for; `@znight/messaging` stays the tool for durable, out-of-process del
 demand: a transaction port (`phase: 'after-commit'`), `@Externalized` events relayed to a broker, a
 concurrency limit for detached listeners.
 
-## Implemented {#implemented}
+### 0.6: `@znight/websocket` {#v0-6}
 
-### `@znight/websocket`
-
-**Implemented**: [package page](/packages/websocket), [WebSockets guide](/guide/websockets) and the
+[Package page](/packages/websocket), [WebSockets guide](/guide/websockets) and the
 [`realtime-chat`](/examples#realtime-chat) example
 ([RFC 0003](https://github.com/znight-org/znight/blob/main/rfcs/0003-websocket.md)). Gateways are
 providers decorated with `@Gateway(path)` whose methods handle connections and events, resolved and
@@ -157,7 +165,7 @@ These are tracked in the RFCs as follow-ups. None has a date.
   GraphQL interfaces in code-first, `__resolveType` methods and custom
   directives in schema-first, `graphql-ws` subscriptions, `@defer` / `@stream`,
   trusted documents checked at build time, query cost analysis, federation, resolver-level spans
-  in `@znight/observability`, a `graphql-api` example application.
+  in `@znight/observability`.
 
 Interested in one of them? Say so in an issue or a discussion on
 [GitHub](https://github.com/znight-org/znight): real use cases are what moves an item up.

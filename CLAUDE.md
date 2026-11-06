@@ -17,7 +17,8 @@ ahead of time. It is the approach of Micronaut and Dagger, brought to TypeScript
 `reflect-metadata`, no `emitDecoratorMetadata`, wiring errors at build time.
 
 - Repository: <https://github.com/znight-org/znight> (MIT), npm scope `@znight`.
-- Version `0.1.0`, published on npm, every `@znight/*` package versioned in lockstep.
+- Published on npm (`0.6.0` at the time of writing), every `@znight/*` package versioned in lockstep
+  (changesets "fixed" group); `packages/core/package.json` holds the current version.
 - Runtime packages run on Node.js >= 24 and Bun >= 1.3, ESM only.
 
 ## Principles
@@ -52,7 +53,7 @@ Every change must keep these. A change that bends one starts with an RFC (see [R
 
 ## Current state
 
-### v0.1 (in this repository)
+### Packages (in this repository)
 
 | Package                 | What it is                                                                                                                                                                       |
 | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -80,7 +81,7 @@ feed a "chore: version packages" pull request; merging it publishes to npm after
 
 Respect them; do not reopen them in passing.
 
-- **No `@znight/security` package in v0.1** (RFC 0001). Security lives in `@znight/http`: route
+- **No `@znight/security` package** (RFC 0001, reconsidered only on its criteria). Security lives in `@znight/http`: route
   decision groups (`createRouteDecorator(key, { group, required })`, guards declaring
   `static enforces`) checked at build time (ZNIGHT023) and at boot, CORS, security headers and
   `trustProxy`. JWT, API keys, rate limiting, CSRF and the like are recipes in
@@ -93,15 +94,15 @@ Respect them; do not reopen them in passing.
   (entities, columns, repositories, queries) are explicitly **not** on the roadmap.
 - **Built-in sessions and server-side MVC** (a session store, templates, views) are out of scope.
   Signed cookies are built in, and `examples/secure-api` shows a cookie-session recipe.
-- **WebSocket** (RFC 0003) is implemented in `@znight/websocket` (`ZNIGHT050`–`051` allocated).
-  **GraphQL** (RFC 0005) ships as `@znight/graphql` with
-  v0.2.
+- **WebSocket** (RFC 0003) shipped in 0.6.0 as `@znight/websocket` (`ZNIGHT050`–`051` allocated).
+  **GraphQL** (RFC 0005) shipped in 0.2.0 as `@znight/graphql`.
 
 ### Roadmap
 
-The roadmap page is [`docs/roadmap.md`](docs/roadmap.md): v0.2 brings `@znight/graphql` (RFC 0005,
-implemented); `@znight/websocket` (RFC 0003) is implemented; planned without a date, `@znight/cache`
-(no RFC yet); then what is considered and what is not planned. RFC statuses live in
+The roadmap page is [`docs/roadmap.md`](docs/roadmap.md): what each release brought (0.1 the first
+packages, 0.2 GraphQL, 0.3 GraphQL drivers, 0.4 custom parameter decorators, 0.5 `@znight/events`,
+0.6 `@znight/websocket`); planned without a date, `@znight/cache` (no RFC yet) and the Apollo driver
+of RFC 0009; then what is considered and what is not planned. RFC statuses live in
 [`rfcs/README.md`](rfcs/README.md). There is no TODO list in this file: read the roadmap, the RFCs
 and the GitHub issues before starting a feature, and keep the roadmap page up to date when a
 decision changes.
