@@ -9,7 +9,7 @@
  * Needs `graphql-yoga` (an optional peer dependency of `@znight/graphql`), only loaded by this entry.
  */
 import type { CoreLogger } from '@znight/core'
-import type { HttpContext } from '@znight/http'
+import type { HeaderValue, HttpContext } from '@znight/http'
 import type { DocumentNode, ExecutionArgs, ExecutionResult, GraphQLSchema, ValidationRule } from 'graphql'
 import type {
   GraphiQLOptions,
@@ -23,13 +23,13 @@ import type { EngineExecuteOptions, GraphQLEngine } from './engine.ts'
 import type { GraphQLContext } from './types.ts'
 
 import { ErrorCode, ZnightError } from '@znight/core'
-import { parseByteSize } from '@znight/http'
+import { HttpResponse, parseByteSize } from '@znight/http'
 import { GraphQLError } from 'graphql'
 import { createYoga } from 'graphql-yoga'
 
 import { GraphQLErrorCode } from './errors.ts'
 import { MEDIA, Media, type MediaKind, negotiate } from './transport/accept.ts'
-import { fetchRequest } from './transport/fetch.ts'
+import { fetchRequest, type RequestClass } from './transport/fetch.ts'
 import { isJsonRequest, notJson } from './transport/http.ts'
 
 /** The server context the driver gives Yoga: the `HttpContext` of the route, as `znight`. */
@@ -68,7 +68,7 @@ const OWNER: Readonly<Record<(typeof OWNED)[number], string>> = {
   graphqlEndpoint: 'set the path option of GraphQLPlugin',
   maskedErrors: 'the engine masks errors once (exposeErrors, errorMappers)',
   cors: 'set the cors option of HttpPlugin',
-  fetchAPI: "the driver gives Yoga the runtime's own Fetch API",
+  fetchAPI: "Yoga keeps its default Fetch API; the driver converts Yoga's responses for HttpPlugin",
   maxRequestBodySize: 'set http.bodyLimit of GraphQLPlugin',
   parserAndValidationCache: 'the engine caches documents (the documentCache option of GraphQLPlugin)',
   requestId: 'Yoga uses the request id of HttpPlugin',
@@ -222,11 +222,13 @@ class Driver implements YogaDriver {
       batching: false,
       multipart: false,
       cors: false, // HttpPlugin's CORS
-      maxRequestBodySize: this.#limit,
+      // the Fetch bridge reads the body under the route's limit (HttpPlugin's 413): Yoga's own limit
+      // would pipe every body through a counting stream
+      maxRequestBodySize: false,
       parserAndValidationCache: false, // the engine's document cache
       disposeOnProcessTerminate: false,
       requestId: { generateRequestId: requestIdOf, trustHeader: false },
-      fetchAPI: fetchApi(),
+      // Yoga's default Fetch API (the fastest on each runtime): httpReply() converts its responses
       plugins: [engineFns.plugin, ...plugins, engineFns.guard],
     })
     this.#stopped = false
@@ -240,17 +242,17 @@ class Driver implements YogaDriver {
     await yoga?.dispose()
   }
 
-  readonly #handle = (ctx: HttpContext): Response | Promise<Response> => {
+  readonly #handle = (ctx: HttpContext): Response | Promise<HttpResponse<unknown>> => {
     const yoga = this.#yoga
     if (yoga === undefined) {
       if (this.#stopped) return shuttingDown()
       throw notStarted()
     }
-    const request = fetchRequest(ctx, this.#limit)
+    const request = fetchRequest(ctx, this.#limit, yoga.fetchAPI.Request as RequestClass)
     const server: YogaServerContext = { znight: ctx }
-    const response =
-      request instanceof Request ? yoga.fetch(request, server) : request.then(built => yoga.fetch(built, server))
-    return response instanceof Response ? response : Promise.resolve(response).then(sendable)
+    // Yoga may answer synchronously, or with a thenable of its own: settled as a native promise
+    if (request instanceof Promise) return request.then(built => yoga.fetch(built, server)).then(httpReply)
+    return Promise.resolve(yoga.fetch(request, server)).then(httpReply)
   }
 
   /** `POST`: JSON bodies only (the 415 of the built-in transport otherwise: no CSRF). */
@@ -261,7 +263,7 @@ class Driver implements YogaDriver {
   }
 
   /** `GET`: Yoga's, or 405 when queries over `GET` are off (GraphiQL pages still served). */
-  readonly #getHandler = (ctx: HttpContext): Response | Promise<Response> => {
+  readonly #getHandler = (ctx: HttpContext): Response | Promise<HttpResponse<unknown>> => {
     if (this.#get || (this.#ide && acceptsHtml(ctx))) return this.#handle(ctx)
     return getNotAllowed()
   }
@@ -271,42 +273,76 @@ class Driver implements YogaDriver {
 const UNREACHABLE = '/.znight/unreachable'
 
 /**
- * The Fetch API of the runtime: on Node.js, Yoga would otherwise use the ponyfills of
- * `@whatwg-node/fetch`, whose `Response` objects `HttpPlugin` cannot send.
+ * What `HttpPlugin` sends for a response of Yoga, whatever Fetch API made it (Yoga's default: the
+ * `@whatwg-node` ponyfills on Node.js, the runtime's own on Bun; a `@hono/node-server` class...):
+ * an `HttpResponse` with its status and headers (`set-cookie` lines kept apart) and
+ *
+ * - its text, for a JSON, HTML or plain text body in UTF-8, not content-encoded (Yoga's results,
+ *   GraphiQL, its errors): complete once the response exists (a ponyfill response holds the
+ *   string), it is sent with a `content-length`, never streamed;
+ * - otherwise its body as a native `ReadableStream`, its bytes as they are (a body compressed by a
+ *   plugin such as `useContentEncoding()`, another charset), read as the client receives it and
+ *   cancelled when the client leaves (GraphQL over SSE, incremental delivery): never buffered.
  */
-function fetchApi(): Record<string, unknown> {
-  return {
-    fetch: globalThis.fetch,
-    Request: globalThis.Request,
-    Response: globalThis.Response,
-    Headers: globalThis.Headers,
-    FormData: globalThis.FormData,
-    ReadableStream: globalThis.ReadableStream,
-    WritableStream: globalThis.WritableStream,
-    TransformStream: globalThis.TransformStream,
-    CompressionStream: globalThis.CompressionStream,
-    DecompressionStream: globalThis.DecompressionStream,
-    TextDecoderStream: globalThis.TextDecoderStream,
-    TextEncoderStream: globalThis.TextEncoderStream,
-    Blob: globalThis.Blob,
-    File: globalThis.File,
-    TextEncoder: globalThis.TextEncoder,
-    TextDecoder: globalThis.TextDecoder,
-    URL: globalThis.URL,
-    URLSearchParams: globalThis.URLSearchParams,
-    btoa: globalThis.btoa,
+function httpReply(response: Response): HttpResponse<unknown> | Promise<HttpResponse<unknown>> {
+  const headers = responseHeaders(response.headers)
+  const init = { status: response.status, headers }
+  if (isUtf8Text(headers)) {
+    delete headers['content-length'] // the length of the text, set by HttpPlugin
+    return response.text().then(text => new HttpResponse(text, init))
   }
+  const body = response.body
+  return new HttpResponse(body === null ? undefined : nativeStream(body), init)
 }
 
+/** The headers of a response as `HttpResponse` headers: each name once, `set-cookie` as its lines. */
+function responseHeaders(source: Headers): Record<string, HeaderValue> {
+  const headers: Record<string, HeaderValue> = Object.create(null)
+  source.forEach((value, name) => {
+    if (name !== 'set-cookie') headers[name] = value
+  })
+  const cookies = source.getSetCookie()
+  if (cookies.length > 0) headers['set-cookie'] = cookies
+  return headers
+}
+
+/** Media types whose body is complete with the response (JSON, HTML, plain text): sent as text. */
+const TEXT_TYPE = /^\s*(?:application\/(?:[\w.-]+\+)?json|text\/(?:html|plain))\s*(?:;|$)/i
+
+/** The `charset` parameter of a media type (quoted or not). */
+const CHARSET = /;\s*charset\s*=\s*"?([^";\s]*)/i
+
 /**
- * A `Response` `HttpPlugin` recognises: `@hono/node-server` replaces the global `Response` when it
- * starts listening, after Yoga captured the runtime's own; such a response is rebuilt on the
- * global class (same status, headers and body stream).
+ * Whether a body is sent as its text: a {@link TEXT_TYPE} in UTF-8 (no charset, or `utf-8`) and
+ * not content-encoded (no `content-encoding`, or `identity`). Decoding compressed bytes, or text in
+ * another charset, as UTF-8 would corrupt them: such a body is streamed as it is.
  */
-function sendable(response: Response): Response {
-  if (response instanceof Response) return response
-  const foreign: { readonly body: ReadableStream<Uint8Array> | null } & ResponseInit = response
-  return new Response(foreign.body, foreign)
+function isUtf8Text(headers: Record<string, HeaderValue>): boolean {
+  const type = headers['content-type']
+  if (typeof type !== 'string' || !TEXT_TYPE.test(type)) return false
+  const encoding = headers['content-encoding']
+  if (encoding !== undefined && (typeof encoding !== 'string' || encoding.trim().toLowerCase() !== 'identity')) {
+    return false
+  }
+  const charset = CHARSET.exec(type)?.[1]
+  return charset === undefined || /^utf-?8$/i.test(charset)
+}
+
+/** A native `ReadableStream` reading `body` (another implementation's stream: the ponyfill's). */
+function nativeStream(body: Pick<ReadableStream<Uint8Array>, 'getReader'>): ReadableStream<Uint8Array> {
+  if (body instanceof ReadableStream) return body
+  const reader = body.getReader()
+  return new ReadableStream<Uint8Array>(
+    {
+      async pull(controller) {
+        const { done, value } = await reader.read()
+        if (done) controller.close()
+        else controller.enqueue(value)
+      },
+      cancel: reason => reader.cancel(reason),
+    },
+    { highWaterMark: 0 },
+  )
 }
 
 /** The request id of `HttpPlugin` (a UUID for a request handed to `yoga.fetch()` directly). */
