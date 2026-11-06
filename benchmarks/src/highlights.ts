@@ -137,10 +137,15 @@ export function graphqlSummary(results: Results): string[] {
   )
   const fields = graphql.micro?.settings.fields
   if (overhead !== undefined && fields !== undefined) {
-    const percent = overhead.overheadPercent.median
-    const target = percent < 10 ? 'under' : 'over'
+    const { median, min, max, n } = overhead.overheadPercent
+    // one median moves by a few points from run to run: a verdict only when the range of at least
+    // three processes agrees
+    const range = n > 1 ? `${min.toFixed(1)} to ${max.toFixed(1)}% across ${n} processes` : 'one process'
+    let target = `at the 10% target of RFC 0005 (${range})`
+    if (n >= 3 && max < 10) target = `under the 10% target of RFC 0005 (${range})`
+    else if (n >= 3 && min > 10) target = `over the 10% target of RFC 0005 (${range})`
     lines.push(
-      `**Plugin overhead**: \`GraphQLPlugin.execute()\` adds ${percent.toFixed(1)}% to graphql-js \`execute()\` for a cached ${fields}-field query on Node.js, ${target} the 10% target of RFC 0005.`,
+      `**Plugin overhead**: \`GraphQLPlugin.execute()\` adds ${median.toFixed(1)}% to graphql-js \`execute()\` for a cached ${fields}-field query on Node.js, ${target}.`,
     )
   }
   return lines

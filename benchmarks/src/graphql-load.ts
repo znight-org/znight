@@ -4,7 +4,10 @@
  * Prints autocannon's result as JSON, with the first rejected body if any.
  *
  * Every response body goes through the operation's check (`verifyBody`): a body without the
- * expected data, or with an `errors` key, counts in `mismatches`, and the runner fails the run.
+ * expected data, or with an `errors` key, counts in `mismatches`, and the runner fails the run. The
+ * first body is parsed and checked in full; the next ones are compared with it as strings (the
+ * operation's `same`), and only a body that differs is parsed: the check costs the client almost
+ * nothing, so it does not limit the fastest servers.
  */
 import { createRequire } from 'node:module'
 
@@ -22,6 +25,7 @@ if (url === undefined || !isGraphqlOperation(operation) || seconds === undefined
 
 const spec = OPERATION_SPECS[operation]
 let rejected: string | undefined
+let same: ((body: string) => boolean) | undefined
 const result = await autocannon({
   url,
   method: 'POST',
@@ -31,7 +35,11 @@ const result = await autocannon({
   duration: Number(seconds),
   pipelining: 1,
   verifyBody: (body: string): boolean => {
-    if (spec.verify(body)) return true
+    if (same?.(body) === true) return true
+    if (spec.verify(body)) {
+      same ??= spec.same(body)
+      return true
+    }
     rejected ??= body.slice(0, 500)
     return false
   },

@@ -2,6 +2,9 @@ import type { CreateUserInput, User } from './user.js'
 
 import { Injectable } from '@znight/core'
 
+/** Check-only mode of the runner (`BENCH_COUNT_FIND_MANY=1`): one stderr line per `findMany` call, to check batching. */
+const COUNT_FIND_MANY = process.env['BENCH_COUNT_FIND_MANY'] === '1'
+
 /** Users 1 to 100 are seeded; created users take the ids 101 to 10000 in turn (bounded memory). */
 @Injectable()
 export class UserRepository {
@@ -20,6 +23,7 @@ export class UserRepository {
 
   /** The users of `ids` that exist, in no particular order. */
   findMany(ids: readonly string[]): User[] {
+    if (COUNT_FIND_MANY) process.stderr.write('findMany\n')
     const users: User[] = []
     for (const id of ids) {
       const user = this.#users.get(id)

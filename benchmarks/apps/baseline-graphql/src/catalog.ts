@@ -19,6 +19,9 @@ export interface Book {
   readonly authorId: string
 }
 
+/** Check-only mode of the runner (`BENCH_COUNT_FIND_MANY=1`): one stderr line per `findMany` call, to check batching. */
+const COUNT_FIND_MANY = process.env['BENCH_COUNT_FIND_MANY'] === '1'
+
 /** Input of `Mutation.createUser`: the rules of the HTTP benchmark's `POST /users` body. */
 export const CreateUserInput = z.object({ name: z.string().min(1).max(100), email: z.email() })
 export type CreateUserInput = z.infer<typeof CreateUserInput>
@@ -70,6 +73,7 @@ export class UserRepository {
 
   /** The users of `ids` that exist, in no particular order. */
   findMany(ids: readonly string[]): User[] {
+    if (COUNT_FIND_MANY) process.stderr.write('findMany\n')
     const users: User[] = []
     for (const id of ids) {
       const user = this.#users.get(id)

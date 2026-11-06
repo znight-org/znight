@@ -82,10 +82,14 @@ Every GraphQL application follows it exactly, which is what makes the comparison
   types), with resolver -> `UsersService`/`BooksService` -> in-memory repositories seeded with
   users 1 to 100 and books 1 to 100, book `i` written by user `((i * 7) % 100) + 1`;
   `books(limit)` returns the first books by id;
-- `Book.author` batched by a DataLoader, one `users.findMany()` per request;
+- `Book.author` batched by a DataLoader, one `users.findMany()` per request: the users repository
+  writes one `findMany` line on stderr per call when `BENCH_COUNT_FIND_MANY=1`, and the runner
+  checks, before the runs, that one `books` request makes exactly one;
 - `createUser` validates its input with the Zod 4 schema of `POST /users` and returns the user;
-- graphql-js 17.0, the copy of the workspace: `bun src/cli.ts graphql` fails when an application
-  loads another copy.
+- graphql-js 17.0, the copy of the workspace: `bun src/cli.ts graphql` fails when an application,
+  or any package of its dependency tree, resolves another copy, or when the workspace installs more
+  than one. Yoga (and NestJS with Yoga) executes with `@graphql-tools/executor`, Yoga's default;
+  graphql-js and Znight (with or without Yoga) execute with graphql-js `execute`.
 
 The runner sends the three operations of `src/graphql-operations.ts` and checks every response
 body (no `errors` key, the expected data, the authors of the seed): one failure fails the run. An

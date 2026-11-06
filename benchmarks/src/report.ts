@@ -465,8 +465,9 @@ function graphqlMicroBlock(results: Results): string {
             if (result === undefined) return '–'
             const us = `${(result.nsPerOp.median / 1000).toFixed(1)} µs`
             if (path === 'graphql-js') return us
-            const overhead = result.overheadPercent.median
-            return `${bold ? `**${us}**` : us} <small>${overhead >= 0 ? '+' : ''}${overhead.toFixed(1)}%</small>`
+            const { median, min, max } = result.overheadPercent
+            const signed = (value: number): string => `${value >= 0 ? '+' : ''}${value.toFixed(1)}`
+            return `${bold ? `**${us}**` : us} <small>${signed(median)}% (${signed(min)} to ${signed(max)})</small>`
           }),
         ),
       ]
@@ -478,7 +479,7 @@ function graphqlMicroBlock(results: Results): string {
     '',
     schema,
     '',
-    `**Per-operation overhead**: a cached ${s.fields}-field query, the time per operation and, in small type, the time added to graphql-js \`execute()\` on the same schema. "Direct": outside any scope, the plugin opens one per operation; "request scope": inside the scope a GraphQL-over-HTTP request already has. Median of ${s.executeRuns} processes of ${s.rounds} interleaved rounds of ${formatCount(s.iterations)} operations. RFC 0005 target: under 10%.`,
+    `**Per-operation overhead**: a cached ${s.fields}-field query, the time per operation and, in small type, the time added to graphql-js \`execute()\` on the same schema, with its range across the processes. "Direct": outside any scope, the plugin opens one per operation; "request scope": inside the scope a GraphQL-over-HTTP request already has. Median of ${s.executeRuns} processes of ${s.rounds} interleaved rounds of ${formatCount(s.iterations)} operations. RFC 0005 target: under 10%.`,
     '',
     execute,
   ].join('\n')
