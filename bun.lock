@@ -206,6 +206,26 @@
         "vite": "catalog:",
       },
     },
+    "examples/realtime-chat": {
+      "name": "@znight-examples/realtime-chat",
+      "version": "0.0.0",
+      "dependencies": {
+        "@znight/core": "workspace:*",
+        "@znight/http": "workspace:*",
+        "@znight/websocket": "workspace:*",
+        "ws": "8.22.0",
+        "zod": "catalog:",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+        "@types/node": "catalog:",
+        "@znight/cli": "workspace:*",
+        "@znight/compiler": "workspace:*",
+        "@znight/testing": "workspace:*",
+        "typescript": "catalog:",
+        "vite": "catalog:",
+      },
+    },
     "examples/rest-api": {
       "name": "@znight-examples/rest-api",
       "version": "0.0.0",
@@ -1387,6 +1407,8 @@
     "@znight-examples/microservice": ["@znight-examples/microservice@workspace:examples/microservice"],
 
     "@znight-examples/notifications-worker": ["@znight-examples/notifications-worker@workspace:examples/monorepo/services/notifications-worker"],
+
+    "@znight-examples/realtime-chat": ["@znight-examples/realtime-chat@workspace:examples/realtime-chat"],
 
     "@znight-examples/rest-api": ["@znight-examples/rest-api@workspace:examples/rest-api"],
 

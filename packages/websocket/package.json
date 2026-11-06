@@ -1,6 +1,6 @@
 {
   "name": "@znight/websocket",
-  "version": "0.0.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Znight WebSocket gateways served by the HTTP server, validated at build time (RFC 0003, in progress)",
   "license": "MIT",

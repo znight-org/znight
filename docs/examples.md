@@ -18,6 +18,7 @@ them: their code samples are files of the examples.
 | [`storefront-api`](#storefront-api) | OpenAPI generated from the code, committed, served and checked; a typed client     | Hono         |
 | [`uptime-monitor`](#uptime-monitor) | Scheduled and dynamic jobs, one runner across instances, live results over SSE     | Hono         |
 | [`graphql-api`](#graphql-api)       | A GraphQL schema derived from the types, loaders, subscriptions, per-field access  | Hono         |
+| [`realtime-chat`](#realtime-chat)   | WebSocket gateways (in progress): rooms, tickets, guards, a raw binary feed        | `node:http`  |
 | [`microservice`](#microservice)     | HTTP and messaging in one service, retries, dead letters, distributed tracing      | Hono         |
 | [`worker`](#worker)                 | Message consumers without HTTP, request scope per message, draining on shutdown    | —            |
 | [`monorepo`](#monorepo)             | Two services sharing a provider library, overriding its providers                  | Express      |
@@ -136,6 +137,22 @@ reference example of [`@znight/schedule`](/packages/schedule) and the tested sou
 Packages: [`@znight/http`](/packages/http) (`@znight/http/hono`), [`@znight/schedule`](/packages/schedule).
 Libraries: Hono, PGlite, Zod; Testcontainers for `bun run test:integration` (Docker).
 [Source on GitHub](https://github.com/znight-org/znight/tree/main/examples/uptime-monitor).
+
+## realtime-chat
+
+**Chat rooms over WebSockets** (in progress: [`@znight/websocket`](/packages/websocket) is not
+published yet), served by the `HttpPlugin` server on one port, plus a binary price ticker.
+
+- Gateways with Zod payloads, replies, rooms and broadcasts encoded once.
+- The handshake is an HTTP request: the global `AuthGuard` checks an API key, or a single-use
+  ticket for browsers; the request scope is the connection.
+- A handshake guard (five tabs per user), a message guard reading `@Roles` on one event, access
+  decisions checked at build time.
+- A raw gateway sending binary frames at the client's pace, with a `4404` close for unknown symbols.
+- Tests in memory with `app.connect()` and over the network with `connectWebSocket()`.
+
+Packages: [`@znight/http`](/packages/http), [`@znight/websocket`](/packages/websocket). Libraries: `ws`, Zod.
+[Source on GitHub](https://github.com/znight-org/znight/tree/main/examples/realtime-chat).
 
 ## graphql-api
 

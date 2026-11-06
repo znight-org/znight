@@ -1,0 +1,8 @@
+# Bun loads .env files into process.env by itself (`.env.development` when NODE_ENV is unset), with
+# its own precedence and `$VAR` expansion. Leave them to ConfigPlugin (dotenv()), so that Node.js and
+# Bun read exactly the same values.
+env = false
+
+[test]
+# Regenerates the DI container (src/.znight/container.generated.ts) before the tests run
+preload = ["@znight/compiler/bun"]
