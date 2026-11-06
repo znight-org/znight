@@ -36,5 +36,8 @@
   "dependencies": {
     "@znight/core": "workspace:*",
     "@znight/http": "workspace:*"
+  },
+  "devDependencies": {
+    "ws": "8.22.0"
   }
 }
