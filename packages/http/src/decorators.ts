@@ -286,7 +286,7 @@ export function BodyLimit(_size: ByteSize): ClassMarker & MethodMarker {
   return classOrMethodMarker
 }
 
-/** Injects the native request of the adapter (escape hatch; the compiler warns). */
+/** Injects the native request of the adapter (escape hatch). */
 export function Req(): ParameterMarker {
   return parameterMarker
 }

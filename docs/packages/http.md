@@ -93,18 +93,18 @@ export class UserController {
 
 ## Parameters
 
-| Decorator                    | Injects                                                       |
-| ---------------------------- | ------------------------------------------------------------- |
-| `@Param(name?, schema?)`     | A path parameter (or all of them without `name`)              |
-| `@Query(name?, schema?)`     | A query parameter (or the whole query object)                 |
-| `@Body(schema?)`             | The parsed request body                                       |
-| `@Headers(name?)`            | A header (lower-cased name) or all headers                    |
-| `@Cookie(name?, schema?)`    | A request cookie (or all of them), coerced like a header      |
-| `@SignedCookie(name, s?)`    | The verified value of a [signed cookie](#cookies)             |
-| `@UploadedFile(field?, o?)`  | An uploaded `File` of a multipart body ([Files](#files))      |
-| `@UploadedFiles(field?, o?)` | The uploaded files of a field (`File[]`)                      |
-| `@Ctx()`                     | The adapter-neutral `HttpContext`                             |
-| `@Req()` / `@Res()`          | The native adapter request / response (escape hatch, warning) |
+| Decorator                    | Injects                                                              |
+| ---------------------------- | -------------------------------------------------------------------- |
+| `@Param(name?, schema?)`     | A path parameter (or all of them without `name`)                     |
+| `@Query(name?, schema?)`     | A query parameter (or the whole query object)                        |
+| `@Body(schema?)`             | The parsed request body                                              |
+| `@Headers(name?)`            | A header (lower-cased name) or all headers                           |
+| `@Cookie(name?, schema?)`    | A request cookie (or all of them), coerced like a header             |
+| `@SignedCookie(name, s?)`    | The verified value of a [signed cookie](#cookies)                    |
+| `@UploadedFile(field?, o?)`  | An uploaded `File` of a multipart body ([Files](#files))             |
+| `@UploadedFiles(field?, o?)` | The uploaded files of a field (`File[]`)                             |
+| `@Ctx()`                     | The adapter-neutral `HttpContext`                                    |
+| `@Req()` / `@Res()`          | The native adapter request / response (escape hatch; `@Res()` warns) |
 
 **Coercion.** Path, query and header values are strings on the wire; Znight coerces them from the
 **declared parameter type** in generated code: `string`, `number`, `boolean`, `bigint`, `Date`,
