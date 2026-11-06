@@ -1,8 +1,10 @@
+import type { EventPublisher } from '@znight/events'
 import type { BookRepository } from './book.repository.js'
 
 import { Injectable } from '@znight/core'
 import { Logged, type Logger, Metric } from '@znight/observability'
 
+import { BookAdded } from './book.events.js'
 import {
   type Book,
   type BookChanges,
@@ -29,6 +31,7 @@ export class BookService {
   constructor(
     private readonly books: BookRepository,
     private readonly logger: Logger,
+    private readonly events: EventPublisher,
   ) {}
 
   list(query: BookQuery): Promise<Page<Book>> {
@@ -46,11 +49,16 @@ export class BookService {
    * here, its arguments; `BookService.add() failed` with the error, as a warning: a duplicate ISBN is
    * a client mistake, not an incident) and `@Metric` counts the calls in Prometheus, labelled by
    * outcome. Both are method interceptors: the compiler wires them, nothing is wrapped by hand.
+   *
+   * Once the book is stored, `BookAdded` is published: the listeners of `book.listeners.ts` react to
+   * it without this service knowing them (`@znight/events`).
    */
   @Logged({ level: 'info', errorLevel: 'warn', args: true })
   @Metric({ type: 'counter', name: 'bookshelf_books_added_total', help: 'Books added to the shelf' })
-  add(book: NewBook, createdBy: string): Promise<Book> {
-    return this.books.create(book, createdBy)
+  async add(book: NewBook, createdBy: string): Promise<Book> {
+    const created = await this.books.create(book, createdBy)
+    await this.events.publish(new BookAdded(created, createdBy))
+    return created
   }
 
   async update(id: number, changes: BookChanges): Promise<Book> {

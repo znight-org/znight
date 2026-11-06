@@ -1,9 +1,11 @@
 import type { BookRepository } from '../src/books/book.repository.js'
 
+import { EventPublisher } from '@znight/events'
 import { Logger } from '@znight/observability'
 import { TestBed } from '@znight/testing'
 
 import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { BookAdded } from '../src/books/book.events.js'
 import { BookNotFoundError, CoverNotFoundError, UnsupportedCoverError } from '../src/books/book.js'
 import { BookService } from '../src/books/book.service.js'
 import { aBook, PNG_BYTES, pngFile } from './support/fixtures.js'
@@ -12,11 +14,17 @@ import { describe, expect, test as it } from 'bun:test'
 /**
  * Unit tests: TestBed builds BookService with its generated factory and replaces its direct
  * dependencies with auto-mocks. `BookRepository` is an interface: its mock is looked up by name
- * (typed with the generic), `Logger` (provided at runtime by ObservabilityPlugin) by class.
+ * (typed with the generic), `Logger` and `EventPublisher` (provided at runtime by their plugins) by
+ * class.
  */
 async function setup() {
   const { instance, mocks } = await TestBed.create(BookService, { metadata })
-  return { service: instance, repository: mocks.get<BookRepository>('BookRepository'), logger: mocks.get(Logger) }
+  return {
+    service: instance,
+    repository: mocks.get<BookRepository>('BookRepository'),
+    logger: mocks.get(Logger),
+    events: mocks.get(EventPublisher),
+  }
 }
 
 describe('BookService', () => {
@@ -37,7 +45,7 @@ describe('BookService', () => {
   })
 
   it('adds a book on behalf of the caller', async () => {
-    const { service, repository } = await setup()
+    const { service, repository, events } = await setup()
     repository.create.mockResolvedValue(aBook({ id: 3, createdBy: 'admin' }))
 
     const book = await service.add({ isbn: '9780547928227', title: 'The Hobbit', author: 'Tolkien' }, 'admin')
@@ -47,6 +55,8 @@ describe('BookService', () => {
       { isbn: '9780547928227', title: 'The Hobbit', author: 'Tolkien' },
       'admin',
     )
+    // EventPublisher is an abstract class: TestBed auto-mocks it like any dependency
+    expect(events.publish).toHaveBeenCalledWith(expect.any(BookAdded))
   })
 
   it('removes a book and logs it', async () => {
