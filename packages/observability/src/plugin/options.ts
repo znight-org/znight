@@ -7,6 +7,7 @@ import type { MetricsServerOptions } from '../metrics/server.ts'
 import type { JobLogOptions, ScheduleMetricsOptions, ScheduleTracingOptions } from '../schedule/jobs.ts'
 import type { HttpTracingOptions, MessagePublishTracingOptions, MessagingTracingOptions } from '../tracing/hooks.ts'
 import type { TracerOptions } from '../tracing/tracer.ts'
+import type { WebSocketLogOptions, WebSocketMetricsOptions, WebSocketTracingOptions } from '../websocket/gateways.ts'
 
 /** `logging` options of `ObservabilityPlugin.configure()`. */
 export interface LoggingOptions extends Omit<LoggerOptions, 'scope'> {
@@ -18,6 +19,11 @@ export interface LoggingOptions extends Omit<LoggerOptions, 'scope'> {
   readonly jobs?: boolean | JobLogOptions
   /** One entry per GraphQL operation (`graphql:operation` hook of `@znight/graphql`). Default: `false`. */
   readonly graphql?: boolean | GraphQLOperationLogOptions
+  /**
+   * One entry per closed WebSocket connection and per failed message (`websocket:*` hooks of
+   * `@znight/websocket`); `{ messages: true }` adds a `debug` entry per message. Default: `true`.
+   */
+  readonly websocket?: boolean | WebSocketLogOptions
   /**
    * Route the framework's own logs (core, plugins) through the logger, with `component: 'znight'`
    * (`app.setLogger()`). Default: `true`.
@@ -37,6 +43,8 @@ export interface MetricsOptions extends MetricsRegistryOptions {
   readonly schedule?: boolean | ScheduleMetricsOptions
   /** GraphQL operation metrics (`graphql:operation` hook of `@znight/graphql`). Default: `true`. */
   readonly graphql?: boolean | GraphQLMetricsOptions
+  /** WebSocket connection and message metrics (`websocket:*` hooks of `@znight/websocket`). Default: `true`. */
+  readonly websocket?: boolean | WebSocketMetricsOptions
 }
 
 /** `tracing` options of `ObservabilityPlugin.configure()`. */
@@ -60,6 +68,11 @@ export interface TracingOptions extends TracerOptions {
    * hook of `@znight/graphql`). Default: `true`.
    */
   readonly graphql?: boolean | GraphQLTracingOptions
+  /**
+   * A `SERVER` span per inbound WebSocket message, the root of a new trace linked to the handshake
+   * span (`websocket:message` hook of `@znight/websocket`). Default: `true`.
+   */
+  readonly websocket?: boolean | WebSocketTracingOptions
 }
 
 /** Options of `ObservabilityPlugin.configure()`. */

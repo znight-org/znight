@@ -44,7 +44,7 @@ export interface ObservabilityPluginInstance extends Plugin {
  *
  * - `register`: provides `Logger`, `Tracer`, `MetricsRegistry` and the `@Logged` / `@Traced` /
  *   `@Metric` interceptors, wraps the `http:request`, `messaging:message`, `schedule:run` and
- *   `graphql:operation` hooks (spans → metrics → logs) and `messaging:publish` (producer spans),
+ *   `graphql:operation` and `websocket:message` hooks (spans → metrics → logs) and `messaging:publish` (producer spans),
  *   listens to `schedule:run` (run counters) and routes the framework logs through the logger; a
  *   hook whose features are all disabled is not registered (options given as a function: removed in
  *   `onBootstrap`, once they are evaluated); once the logger exists, `getLogger()` loggers write
@@ -171,6 +171,17 @@ class ObservabilityPluginImpl implements ObservabilityPluginInstance {
         return wrapper === undefined ? next() : wrapper(event, next)
       }),
     )
+    this.#hook('websocket', () =>
+      hooks.wrap('websocket:message', (event, next) => {
+        const wrapper = this.#kit?.websocket
+        return wrapper === undefined ? next() : wrapper(event, next)
+      }),
+    )
+    this.#hook('websocketListener', () =>
+      hooks.on('websocket:connection', event => {
+        this.#kit?.websocketListener?.(event)
+      }),
+    )
   }
 
   onBootstrap(ctx: PluginContext): void {
@@ -233,7 +244,15 @@ class ObservabilityPluginImpl implements ObservabilityPluginInstance {
 }
 
 /** The features of the kit served by a hook of the plugin. */
-type HookedFeature = 'http' | 'messaging' | 'publish' | 'schedule' | 'scheduleListener' | 'graphql'
+type HookedFeature =
+  | 'http'
+  | 'messaging'
+  | 'publish'
+  | 'schedule'
+  | 'scheduleListener'
+  | 'graphql'
+  | 'websocket'
+  | 'websocketListener'
 
 /**
  * A runtime definition returning an object owned by the plugin. Transient: created on injection

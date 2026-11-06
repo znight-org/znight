@@ -47,4 +47,10 @@ export const SemanticAttributes = {
   ZNIGHT_GRAPHQL_DOCUMENT_ID: 'znight.graphql.document_id',
   ZNIGHT_GRAPHQL_OUTCOME: 'znight.graphql.outcome',
   ZNIGHT_GRAPHQL_ERROR_CODES: 'znight.graphql.error_codes',
+  /** Znight specific: WebSocket messages (`@znight/websocket`). */
+  ZNIGHT_WEBSOCKET_GATEWAY: 'znight.websocket.gateway',
+  ZNIGHT_WEBSOCKET_EVENT: 'znight.websocket.event',
+  ZNIGHT_WEBSOCKET_HANDLER: 'znight.websocket.handler',
+  ZNIGHT_WEBSOCKET_CONNECTION_ID: 'znight.websocket.connection_id',
+  ZNIGHT_WEBSOCKET_OUTCOME: 'znight.websocket.outcome',
 } as const
