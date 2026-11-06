@@ -23,7 +23,7 @@ export interface OnEventOptions {
 /** Type-checks the decorated method: one parameter, the event (any return type). */
 export type EventListenerMarker = <F extends (event: never) => unknown>(
   target: object,
-  propertyKeyOrContext: string | symbol | ClassMethodDecoratorContext<unknown, F>,
+  propertyKeyOrContext: string | symbol | ClassMethodDecoratorContext,
   descriptor?: TypedPropertyDescriptor<F>,
 ) => void
 

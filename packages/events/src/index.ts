@@ -4,10 +4,11 @@
  * is the event class; inline listeners run in the publisher's scope and fail its operation, detached
  * ones run after it in their own scope with errors reported.
  */
-export type * from './metadata.ts'
 
 export type { PublicationObserver } from './dispatcher.ts'
-export { OnEvent, type EventListenerMarker, type OnEventOptions } from './decorators.ts'
+export type * from './metadata.ts'
+
+export { type EventListenerMarker, OnEvent, type OnEventOptions } from './decorators.ts'
 export {
   DEFAULT_DRAIN_TIMEOUT_MS,
   type EventErrorHandler,

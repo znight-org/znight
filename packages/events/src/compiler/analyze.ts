@@ -14,18 +14,12 @@ import type {
   MethodInfo,
   ParameterInfo,
   ReferenceType,
+  StaticValue,
   TypeInfo,
 } from '@znight/compiler'
 import type { EventsData, ListenerData } from './data.ts'
 
-import {
-  INVALID_DECORATOR,
-  INVALID_LISTENER,
-  NEST_OPTIONS,
-  ON_EVENT,
-  OPTION_KEYS,
-  ROOT_REASON,
-} from './constants.ts'
+import { INVALID_DECORATOR, INVALID_LISTENER, NEST_OPTIONS, ON_EVENT, OPTION_KEYS, ROOT_REASON } from './constants.ts'
 import { closest, describeValue, isRecord, propertyLocation } from './values.ts'
 
 type Context = AnalyzeContext<EventsData>
@@ -180,6 +174,7 @@ function readOptions(decorator: DecoratorInfo, where: string, ctx: Context): Lis
     })
     return undefined
   }
+  const record: Readonly<Record<string, StaticValue>> = value
   let valid = true
   const fail = (key: string, message: string, hints: readonly string[]): void => {
     valid = false
@@ -191,7 +186,7 @@ function readOptions(decorator: DecoratorInfo, where: string, ctx: Context): Lis
       hints,
     })
   }
-  for (const key of Object.keys(value)) {
+  for (const key of Object.keys(record)) {
     if (OPTION_KEYS.includes(key)) continue
     const nest = NEST_OPTIONS.get(key)
     if (nest !== undefined) {
@@ -207,13 +202,13 @@ function readOptions(decorator: DecoratorInfo, where: string, ctx: Context): Lis
       ])
     }
   }
-  const order = value['order'] ?? 0
+  const order = record['order'] ?? 0
   if (typeof order !== 'number' || !Number.isSafeInteger(order)) {
     fail('order', `'order' must be an integer, got ${describeValue(order)}`, [
       'Lower orders run first; the default is 0',
     ])
   }
-  const detached = value['detached'] ?? false
+  const detached = record['detached'] ?? false
   if (typeof detached !== 'boolean') {
     fail('detached', `'detached' must be a boolean, got ${describeValue(detached)}`, [
       '@OnEvent({ detached: true }) runs the listener after the publication',
@@ -292,11 +287,7 @@ function eventClassOf(member: TypeInfo, param: ParameterInfo, where: string, ctx
       ])
     }
     const what =
-      member.kind === 'opaque' && member.reason === 'object-literal'
-        ? 'an inline object type'
-        : member.kind === 'primitive' || member.kind === 'literal'
-          ? `'${written}'`
-          : `'${written}'`
+      member.kind === 'opaque' && member.reason === 'object-literal' ? 'an inline object type' : `'${written}'`
     return fail(`${where} listens to ${what}, which is not a class: listeners are matched on the class of the event`, [
       'Listen to a class (or a union of classes, or a base class): handle(event: UserCreated)',
     ])
@@ -334,7 +325,12 @@ function writesTypeArguments(member: ReferenceType, param: ParameterInfo, ctx: C
  * A union whose members extend one another (`A | Base` with `A extends Base`): the base already
  * receives the subclass, so the subclass is dropped, with a warning.
  */
-function withoutOverlaps(classes: readonly ClassInfo[], param: ParameterInfo, where: string, ctx: Context): ClassInfo[] {
+function withoutOverlaps(
+  classes: readonly ClassInfo[],
+  param: ParameterInfo,
+  where: string,
+  ctx: Context,
+): ClassInfo[] {
   const kept: ClassInfo[] = []
   for (const cls of classes) {
     const base = classes.find(

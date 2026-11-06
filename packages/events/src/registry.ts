@@ -161,8 +161,8 @@ function compareStrings(a: string, b: string): number {
 
 /** Class name of the instances of `prototype`. */
 export function eventNameOf(prototype: object): string {
-  const constructor: unknown = Object.getOwnPropertyDescriptor(prototype, 'constructor')?.value
-  return typeof constructor === 'function' && constructor.name !== '' ? constructor.name : 'anonymous event'
+  const ctor: unknown = Object.getOwnPropertyDescriptor(prototype, 'constructor')?.value
+  return typeof ctor === 'function' && ctor.name !== '' ? ctor.name : 'anonymous event'
 }
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {

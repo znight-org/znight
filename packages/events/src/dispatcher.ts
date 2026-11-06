@@ -104,7 +104,7 @@ export class Dispatcher {
     const work = this.#begin(`emit ${plan.eventName}`)
     setImmediate(() => {
       const failure: Failure = { listener: undefined }
-      this.#container
+      void this.#container
         .runInScope(() =>
           this.#observed()
             ? this.#publishObserved(event, plan, 'emit', failure)
@@ -265,7 +265,7 @@ export class Dispatcher {
     setImmediate(() => {
       for (let index = 0; index < listeners.length; index++) {
         const work = works[index] as Work
-        this.#detached(event, plan, listeners[index] as Listener).then(() => this.#end(work))
+        void this.#detached(event, plan, listeners[index] as Listener).then(() => this.#end(work))
       }
     })
     return RESOLVED
@@ -348,7 +348,7 @@ export class Dispatcher {
   }
 
   /** `onStop`: publications from now on await their detached listeners; waits for the work in flight. */
-  async stop(timeoutMs: number): Promise<readonly string[]> {
+  stop(timeoutMs: number): Promise<readonly string[]> {
     if (this.#state === 'running') this.#state = 'stopped'
     return this.#waitIdle(timeoutMs)
   }

@@ -65,8 +65,7 @@ export const EventsPlugin: {
   configure(options?: PluginOptions<EventsPluginOptions>): EventsPluginInstance
 } = Object.freeze({
   name: EVENTS_PLUGIN_NAME,
-  configure: (options: PluginOptions<EventsPluginOptions> = {}): EventsPluginInstance =>
-    new EventsPluginImpl(options),
+  configure: (options: PluginOptions<EventsPluginOptions> = {}): EventsPluginInstance => new EventsPluginImpl(options),
 })
 
 class EventsPluginImpl implements EventsPluginInstance {
