@@ -1,5 +1,13 @@
 # @znight/testing
 
+## 0.6.0
+
+### Patch Changes
+
+- f6cbef6: `TestApp.connect()` opens in-memory WebSocket connections through `WebSocketPlugin`, `connectWebSocket()` connects over the network with the same `TestWsClient`, and `TestApp` boots the gateways of `metadata.extensions.websocket` with their guards (RFC 0003).
+- Updated dependencies [f6cbef6]
+  - @znight/core@0.6.0
+
 ## 0.5.1
 
 ### Patch Changes

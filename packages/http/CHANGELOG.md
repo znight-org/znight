@@ -1,5 +1,17 @@
 # @znight/http
 
+## 0.6.0
+
+### Minor Changes
+
+- f6cbef6: Upgrade routes for plugins (RFC 0003 groundwork): `PluginHttpUpgrades`, the adapters' upgrade capability, `HttpPlugin.upgradeInMemory()`, the `websocket:*` hook types and the ZNIGHT050/051 codes.
+
+### Patch Changes
+
+- Updated dependencies [f6cbef6]
+  - @znight/core@0.6.0
+  - @znight/compiler@0.6.0
+
 ## 0.5.1
 
 ### Patch Changes
