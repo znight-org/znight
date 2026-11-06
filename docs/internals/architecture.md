@@ -2433,8 +2433,10 @@ More on the drivers:
   backoff) that ends only when the connection is the one it opened and every active subscription
   consumes again: a connection lost during the recovery, a consumer channel closed by a channel
   error and a consumer cancelled by the broker (`basic.cancel`: queue deleted, node down; the
-  queues are declared again with `assertTopology`) are all resumed. Messages in flight on a lost
-  channel are redelivered by RabbitMQ.
+  queues are declared again with `assertTopology`) are all resumed. A resubscription failing with
+  `404 NOT_FOUND` (the queue was deleted, possibly after its declaration again: RabbitMQ cancels the
+  consumers before the deletion completes) declares the queues again before the next attempt.
+  Messages in flight on a lost channel are redelivered by RabbitMQ.
 - **RabbitMQ publications.** A returned (unroutable) message fails only its own `publish()`: it is
   matched with the oldest pending publication with the same exchange, routing key and message id.
   Retried and dead-lettered copies carry the type that selected the handler (a type read from the
