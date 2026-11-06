@@ -21,6 +21,9 @@ const here = path.dirname(fileURLToPath(import.meta.url))
 export const EVENTS_ROOT: string = fs.realpathSync.native(path.resolve(here, '../..'))
 const PACKAGES = path.dirname(EVENTS_ROOT)
 
+/** The workspace `tsc` (typecheck of the generated module). */
+export const TSC: string = fs.realpathSync.native(path.join(EVENTS_ROOT, '../../node_modules/typescript/bin/tsc'))
+
 /** Packages linked into the `node_modules` of temporary applications. */
 const LINKS: Readonly<Record<string, string>> = {
   '@znight/core': fs.realpathSync.native(path.join(EVENTS_ROOT, 'node_modules/@znight/core')),

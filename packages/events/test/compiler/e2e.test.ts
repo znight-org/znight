@@ -3,11 +3,13 @@
  * through the manifest), then booted with `TestApp` and `EventsPlugin`: inline listeners in order and
  * in the publisher's scope, base classes and unions, detached listeners after the publication.
  */
+import { spawnSync } from 'node:child_process'
+import path from 'node:path'
 import { silentLogger } from '@znight/core'
 import { TestApp } from '@znight/testing'
 
 import { EventPublisher, EventsPlugin } from '../../src/index.ts'
-import { analyzeFiles, cleanupApps, compileAndLoad, render, tempApp } from './helpers.ts'
+import { analyzeFiles, cleanupApps, compileAndLoad, render, TSC, tempApp } from './helpers.ts'
 import { afterAll, describe, expect, test as it } from 'bun:test'
 
 afterAll(cleanupApps)
@@ -105,6 +107,43 @@ describe('compiled application', () => {
       '0 src/listeners.ts#WelcomeMail send UserCreated true',
       '10 src/listeners.ts#Audit any UserEvent false',
     ])
+  })
+
+  it('the generated module type-checks with strict compiler options', async () => {
+    const app = tempApp(APP)
+    const { result } = await compileAndLoad(app)
+    app.write(
+      'tsconfig.check.json',
+      JSON.stringify({
+        compilerOptions: {
+          target: 'ES2024',
+          lib: ['ES2024', 'ESNext.Disposable'],
+          module: 'preserve',
+          moduleResolution: 'bundler',
+          customConditions: ['@znight/source'],
+          strict: true,
+          noUnusedLocals: true,
+          noUnusedParameters: true,
+          noPropertyAccessFromIndexSignature: true,
+          exactOptionalPropertyTypes: true,
+          verbatimModuleSyntax: true,
+          experimentalDecorators: true,
+          allowImportingTsExtensions: true,
+          skipLibCheck: true,
+          noEmit: true,
+          types: ['node'],
+        },
+        include: ['src'],
+        files: [path.relative(app.root, result.outFile)],
+      }),
+    )
+    const run = spawnSync(process.execPath, [TSC, '-p', 'tsconfig.check.json', '--listFiles'], {
+      cwd: app.root,
+      encoding: 'utf8',
+    })
+    const output = `${run.stdout}${run.stderr}`
+    expect(output).toContain(result.outFile)
+    expect(output.split('\n').filter(line => line.startsWith('src/'))).toEqual([])
   })
 
   it('dispatches inline listeners in the publisher scope, then detached ones', async () => {
