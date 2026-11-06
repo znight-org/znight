@@ -1,6 +1,6 @@
 {
   "name": "@znight/graphql",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Znight GraphQL: code-first GraphQL whose schema is derived from TypeScript types at build time, on graphql-js 17",
   "license": "MIT",
   "author": "Ugho STEPHAN",

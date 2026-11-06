@@ -1,5 +1,14 @@
 # @znight/openapi
 
+## 0.6.1
+
+### Patch Changes
+
+- Updated dependencies [3785557]
+  - @znight/http@0.6.1
+  - @znight/compiler@0.6.1
+  - @znight/core@0.6.1
+
 ## 0.6.0
 
 ### Patch Changes

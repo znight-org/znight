@@ -1,6 +1,6 @@
 {
   "name": "@znight/events",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Znight events: in-process application events with listeners wired at build time, inline or detached",
   "license": "MIT",
   "author": "Ugho STEPHAN",

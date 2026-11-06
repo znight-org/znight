@@ -1,5 +1,13 @@
 # @znight/http
 
+## 0.6.1
+
+### Patch Changes
+
+- 3785557: The JSDoc of `@Req()` no longer says the compiler warns: only `@Res()` does.
+- @znight/compiler@0.6.1
+  - @znight/core@0.6.1
+
 ## 0.6.0
 
 ### Minor Changes
