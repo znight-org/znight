@@ -51,6 +51,7 @@ import {
   lightStreamResponse,
   serverAddress,
 } from './shared.ts'
+import { NodeUpgrades } from './upgrade-io.ts'
 
 /** Options of {@link fastifyAdapter}. */
 export interface FastifyAdapterOptions {
@@ -148,6 +149,8 @@ interface InternalKeys {
 
 class FastifyHttpAdapter implements FastifyAdapter {
   readonly name = 'fastify' as const
+  /** WebSocket upgrades (RFC 0003), routed by `instance.server`. */
+  readonly upgrades: NodeUpgrades = new NodeUpgrades()
   readonly instance: FastifyInstance
   readonly #routes: AdapterRoute[] = []
   readonly #tracker: ConnectionTracker
@@ -399,6 +402,7 @@ class FastifyHttpAdapter implements FastifyAdapter {
   async listen(port: number, host: string): Promise<HttpServerAddress> {
     await this.#prepare()
     this.#closing = undefined
+    this.upgrades.attach(this.instance.server)
     await this.instance.listen({ port, host })
     const address = this.instance.server.address()
     if (address === null || typeof address === 'string') return serverAddress(host, port)

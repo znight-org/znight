@@ -19,12 +19,14 @@ import type {
   InjectStreamResponse,
 } from '../adapter.ts'
 import type { HeaderValue } from '../exceptions.ts'
+import type { AdapterUpgrades, UpgradeHandlerOptions } from '../upgrade.ts'
 
 import { type Context, Hono, type Next } from 'hono'
 
 import { BadRequestException } from '../exceptions.ts'
 import { toHonoPath } from '../path.ts'
 import { discardStream } from '../stream.ts'
+import { isWebSocketUpgrade } from '../upgrade.ts'
 import { isBun } from '../utils.ts'
 import { ConnectionTracker, closeServer, nodeBodyStream, onResponseAbort, readNodeBody } from './node-io.ts'
 import {
@@ -36,6 +38,7 @@ import {
   serverAddress,
   webBodyStream,
 } from './shared.ts'
+import { bunWebSocketOption, FetchUpgradeRequest, NodeUpgrades, refusalResponse } from './upgrade-io.ts'
 
 /** Options of {@link honoAdapter}. */
 export interface HonoAdapterOptions {
@@ -104,9 +107,25 @@ interface BunRuntime {
     options: HonoServeOptions & {
       port: number
       hostname: string
-      fetch: (request: Request, server: BunServer) => Response | Promise<Response>
+      fetch: (request: Request, server: BunServer) => Response | undefined | Promise<Response | undefined>
+      websocket?: unknown
     },
   ): BunServer
+}
+
+/**
+ * The upgrade capability of the Hono adapter (RFC 0003): `Bun.serve()` upgrades on Bun (checked in
+ * the fetch handler before Hono routing), `node:http` upgrades of `@hono/node-server` on Node.js.
+ */
+class HonoUpgrades implements AdapterUpgrades {
+  readonly kind: 'node' | 'bun' = isBun() ? 'bun' : 'node'
+  readonly node: NodeUpgrades = new NodeUpgrades()
+  options: UpgradeHandlerOptions | undefined
+
+  enable(options: UpgradeHandlerOptions): void {
+    this.options = options
+    this.node.enable(options)
+  }
 }
 
 /** Default `idleTimeout` of `Bun.serve()`, in seconds. */
@@ -180,6 +199,8 @@ interface ReadHandlers {
 class HonoHttpAdapter implements HonoAdapter {
   readonly name = 'hono' as const
   readonly app: Hono
+  /** WebSocket upgrades (RFC 0003). */
+  readonly upgrades: HonoUpgrades = new HonoUpgrades()
   readonly #serveOptions: HonoServeOptions
   /** Number of routes of `app` registered by the adapter (see {@link #middleware}). */
   #routes = 0
@@ -411,6 +432,27 @@ class HonoHttpAdapter implements HonoAdapter {
     return response
   }
 
+  /**
+   * A WebSocket upgrade of a gateway path received by `Bun.serve()`, run before Hono routing:
+   * `undefined` for any other request; otherwise the refusal, or `undefined` once upgraded.
+   */
+  #bunUpgrade(
+    options: UpgradeHandlerOptions,
+    request: Request,
+    server: BunServer,
+  ): Promise<Response | undefined> | undefined {
+    const upgrade = request.headers.get('upgrade')
+    if (upgrade === null || !isWebSocketUpgrade({ upgrade })) return undefined
+    const url = pathAndQuery(request.url)
+    if (!options.match(pathOf(url))) return undefined
+    const address = server.requestIP?.(request)?.address ?? undefined
+    const adapterRequest = new FetchUpgradeRequest(request, url, fetchHeaders(request.headers), address)
+    return options.handle(adapterRequest, { kind: 'bun', request, server }).then(
+      reply => (reply === undefined ? undefined : refusalResponse(reply)),
+      () => new Response(null, { status: 500 }),
+    )
+  }
+
   async listen(port: number, host: string): Promise<HttpServerAddress> {
     this.#prepare()
     this.#closing = undefined
@@ -418,15 +460,18 @@ class HonoHttpAdapter implements HonoAdapter {
     if (isBun() && bun !== undefined) {
       const options = this.#serveOptions
       this.#idleTimeout = typeof options.idleTimeout === 'number' ? options.idleTimeout : BUN_IDLE_TIMEOUT
+      const upgrades = this.upgrades.options
       const server = bun.serve({
         // Znight enforces the body limits (route @BodyLimit, plugin bodyLimit): not Bun's 128 MiB default
         maxRequestBodySize: Number.MAX_SAFE_INTEGER,
         ...options,
+        ...(upgrades === undefined ? {} : { websocket: bunWebSocketOption(upgrades.bunWebSocket) }),
         port,
         hostname: host,
         // without middleware, the response of a Znight route is the one Bun sends (no wrapper needed)
         fetch: (request, server) =>
-          this.#middleware() ? this.#bunFetch(request, server) : this.app.fetch(request, server),
+          (upgrades === undefined ? undefined : this.#bunUpgrade(upgrades, request, server)) ??
+          (this.#middleware() ? this.#bunFetch(request, server) : this.app.fetch(request, server)),
       })
       this.#bun = server
       return serverAddress(server.hostname, server.port)
@@ -441,6 +486,7 @@ class HonoHttpAdapter implements HonoAdapter {
       )
     }
     const server = nodeServer.createAdaptorServer({ fetch: this.app.fetch }) as Server
+    this.upgrades.node.attach(server)
     this.#node = server
     this.#tracker = new ConnectionTracker(server)
     await new Promise<void>((resolve, reject) => {

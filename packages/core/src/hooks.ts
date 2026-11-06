@@ -33,6 +33,13 @@ export interface ZnightHooks {
    * emitted when listeners exist.
    */
   'graphql:operation': GraphQLOperationEvent
+  /**
+   * One inbound WebSocket message handled by `@znight/websocket` (RFC 0003): wrapped with
+   * `hooks.run` when wrappers exist, then emitted when listeners exist. `$ping` frames do not run it.
+   */
+  'websocket:message': WebSocketMessageEvent
+  /** A WebSocket connection of `@znight/websocket` opened or closed (emitted only). */
+  'websocket:connection': WebSocketConnectionEvent
 }
 
 /**
@@ -95,6 +102,61 @@ export interface MessageDeliveryEvent {
   /** Outcome set before `hooks.run` resolves. */
   outcome?: 'ack' | 'retry' | 'dead-letter'
   error?: unknown
+}
+
+/** Outcome of an inbound WebSocket message (`WebSocketMessageEvent.outcome`). */
+export type WebSocketMessageOutcome = 'ok' | 'error' | 'rejected' | 'unhandled' | 'timeout'
+
+/** Who closed a WebSocket connection (`WsCloseInfo.initiator` of `@znight/websocket`). */
+export type WebSocketCloseInitiator = 'client' | 'server' | 'shutdown' | 'heartbeat' | 'backpressure' | 'error'
+
+/**
+ * Instrumentation event of the `websocket:message` hook (RFC 0003 §8.10), one per inbound message
+ * of a gateway. `outcome` and `error` are set before `hooks.run` resolves.
+ */
+export interface WebSocketMessageEvent {
+  /** Display name of the gateway class. */
+  readonly gateway: string
+  /** Gateway path pattern, HTTP prefix included (`/api/chat`). */
+  readonly path: string
+  /** Event name (`events` gateways); `undefined` on `raw` gateways or for an undecodable frame. */
+  readonly event: string | undefined
+  /** Handler method; `undefined` when no handler matched. */
+  readonly handler: string | undefined
+  readonly connectionId: string
+  /** The request id of the handshake. */
+  readonly requestId: string
+  /** Size of the frame, in bytes (characters for a text frame). */
+  readonly bytes: number
+  /** `WsMessageContext` from `@znight/websocket`. */
+  readonly context: unknown
+  /** `performance.now()` when the message was dispatched. */
+  readonly startTime: number
+  outcome?: WebSocketMessageOutcome
+  error?: unknown
+}
+
+/** Instrumentation event of the `websocket:connection` hook (RFC 0003 §8.10). */
+export interface WebSocketConnectionEvent {
+  readonly type: 'open' | 'close'
+  /** Display name of the gateway class. */
+  readonly gateway: string
+  /** Gateway path pattern, HTTP prefix included. */
+  readonly path: string
+  readonly connectionId: string
+  /** The request id of the handshake. */
+  readonly requestId: string
+  /** `WsConnection` from `@znight/websocket`. */
+  readonly connection: unknown
+  /** `performance.now()` when the connection opened. */
+  readonly openedAt: number
+  /** Close code (`close` events). */
+  readonly code?: number
+  readonly reason?: string
+  readonly initiator?: WebSocketCloseInitiator
+  /** Messages received and sent by the connection (`close` events). */
+  readonly messagesIn?: number
+  readonly messagesOut?: number
 }
 
 /** How a scheduled run was triggered (`ScheduledRunEvent.trigger`). */

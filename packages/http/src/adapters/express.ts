@@ -22,6 +22,7 @@ import express, { type Express, type NextFunction, type Request, type Response, 
 import { toRegExpSource } from '../path.ts'
 import { ConnectionTracker, closeServer, nodeAdapterRequest, writeNodeFailure, writeNodeReply } from './node-io.ts'
 import { bufferInjectStream, injectNodeStream, serverAddress } from './shared.ts'
+import { NodeUpgrades } from './upgrade-io.ts'
 
 /** Options of {@link expressAdapter}. */
 export interface ExpressAdapterOptions {
@@ -67,6 +68,8 @@ type Method = 'get' | 'head' | 'post' | 'put' | 'patch' | 'delete' | 'options'
 
 class ExpressHttpAdapter implements ExpressAdapter {
   readonly name = 'express' as const
+  /** WebSocket upgrades (RFC 0003), routed by the server of {@link listen}. */
+  readonly upgrades: NodeUpgrades = new NodeUpgrades()
   readonly app: Express
   readonly router: Router
   #fallback: FallbackHandler | undefined
@@ -142,6 +145,7 @@ class ExpressHttpAdapter implements ExpressAdapter {
     this.#mount()
     const server = this.#givenServer ?? createServer()
     if (!server.listeners('request').includes(this.#listener)) server.on('request', this.#listener)
+    this.upgrades.attach(server)
     this.#server = server
     // `#listener` counts the requests
     this.#tracker ??= new ConnectionTracker(server, { requests: false })

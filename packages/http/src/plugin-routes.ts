@@ -9,6 +9,7 @@ import type { RouteMetaEntry } from './decorators.ts'
 import type { HttpMethod } from './metadata.ts'
 import type { GuardRef } from './plugin.ts'
 import type { ByteSize } from './size.ts'
+import type { PluginHttpUpgradesContext, PluginUpgrades } from './upgrade.ts'
 
 import { ErrorCode, ZnightError } from '@znight/core'
 
@@ -79,6 +80,11 @@ export interface PluginHttpRoutes {
    * waits for a returned promise too (within `drainTimeoutMs`); a failure is logged.
    */
   onHttpDrain?(): void | Promise<void>
+  /**
+   * WebSocket upgrade routes of the plugin (RFC 0003, `@znight/websocket`): see
+   * {@link PluginHttpUpgrades}. Called once in `onBootstrap`, after `httpRoutes()`.
+   */
+  httpUpgrades?(context: PluginHttpUpgradesContext): PluginUpgrades
 }
 
 /** A validated plugin route (internal). */

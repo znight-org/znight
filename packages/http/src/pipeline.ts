@@ -8,6 +8,7 @@ import type { CanActivate, ExceptionMapper, HttpInterceptor } from './interfaces
 import type { HttpRouteDefinition, HttpSseDefinition } from './metadata.ts'
 import type { TrustPolicy } from './proxy.ts'
 import type { RouteTable } from './router.ts'
+import type { NativeUpgrade } from './upgrade.ts'
 import type { BodyPlan } from './uploads.ts'
 
 import { Buffer } from 'node:buffer'
@@ -46,6 +47,7 @@ import { isSseBody, isSseSource, type SseOptions, SseSession, type SseSource } f
 import { isBodylessStatus } from './status.ts'
 import { type ContextRunner, captureContext, discardStream, type TrackedStream, trackStream } from './stream.ts'
 import { HttpTokens } from './tokens.ts'
+import { PendingUpgradeState } from './upgrade.ts'
 import { emptyRecord, errorMessage, fastRecord, isBun, isThenable } from './utils.ts'
 
 /** A dependency of the pipeline: an instance resolved at bootstrap, or a token resolved per request. */
@@ -71,6 +73,24 @@ export interface RoutePlan {
   readonly body: BodyPlan
   /** Trailing-slash variant answered with a redirect to the path without its trailing slash. */
   readonly redirect?: boolean
+}
+
+/** An upgrade route: its plan, and how long the handshake may take (internal). */
+export interface UpgradePlan {
+  readonly plan: RoutePlan
+  /** `408` after this delay (ms); `undefined`: no limit. */
+  readonly timeoutMs: number | undefined
+}
+
+/**
+ * The pending upgrade of a handshake context (RFC 0003): set by {@link Pipeline.upgrade} for the
+ * upgrade routes only, so that ordinary requests pay nothing.
+ */
+const UPGRADES = new WeakMap<object, PendingUpgradeState>()
+
+/** The pending upgrade of the handshake whose context is `ctx` (internal, upgrade routes). */
+export function pendingUpgradeOf(ctx: HttpContext): PendingUpgradeState | undefined {
+  return UPGRADES.get(ctx)
 }
 
 /** Pipeline settings (resolved plugin options). */
@@ -241,6 +261,8 @@ export class Pipeline {
   readonly #streams = new Set<SseSession>()
   /** Set while the server drains: responses ask clients to close their connection. */
   draining = false
+  /** The upgrade routes (RFC 0003), `undefined` when no plugin declares one. */
+  upgrades: RouteTable<UpgradePlan> | undefined = undefined
 
   constructor(
     container: Container,
@@ -781,6 +803,68 @@ export class Pipeline {
     }
   }
 
+  /**
+   * Serves a WebSocket handshake (RFC 0003 §8.2.2): the upgrade route of its raw path runs through
+   * the pipeline. Resolves with the reply to write (a refusal), or `undefined` once the transport
+   * took the connection; the request scope then stays open until the connection closes.
+   */
+  upgrade(request: AdapterRequest, native: NativeUpgrade): Promise<AdapterReply | undefined> {
+    const startTime = performance.now()
+    try {
+      const url = splitUrl(request.url)
+      const upgrade = this.upgrades?.find('GET', url.path)
+      if (upgrade === undefined) return this.#fallback(request, undefined, startTime)
+      const plan = upgrade.plan
+      const raw = matchRoutePath(plan.path, url.path) ?? emptyRecord<string>()
+      const params = emptyRecord<string>()
+      let malformed: string | undefined
+      for (const name of Object.keys(raw)) {
+        const decoded = decodePathValue(raw[name] as string)
+        if (decoded === undefined) malformed ??= name
+        else params[name] = decoded
+      }
+      const target: Target =
+        malformed === undefined
+          ? { kind: 'route', plan }
+          : { kind: 'error', error: new BadRequestException(`Malformed URL parameter "${malformed}"`) }
+      let pending: PendingUpgradeState | undefined
+      const replied = this.#serve(request, url, plan.info, params, target, startTime, plan.body, ctx => {
+        pending = new PendingUpgradeState(native, () => this.#upgradeHeaders(ctx))
+        UPGRADES.set(ctx, pending)
+      })
+      const settled = replied.then(reply => (pending?.accepted === true ? undefined : reply))
+      const timeoutMs = upgrade.timeoutMs
+      if (timeoutMs === undefined) return settled
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const expired = new Promise<AdapterReply>(resolve => {
+        timer = setTimeout(() => {
+          if (pending !== undefined) pending.expired = true
+          const body = { statusCode: 408, error: 'Request Timeout', message: 'WebSocket handshake timed out' }
+          resolve(adapterReply(serializeError(408, body, 'GET'), null))
+        }, timeoutMs)
+      })
+      return Promise.race([settled, expired]).finally(() => clearTimeout(timer))
+    } catch (error) {
+      return Promise.reject(error)
+    }
+  }
+
+  /** The headers of a `101` response: those set on the context, its cookies and the request id. */
+  #upgradeHeaders(ctx: RequestContext): Readonly<Record<string, HeaderValue>> {
+    const headers: Record<string, HeaderValue> = { ...ctx.responseHeaders }
+    const cookies = ctx.cookieLines
+    if (cookies.length > 0) {
+      const existing = headers['set-cookie']
+      const raw = existing === undefined ? [] : typeof existing === 'string' ? [existing] : [...existing]
+      headers['set-cookie'] = [...raw, ...cookies.map(cookie => cookie.line)]
+    }
+    const idHeader = this.#options.requestIdHeader
+    if (idHeader !== undefined && headers[idHeader] === undefined && (this.#validIds || isHeaderValue(ctx.requestId))) {
+      headers[idHeader] = ctx.requestId
+    }
+    return headers
+  }
+
   #fallback(request: AdapterRequest, error: unknown, startTime: number, reroute = true): Promise<AdapterReply> {
     const body = this.#options.body
     if (error !== undefined) {
@@ -799,7 +883,7 @@ export class Pipeline {
     const allowed = this.#table.allowedMethods(path)
     let target: Target
     if (allowed.length === 0) {
-      target = { kind: 'error', error: new NotFoundException(`Cannot ${request.method} ${truncate(path)}`) }
+      target = { kind: 'error', error: this.#unmatched(request.method, path) }
     } else if (request.method === 'OPTIONS') {
       target = { kind: 'options', allow: allowHeader(allowed) }
     } else {
@@ -816,6 +900,19 @@ export class Pipeline {
       }
     }
     return this.#serve(request, url, undefined, emptyRecord(), target, startTime, body)
+  }
+
+  /**
+   * The error of a request no route matched: `404`, or `426 Upgrade Required` for a plain `GET` of
+   * a WebSocket gateway path (RFC 0003 §8.2.1).
+   */
+  #unmatched(method: string, path: string): HttpException {
+    if ((method === 'GET' || method === 'HEAD') && this.upgrades?.find('GET', path) !== undefined) {
+      return new HttpException(426, 'This endpoint only accepts WebSocket connections', undefined, {
+        headers: { upgrade: 'websocket', connection: 'upgrade' },
+      })
+    }
+    return new NotFoundException(`Cannot ${method} ${truncate(path)}`)
   }
 
   /** A CORS preflight (with the `cors` option): answered without running any route. */
@@ -838,12 +935,14 @@ export class Pipeline {
     target: Target,
     startTime: number,
     body: BodyPlan,
+    prepare?: (ctx: RequestContext) => void,
   ): Promise<AdapterReply> {
     this.#enter()
     let x: Exchange
     try {
       const requestId = this.#requestId(request)
       const ctx = this.#context(request, requestId, url.path, url.query, route, params, body)
+      if (prepare !== undefined) prepare(ctx)
       // an event stream requested while draining is served (guards run) with its signal already
       // aborted: a well-behaved source ends at once and the client gets a jittered retry
       if (this.draining && target.kind === 'route' && target.plan.definition.sse !== undefined) ctx.abort('shutdown')
@@ -958,6 +1057,11 @@ export class Pipeline {
     }
     const streaming = this.#send(x, outcome, recheck, run)
     if (streaming !== undefined) this.#streamed(x, streaming, await streaming.tracked.done)
+    else if (outcome === RAW) {
+      // an accepted WebSocket handshake: the connection lives in this scope until it closes
+      const held = UPGRADES.get(ctx)?.held
+      if (held !== undefined) await held
+    }
   }
 
   /**
@@ -993,7 +1097,7 @@ export class Pipeline {
     const event = x.event
     if (outcome === RAW) {
       ctx.commit()
-      const status = x.request.rawStatus?.() ?? 200
+      const status = UPGRADES.get(ctx)?.accepted === true ? 101 : (x.request.rawStatus?.() ?? 200)
       event.status ??= status
       x.answer({ status, headers: {}, body: null, raw: true })
       return undefined

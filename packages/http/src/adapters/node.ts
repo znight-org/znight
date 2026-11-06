@@ -20,6 +20,7 @@ import { createServer, type IncomingMessage, type Server, type ServerOptions, ty
 import { RouteTable } from '../router.ts'
 import { ConnectionTracker, closeServer, nodeAdapterRequest, writeNodeFailure, writeNodeReply } from './node-io.ts'
 import { bufferInjectStream, injectNodeStream, serverAddress } from './shared.ts'
+import { NodeUpgrades } from './upgrade-io.ts'
 
 /** Options of {@link nodeAdapter}. */
 export interface NodeAdapterOptions {
@@ -55,6 +56,8 @@ export function nodeAdapter(options: NodeAdapterOptions = {}): NodeAdapter {
 
 class NodeHttpAdapter implements NodeAdapter {
   readonly name = 'node' as const
+  /** WebSocket upgrades (RFC 0003), routed by the server of {@link listen}. */
+  readonly upgrades: NodeUpgrades = new NodeUpgrades()
   readonly #routes = new RouteTable<AdapterHandler>()
   readonly #options: NodeAdapterOptions
   #fallback: FallbackHandler | undefined
@@ -107,6 +110,7 @@ class NodeHttpAdapter implements NodeAdapter {
     this.#tracker ??= new ConnectionTracker(server, { requests: false })
     this.#closing = undefined
     if (!server.listeners('request').includes(this.handler)) server.on('request', this.handler)
+    this.upgrades.attach(server)
     await new Promise<void>((resolve, reject) => {
       const onError = (error: Error): void => reject(error)
       server.once('error', onError)
