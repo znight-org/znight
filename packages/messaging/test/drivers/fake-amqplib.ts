@@ -62,6 +62,8 @@ export class FakeBroker {
   onCreateChannel: ((model: FakeModel) => Promise<void> | void) | undefined
   /** Error of an `assertQueue` call (the channel is then closed, like RabbitMQ does). */
   onAssertQueue: ((name: string, args: Record<string, unknown>) => Error | undefined) | undefined
+  /** Error of a `consume` call (the channel is then closed, like RabbitMQ does). */
+  onConsume: ((queue: string) => Error | undefined) | undefined
   /** Delay of the confirmation of a routable publication (unroutable ones are returned and confirmed at once). */
   confirmDelayMs = 0
   #tags = 0
@@ -79,6 +81,7 @@ export class FakeBroker {
     this.missingQueues.clear()
     this.onCreateChannel = undefined
     this.onAssertQueue = undefined
+    this.onConsume = undefined
     this.confirmDelayMs = 0
   }
 
@@ -213,6 +216,11 @@ export class FakeChannel extends EventEmitter {
 
   consume(queue: string, callback: (message: FakeMessage | null) => void): Promise<{ consumerTag: string }> {
     return this.rpc(() => {
+      const error = fakeBroker.onConsume?.(queue)
+      if (error !== undefined) {
+        this.fail(error)
+        throw error
+      }
       const tag = `ctag-${fakeBroker.nextTag()}`
       fakeBroker.consumers.push({ queue, tag, channel: this, callback, cancelled: false })
       return { consumerTag: tag }

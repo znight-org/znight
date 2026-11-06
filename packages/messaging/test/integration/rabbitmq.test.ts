@@ -297,7 +297,9 @@ describe.skipIf(!integration)('RabbitMQ (testcontainers)', () => {
     const queue = `rabbit-cancel-${Date.now()}`
     const logger = memoryLogger()
     const app = await startApp(
-      rabbitmq({ url, reconnect: { initialDelayMs: 50, maxDelayMs: 500 } }),
+      // resubscribe at once: RabbitMQ cancels the consumer before the deletion completes, so the first
+      // declaration usually finds the old queue and the consumption that follows fails with NOT_FOUND
+      rabbitmq({ url, reconnect: { initialDelayMs: 1, maxDelayMs: 500 } }),
       [{ class: Consumer, queue, handlers: [handler('handle')] }],
       logger,
     )

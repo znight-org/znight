@@ -141,6 +141,35 @@ describe('recovery', () => {
     await driver.close()
   })
 
+  it('declares the queue again when it is gone by the time the consumer resubscribes', async () => {
+    const { driver, lines } = await connected()
+    await driver.subscribe('q', ignore, options)
+    fakeBroker.declarations.length = 0
+    // RabbitMQ cancels the consumers of a deleted queue before the deletion completes: the declaration
+    // that follows still finds the old queue, then `basic.consume` fails with NOT_FOUND
+    let missing = 2
+    fakeBroker.onConsume = queue =>
+      missing-- > 0 ? Object.assign(new Error(`NOT_FOUND - no queue '${queue}'`), { code: 404 }) : undefined
+    fakeBroker.cancelConsumers('q')
+    await waitFor(() => fakeBroker.active('q').length === 1)
+    expect(fakeBroker.declarations.map(declaration => declaration.name)).toEqual(['q', 'q', 'q'])
+    expect(lines()).toContain('info RabbitMQ: consuming "q" again')
+    await driver.close()
+  })
+
+  it('declares the queue again when it was deleted while the connection was down', async () => {
+    const { driver } = await connected()
+    await driver.subscribe('q', ignore, options)
+    fakeBroker.declarations.length = 0
+    let missing = 1
+    fakeBroker.onConsume = queue =>
+      missing-- > 0 ? Object.assign(new Error(`NOT_FOUND - no queue '${queue}'`), { code: 404 }) : undefined
+    fakeBroker.models[0]?.kill()
+    await waitFor(() => fakeBroker.active('q').length === 1)
+    expect(fakeBroker.declarations.map(declaration => declaration.name)).toEqual(['q'])
+    await driver.close()
+  })
+
   it('retries with backoff while the cancelled queue cannot be consumed', async () => {
     const { driver } = await connected({ assertTopology: false })
     await driver.subscribe('q', ignore, options)
