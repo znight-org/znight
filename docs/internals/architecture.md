@@ -3354,11 +3354,12 @@ interface GraphQLDriver {
 - **The Yoga driver** (`yogaDriver()`, `name: 'yoga'`) is route-mounted: `GET` and `POST` on
   `path`. `start()` creates the Yoga server with `schema: engine.schema`, `graphqlEndpoint:
   settings.path`, `graphiql` from `settings.ide` (GraphiQL options from the driver options),
-  `maskedErrors: { maskError }` (below), `cors: false`, `maxRequestBodySize` from
-  `settings.http.bodyLimit`, `parserAndValidationCache: false`, `landingPage: false`, `batching:
-  false`, `multipart: false`, Yoga's request id from `HttpContext.requestId`, the runtime's Fetch
-  API, `disposeOnProcessTerminate: false` and `logging: false` unless set; the options Znight owns
-  (`schema`, `context`, `graphqlEndpoint`, `maskedErrors`, `cors`, `fetchAPI`, `maxRequestBodySize`,
+  `maskedErrors: { maskError }` (below), `cors: false`, `maxRequestBodySize: false` (the Fetch
+  bridge reads the body under `settings.http.bodyLimit`), `parserAndValidationCache: false`,
+  `landingPage: false`, `batching: false`, `multipart: false`, Yoga's request id from
+  `HttpContext.requestId`, Yoga's default Fetch API (the `@whatwg-node` ponyfills on Node.js, the
+  runtime's own on Bun), `disposeOnProcessTerminate: false` and `logging: false` unless set; the
+  options Znight owns (`schema`, `context`, `graphqlEndpoint`, `maskedErrors`, `cors`, `fetchAPI`, `maxRequestBodySize`,
   `parserAndValidationCache`, `requestId`, `healthCheckEndpoint`, `landingPage`,
   `disposeOnProcessTerminate`, `batching`, `multipart`, a non-object `graphiql`) are ZNIGHT066 when
   `yogaDriver()` is called (absent from `YogaDriverOptions`: a type error first). An Envelop plugin installed before the
@@ -3369,11 +3370,13 @@ interface GraphQLDriver {
   (`INTERNAL_SERVER_ERROR`), logged once. A route handler calls `yoga.fetch(request, { znight:
   ctx })` with the Fetch bridge's request: on `honoAdapter()`, the native `Request` when its body
   was not read and is a `GET`, or declares a `content-length` within the body limit; otherwise a
-  `Request` built from the method, the absolute URL (`protocol`, `host` header, raw target), the
-  headers, `ctx.signal` and the body of `ctx.rawBody()` (so the body limit is `HttpPlugin`'s 413).
-  A `Response` that is not an instance of the global `Response` of the moment (`@hono/node-server`
-  replaces it when listening) is rebuilt on it with the same status, headers and body. `GET`
-  without `http.get` answers 405 (`allow: POST`) unless it asks for GraphiQL (`accept: text/html`)
+  `Request` of Yoga's Fetch API built from the method, the absolute URL (`protocol`, `host` header,
+  raw target), a copy of the headers, `ctx.signal` and the body of `ctx.rawBody()` (so the body
+  limit is `HttpPlugin`'s 413). Yoga's `Response`, whatever Fetch API made it, is returned as an
+  `HttpResponse` with its status and headers (each `set-cookie` line kept): a JSON, HTML or plain
+  text body as its text (with its `content-length`), any other body (GraphQL over SSE, incremental
+  delivery) as a native `ReadableStream` reading it as the client receives it, cancelled when the
+  client leaves. `GET` without `http.get` answers 405 (`allow: POST`) unless it asks for GraphiQL (`accept: text/html`)
   with `graphiql` on; a mutation over `GET` is Yoga's 405 (`allow: POST`). A `POST` whose
   `content-type` is not JSON (the built-in transport's test: `application/json`, UTF-8) MUST be
   answered with the built-in transport's 415 before Yoga parses it, so that no form, multipart or

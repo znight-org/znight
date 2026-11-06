@@ -1039,7 +1039,7 @@ GraphQLPlugin.configure({ driver: yogaDriver({ plugins: [usePersistedOperations(
   `graphqlEndpoint` (`path`), `maskedErrors` (the engine masks once, see below),
   `cors` (`HttpPlugin`'s), `maxRequestBodySize` (`http.bodyLimit`), `parserAndValidationCache`,
   `requestId` (Yoga uses `HttpContext.requestId`), `healthCheckEndpoint`, `landingPage`,
-  `fetchAPI` (the runtime's own), `disposeOnProcessTerminate` (the application stops Yoga),
+  `fetchAPI` (Yoga's default, whose responses the driver converts for `HttpPlugin`), `disposeOnProcessTerminate` (the application stops Yoga),
   `batching` (one operation per request: the operations of a batch would share the request scope,
   where each one's `GraphQLContext` would replace the other's) and `multipart` (JSON bodies only,
   below). Yoga's `logging` is off unless set.
