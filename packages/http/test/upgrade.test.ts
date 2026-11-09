@@ -133,7 +133,11 @@ describe('upgrade routes in memory', () => {
       const reply = await http.upgradeInMemory({ method: 'GET', url: '/ws/a' }, { kind: 'memory', peer: {} })
       expect(reply?.status).toBe(408)
       await Promise.resolve()
-      expect(aborted).toMatchObject({ name: 'AbortError', kind: 'expired' })
+      expect(aborted).toMatchObject({
+        name: 'AbortError',
+        kind: 'expired',
+        message: 'The WebSocket handshake timed out',
+      })
       // the guard settled: the handshake left the pipeline
       expect(http.inflight).toBe(0)
       expect(accepted).toEqual([])

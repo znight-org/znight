@@ -1092,7 +1092,8 @@ on other routes (`EventSource` requires 200; `fetch()` clients read any status).
 the response was written, when the response body is cancelled, or when the server closes an event
 stream; never after a normal completion (pass it to work that outlives the response). Its reason
 is a `RequestAbortedError` (`name: 'AbortError'`, what `fetch` and `node:timers/promises` check)
-with `kind: 'client' | 'shutdown' | 'expired'`. Ordinary in-flight requests are not aborted on
+with `kind: 'client' | 'shutdown' | 'expired'` (`expired`: an event stream reached its `maxDuration`
+or a WebSocket handshake timed out, as its `message` says). Ordinary in-flight requests are not aborted on
 shutdown: they drain.
 
 ### `EventChannel`

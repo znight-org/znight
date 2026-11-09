@@ -2195,7 +2195,8 @@ not call `next()` gets the same reply as in the general pipeline.
 - **`ctx.signal`** exists on every route (created on first access): it aborts when the client
   disconnects before the response was written (`AdapterRequest.onAbort`), when the response body is
   cancelled, or when the server closes an event stream; never after a normal completion. Its reason
-  is a `RequestAbortedError` (`name: 'AbortError'`, `kind: 'client' | 'shutdown' | 'expired'`).
+  is a `RequestAbortedError` (`name: 'AbortError'`, `kind: 'client' | 'shutdown' | 'expired'`;
+  `expired` covers an event stream's `maxDuration` and a handshake timeout, told apart by `message`).
   Ordinary in-flight requests are not aborted on shutdown: they drain.
 - `HttpPlugin.configure({ adapter, port, host, prefix, guards, interceptors, exceptionMappers,
   trailingSlash, exposeErrors, bodyLimit, uploads, requestIdHeader, generateRequestId,

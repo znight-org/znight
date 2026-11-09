@@ -25,11 +25,15 @@ export type RequestAbortKind = 'client' | 'shutdown' | 'expired'
  */
 export class RequestAbortedError extends Error {
   override readonly name = 'AbortError'
-  /** `client`: disconnected; `shutdown`: the server stops; `expired`: an SSE stream reached its `maxDuration`. */
+  /**
+   * `client`: disconnected; `shutdown`: the server stops; `expired`: a time limit was reached (an SSE
+   * stream reached its `maxDuration`, a WebSocket handshake its timeout; `message` says which).
+   */
   readonly kind: RequestAbortKind
 
-  constructor(kind: RequestAbortKind) {
-    super(ABORT_MESSAGES[kind])
+  /** `message` defaults to a description of `kind`. */
+  constructor(kind: RequestAbortKind, message?: string) {
+    super(message ?? ABORT_MESSAGES[kind])
     this.kind = kind
   }
 }
@@ -446,9 +450,9 @@ export class RequestContext implements HttpContext {
    * Aborts {@link signal} with a {@link RequestAbortedError} of `kind` (internal): at most once, and
    * never once the request is over ({@link complete}).
    */
-  abort(kind: RequestAbortKind): void {
+  abort(kind: RequestAbortKind, message?: string): void {
     if (this.#more?.abortReason !== undefined || this.#completed) return
-    const reason = new RequestAbortedError(kind)
+    const reason = new RequestAbortedError(kind, message)
     const state = this.#extra
     state.abortReason = reason
     state.abortController?.abort(reason)
