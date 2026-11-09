@@ -151,6 +151,30 @@ describe('Project.refresh', () => {
     expect(value()).toBe('export const V = 2')
   })
 
+  it('drops the parses of files that were not inputs of the previous compile', () => {
+    const { project: created, dir } = project({
+      'src/a.ts': "import { V } from '../shared/c.ts'\nexport const A = V",
+      'src/b.ts': 'export const B = 1',
+      'shared/c.ts': 'export const V = 1',
+    })
+    const c = `${dir.root}/shared/c.ts`
+    created.refresh()
+    created.resolveIdentifier(fileOf(created, 'src/a.ts'), 'V')
+    expect(created.cachedFiles()).toContain(c)
+    // a file no compile reads any more (an import removed, a package upgraded) leaves the cache
+    dir.write('src/a.ts', 'export const A = 1')
+    created.refresh({ changed: ['src/a.ts'] })
+    expect(created.cachedFiles()).toContain(c)
+    created.refresh({ changed: ['src/a.ts'] })
+    expect(created.cachedFiles()).not.toContain(c)
+    // a source renamed behind a full refresh
+    dir.remove('src/b.ts')
+    dir.write('src/renamed.ts', 'export const B = 1')
+    created.refresh()
+    created.refresh()
+    expect(created.cachedFiles()).toEqual([`${dir.root}/src/a.ts`, `${dir.root}/src/renamed.ts`])
+  })
+
   it('reports syntax errors of scanned files', () => {
     const { project: created, dir } = project({ 'src/a.ts': 'export class {', 'src/b.ts': 'export {}' })
     created.refresh()

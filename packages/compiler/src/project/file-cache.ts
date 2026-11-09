@@ -64,14 +64,11 @@ export class FileCache {
     }
   }
 
-  /**
-   * Invalidates every cached file that is not in `keep`. Used by incremental refreshes: a file that
-   * was not an input of the previous compile is not watched, so nothing guarantees its cached content.
-   */
-  invalidateExcept(keep: ReadonlySet<string>): void {
-    for (const [path, entry] of this.#entries) {
+  /** Drops every cached file that is not in `keep` (the next {@link get} reads it again). */
+  retain(keep: ReadonlySet<string>): void {
+    for (const path of [...this.#entries.keys()]) {
       if (!keep.has(path)) {
-        entry.stale = true
+        this.#entries.delete(path)
       }
     }
   }

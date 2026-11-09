@@ -36,6 +36,16 @@ describe('FileCache', () => {
     expect(cache.stats).toEqual({ parsed: 0, reused: 0 })
   })
 
+  it('retain() drops every other entry', () => {
+    const cache = new FileCache()
+    cache.get(a)
+    cache.get(`${dir.root}/missing.ts`)
+    cache.retain(new Set([a]))
+    expect([...cache.paths()]).toEqual([a])
+    cache.retain(new Set())
+    expect([...cache.paths()]).toEqual([])
+  })
+
   it('returns undefined for missing and unparseable files (and caches it)', () => {
     const cache = new FileCache()
     expect(cache.get(`${dir.root}/missing.ts`)).toBeUndefined()
