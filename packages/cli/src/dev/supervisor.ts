@@ -3,7 +3,8 @@
  * after each successful build. Stopping sends SIGTERM, waits for the exit and sends SIGKILL after a
  * timeout. Restarts are serialised and coalesced: a burst of builds causes one restart with the
  * latest output. A failed build simply does not schedule a restart (and cancels a pending one when
- * its output is broken), so the last good process keeps running.
+ * its output is broken, even one already stopping the previous process), so nothing starts until a
+ * build compiles.
  */
 import type { ChildHandle, ExitStatus } from '../integrations/process.ts'
 
@@ -41,6 +42,12 @@ export class AppSupervisor {
   #debounce: ReturnType<typeof setTimeout> | undefined
   #queue: Promise<void> = Promise.resolve()
   #queued = false
+  /** A restart is stopping the previous process before starting the next one. */
+  #restarting = false
+  /** Bumped by {@link cancelRestart}: a restart requested in an older epoch does not start. */
+  #epoch = 0
+  /** Epoch of the latest restart request. */
+  #requested = 0
   #closed = false
   #started = 0
 
@@ -77,14 +84,18 @@ export class AppSupervisor {
   }
 
   /**
-   * Cancels a restart scheduled by {@link scheduleRestart} and not started yet (the output it would
-   * run turned out to be broken, e.g. a failed compilation). Returns whether one was pending.
+   * Cancels the restarts that did not start their process yet (the output they would run turned out
+   * to be broken, e.g. a failed compilation): scheduled, queued, or stopping the previous process
+   * (which still stops). Returns whether one was pending.
    */
   cancelRestart(): boolean {
-    if (this.#debounce === undefined) return false
-    clearTimeout(this.#debounce)
-    this.#debounce = undefined
-    return true
+    const pending = this.#debounce !== undefined || this.#queued || this.#restarting
+    if (this.#debounce !== undefined) {
+      clearTimeout(this.#debounce)
+      this.#debounce = undefined
+    }
+    this.#epoch++
+    return pending
   }
 
   /**
@@ -93,14 +104,23 @@ export class AppSupervisor {
    */
   restart(): Promise<void> {
     if (this.#closed) return this.#queue
+    this.#requested = this.#epoch
     if (this.#queued) return this.#queue
     this.#queued = true
     this.#queue = this.#queue
       .then(async () => {
         this.#queued = false
-        if (this.#closed) return
-        await this.#stopCurrent('SIGTERM')
-        if (this.#closed) return
+        // cancelled while it waited for the previous restart
+        if (this.#closed || this.#requested !== this.#epoch) return
+        const epoch = this.#epoch
+        this.#restarting = true
+        try {
+          await this.#stopCurrent('SIGTERM')
+        } finally {
+          this.#restarting = false
+        }
+        // cancelled while the previous process was stopping
+        if (this.#closed || epoch !== this.#epoch) return
         this.#startNew()
       })
       .catch((error: unknown) => {
