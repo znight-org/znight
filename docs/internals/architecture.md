@@ -1566,7 +1566,10 @@ Sequence:
 3. `stop()` (idempotent; waits for an in-progress `start()`, except when called from a start hook,
    below; that wait is a step bounded like the others, labelled `Waiting for start()`: when it
    times out, the remaining start hooks are skipped and the shutdown goes on with the rest of the
-   deadline, stopping what completed its `onStart`): `state = 'stopping'` → plugins `onStop` (reverse) → providers `onStop` (only those whose
+   deadline, stopping what completed its `onStart`; the plugin or provider whose `onStart` is still
+   in flight is not stopped then, and a plugin's `onDispose` is skipped: when that hook settles, the
+   plugin receives `onStop` (if it succeeded) and `onDispose`, the provider (already disposed)
+   `onStop` (if it succeeded), best effort, failures logged): `state = 'stopping'` → plugins `onStop` (reverse) → providers `onStop` (only those whose
    `onStart` ran) + disposal (always, reverse resolution order) → plugins `onDispose` (reverse) →
    `state = 'stopped'` (also when `stop()` rejects). Every step is attempted with `hookTimeoutMs`
    inside the global `timeoutMs` deadline (both MUST be non-negative numbers, ZNIGHT005 otherwise;
