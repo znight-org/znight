@@ -46,6 +46,13 @@ interface Failure {
 }
 
 const RESOLVED: Promise<void> = Promise.resolve()
+const NO_WORK: ReadonlySet<Work> = new Set()
+
+/** A caller waiting until no work but `ignore` is in flight. */
+interface Waiter {
+  readonly ignore: ReadonlySet<Work>
+  readonly resolve: () => void
+}
 
 /** Dispatches the events of one running application. */
 export class Dispatcher {
@@ -55,7 +62,9 @@ export class Dispatcher {
   readonly #logger: CoreLogger
   readonly #onError: EventErrorHandler | undefined
   readonly #running = new Set<Work>()
-  #idle: (() => void)[] = []
+  #waiters: Waiter[] = []
+  /** Work in flight when `stop()` began: `stop()` drains it, `dispose()` does not wait for it again. */
+  #beforeStop: ReadonlySet<Work> = NO_WORK
   #state: DispatcherState = 'running'
   /** Observers of every publication; replaced, never mutated (copy-on-write). */
   observers: readonly PublicationObserver[] = []
@@ -74,7 +83,18 @@ export class Dispatcher {
 
   /** Names of the background work in flight (`WelcomeMail.send (UserCreated)`, `emit UserCreated`). */
   inflight(): string[] {
-    return [...this.#running].map(work => work.name)
+    return this.#names(NO_WORK)
+  }
+
+  /** Names of the work in flight started after `stop()` began (all of it before `stop()`). */
+  late(): string[] {
+    return this.#names(this.#beforeStop)
+  }
+
+  #names(ignore: ReadonlySet<Work>): string[] {
+    const names: string[] = []
+    for (const work of this.#running) if (!ignore.has(work)) names.push(work.name)
+    return names
   }
 
   // ------------------------------------------------------------------------------------- publish
@@ -348,36 +368,56 @@ export class Dispatcher {
 
   #end(work: Work): void {
     this.#running.delete(work)
-    if (this.#running.size > 0 || this.#idle.length === 0) return
-    const waiters = this.#idle
-    this.#idle = []
-    for (const resolve of waiters) resolve()
+    if (this.#waiters.length === 0) return
+    const waiting: Waiter[] = []
+    for (const waiter of this.#waiters) {
+      if (this.#settled(waiter.ignore)) waiter.resolve()
+      else waiting.push(waiter)
+    }
+    this.#waiters = waiting
+  }
+
+  /** Whether no work but `ignore` is in flight. */
+  #settled(ignore: ReadonlySet<Work>): boolean {
+    if (this.#running.size > ignore.size) return false
+    for (const work of this.#running) if (!ignore.has(work)) return false
+    return true
+  }
+
+  #until(ignore: ReadonlySet<Work>): Promise<void> {
+    if (this.#settled(ignore)) return RESOLVED
+    return new Promise(resolve => {
+      this.#waiters.push({ ignore, resolve })
+    })
   }
 
   /** Resolves once no detached listener nor `emit()` work is in flight. */
   idle(): Promise<void> {
-    if (this.#running.size === 0) return RESOLVED
-    return new Promise(resolve => {
-      this.#idle.push(resolve)
-    })
+    return this.#until(NO_WORK)
   }
 
   /** `onStop`: publications from now on await their detached listeners; waits for the work in flight. */
   stop(timeoutMs: number): Promise<readonly string[]> {
-    if (this.#state === 'running') this.#state = 'stopped'
-    return this.#waitIdle(timeoutMs)
+    if (this.#state === 'running') {
+      this.#state = 'stopped'
+      this.#beforeStop = new Set(this.#running)
+    }
+    return this.#waitIdle(timeoutMs, NO_WORK)
   }
 
-  /** `onDispose`: waits for the work started after `onStop` (bounded), then refuses publications. */
+  /**
+   * `onDispose`: waits for the work started after `stop()` began (bounded; the work `stop()` drains
+   * is not waited for again, even when that drain timed out), then refuses publications.
+   */
   async dispose(timeoutMs: number): Promise<readonly string[]> {
-    const late = this.#running.size === 0 ? [] : await this.#waitIdle(timeoutMs)
+    const late = await this.#waitIdle(timeoutMs, this.#beforeStop)
     this.#state = 'disposed'
     return late
   }
 
-  /** Waits until idle or `timeoutMs`; returns the work still running. */
-  async #waitIdle(timeoutMs: number): Promise<readonly string[]> {
-    if (this.#running.size === 0) return []
+  /** Waits until no work but `ignore` is in flight, or `timeoutMs`; returns the other work still running. */
+  async #waitIdle(timeoutMs: number, ignore: ReadonlySet<Work>): Promise<readonly string[]> {
+    if (this.#settled(ignore)) return []
     let timer: ReturnType<typeof setTimeout> | undefined
     const timeout =
       timeoutMs === Number.POSITIVE_INFINITY
@@ -386,9 +426,10 @@ export class Dispatcher {
             timer = setTimeout(resolve, timeoutMs)
             timer.unref?.()
           })
-    await (timeout === undefined ? this.idle() : Promise.race([this.idle(), timeout]))
+    const settled = this.#until(ignore)
+    await (timeout === undefined ? settled : Promise.race([settled, timeout]))
     if (timer !== undefined) clearTimeout(timer)
-    return this.inflight()
+    return this.#names(ignore)
   }
 }
 

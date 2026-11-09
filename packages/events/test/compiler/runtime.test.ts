@@ -2,7 +2,7 @@
  * Runtime behaviour on a compiled application (RFC 0011 §5.7–§5.13): errors of inline and detached
  * listeners, `emit()`, `onError`, hooks, `recordEvents()`, lifecycle errors and the drain on stop.
  */
-import type { EventListenerEvent, EventPublishEvent, ZnightMetadata } from '@znight/core'
+import type { EventListenerEvent, EventPublishEvent, Plugin, ZnightMetadata } from '@znight/core'
 import type { EventErrorInfo } from '../../src/index.ts'
 
 import { Application, silentLogger, ZnightError } from '@znight/core'
@@ -238,5 +238,40 @@ describe('lifecycle', () => {
     await app.stop()
     expect(errors).toEqual([])
     expect(mod.log).toEqual(['late-ran', 'late-ran'])
+  })
+
+  it('a timed-out dispose of a shared instance leaves the next application alone', async () => {
+    mod.log.length = 0
+    const plugin = EventsPlugin.configure({ drainTimeoutMs: 200 })
+    const warnings: unknown[] = []
+    const logger = { ...silentLogger, warn: (message: string, context?: unknown) => warnings.push([message, context]) }
+    // listed first, so it stops after EventsPlugin: its emit() is work started after onStop
+    const late: Plugin = {
+      name: 'late',
+      async onStop(ctx) {
+        ctx.container.get(EventPublisher).emit(new mod.Slow())
+        await new Promise(resolve => setImmediate(resolve)) // its listener starts before the providers are disposed
+      },
+    }
+    const shutdown = { signals: false, hookTimeoutMs: 50, timeoutMs: 120 } as const
+    const first = await Application.create({ metadata, plugins: [late, plugin], logger, shutdown })
+    await first.start()
+    await first.container.get(EventPublisher).publish(new mod.Slow()) // never settles
+    await new Promise(resolve => setImmediate(resolve))
+    const failure = (await first.stop().catch((error: unknown) => error)) as { errors: readonly Error[] }
+    expect(failure.errors.map(error => error.message)).toEqual([
+      expect.stringContaining('Plugin "events" onStop() timed out'),
+      expect.stringContaining('Plugin "events" onDispose() timed out'),
+    ])
+    // onDispose waits for the emit() only, not again for the listener left over by onStop
+    expect(warnings).toContainEqual([
+      'Events: waiting for 1 listener(s) started after onStop',
+      { listeners: ['emit Slow'] },
+    ])
+
+    await using second = await TestApp.create({ metadata, plugins: [plugin], logger: silentLogger })
+    await new Promise(resolve => setTimeout(resolve, 300)) // the first dispose has ended meanwhile
+    expect(plugin.state).toBe('running')
+    await second.app.container.get(EventPublisher).publish(new mod.Boom('none'))
   })
 })

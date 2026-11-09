@@ -3475,7 +3475,10 @@ Runtime (`EventsPlugin`):
   detached listeners itself, so none outlives provider disposal. An application stopped without having
   started (or rolled back) runs no `onStop`: the plugin registers an internal singleton
   (`@znight/events#EventsShutdownDrain`, last in the resolution order, so disposed first) whose
-  disposal runs the same drain before any other provider is disposed. List `EventsPlugin` before
+  disposal runs the same drain before any other provider is disposed. `onDispose` waits (bounded by
+  `drainTimeoutMs`) only for the work started after the drain began, never again for what the drain
+  left running; an instance reused by a later application is not affected by a dispose that ends
+  late. List `EventsPlugin` before
   `HttpPlugin`, `MessagingPlugin` and `SchedulePlugin` (plugins stop in reverse order).
 - **Hooks.** `events:publish` wraps the inline phase of a publication with listeners
   (`failedListener` names the failing inline listener); `events:listener` wraps each invocation. The

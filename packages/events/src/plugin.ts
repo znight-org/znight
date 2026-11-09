@@ -182,13 +182,16 @@ class EventsPluginImpl implements EventsPluginInstance {
     const dispatcher = this.publisher.dispatcher
     this.#active = false
     if (dispatcher === undefined) return
-    const late = dispatcher.inflight()
+    const late = dispatcher.late()
     if (late.length > 0) {
       ctx.logger.warn(`Events: waiting for ${late.length} listener(s) started after onStop`, { listeners: late })
     }
     const pending = await dispatcher.dispose(this.#drainTimeoutMs)
-    this.publisher.dispatcher = undefined
-    this.publisher.disposed = true
+    // a timed-out dispose may end after the instance was registered by the next application
+    if (this.publisher.dispatcher === dispatcher) {
+      this.publisher.dispatcher = undefined
+      this.publisher.disposed = true
+    }
     if (pending.length > 0) {
       ctx.logger.warn(`Events: ${pending.length} listener(s) still running after disposal`, { listeners: pending })
     }
