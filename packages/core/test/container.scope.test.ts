@@ -1,4 +1,11 @@
-import { Container, ErrorCode, getSuppressedErrors, ZnightAggregateError, type ZnightError } from '../src/index.ts'
+import {
+  Container,
+  ErrorCode,
+  getSuppressedErrors,
+  type Lazy,
+  ZnightAggregateError,
+  type ZnightError,
+} from '../src/index.ts'
 import { caught, caughtSync, factoryDef, later, meta, sleep, t } from './helpers.ts'
 import { describe, expect, it } from 'bun:test'
 
@@ -183,6 +190,54 @@ describe('request scope errors', () => {
     const error = (await caught(() => pending)) as ZnightError
     expect(error.code).toBe(ErrorCode.NoActiveScope)
     expect(error.message).toContain('already closed')
+  })
+
+  it('reports a cycle (ZNIGHT002) when a request-scoped constructor uses a lazy reference back to itself', async () => {
+    const container = Container.create(
+      meta({
+        [t('A')]: factoryDef(d => ({ b: (d[0] as Lazy<unknown>).get() }), [{ lazy: t('B') }], { scope: 'request' }),
+        [t('B')]: factoryDef(d => ({ a: d[0] }), [t('A')], { scope: 'request' }),
+      }),
+    )
+    await container.init()
+    const error = (await caught(() => container.runInScope(() => container.get(t('A'))))) as ZnightError
+    expect(error.code).toBe(ErrorCode.InstantiationFailed)
+    expect((error.cause as ZnightError).code).toBe(ErrorCode.CircularDependency)
+    expect((error.cause as ZnightError).message).toContain('A was requested while it is being instantiated')
+  })
+
+  it('reports a cycle (ZNIGHT002) when a transient constructor uses a lazy reference to itself', async () => {
+    const container = Container.create(
+      meta({
+        [t('T')]: factoryDef(d => ({ self: (d[0] as Lazy<unknown>).get() }), [{ lazy: t('T') }], {
+          scope: 'transient',
+        }),
+      }),
+    )
+    await container.init()
+    const error = caughtSync(() => container.get(t('T'))) as ZnightError
+    expect(error.code).toBe(ErrorCode.InstantiationFailed)
+    expect((error.cause as ZnightError).code).toBe(ErrorCode.CircularDependency)
+  })
+
+  it('lets the same request-scoped provider be created again after a failed creation', async () => {
+    let fail = true
+    const container = Container.create(
+      meta({
+        [t('Flaky')]: factoryDef(
+          () => {
+            if (fail) throw new Error('boom')
+            return { ok: true }
+          },
+          [],
+          { scope: 'request' },
+        ),
+      }),
+    )
+    await container.init()
+    expect((await caught(() => container.runInScope(() => container.get(t('Flaky'))))) as ZnightError).toBeDefined()
+    fail = false
+    expect(await container.runInScope(() => container.get(t('Flaky')))).toEqual({ ok: true })
   })
 })
 

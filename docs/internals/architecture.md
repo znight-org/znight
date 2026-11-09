@@ -1428,7 +1428,8 @@ type ProviderKey<T> = TypedToken<T> | ProviderClass<T> | ClassKey<T> // ClassKey
   singletons run concurrently). `only` instantiates the dependency closure of the given keys; other
   synchronous singletons (and the target of a `Lazy.get()` called during `init()`) are created on
   first use, async ones outside the closure are refused (ZNIGHT015) and a re-entrant creation is
-  ZNIGHT002. A singleton created on demand while a request scope is active is created outside of it
+  ZNIGHT002 (also for a request-scoped or transient provider whose construction requests itself
+  again, e.g. through `Lazy<T>.get()`). A singleton created on demand while a request scope is active is created outside of it
   (`AsyncLocalStorage.exit`): its factory, dependencies and interceptors never capture the scope of
   the request that used it first.
   Missing externals are reported together (ZNIGHT001 naming `providedBy`). Factory errors are

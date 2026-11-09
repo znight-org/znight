@@ -160,6 +160,11 @@ export class Container {
   readonly #storage = new AsyncLocalStorage<RequestScope>()
   /** Instantiated singletons, in creation order. */
   readonly #created: Slot[] = []
+  /**
+   * Request-scoped and transient slots whose factory is running. Creation is synchronous, so a slot
+   * found here again was requested by its own construction (a `Lazy<T>.get()` in a constructor).
+   */
+  readonly #constructing = new Set<Slot>()
   #order: readonly Slot[] = []
   #names: Map<string, Slot[]> | undefined
   #status: Status = 'open'
@@ -574,17 +579,24 @@ export class Container {
   /** Instantiates a request-scoped or transient provider (synchronous factories only). */
   #create(slot: Slot): unknown {
     const definition = slot.definition as ProviderDefinition
+    const constructing = this.#constructing
+    if (constructing.has(slot)) throw reentrantCreationError(slot)
+    constructing.add(slot)
     let deps: unknown[]
-    try {
-      deps = this.#resolveDeps(slot)
-    } catch (error) {
-      throw error instanceof InstantiationError ? error.withParents([slot.token]) : error
-    }
     let instance: unknown
     try {
-      instance = definition.factory(deps)
-    } catch (error) {
-      throw new InstantiationError(slot.token, [slot.token], error, definition.source)
+      try {
+        deps = this.#resolveDeps(slot)
+      } catch (error) {
+        throw error instanceof InstantiationError ? error.withParents([slot.token]) : error
+      }
+      try {
+        instance = definition.factory(deps)
+      } catch (error) {
+        throw new InstantiationError(slot.token, [slot.token], error, definition.source)
+      }
+    } finally {
+      constructing.delete(slot)
     }
     if (definition.interceptors !== undefined) {
       try {
