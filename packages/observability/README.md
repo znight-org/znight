@@ -288,9 +288,11 @@ Bit ship stdout. To follow Lambda's configured level: `level: process.env.AWS_LA
 The plugin flushes the logger in `onDispose`, and every entry logged afterwards (the framework's
 final `Application stopped` or `The application stopped with errors`) is flushed as soon as it is
 written: the pending request keeps the process alive until it is delivered. Standalone, call
-`await logger.close()` (or `transport.close()`) before exiting. During `flush()` / `close()`, a batch
-that still fails after its retries drops the rest of the buffer (reported to `onError`): an
-unreachable intake costs the retries of one batch at shutdown, not of every buffered batch.
+`await logger.close()` (or `transport.close()`) before exiting. A batch that still fails after its
+retries is lost alone (reported to `onError`); during `flush()` / `close()`, a batch the intake did
+not answer at all (network error, timeout) drops the rest of the buffer too: an unreachable intake
+costs the retries of one batch at shutdown, not of every buffered batch, while an error status
+(`503`...) loses only its own batch.
 
 ### Request, message, job, GraphQL, WebSocket and event logs
 

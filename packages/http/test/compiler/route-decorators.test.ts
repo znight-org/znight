@@ -121,10 +121,12 @@ export const Owner = function () {
 }
 export const Loop: typeof Roles = Loop2
 export const Loop2: typeof Roles = Loop
+export const PreApplied = Roles(['admin'])
+export const PreAppliedAlias = RequireRoles(['admin']) as MethodDecorator
 `,
     'src/app.controller.ts': `
 import { Controller, Delete } from '@znight/http'
-import { Admin, AdminOnly, Again, Authenticated, Loop, Owner, RequireRoles } from './auth/access.ts'
+import { Admin, AdminOnly, Again, Authenticated, Loop, Owner, PreApplied, PreAppliedAlias, RequireRoles } from './auth/access.ts'
 
 @Controller('/admin')
 @Authenticated()
@@ -152,13 +154,29 @@ export class AdminController {
   @Delete('/f')
   @Loop(['x'])
   f() { return 'f' }
+
+  @Delete('/g')
+  @PreApplied
+  g() { return 'g' }
+
+  @Delete('/h')
+  @PreAppliedAlias
+  h() { return 'h' }
 }
 `,
   })
   const result = await analyzeApp(app.root)
   const wrapper = (name: string) =>
     `error ZNIGHT005 src/app.controller.ts:${{ AdminOnly: 9, Admin: 17, Owner: 21 }[name]}:3 Invalid route decorator @${name}: it applies the route decorator @Roles inside a function, which the compiler cannot see: the "access" decision would be ignored`
-  expect(httpDiagnostics(result)).toEqual([wrapper('AdminOnly'), wrapper('Admin'), wrapper('Owner')])
+  const preApplied = (name: string, line: number, inner: string) =>
+    `error ZNIGHT005 src/app.controller.ts:${line}:3 Invalid route decorator @${name}: it is the route decorator @${inner} already applied, which the compiler cannot see: the "access" decision would be ignored`
+  expect(httpDiagnostics(result)).toEqual([
+    wrapper('AdminOnly'),
+    wrapper('Admin'),
+    wrapper('Owner'),
+    preApplied('PreApplied', 33, 'Roles'),
+    preApplied('PreAppliedAlias', 37, 'RequireRoles'),
+  ])
   const routes = result.controllers[0]?.routes ?? []
   const meta = (path: string) =>
     routes.find(route => route.path === path)?.meta.map(entry => [entry.decorator, entry.key, entry.value])

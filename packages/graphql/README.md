@@ -819,7 +819,7 @@ ZNIGHT066.
 | `introspection` | `NODE_ENV !== 'production'`                                            | Off: graphql-js `NoSchemaIntrospectionCustomRule`, and suggestions are hidden                                                                                            |
 | `graphiql`      | `NODE_ENV === 'development'`                                           | `GET path` with `accept: text/html` serves GraphiQL; with a `driver`, the driver's IDE                                                                                   |
 | `limits`        | `{ maxTokens: 2000, maxDepth: 12, maxAliases: 30, maxDirectives: 50 }` | Request limits (introspection fields exempt from `maxDepth`); `false` disables one                                                                                       |
-| `documentCache` | `1000`                                                                 | Distinct documents kept parsed and validated (LRU); `0` disables. Texts over 16 KiB are not kept, and the kept text stays under 8 MiB                                    |
+| `documentCache` | `1000`                                                                 | Distinct documents kept parsed and validated (LRU); `0` disables. Texts over 128 KiB are not kept, and the kept text stays under 8 MiB                                   |
 | `subscriptions` | `{ maxActive: 10_000, bufferSize: 100 }`                               | `false` disables subscriptions over SSE. `heartbeat` (ms or `false`) and `maxDuration` (ms) are passed to `HttpResponse.sse()` (default: the `HttpPlugin` `sse` options) |
 | `pubsub`        | a `MemoryPubSub`                                                       | The `PubSub` provided to the container                                                                                                                                   |
 | `enforcement`   | `'error'`                                                              | How the boot check of field decisions reports a problem: `'error'` fails the boot (ZNIGHT023), `'warn'` logs                                                             |
@@ -1036,8 +1036,11 @@ GraphQLPlugin.configure({ driver: yogaDriver({ plugins: [usePersistedOperations(
   `driver: 'yoga'` (`transport: 'sse'` for subscriptions). Plugins wrapping the execution
   (`useResponseCache`) call the engine, but a response cache hit answers without it: guards,
   loaders, error mappers, request-scoped providers and the hook do not run for that request, so
-  key the cache per principal (`session: request => request.headers.get('authorization')`),
-  never with one global session next to guards. An operation executed by a plugin that replaces
+  key the cache by the credential the guards authenticate and turn it off without one, since a
+  `null` session is one cache shared by every client:
+  `const principal = (request: Request) => request.headers.get('x-api-key') ?? request.headers.get('authorization')`,
+  then `useResponseCache({ session: principal, enabled: request => principal(request) !== null })`
+  (read the cookie of a cookie session the same way). An operation executed by a plugin that replaces
   the execution (`useGraphQlJit`) fails with ZNIGHT066, logged once: its resolvers would not get
   the `GraphQLContext`.
 - **Owned options**, refused with ZNIGHT066 (a type error first): `schema`, `context`,

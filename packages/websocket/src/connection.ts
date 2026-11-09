@@ -25,6 +25,8 @@ export type WsSendResult = SendStatus
 
 /** How often a pending `conn.drained()` re-reads the outbound buffer (ms). */
 const DRAIN_POLL_MS = 10
+/** Heartbeat ticks a paused connection may spend without any handler progress before it is terminated. */
+const MAX_STALLED_TICKS = 2
 
 /** `conn.drained()` rejects with it once the connection is closed. */
 export class WsClosedError extends Error {
@@ -186,6 +188,10 @@ export class WsConnectionImpl implements WsConnection, ChannelMember {
   #closeTimer: ReturnType<typeof setTimeout> | undefined
   /** Seen alive (a frame or a pong) since the last heartbeat tick. */
   #alive = true
+  /** A queued message was dispatched or a handler settled since the last heartbeat tick. */
+  #progressed = false
+  /** Consecutive heartbeat ticks spent paused without progress. */
+  #stalledTicks = 0
 
   constructor(init: ConnectionInit) {
     this.id = init.id
@@ -342,14 +348,24 @@ export class WsConnectionImpl implements WsConnection, ChannelMember {
   /**
    * One heartbeat tick (RFC 0003 §8.7): a connection not seen alive since the previous tick is
    * terminated, the others are marked and pinged. A connection whose reading the server paused
-   * (`maxPendingMessages`) counts as alive: its pongs cannot be read until reading resumes.
+   * (`maxPendingMessages`) counts as alive while its handlers make progress (its pongs cannot be
+   * read until reading resumes); paused without progress for more than {@link MAX_STALLED_TICKS}
+   * ticks (handlers stuck, e.g. on `drained()` for a client that stopped reading), it is terminated.
    */
   heartbeat(): void {
     if (this.#state !== 'open' || this.#socket === undefined) return
+    const progressed = this.#progressed
+    this.#progressed = false
     if (this.#paused) {
+      this.#stalledTicks = progressed ? 0 : this.#stalledTicks + 1
+      if (this.#stalledTicks > MAX_STALLED_TICKS) {
+        this.terminateWith('heartbeat')
+        return
+      }
       this.#alive = true
       return
     }
+    this.#stalledTicks = 0
     if (!this.#alive) {
       this.terminateWith('heartbeat')
       return
@@ -397,6 +413,7 @@ export class WsConnectionImpl implements WsConnection, ChannelMember {
       this.#queue.length > 0
     ) {
       const next = this.#queue.shift() as { readonly frame: string | Uint8Array; readonly binary: boolean }
+      this.#progressed = true
       this.#track(this.#driver.dispatch(this, next.frame, next.binary))
     }
     if (this.#paused && this.#queue.length <= this.#limits.maxPendingMessages / 2) {
@@ -411,6 +428,7 @@ export class WsConnectionImpl implements WsConnection, ChannelMember {
       .catch(() => undefined)
       .then(() => {
         this.#running.delete(tracked)
+        this.#progressed = true
         this.#pump()
       })
     this.#running.add(tracked)

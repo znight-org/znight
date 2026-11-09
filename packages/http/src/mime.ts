@@ -144,10 +144,24 @@ export function mediaTypeEssence(type: string): string {
 
 /**
  * Whether `type` is a single media type: a `type/subtype` token pair, optionally followed by
- * parameters, without a comma (browsers read the last type of a list: `image/png, text/html` is HTML).
+ * parameters, without a comma outside a quoted parameter value (browsers read the last type of a
+ * list: `image/png, text/html` is HTML; `multipart/form-data; boundary="a,b"` is one type).
  */
 export function isSingleMediaType(type: string): boolean {
-  return !type.includes(',') && MEDIA_TYPE.test(mediaTypeEssence(type))
+  return !hasUnquotedComma(type) && MEDIA_TYPE.test(mediaTypeEssence(type))
+}
+
+/** Whether `value` holds a `,` outside a quoted string (`"..."` with backslash escapes), where header lists split. */
+function hasUnquotedComma(value: string): boolean {
+  if (!value.includes(',')) return false
+  let quoted = false
+  for (let index = 0; index < value.length; index++) {
+    const char = value[index]
+    if (quoted && char === '\\') index++
+    else if (char === '"') quoted = !quoted
+    else if (char === ',' && !quoted) return true
+  }
+  return false
 }
 
 /**

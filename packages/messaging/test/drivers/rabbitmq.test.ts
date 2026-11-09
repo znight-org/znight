@@ -271,7 +271,26 @@ describe('republished copies', () => {
     expect(fakeBroker.publications.at(-1)?.options.headers).toEqual({ 'x-tenant': 'acme', 'x-znight-attempt': '3' })
     await driver.close()
   })
-  it('never copies the user-id property, which the broker validates against the publishing user', async () => {
+  it('copies the user-id property only when it is the user of the connection', async () => {
+    for (const [url, user] of [
+      ['amqp://orders:secret@fake', 'orders'],
+      ['amqp://fake', 'guest'],
+      [{ hostname: 'fake', username: 'orders', password: 'secret' }, 'orders'],
+    ] as const) {
+      const { driver, deliveries } = await received({ url })
+      fakeBroker.deliver('q', { properties: { messageId: 'm1', userId: user } })
+      await waitFor(() => deliveries.length === 1)
+      await deliveries[0]?.retry({ attempt: 2, delayMs: 0, error: new Error('boom') })
+      expect(fakeBroker.publications.at(-1)?.options.userId).toBe(user)
+      fakeBroker.deliver('q', { properties: { messageId: 'm2', userId: user } })
+      await waitFor(() => deliveries.length === 2)
+      await deliveries[1]?.deadLetter({ queue: 'q.dlq', reason: 'non-retryable', error: new Error('boom'), attempt: 1 })
+      expect(fakeBroker.publications.at(-1)?.options.userId).toBe(user)
+      await driver.close()
+    }
+  })
+
+  it('never copies the user-id property of another user, which the broker would refuse', async () => {
     const { driver, deliveries } = await received()
     fakeBroker.deliver('q', { properties: { messageId: 'm1', userId: 'partner', appId: 'billing' } })
     await waitFor(() => deliveries.length === 1)

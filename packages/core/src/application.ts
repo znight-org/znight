@@ -116,6 +116,13 @@ export class Application {
   #startAborted = false
   /** Releases a `stop()` waiting for the start, when a start hook asks to stop in turn. */
   #releaseStopWait: (() => void) | undefined
+  /** Owner of the `onStart` hook in progress. */
+  #starting: StartOwner | undefined
+  /**
+   * Owner of the `onStart` hook still in flight when the wait of `stop()` timed out: the shutdown
+   * skips its `onDispose`, and it is stopped and disposed when that hook settles.
+   */
+  #lateStart: StartOwner | undefined
 
   private constructor(options: ApplicationOptions) {
     const plugins = [...(options.plugins ?? [])]
@@ -292,11 +299,11 @@ export class Application {
   async #runStartHooks(): Promise<boolean> {
     const providers = this.container.instances()
     for (const provider of providers) {
-      if (!(await this.#startHook(() => this.#callProvider(provider, 'onStart')))) return false
+      if (!(await this.#startHook(() => this.#callProvider(provider, 'onStart'), { provider }))) return false
       this.#startedProviders.add(provider.token)
     }
     for (const plugin of this.#plugins) {
-      if (!(await this.#startHook(() => this.#callPlugin(plugin, 'onStart')))) return false
+      if (!(await this.#startHook(() => this.#callPlugin(plugin, 'onStart'), { plugin }))) return false
       this.#startedPlugins.push(plugin)
     }
     for (const provider of providers) {
@@ -311,16 +318,49 @@ export class Application {
   /**
    * Runs one start hook in an async context carrying a fresh marker, so that a `stop()` called from
    * it (or from work it awaits) is recognised. Returns `false` when the hook stopped the application.
+   * `owner` is given for `onStart` hooks: one that settles after `stop()` stopped waiting for it is
+   * stopped and disposed then (see `#stopLateStart`).
    */
-  async #startHook(hook: () => Promise<void>): Promise<boolean> {
+  async #startHook(hook: () => Promise<void>, owner?: StartOwner): Promise<boolean> {
     const marker = {}
     this.#startHookMarker = marker
+    this.#starting = owner
+    let started = false
     try {
       await startHookContext.run(marker, hook)
+      started = true
     } finally {
       this.#startHookMarker = undefined
+      this.#starting = undefined
+      if (owner !== undefined && this.#lateStart === owner) {
+        await this.#stopLateStart(owner, started)
+      }
     }
     return !this.#startAborted
+  }
+
+  /**
+   * Stops what an `onStart` hook settling after the shutdown started (best effort, failures logged):
+   * a plugin gets `onStop` (when its `onStart` succeeded) then the `onDispose` the shutdown skipped;
+   * a provider, already disposed by the shutdown, gets `onStop` when its `onStart` succeeded.
+   */
+  async #stopLateStart(owner: StartOwner, started: boolean): Promise<void> {
+    const { plugin, provider } = owner
+    const label = plugin === undefined ? `${provider?.displayName}.onStart()` : `Plugin "${plugin.name}" onStart()`
+    this.#logger.warn(`${label} settled after the shutdown stopped waiting for it: stopping it now`)
+    const errors: unknown[] = []
+    const step = this.#stepRunner(errors)
+    if (plugin !== undefined) {
+      if (started && typeof plugin.onStop === 'function') {
+        await step(`Plugin "${plugin.name}" onStop()`, () => plugin.onStop?.(this.#context))
+      }
+      if (typeof plugin.onDispose === 'function') {
+        await step(`Plugin "${plugin.name}" onDispose()`, () => plugin.onDispose?.(this.#context))
+      }
+    } else if (provider !== undefined && started && hasLifecycleHook(provider.instance, 'onStop')) {
+      await step(`${provider.displayName}.onStop()`, () => callLifecycleHook(provider.instance, 'onStop'))
+    }
+    for (const error of errors) this.#logger.error('Failed to stop a late start', { err: error })
   }
 
   /** Whether the caller runs in the async context of the start hook in progress. */
@@ -366,9 +406,11 @@ export class Application {
       // a start hook may never settle: waiting for the start is a step of the shutdown
       await step('Waiting for start()', () => this.#waitForStart())
       if (this.#state === 'starting') {
-        // timed out: the remaining start hooks are skipped, what completed its onStart is stopped
+        // timed out: the remaining start hooks are skipped, what completed its onStart is stopped,
+        // and the owner of the onStart still in flight is stopped and disposed once it settles
         this.#startAborted = true
         this.#releaseStopWait = undefined
+        this.#lateStart = this.#starting
       }
     }
     if (this.#state === 'failed' || this.#state === 'stopped') {
@@ -430,7 +472,8 @@ export class Application {
       errors.push(...flatten(error))
     }
     for (const plugin of [...this.#registered].reverse()) {
-      if (typeof plugin.onDispose === 'function') {
+      // a plugin whose onStart is still in flight is disposed when it settles (#stopLateStart)
+      if (typeof plugin.onDispose === 'function' && plugin !== this.#lateStart?.plugin) {
         await step(`Plugin "${plugin.name}" onDispose()`, () => plugin.onDispose?.(this.#context))
       }
     }
@@ -507,6 +550,12 @@ export class Application {
       proc.exitCode = 1
     })
   }
+}
+
+/** The plugin or provider an `onStart` hook belongs to. */
+interface StartOwner {
+  readonly plugin?: Plugin
+  readonly provider?: ManagedInstance
 }
 
 function entriesOf(values: ProviderValues): Iterable<readonly [ProviderKey, unknown]> {

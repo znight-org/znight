@@ -93,6 +93,24 @@ describe('createConfigSource', () => {
     expect(source.keys()).toEqual(['PORT', 'HOST', 'database', 'database.host', 'database.port', 'EMPTY', 'NULLED'])
   })
 
+  it('bounds the keys of values whose shared children make the paths grow exponentially', () => {
+    // N[i] = { a: N[i + 1], b: N[i + 1] } for 31 levels, and the last one points back to the first
+    const nodes: Record<string, unknown>[] = Array.from({ length: 32 }, () => ({}))
+    for (let index = 0; index < 31; index++) {
+      const node = nodes[index] as Record<string, unknown>
+      node['a'] = nodes[index + 1]
+      node['b'] = nodes[index + 1]
+    }
+    ;(nodes[31] as Record<string, unknown>)['back'] = nodes[0]
+    const source = createConfigSource([{ origin: 'custom', values: { root: nodes[0] } }])
+    const started = performance.now()
+    const keys = source.keys()
+    expect(performance.now() - started).toBeLessThan(1000)
+    expect(keys.length).toBeLessThanOrEqual(10_000)
+    expect(keys).toContain('root.a.a')
+    expect(JSON.stringify(source)).toBe(`{"origins":["custom"],"keys":${keys.length}}`)
+  })
+
   it('lists the keys of cyclic values supplied by a custom loader without expanding the cycles', () => {
     const node: Record<string, unknown> = { a: 1 }
     node['x'] = node

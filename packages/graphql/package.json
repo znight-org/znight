@@ -74,6 +74,7 @@
     }
   },
   "devDependencies": {
+    "@graphql-yoga/plugin-response-cache": "4.0.1",
     "@testcontainers/redis": "12.2.1",
     "@znight/compiler": "workspace:*",
     "@znight/http": "workspace:*",

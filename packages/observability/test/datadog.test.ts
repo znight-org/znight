@@ -288,7 +288,26 @@ describe('datadogTransport', () => {
     expect(errors[0]?.dropped).toBe(1)
   })
 
-  it('drops the rest of the buffer once a batch fails during flush or close (bounded shutdown)', async () => {
+  it('loses only the failed batch when the intake answers an error status during a flush', async () => {
+    let calls = 0
+    const dd = transport({
+      batchSize: 10,
+      maxRetries: 0,
+      compress: false,
+      fetch: (() => {
+        calls++
+        return Promise.resolve(new Response(null, { status: calls === 1 ? 503 : 202 }))
+      }) as unknown as typeof fetch,
+    })
+    const logger = new Logger({ transport: dd })
+    for (let index = 0; index < 50; index++) logger.info(`entry ${index}`)
+    await dd.flush()
+    expect(calls).toBe(5)
+    expect(dd.dropped).toBe(10)
+    expect(errors.reduce((sum, error) => sum + error.dropped, 0)).toBe(10)
+  })
+
+  it('drops the rest of the buffer once the intake is unreachable during flush or close (bounded shutdown)', async () => {
     let calls = 0
     const dd = transport({
       batchSize: 1,

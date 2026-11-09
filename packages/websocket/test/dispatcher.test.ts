@@ -46,6 +46,7 @@ async function connect(
 ) {
   const gateway = new Gateway()
   const errors: string[] = []
+  const warnings: string[] = []
   const definition: GatewayDefinition = {
     token: 'src/chat.gateway.ts#ChatGateway',
     path: '/chat',
@@ -66,6 +67,7 @@ async function connect(
     handlerTimeoutMs: 50,
     exposeErrors: false,
     logError: message => errors.push(message),
+    logClientError: message => warnings.push(message),
     closed: () => undefined,
     ...extra,
   })
@@ -90,7 +92,7 @@ async function connect(
     await Bun.sleep(5)
     return client.received.map(frame => JSON.parse(String(frame)) as unknown)
   }
-  return { gateway, client, conn, errors, received }
+  return { gateway, client, conn, errors, warnings, received }
 }
 
 describe('GatewayDispatcher', () => {
@@ -198,7 +200,7 @@ describe('GatewayDispatcher', () => {
     expect(connectFailureCode(new Error('x')).code).toBe(1011)
   })
 
-  it('answers BAD_FRAME and logs when a custom codec throws, rate limited or not', async () => {
+  it('answers BAD_FRAME and logs once per connection when a custom codec throws, rate limited or not', async () => {
     const codec = {
       decode: (frame: string | Uint8Array) => {
         if (frame === 'garbage') throw new Error('malformed')
@@ -206,7 +208,7 @@ describe('GatewayDispatcher', () => {
       },
       encode: jsonCodec.encode,
     }
-    const { client, received, errors, conn } = await connect([handler('echo', 'echo', (_g, m) => m.data)], {
+    const { client, received, errors, warnings, conn } = await connect([handler('echo', 'echo', (_g, m) => m.data)], {
       codec,
       limits: { ...LIMITS, rateLimit: { bucket: new TokenBucket(2, 60_000), onLimit: 'reject' } },
     })
@@ -224,7 +226,9 @@ describe('GatewayDispatcher', () => {
         { event: '$error', data: { code: 'RATE_LIMITED', message: 'Too many messages' } },
       ]),
     )
-    expect(errors).toEqual(['The codec failed to decode a frame', 'The codec failed to decode a frame'])
+    // client input: logged once per connection, not as an error, whatever the number of bad frames
+    expect(warnings).toEqual(['The codec failed to decode a frame (later failures of this connection are not logged)'])
+    expect(errors).toEqual([])
     expect(conn.readyState).toBe('open')
   })
 

@@ -1,5 +1,5 @@
 /** Trusted proxies (RFC 0001 §5.6): address parsing, hop counts, ranges, aliases, `x-forwarded-proto`. */
-import type { TrustProxy } from '../src/index.ts'
+import type { HttpPluginOptions, TrustProxy } from '../src/index.ts'
 
 import { ErrorCode, ZnightError } from '@znight/core'
 import express from 'express'
@@ -193,29 +193,65 @@ describe('ctx.ip and ctx.protocol', () => {
 describe('adapter proxy settings', () => {
   const meta = metadata({}, [])
 
-  it('refuse a Fastify instance trusting every hop (ZNIGHT005)', () => {
-    let error: unknown
-    try {
-      fastifyAdapter({ options: { trustProxy: true } })
-    } catch (caught) {
-      error = caught
-    }
-    expect(error).toBeInstanceOf(ZnightError)
-    expect((error as ZnightError).code).toBe(ErrorCode.InvalidDecorator)
-    expect((error as ZnightError).message).toContain('trustProxy')
-    // a hop count or an address list stays allowed
-    expect(fastifyAdapter({ options: { trustProxy: '10.0.0.1' } }).name).toBe('fastify')
-  })
-
-  it('refuse an Express application trusting every hop (ZNIGHT005)', async () => {
-    const app = express()
-    app.set('trust proxy', true)
-    const error = await createApp(meta, { adapter: expressAdapter({ app }) }).then(
+  function boot(options: HttpPluginOptions): Promise<unknown> {
+    return createApp(meta, options).then(
       started => started.stop().then(() => undefined),
       (caught: unknown) => caught,
     )
+  }
+
+  function expectRefused(error: unknown, setting: string): void {
     expect(error).toBeInstanceOf(ZnightError)
     expect((error as ZnightError).code).toBe(ErrorCode.InvalidDecorator)
-    expect((error as ZnightError).message).toContain('trust proxy')
+    expect((error as ZnightError).message).toContain(setting)
+    expect((error as ZnightError).message).toContain('the trustProxy option is not set')
+  }
+
+  it('refuse a Fastify instance trusting every hop without the trustProxy option (ZNIGHT005)', async () => {
+    expectRefused(await boot({ adapter: fastifyAdapter({ options: { trustProxy: true } }) }), 'trustProxy')
+    expectRefused(await boot({ adapter: fastifyAdapter({ options: { trustProxy: () => true } }) }), 'trustProxy')
+    // a hop count or an address list stays allowed
+    expect(await boot({ adapter: fastifyAdapter({ options: { trustProxy: '10.0.0.1' } }) })).toBeUndefined()
+  })
+
+  it('allow a Fastify instance trusting every hop with the trustProxy option: ctx.ip follows the option', async () => {
+    class Client {
+      ip(ip: string | undefined) {
+        return { ip }
+      }
+    }
+    const app = await createApp(
+      metadata({ [t('Client')]: provider(Client) }, [
+        controller(t('Client'), '/', [
+          route('ip', '/client', (c: Client, ctx) => c.ip(ctx.ip), { params: [{ index: 0, source: 'context' }] }),
+        ]),
+      ]),
+      { adapter: fastifyAdapter({ options: { trustProxy: true } }), trustProxy: ['10.0.0.0/8'] },
+      { start: false },
+    )
+    try {
+      const res = await app.http.inject({ method: 'GET', url: '/client', headers: { 'x-forwarded-for': '6.6.6.6' } })
+      // Fastify alone would answer 6.6.6.6; the socket peer (127.0.0.1) is not a trusted proxy
+      expect(res.json()).toEqual({ ip: '127.0.0.1' })
+    } finally {
+      await app.stop()
+    }
+  })
+
+  it('refuse an Express application trusting every hop without the trustProxy option (ZNIGHT005)', async () => {
+    for (const value of [true, () => true, '0.0.0.0/1,128.0.0.0/1']) {
+      const app = express()
+      app.set('trust proxy', value)
+      expectRefused(await boot({ adapter: expressAdapter({ app }) }), 'trust proxy')
+    }
+    const hops = express()
+    hops.set('trust proxy', 1)
+    expect(await boot({ adapter: expressAdapter({ app: hops }) })).toBeUndefined()
+  })
+
+  it('allow an Express application trusting every hop with the trustProxy option', async () => {
+    const app = express()
+    app.set('trust proxy', true)
+    expect(await boot({ adapter: expressAdapter({ app }), trustProxy: 1 })).toBeUndefined()
   })
 })

@@ -156,7 +156,8 @@ begins. If a step fails, what was started is stopped, everything is disposed and
 **`app.stop()`** is idempotent and waits for an in-progress start, at most `hookTimeoutMs` (a start
 hook that never settles cannot block the shutdown: past that budget, a `Waiting for start() timed out`
 failure is recorded, the remaining start hooks are skipped and what completed its `onStart` is
-stopped). It runs three phases:
+stopped; a plugin whose `onStart` is still in flight is stopped and disposed when that hook settles,
+not before). It runs three phases:
 
 1. plugins' `onStop`, in reverse order (stop ingress, drain in-flight work);
 2. for each provider in reverse resolution order: `onStop` (if it was started), then disposal;

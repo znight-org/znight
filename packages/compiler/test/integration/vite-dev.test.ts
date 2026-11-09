@@ -238,10 +238,46 @@ describe('dev server restarts', () => {
     expect(listeners(first.watcher)).toBe(3)
     // Vite's restart: the new server is configured, then the old one is closed
     configureServer(second.server)
-    expect(listeners(first.watcher)).toBe(0)
+    expect(listeners(second.watcher)).toBe(3)
     closeServer({ reason: 'restart' })
+    expect(listeners(first.watcher)).toBe(0)
     expect(listeners(second.watcher)).toBe(3)
     closeServer({ reason: 'close' })
     expect(listeners(second.watcher)).toBe(0)
+  })
+
+  it('a restart that fails (the new server is never used) leaves the old server attached', () => {
+    const plugin = znight()
+    const configureServer = plugin.configureServer as Hook
+    const closeServer = plugin.closeServer as Hook
+    const first = fakeServer()
+    const orphan = fakeServer()
+    const third = fakeServer()
+    configureServer(first.server)
+    // Vite configured the new server, then failed to create it: no closeServer, the old one keeps running
+    configureServer(orphan.server)
+    expect(listeners(first.watcher)).toBe(3)
+    // a later restart that succeeds replaces the old server and drops the orphan
+    configureServer(third.server)
+    closeServer({ reason: 'restart' })
+    expect(listeners(first.watcher)).toBe(0)
+    expect(listeners(orphan.watcher)).toBe(0)
+    expect(listeners(third.watcher)).toBe(3)
+    // closing the live server detaches it
+    closeServer({ reason: 'close' })
+    expect(listeners(third.watcher)).toBe(0)
+  })
+
+  it('closing the live server after a failed restart detaches every server', () => {
+    const plugin = znight()
+    const configureServer = plugin.configureServer as Hook
+    const closeServer = plugin.closeServer as Hook
+    const first = fakeServer()
+    const orphan = fakeServer()
+    configureServer(first.server)
+    configureServer(orphan.server)
+    closeServer({ reason: 'close' })
+    expect(listeners(first.watcher)).toBe(0)
+    expect(listeners(orphan.watcher)).toBe(0)
   })
 })

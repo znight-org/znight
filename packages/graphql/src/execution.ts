@@ -215,14 +215,16 @@ class CachedDocument {
   }
 }
 
-/**
- * Longest query text kept in the document cache (characters): comments and white space do not count
- * toward `maxTokens`, so without it a client could pin `documentCache` times the body limit.
- */
-const MAX_CACHED_DOCUMENT_LENGTH = 16 * 1024
-
 /** Total query text kept in the document cache (characters); the oldest documents go first. */
 const DOCUMENT_CACHE_BUDGET = 8 * 1024 * 1024
+
+/**
+ * Longest query text kept in the document cache (characters, 128 Ki): comments and white space do
+ * not count toward `maxTokens`, so a padded document could otherwise take a large share of the
+ * budget and evict the others in a few requests. Large legitimate operations (many fragments,
+ * pretty-printed) stay well under it.
+ */
+const MAX_CACHED_DOCUMENT_LENGTH = DOCUMENT_CACHE_BUDGET / 64
 
 /** A bounded LRU of documents by exact query text: at most `max` entries and a text budget. */
 class DocumentCache {

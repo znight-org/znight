@@ -73,16 +73,36 @@ function walk(node: unknown, segments: readonly string[], start: number): unknow
 }
 
 /**
- * Adds the key paths of `values` to `out`. A value already on the current path (a cycle supplied by
- * a custom loader) is listed but not walked again; the depth is bounded as well.
+ * Entries `keys()` visits at most per layer: values supplied by a custom loader may share
+ * sub-objects (a DAG, or a cycle through shared children), whose paths grow exponentially.
  */
-function collectKeys(values: RecordLike, prefix: string, out: Set<string>, ancestors: Set<object>): void {
+const MAX_KEY_VISITS = 10_000
+
+/** What remains of the {@link MAX_KEY_VISITS} budget of one walk. */
+interface KeyWalk {
+  remaining: number
+}
+
+/**
+ * Adds the key paths of `values` to `out`. A value already on the current path (a cycle supplied by
+ * a custom loader) is listed but not walked again; the depth and the number of visited entries
+ * (`walk.remaining`) are bounded as well.
+ */
+function collectKeys(
+  values: RecordLike,
+  prefix: string,
+  out: Set<string>,
+  ancestors: Set<object>,
+  walk: KeyWalk,
+): void {
   ancestors.add(values)
   for (const [name, value] of Object.entries(values)) {
+    if (walk.remaining <= 0) break
     if (value === undefined) continue
+    walk.remaining--
     const path = prefix === '' ? name : `${prefix}.${name}`
     out.add(path)
-    if (isRecord(value) && !ancestors.has(value) && ancestors.size < 32) collectKeys(value, path, out, ancestors)
+    if (isRecord(value) && !ancestors.has(value) && ancestors.size < 32) collectKeys(value, path, out, ancestors, walk)
   }
   ancestors.delete(values)
 }
@@ -134,7 +154,7 @@ class LayeredConfigSource implements ConfigSource {
 
   keys(): readonly string[] {
     const keys = new Set<string>()
-    for (const layer of this.#layers) collectKeys(layer.values, '', keys, new Set())
+    for (const layer of this.#layers) collectKeys(layer.values, '', keys, new Set(), { remaining: MAX_KEY_VISITS })
     return [...keys]
   }
 

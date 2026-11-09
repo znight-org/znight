@@ -35,6 +35,11 @@ export interface DispatcherOptions {
   readonly exposeErrors: boolean
   /** Logs an unexpected error (handler, guard, lifecycle). */
   readonly logError: (message: string, error: unknown, conn: WsConnectionImpl) => void
+  /**
+   * Logs a failure caused by client input (a frame the codec throws on), at most once per
+   * connection: a client must not be able to flood the logs. Default: `logError`.
+   */
+  readonly logClientError?: (message: string, error: unknown, conn: WsConnectionImpl) => void
   /** Once a connection is fully closed. */
   readonly closed: (conn: WsConnectionImpl, info: WsCloseInfo) => void
   /** The `websocket:message` hook: run when it has wrappers, emitted when it has listeners. */
@@ -109,6 +114,8 @@ export class GatewayDispatcher implements ConnectionDriver {
   readonly #fallback: HandlerPlan | undefined
   readonly #codec: WsCodec
   readonly #ignored = new Set<string>()
+  /** Connections whose decode failure was logged. */
+  readonly #decodeLogged = new WeakSet<WsConnectionImpl>()
 
   constructor(options: DispatcherOptions) {
     this.#options = options
@@ -343,8 +350,9 @@ export class GatewayDispatcher implements ConnectionDriver {
 
   /**
    * Decodes with the codec. A codec that throws instead of returning a failure (a MessagePack
-   * decoder on malformed input...) is a `BAD_FRAME`, logged: the rate-limit path runs in the
-   * transport's message callback, where an exception would crash the process.
+   * decoder on malformed input...) is a `BAD_FRAME`, logged once per connection (the client chooses
+   * its frames): the rate-limit path runs in the transport's message callback, where an exception
+   * would crash the process.
    */
   #decode(conn: WsConnectionImpl, frame: string | Uint8Array, binary: boolean): InboundMessage | InboundFailure {
     try {
@@ -355,7 +363,11 @@ export class GatewayDispatcher implements ConnectionDriver {
       }
       return decoded
     } catch (error) {
-      this.#options.logError('The codec failed to decode a frame', error, conn)
+      if (!this.#decodeLogged.has(conn)) {
+        this.#decodeLogged.add(conn)
+        const log = this.#options.logClientError ?? this.#options.logError
+        log('The codec failed to decode a frame (later failures of this connection are not logged)', error, conn)
+      }
       return { error: WsErrorCode.BadFrame, message: 'The frame could not be decoded', id: undefined }
     }
   }

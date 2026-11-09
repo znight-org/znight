@@ -117,14 +117,18 @@ export interface YogaDriver extends GraphQLDriver {
  * like the engine's (`Unexpected error.` unless `exposeErrors`) and logged.
  *
  * A response cache hit answers without the engine: guards, loaders, error mappers and the
- * `graphql:operation` hook do not run. Key the cache per principal (`session`), never globally
- * next to guards:
+ * `graphql:operation` hook do not run. Key the cache by the credential your guards authenticate
+ * (`session`), and disable it without one: a `null` session is one cache shared by every client.
  *
  * ```ts
+ * // the credential AccessGuard authenticates: an API key or a bearer token
+ * const principal = (request: Request): string | null =>
+ *   request.headers.get('x-api-key') ?? request.headers.get('authorization')
+ *
  * GraphQLPlugin.configure({
  *   guards: [AccessGuard],
  *   driver: yogaDriver({
- *     plugins: [useResponseCache({ session: request => request.headers.get('authorization') })],
+ *     plugins: [useResponseCache({ session: principal, enabled: request => principal(request) !== null })],
  *   }),
  * })
  * ```

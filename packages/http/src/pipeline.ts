@@ -843,7 +843,7 @@ export class Pipeline {
         timer = setTimeout(() => {
           if (pending !== undefined) pending.expired = true
           // the guards still running stop their work (a call to an auth service honouring ctx.signal)
-          context?.abort('expired')
+          context?.abort('expired', 'The WebSocket handshake timed out')
           const body = { statusCode: 408, error: 'Request Timeout', message: 'WebSocket handshake timed out' }
           resolve(adapterReply(serializeError(408, body, 'GET'), null))
         }, timeoutMs)

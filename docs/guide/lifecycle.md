@@ -157,7 +157,9 @@ Every step is attempted even if a previous one failed. Each step has its own tim
 (`hookTimeoutMs`, 5 s by default) and the whole shutdown a global deadline (`timeoutMs`, 10 s).
 Waiting for an in-progress start is such a step: a start hook that never settles (a broker that
 never answers) does not block the shutdown, the remaining start hooks are skipped and what completed
-its `onStart()` is stopped.
+its `onStart()` is stopped. The plugin or provider whose `onStart()` is still running is stopped (and
+a plugin disposed) once that hook settles, so a listen or a connection that completes late is closed
+too.
 `Infinity` disables a budget (so does any value above 2^31 − 1 ms, about 24.8 days, the longest
 delay a timer accepts); negative and `NaN` values are rejected
 ([`ZNIGHT005`](/reference/error-codes#znight005)).

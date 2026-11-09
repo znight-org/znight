@@ -166,6 +166,8 @@ export class RabbitMQDriver implements MessagingDriver {
   readonly name = 'rabbitmq'
   readonly capabilities: DriverCapabilities
   readonly #options: RabbitMQDriverOptions
+  /** The user this driver authenticates as, when known: the only `user-id` its copies may carry. */
+  readonly #user: string | undefined
   readonly #queueType: 'quorum' | 'classic'
   readonly #assertTopology: boolean
   readonly #publishTimeoutMs: number
@@ -197,6 +199,7 @@ export class RabbitMQDriver implements MessagingDriver {
       throw new TypeError('[znight] rabbitmq(): "delayLevelPrefix" must be a non-empty string')
     }
     this.#options = options
+    this.#user = connectionUser(options.url, options.socketOptions)
     this.#queueType = options.queueType ?? 'quorum'
     this.#assertTopology = options.assertTopology ?? true
     this.#publishTimeoutMs = durationOption(
@@ -851,7 +854,7 @@ export class RabbitMQDriver implements MessagingDriver {
         copied[name] = value
       }
       return {
-        ...definedProperties(properties),
+        ...definedProperties(properties, this.#user),
         // a type read from the routing key would be lost: copies go through the default exchange
         ...(type === undefined ? {} : { type }),
         messageId: id,
@@ -960,8 +963,29 @@ function delayBindingKey(level: number, bit: '0' | '1'): string {
   return words.join('.')
 }
 
-/** AMQP properties of a received message, reusable for a republication. */
-function definedProperties(properties: MessageProperties): Options.Publish {
+/**
+ * The user amqplib authenticates as (its defaults: `guest` without credentials in the URL);
+ * `undefined` when other credentials (`socketOptions.credentials`: EXTERNAL...) are used.
+ */
+function connectionUser(url: string | Options.Connect, socketOptions: SocketOptions | undefined): string | undefined {
+  if ((socketOptions as { credentials?: unknown } | undefined)?.credentials !== undefined) return undefined
+  if (typeof url !== 'string') {
+    return url.username === undefined && url.password === undefined ? 'guest' : (url.username ?? '')
+  }
+  try {
+    const parsed = new URL(url)
+    if (parsed.username === '' && parsed.password === '') return 'guest'
+    return decodeURIComponent(parsed.username)
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * AMQP properties of a received message, reusable for a republication. `userId` is kept only when it
+ * is `user`, the user of this connection: the broker closes the channel (406) for any other.
+ */
+function definedProperties(properties: MessageProperties, user: string | undefined): Options.Publish {
   const result: Options.Publish = {}
   if (properties.contentType !== undefined) result.contentType = properties.contentType
   if (properties.contentEncoding !== undefined) result.contentEncoding = properties.contentEncoding
@@ -971,7 +995,7 @@ function definedProperties(properties: MessageProperties): Options.Publish {
   if (properties.type !== undefined) result.type = properties.type
   if (properties.appId !== undefined) result.appId = properties.appId
   if (properties.priority !== undefined) result.priority = properties.priority
-  // never `userId`: the broker closes the channel (406) when it is not the user of this connection
+  if (properties.userId !== undefined && properties.userId === user) result.userId = properties.userId
   return result
 }
 

@@ -1092,7 +1092,8 @@ on other routes (`EventSource` requires 200; `fetch()` clients read any status).
 the response was written, when the response body is cancelled, or when the server closes an event
 stream; never after a normal completion (pass it to work that outlives the response). Its reason
 is a `RequestAbortedError` (`name: 'AbortError'`, what `fetch` and `node:timers/promises` check)
-with `kind: 'client' | 'shutdown' | 'expired'`. Ordinary in-flight requests are not aborted on
+with `kind: 'client' | 'shutdown' | 'expired'` (`expired`: an event stream reached its `maxDuration`
+or a WebSocket handshake timed out, as its `message` says). Ordinary in-flight requests are not aborted on
 shutdown: they drain.
 
 ### `EventChannel`
@@ -1285,7 +1286,8 @@ control:
   per group: `@Public() @Roles(['admin'])` on one method is ZNIGHT005 at build time.
 - **Route decorators are applied directly.** A `const` alias (`export const RequireRoles = Roles`)
   is the same decorator, but a function applying one (`const AdminOnly = () => Roles(['admin'])`,
-  NestJS's `applyDecorators` habit) is ZNIGHT005: the compiler never runs your code, so the decision
+  NestJS's `applyDecorators` habit) or one already applied (`const AdminOnly = Roles(['admin'])`,
+  used as `@AdminOnly`) is ZNIGHT005: the compiler never runs your code, so the decision
   would be dropped and the controller's weaker one would apply to the route.
 - **The nearest decision wins.** The effective metadata of a route (`ctx.route.meta`,
   `decorator.get(ctx)`) is made of the controller's entries whose group the route does not decide,
@@ -1451,8 +1453,10 @@ leftmost `x-forwarded-proto` (`http` or `https` only); otherwise it is the proto
 connection. `true` is refused (ZNIGHT005): trusting every hop would let any client choose its
 `ctx.ip`. Without the option, `ctx.ip` is the adapter's address, so the proxy settings of Fastify
 (`trustProxy`) and Express (`trust proxy`) still apply; for the same reason, `trustProxy: true` in
-the options of `fastifyAdapter()` and an Express application whose `trust proxy` is `true` are
-refused (ZNIGHT005). Prefer the Znight option, the same on every adapter. The `Forwarded` header (RFC 7239) is not
+the options of `fastifyAdapter()` and an Express application whose `trust proxy` trusts any address
+(`true`, a function or ranges accepting any client) are refused at boot (ZNIGHT005) unless the
+`trustProxy` option of `HttpPlugin` is set, which `ctx.ip` then follows (keep such a setting for
+framework features like Express's `req.secure`). Prefer the Znight option, the same on every adapter. The `Forwarded` header (RFC 7239) is not
 read.
 
 ## Interceptors
@@ -1725,10 +1729,10 @@ await instance.register(helmet)
 HttpPlugin.configure({ adapter: fastifyAdapter({ instance }) })
 ```
 
-| Option     | Description                                                                                       |
-| ---------- | ------------------------------------------------------------------------------------------------- |
-| `instance` | An existing Fastify instance (plugins, hooks, native routes)                                      |
-| `options`  | Options of the instance created otherwise (`https`, timeouts...; `trustProxy: true` is ZNIGHT005) |
+| Option     | Description                                                                              |
+| ---------- | ---------------------------------------------------------------------------------------- |
+| `instance` | An existing Fastify instance (plugins, hooks, native routes)                             |
+| `options`  | Options of the instance created otherwise (`https`, timeouts...; see `trustProxy` below) |
 
 Znight routes are registered in an encapsulated context with their own body handling and 404
 handler, so your other routes keep Fastify's parsers. A `content-type` Fastify cannot parse (`foo`,
@@ -2465,6 +2469,7 @@ interface HttpAdapter {
   close(options?: { force?: boolean }): Promise<void>
   inject(request: InjectRequest): Promise<InjectResponse>
   injectStream?(request: InjectStreamRequest): Promise<InjectStreamResponse> // optional
+  trustsEveryProxy?(): string | undefined // optional: the setting trusting every proxy hop, when one is set
 }
 ```
 

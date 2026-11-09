@@ -493,8 +493,9 @@ export class SqsDriver implements MessagingDriver {
           try {
             await client.send(new SendMessageCommand(this.#deadLetterInput(copy, key, true)))
           } catch (error) {
-            // a copy SQS refuses (too large...) would be refused again on every redelivery
-            if ((error as { $fault?: unknown } | null)?.$fault !== 'client') throw error
+            // a copy SQS refuses (too large...) would be refused again on every redelivery; other
+            // client faults (throttling, KMS, permissions) are transient: retried with the full copy
+            if (!isInvalidCopy(error)) throw error
             this.#logger.warn(
               `SQS: the dead-letter copy of message ${id} was refused, sending it without the error and the headers`,
               { err: error },
@@ -618,4 +619,18 @@ function parseRedrivePolicy(
   } catch {
     return undefined
   }
+}
+
+/** SQS errors meaning the copy itself is invalid (too large, invalid characters or attributes). */
+const INVALID_COPY_ERRORS: ReadonlySet<string> = new Set([
+  'InvalidMessageContents',
+  'InvalidAttributeName',
+  'InvalidAttributeValue',
+  'InvalidParameterValue',
+  'InvalidParameterValueException',
+])
+
+function isInvalidCopy(error: unknown): boolean {
+  const failure = error as { readonly name?: unknown; readonly $fault?: unknown } | null
+  return failure?.$fault === 'client' && typeof failure.name === 'string' && INVALID_COPY_ERRORS.has(failure.name)
 }

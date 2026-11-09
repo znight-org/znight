@@ -12,6 +12,7 @@ import type { GraphQLContext, GraphQLPluginOptions } from '../src/index.ts'
 
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { useResponseCache } from '@graphql-yoga/plugin-response-cache'
 import { HttpPlugin } from '@znight/http'
 import { TestApp } from '@znight/testing'
 import { execute, GraphQLError } from 'graphql'
@@ -25,6 +26,7 @@ import { HTTP_EXTERNALS } from './support/library.ts'
 import { describe, expect, it } from 'bun:test'
 
 const seen: GraphQLContext[] = []
+let meCalls = 0
 
 class Library {
   hello(args: { name?: string | null }, _parent: unknown, ctx: GraphQLContext): string {
@@ -33,6 +35,11 @@ class Library {
   }
   fail(): string {
     throw new Error('postgres://secret')
+  }
+  me(_args: unknown, _parent: unknown, ctx: GraphQLContext): string {
+    meCalls++
+    const headers = ctx.http?.headers ?? {}
+    return headers['x-api-key'] ?? headers['authorization'] ?? 'anonymous'
   }
   async *ticks(_args: unknown, _parent: unknown, ctx: GraphQLContext): AsyncGenerator<number> {
     seen.push(ctx)
@@ -50,6 +57,7 @@ function metadata() {
         fields: [
           field('hello', 'String!', bind(Library, 'hello'), { args: [{ name: 'name', type: 'String' }] }),
           field('fail', 'String', bind(Library, 'fail')),
+          field('me', 'String!', bind(Library, 'me')),
         ],
       },
       {
@@ -148,13 +156,41 @@ describe('yogaDriver()', () => {
 })
 
 describe('response cache examples', () => {
-  // a cache hit answers without the engine: guards, loaders and the hook do not run, so a global
-  // cache (`session: () => null`) next to guards would serve one user's data to another
-  it('never pair guards with a global response cache', () => {
+  // the recipe of the docs: the session is the credential the guards authenticate, and nothing is
+  // cached without one (a null session is one cache shared by every client)
+  const principal = (request: Request): string | null =>
+    request.headers.get('x-api-key') ?? request.headers.get('authorization')
+  const cache = () => useResponseCache({ session: principal, enabled: request => principal(request) !== null })
+
+  it('never serve one principal the cached response of another', async () => {
+    await using app = await create({ driver: yogaDriver({ plugins: [cache()] }) })
+    meCalls = 0
+    const me = async (headers: Record<string, string>) => (await post(app, '{ me }', headers)).json()
+    expect(await me({ 'x-api-key': 'admin-key' })).toEqual({ data: { me: 'admin-key' } })
+    expect(await me({ 'x-api-key': 'reader-key' })).toEqual({ data: { me: 'reader-key' } })
+    expect(await me({ authorization: 'Bearer token' })).toEqual({ data: { me: 'Bearer token' } })
+    expect(meCalls).toBe(3)
+    // the cache is on: a principal's second request is a hit
+    expect(await me({ 'x-api-key': 'admin-key' })).toEqual({ data: { me: 'admin-key' } })
+    expect(meCalls).toBe(3)
+    // no credential: never cached, never served from another principal's entry
+    expect(await me({})).toEqual({ data: { me: 'anonymous' } })
+    expect(await me({})).toEqual({ data: { me: 'anonymous' } })
+    expect(meCalls).toBe(5)
+  })
+
+  it('document the session of the recipe, never a global one', () => {
     const root = join(import.meta.dir, '../../..')
     for (const file of ['packages/graphql/src/yoga.ts', 'packages/graphql/README.md', 'rfcs/0009-graphql-drivers.md']) {
       const text = readFileSync(join(root, file), 'utf8')
-      expect({ file, global: /session:\s*\(\)\s*=>\s*null/.test(text) }).toEqual({ file, global: false })
+      expect({
+        file,
+        recipe: text.includes("request.headers.get('x-api-key') ?? request.headers.get('authorization')"),
+      }).toEqual({ file, recipe: true })
+      expect({ file, enabled: text.includes('enabled: request => principal(request) !== null') }).toEqual({
+        file,
+        enabled: true,
+      })
     }
   })
 })

@@ -68,6 +68,12 @@ describe('media types', () => {
     expect(matchesMediaType('image/png, text/html', ['image/*'])).toBe(false)
     expect(matchesMediaType('image/png; x=1, text/html', ['image/*'])).toBe(false)
     expect(matchesMediaType('image/p ng', ['image/*'])).toBe(false)
+    expect(matchesMediaType('image/png; x="a", text/html', ['image/*'])).toBe(false)
+    // a comma inside a quoted parameter value is legal (RFC 2046 boundaries, file names)
+    expect(matchesMediaType('multipart/form-data; boundary="----a,b"', ['multipart/form-data'])).toBe(true)
+    expect(matchesMediaType('text/plain; name="a,b"', ['text/*'])).toBe(true)
+    expect(matchesMediaType('text/plain; name="a\\",b"', ['text/*'])).toBe(true)
+    expect(matchesMediaType('text/plain; name="a\\"", b/c', ['text/*'])).toBe(false)
   })
 })
 

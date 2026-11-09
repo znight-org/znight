@@ -63,7 +63,7 @@ import {
   type UpgradePlan,
 } from './pipeline.ts'
 import { collectPluginRoutes, drainPlugins } from './plugin-routes.ts'
-import { resolveTrustProxy } from './proxy.ts'
+import { resolveTrustProxy, trustEveryProxyError } from './proxy.ts'
 import { RouteTable } from './router.ts'
 import { resolveSecurityHeaders } from './security-headers.ts'
 import { parseByteSize } from './size.ts'
@@ -516,6 +516,12 @@ export class HttpPlugin implements Plugin {
           ],
         },
       )
+    }
+    const everyProxy = options.adapter.trustsEveryProxy?.()
+    if (everyProxy !== undefined) {
+      // ctx.ip comes from the adapter only without the trustProxy option
+      if (options.trustProxy === undefined) throw trustEveryProxyError(options.adapter.name, everyProxy)
+      ctx.logger.debug(`HttpPlugin: ${everyProxy} trusts every proxy hop; ctx.ip follows the trustProxy option`)
     }
     BOUND_ADAPTERS.add(options.adapter)
     const table = new RouteTable<RoutePlan>()

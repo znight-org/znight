@@ -496,7 +496,7 @@ describe('start / stop', () => {
     expect(error.errors).toHaveLength(1)
     expect((error.errors[0] as ZnightError).message).toContain('Waiting for start() timed out after 30ms')
     expect(app.state).toBe('stopped')
-    // providers and plugin "a" started: they are stopped; "hung" never started, but is disposed
+    // providers and plugin "a" started: they are stopped; "hung" is disposed once its onStart settles
     expect(log).toEqual([
       'Db.onStart',
       'Repo.onStart',
@@ -507,9 +507,63 @@ describe('start / stop', () => {
       'Repo.dispose',
       'Db.onStop',
       'Db.dispose',
-      'hung.onDispose',
       'a.onDispose',
     ])
+  })
+
+  it('stops and disposes a plugin whose onStart settles after the wait of stop() timed out', async () => {
+    const log: string[] = []
+    const app = await Application.create(
+      options(log, {
+        shutdown: { signals: false, hookTimeoutMs: 40, timeoutMs: 1000 },
+        plugins: [
+          plugin('a', log, { register: ctx => ctx.container.registerValue(LOGGER, 'l') }),
+          plugin('slow', log, {
+            onStart: async () => {
+              await sleep(120)
+              log.push('slow.listening')
+            },
+          }),
+        ],
+      }),
+    )
+    log.length = 0
+    const start = app.start()
+    await sleep(5)
+    const error = (await caught(() => app.stop())) as ZnightAggregateError
+    expect((error.errors[0] as ZnightError).message).toContain('Waiting for start() timed out after 40ms')
+    // the shutdown did not dispose "slow" while its onStart was still running
+    expect(log).not.toContain('slow.onDispose')
+    await start
+    expect(app.state).toBe('stopped')
+    const tail = log.slice(log.indexOf('slow.listening'))
+    expect(tail).toEqual(['slow.listening', 'slow.onStop', 'slow.onDispose'])
+    expect(log).not.toContain('slow.onReady')
+  })
+
+  it('stops a provider whose onStart settles after the wait of stop() timed out', async () => {
+    const log: string[] = []
+    const app = await Application.create({
+      ...options(log),
+      shutdown: { signals: false, hookTimeoutMs: 30, timeoutMs: 1000 },
+      metadata: meta({
+        [t('Server')]: factoryDef(() => ({
+          onStart: async () => {
+            await sleep(100)
+            log.push('Server.listening')
+          },
+          onStop: () => {
+            log.push('Server.onStop')
+          },
+        })),
+      }),
+    })
+    const start = app.start()
+    await sleep(5)
+    await caught(() => app.stop())
+    expect(log).not.toContain('Server.onStop')
+    await start
+    expect(log.slice(log.indexOf('Server.listening'))).toEqual(['Server.listening', 'Server.onStop'])
   })
 
   it('skips the remaining start hooks when a start outlives the wait of stop()', async () => {
@@ -533,12 +587,13 @@ describe('start / stop', () => {
     const start = app.start()
     await sleep(1)
     await caught(() => app.stop())
+    expect(log).not.toContain('late.onDispose')
     release()
     await start
     expect(app.state).toBe('stopped')
     expect(log).not.toContain('late.onReady')
-    expect(log).not.toContain('late.onStop')
-    expect(log).toContain('late.onDispose')
+    // its onStart completed after the shutdown: it is stopped, then disposed
+    expect(log.slice(-2)).toEqual(['late.onStop', 'late.onDispose'])
   })
 
   it('times out hanging steps and keeps going', async () => {

@@ -14,7 +14,8 @@ compiler never runs your code, so it ignores the decorator with a
 manifest ([below](#znight-core)). Your own route decorators
 ([`createRouteDecorator`](#znight-http)) are stricter: a `const` alias
 (`export const RequireRoles = Roles`) is followed, and a function applying one
-(`const AdminOnly = () => Roles(['admin'])`) is a `ZNIGHT005` **error**, since dropping an access
+(`const AdminOnly = () => Roles(['admin'])`) or one already applied (`const AdminOnly =
+Roles(['admin'])`, used as `@AdminOnly`) is a `ZNIGHT005` **error**, since dropping an access
 decision would let the controller's weaker decision apply to the route.
 
 Arguments come in two kinds:

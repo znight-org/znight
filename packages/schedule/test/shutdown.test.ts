@@ -150,6 +150,7 @@ describe('onStop', () => {
     const inner = memoryLockStore({ clock })
     const extension = deferred<boolean>()
     let extending = false
+    let released = 0
     const store: ScheduleLockStore = {
       name: 'spy',
       acquire: async (key, claim) => {
@@ -160,7 +161,10 @@ describe('onStop', () => {
               extending = true
               return extension.promise
             },
-            release: () => lease.release(),
+            release: () => {
+              released++
+              return lease.release()
+            },
           }
         )
       },
@@ -199,6 +203,8 @@ describe('onStop', () => {
     await clock.settle()
     expect(clock.pendingTimers).toBe(0)
     expect(booted.logs.messages('warn').filter(message => message.includes('lost its lock'))).toEqual([])
+    // the aborted job returned: its lease is released, other instances do not wait for its ttl
+    expect(released).toBe(1)
   })
 })
 

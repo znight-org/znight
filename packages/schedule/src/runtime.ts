@@ -177,6 +177,8 @@ export interface RunRecord {
   event: ScheduledRunEvent | undefined
   aborted: JobAbortReason | undefined
   abandoned: boolean
+  /** Aborted by `dispose()`: its lease is no longer extended nor watched, but released when it settles. */
+  disposed: boolean
   settled: boolean
   timeout: unknown
   heartbeat: unknown
@@ -318,8 +320,8 @@ export class ScheduleRuntime {
 
   /**
    * `onDispose`: clears every timer (lock store calls in flight go on unbounded). Without a previous
-   * `stop()` (a failed start), the runs in flight are aborted (`shutdown`) and abandoned: their lease
-   * is neither extended nor watched any more.
+   * `stop()` (a failed start), the runs in flight are aborted (`shutdown`): their lease is neither
+   * extended nor watched any more, and is released when the run settles (best effort).
    */
   dispose(): void {
     this.#disposed = true
@@ -329,7 +331,7 @@ export class ScheduleRuntime {
     for (const run of this.#inflight) {
       if (!run.settled) {
         run.abort('shutdown')
-        run.abandoned = true
+        run.disposed = true
       }
       this.#stopTimers(run)
       if (run.storeTimer !== undefined) this.clock.clearTimer(run.storeTimer)
@@ -674,6 +676,7 @@ export class ScheduleRuntime {
       event: undefined,
       aborted: undefined,
       abandoned: false,
+      disposed: false,
       settled: false,
       timeout: undefined,
       heartbeat: undefined,
@@ -1048,7 +1051,7 @@ export class ScheduleRuntime {
     const ttl = lock.ttlMs
     let extending = false
     let lost = false
-    const live = (): boolean => !lost && !run.settled && !run.abandoned
+    const live = (): boolean => !lost && !run.settled && !run.abandoned && !run.disposed
     const lose = (): void => {
       if (!live()) return
       lost = true

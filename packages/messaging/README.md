@@ -379,8 +379,8 @@ at-least-once dead-lettering. Retry delays come from the `@Retry` policies, so t
 a bounded set declared at subscribe time. The type is read from the `type` property (then
 `x-znight-type`, then the routing key with `typeFromRoutingKey`), the id from `message-id`; retried
 and dead-lettered copies carry the type that selected the handler (a type read from the routing key
-included) but never the `CC` / `BCC` headers, the broker's `x-death` headers nor the `user-id`
-property (the broker rejects a `user-id` other than the user of the publishing connection).
+included) but never the `CC` / `BCC` headers nor the broker's `x-death` headers. The `user-id`
+property is kept only when it is the user of the connection (the broker rejects any other).
 
 Delayed publications (`publish(queue, payload, { delay })`, any delay up to 2^32 - 1 ms) do not create
 one queue per delay: they go through 32 **delay levels** shared by every queue of the virtual host,
@@ -435,8 +435,9 @@ Headers are message attributes: SQS allows 10 per message and Znight uses up to 
 (default `'default'`), the message id as deduplication id, and messages of a group are handled in
 order. A dead-letter copy is always one SQS accepts: its FIFO deduplication id is derived from the SQS
 `MessageId` (never from a producer's `x-znight-id`), the characters SQS refuses are replaced in
-`x-znight-error`, and a copy SQS still refuses (too large...) is sent again without `x-znight-error`
-and the headers (with a warning) instead of looping on redeliveries. The lease extension of a message stops (once any extension in flight completed) before its
+`x-znight-error`, and a copy SQS still refuses as invalid (too large...) is sent again without
+`x-znight-error` and the headers (with a warning) instead of looping on redeliveries; a transient
+failure (throttling, KMS, permissions) releases the message instead, for a full copy later. The lease extension of a message stops (once any extension in flight completed) before its
 settlement is sent, so that it never overrides the visibility set by a retry or a release. IAM
 permissions: `sqs:ReceiveMessage`, `sqs:DeleteMessage`, `sqs:ChangeMessageVisibility`,
 `sqs:SendMessage`, `sqs:GetQueueUrl`, `sqs:GetQueueAttributes`.

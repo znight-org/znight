@@ -703,8 +703,9 @@ options `{ group?, required? }` (`required` default `false`; `group` default the
 `'app/tag'`). Invalid values throw a `TypeError` when the module loads, and the compiler reports
 them as ZNIGHT005. A `const` alias of a route decorator (`const RequireRoles = Roles`) is the same
 route decorator; a function applying one (`const AdminOnly = () => Roles(['admin'])`, a `function`
-returning one) MUST be reported as a ZNIGHT005 error where it is applied, since the decision it
-applies would otherwise be silently dropped. The decorator carries `key`, `group`, `required` (`RouteDecoratorInfo`), `get(ctx)`
+returning one) or a route decorator already applied and stored in a `const` (`const AdminOnly =
+Roles(['admin'])`, applied as `@AdminOnly`) MUST be reported as a ZNIGHT005 error where it is
+applied, since the decision it applies would otherwise be silently dropped. The decorator carries `key`, `group`, `required` (`RouteDecoratorInfo`), `get(ctx)`
 (the effective value of the current route) and `meta(value?)` (the same metadata as data, `{ key,
 value, group, required }`, for plugin routes, §9.1). `get` accepts any `RouteMetaCarrier`
 (`{ readonly route?: { readonly meta: Readonly<Record<string, unknown>> } | undefined }`) and returns
@@ -1566,7 +1567,10 @@ Sequence:
 3. `stop()` (idempotent; waits for an in-progress `start()`, except when called from a start hook,
    below; that wait is a step bounded like the others, labelled `Waiting for start()`: when it
    times out, the remaining start hooks are skipped and the shutdown goes on with the rest of the
-   deadline, stopping what completed its `onStart`): `state = 'stopping'` → plugins `onStop` (reverse) → providers `onStop` (only those whose
+   deadline, stopping what completed its `onStart`; the plugin or provider whose `onStart` is still
+   in flight is not stopped then, and a plugin's `onDispose` is skipped: when that hook settles, the
+   plugin receives `onStop` (if it succeeded) and `onDispose`, the provider (already disposed)
+   `onStop` (if it succeeded), best effort, failures logged): `state = 'stopping'` → plugins `onStop` (reverse) → providers `onStop` (only those whose
    `onStart` ran) + disposal (always, reverse resolution order) → plugins `onDispose` (reverse) →
    `state = 'stopped'` (also when `stop()` rejects). Every step is attempted with `hookTimeoutMs`
    inside the global `timeoutMs` deadline (both MUST be non-negative numbers, ZNIGHT005 otherwise;
@@ -2069,8 +2073,9 @@ not call `next()` gets the same reply as in the general pipeline.
 - **Trusted proxies** (option `trustProxy`, default `false`). `false`: `ctx.ip` is the adapter's
   `request.ip` (Fastify and Express apply their own proxy settings; an adapter set to trust every hop,
   `fastifyAdapter({ options: { trustProxy: true } })` or an Express application whose `trust proxy`
-  is `true`, is ZNIGHT005, at creation for Fastify and when the adapter starts for Express) and `ctx.protocol` comes from
-  `request.encrypted`. A number (an integer ≥ 1) or a list of IPv4 / IPv6 addresses, CIDR ranges and
+  trusts any address, reports it through `trustsEveryProxy()` and `HttpPlugin` refuses it at
+  `onBootstrap`, ZNIGHT005, unless its own `trustProxy` option is set: `ctx.ip` then ignores the
+  adapter's address) and `ctx.protocol` comes from `request.encrypted`. A number (an integer ≥ 1) or a list of IPv4 / IPv6 addresses, CIDR ranges and
   the aliases `loopback` (127.0.0.0/8, ::1/128), `private` (10.0.0.0/8, 172.16.0.0/12,
   192.168.0.0/16, fc00::/7) and `linklocal` (169.254.0.0/16, fe80::/10) walk the list
   `[remoteAddress ?? ip, ...x-forwarded-for from right to left]`: with a number, the client is the
@@ -2190,7 +2195,8 @@ not call `next()` gets the same reply as in the general pipeline.
 - **`ctx.signal`** exists on every route (created on first access): it aborts when the client
   disconnects before the response was written (`AdapterRequest.onAbort`), when the response body is
   cancelled, or when the server closes an event stream; never after a normal completion. Its reason
-  is a `RequestAbortedError` (`name: 'AbortError'`, `kind: 'client' | 'shutdown' | 'expired'`).
+  is a `RequestAbortedError` (`name: 'AbortError'`, `kind: 'client' | 'shutdown' | 'expired'`;
+  `expired` covers an event stream's `maxDuration` and a handshake timeout, told apart by `message`).
   Ordinary in-flight requests are not aborted on shutdown: they drain.
 - `HttpPlugin.configure({ adapter, port, host, prefix, guards, interceptors, exceptionMappers,
   trailingSlash, exposeErrors, bodyLimit, uploads, requestIdHeader, generateRequestId,
@@ -2237,6 +2243,7 @@ interface HttpAdapter {
   inject(request: InjectRequest): Promise<InjectResponse> // in-memory, same pipeline; rejects an event stream
   injectStream?(request: InjectStreamRequest): Promise<InjectStreamResponse> // resolves at the headers (the 4 built-in adapters)
   upgrades?: AdapterUpgrades // WebSocket upgrades: { kind: 'node' | 'bun', enable(options) } called before listen() (RFC 0003 §8.2)
+  trustsEveryProxy?(): string | undefined // the framework setting trusting every proxy hop, when one is set
 }
 ```
 
@@ -2536,8 +2543,9 @@ More on the drivers:
   blocked (`connection.blocked`), so that publishers never hang on a blocked connection.
   Retried and dead-lettered copies carry the type that selected the handler (a type read from the
   routing key, `typeFromRoutingKey`, included) and never the `CC` / `BCC` headers, the broker's
-  `x-death` headers nor the `user-id` property (validated by the broker against the publishing user,
-  a mismatch closes the publisher channel).
+  `x-death` headers, and keep the `user-id` property only when it is the user of the connection
+  (`guest` without credentials in the URL; validated by the broker against the publishing user, a
+  mismatch closes the publisher channel; unknown with `socketOptions.credentials`, then dropped).
 - **Kafka.** Each partition remembers the next offset it expects: after a rebalance, records a kept
   partition fetches again from the committed offset are skipped (commits never move back), and the
   buffered (or late) records of a revoked partition are dropped, its new owner handles them. The
@@ -2551,8 +2559,11 @@ More on the drivers:
   its settlement is sent, so that it never overrides the visibility set by a retry or a release.
   The FIFO deduplication id of a dead-letter copy is a SHA-256 of the SQS `MessageId` (never the
   `x-znight-id` a producer chose), characters SQS refuses are replaced (U+FFFD) in `x-znight-error`,
-  and a copy refused with a client fault is sent once more without `x-znight-error` and the headers
-  (a warning is logged), so that a message cannot make its own dead-lettering fail forever.
+  and a copy refused as invalid (`InvalidMessageContents`, `InvalidAttributeName`,
+  `InvalidAttributeValue`, `InvalidParameterValue`: too large...) is sent once more without
+  `x-znight-error` and the headers (a warning is logged), so that a message cannot make its own
+  dead-lettering fail forever; other failures (throttling, KMS, permissions) are rethrown, so the
+  message is released and its full copy written on a later attempt.
   Closing a subscription, or the driver, waits for every received message, those of a FIFO group
   still queued behind their predecessor included (handed to the stopped runtime, which releases
   them), before the client is destroyed.
@@ -2604,7 +2615,7 @@ class reads a snapshot of `process.env` when created (failure: ZNIGHT015 caused 
 interface ConfigSource {
   get(key: string): unknown
   has(key: string): boolean
-  keys(): readonly string[]
+  keys(): readonly string[] // Impl.: built-in sources walk cycles once and at most 10 000 entries per layer
   origin(key: string): string | undefined // 'process.env', '.env.local', 'vault:secret/app'...
   describe?(): string
 }
@@ -2996,7 +3007,8 @@ interface ScheduleMetadata {
   their leases are neither released nor extended (a run whose job had not started yet, still
   waiting for its lease, is dropped at once, without waiting for the store, and releases a lease
   that comes later). A `stop()` called from inside a run does not wait for it. `onDispose` clears the timers and unbinds the registry; without a previous `onStop` (a
-  failed start), it also aborts the runs in flight (`shutdown`) and abandons them. List
+  failed start), it also aborts the runs in flight (`shutdown`): their lease is no longer extended
+  nor watched, and is released when the run settles. List
   `SchedulePlugin` before `HttpPlugin`: plugins stop in reverse order, so HTTP drains first.
 - `SchedulerRegistry`: `jobs()`, `get(name)`, `has(name)`, `addCron` / `addInterval` /
   `addTimeout(name, schedule, handler, options?)` (validated at once: ZNIGHT040, ZNIGHT041,
@@ -3291,7 +3303,7 @@ below; absent: the built-in transport); unknown keys and invalid values are ZNIG
   counts its aliases each time, memoised per fragment), then validated (specified rules, plus `NoSchemaIntrospectionCustomRule` and
   `hideSuggestions` when introspection is off); only valid documents enter the LRU document cache,
   keyed by the query text. Impl.: the cache is also bounded by size, since comments and white space
-  do not count toward `maxTokens`: a text longer than 16 KiB characters is not kept (it is parsed
+  do not count toward `maxTokens`: a text longer than 128 Ki characters (1/64 of the budget) is not kept (it is parsed
   and validated on every request), and the oldest entries go when the kept text would exceed
   8 MiB characters. The `GraphQLContext` is seeded in the scope and passed as
   `contextValue`, with the request's `ctx.signal` as `abortSignal` (Impl.: through a stand-in that
@@ -3652,9 +3664,9 @@ are ZNIGHT050):
   inbound event name that does not match the event name grammar (other than `$ping`) is a
   `BAD_FRAME` ("Invalid event name"), whatever the codec: it never reaches a handler, and the hook
   event carries no `event`. A codec
-  whose `decode` throws (instead of returning a failure) yields a logged `BAD_FRAME`, on the
-  rate-limit path too (it runs in the transport's message callback, where nothing may throw); an
-  `encode` failure of a runtime frame (reply, `$error`) is logged and the frame is not sent.
+  whose `decode` throws (instead of returning a failure) yields a `BAD_FRAME`, on the rate-limit
+  path too (it runs in the transport's message callback, where nothing may throw), logged at `warn`
+  at most once per connection (client input must not flood the logs); an `encode` failure of a runtime frame (reply, `$error`) is logged and the frame is not sent.
 - A close frame MUST carry a code a server may send (`1000`–`1014` except `1004`–`1006`, or
   `3000`–`4999`; `1011` replaces any other) and a reason of at most 123 UTF-8 bytes (cut on a code
   point boundary): reasons come from exception messages, which may hold client input. The close
@@ -3666,7 +3678,9 @@ are ZNIGHT050):
   of the process), and `conn.drained()` resolves below a quarter of it.
 - A heartbeat timer (one per plugin, `unref()`ed) pings the connections of `node` transports and
   terminates those silent since the previous tick (`initiator: 'heartbeat'`), except while the
-  server paused their reading (`maxPendingMessages`: pongs cannot be read); Bun pings by itself
+  server paused their reading (`maxPendingMessages`: pongs cannot be read) and their handlers make
+  progress: paused for more than two ticks in a row without a message dispatched or a handler
+  settled, a connection is terminated too (`initiator: 'heartbeat'`); Bun pings by itself
   (`idleTimeout`, `sendPings`).
 - `onHttpDrain()`, `onStop()` and `onDispose()` share one idempotent drain: refuse handshakes,
   close every connection with `shutdown.code` / `reason`, wait up to `shutdown.timeoutMs`, then
