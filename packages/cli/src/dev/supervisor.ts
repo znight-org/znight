@@ -131,8 +131,12 @@ export class AppSupervisor {
     return this.#queue
   }
 
-  /** Stops the current process with `signal` (SIGKILL after the timeout) and refuses new starts. */
-  async stop(signal: NodeJS.Signals = 'SIGTERM'): Promise<void> {
+  /**
+   * Stops the current process with `signal` (SIGKILL after the timeout) and refuses new starts.
+   * `null`: the process already received the signal (a console Ctrl+C on Windows, where `kill()` is
+   * a forced termination): it is only waited for, then SIGKILLed after the timeout.
+   */
+  async stop(signal: NodeJS.Signals | null = 'SIGTERM'): Promise<void> {
     this.#closed = true
     if (this.#debounce !== undefined) {
       clearTimeout(this.#debounce)
@@ -169,13 +173,13 @@ export class AppSupervisor {
     this.#events.onStart?.(child, restart)
   }
 
-  async #stopCurrent(signal: NodeJS.Signals): Promise<void> {
+  async #stopCurrent(signal: NodeJS.Signals | null): Promise<void> {
     const child = this.#current
     if (child === undefined) return
     this.#current = undefined
     this.#stopping.add(child)
     try {
-      child.kill(signal)
+      if (signal !== null) child.kill(signal)
       let timer: ReturnType<typeof setTimeout> | undefined
       const timeout = new Promise<'timeout'>(resolve => {
         timer = setTimeout(() => resolve('timeout'), this.#killTimeoutMs)

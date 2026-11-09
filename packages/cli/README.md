@@ -283,7 +283,8 @@ restart is fast and always consistent.
 5. `Ctrl+C` (or `SIGTERM`, `SIGHUP` when the terminal is closed, `Ctrl+\` / `SIGQUIT`) → the
    watcher closes and the application stops gracefully (`SIGINT` after `Ctrl+C`, `SIGTERM` otherwise);
    a second signal kills it. The application runs in its own session and process group, so it
-   receives exactly one signal, and never the terminal's.
+   receives exactly one signal, and never the terminal's. On Windows it shares the console, which
+   delivers `Ctrl+C` to it: the CLI waits for it to stop (`SIGKILL` after `--kill-timeout`).
 6. The CLI dies without stopping it (`kill -9`, the OOM killer) → the application stops by itself
    (`SIGTERM`, then `SIGKILL` after `--kill-timeout`) within half a second instead of keeping its
    port: the CLI preloads a small guard into it (`--import` on Node.js, `--preload` on Bun) that
@@ -370,7 +371,9 @@ Runs the production build with `NODE_ENV=production` (unless set). On Linux and 
 **replaces itself** with the runtime (`execve`): same PID, signals and exit code go straight to the
 application, which makes `znight start` a good container entry point. Elsewhere the application runs
 as a child process: `SIGINT`, `SIGTERM` and `SIGHUP` are forwarded and its exit code is returned
-(`128 + n` when it is killed by a signal).
+(`128 + n` when it is killed by a signal). On Windows, `Ctrl+C` and the console closing are not
+forwarded: the application shares the console and receives them itself, while forwarding would
+terminate it at once (Windows has no graceful `kill()`).
 
 | Option                        | Default                         | Description                                     |
 | ----------------------------- | ------------------------------- | ----------------------------------------------- |

@@ -2,7 +2,8 @@
  * `znight start`: runs the production build with Node.js (or Bun). On POSIX the CLI process is
  * replaced by the runtime (`execve`): same PID, signals and exit code are native (ideal as a
  * container entry point). Elsewhere the application runs as a child process; signals are forwarded
- * and its exit code is returned.
+ * (except, on Windows, Ctrl+C and the console closing, which reach it directly) and its exit code is
+ * returned.
  */
 import type { Command } from '../command.ts'
 
@@ -63,8 +64,12 @@ export const startCommand: Command = defineCommand({
       return 0
     }
     const child = processes.spawn(executable, argv, { cwd: root, env, detached: true })
+    // on Windows the application shares the console: Ctrl+C and the console closing reach it
+    // directly, and child.kill() would be TerminateProcess, cutting its graceful shutdown short
+    const consoleEvent = (signal: NodeJS.Signals): boolean =>
+      cli.runtime.platform === 'win32' && (signal === 'SIGINT' || signal === 'SIGHUP')
     const forward = (signal: NodeJS.Signals) => (): void => {
-      child.kill(signal)
+      if (!consoleEvent(signal)) child.kill(signal)
     }
     const listeners = (['SIGINT', 'SIGTERM', 'SIGHUP'] as const).map(signal => [signal, forward(signal)] as const)
     for (const [signal, listener] of listeners) cli.signals.on(signal, listener)

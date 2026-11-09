@@ -406,6 +406,22 @@ describe('znight dev', () => {
     expect(run.stderr).toContain('Cannot find "bun" in PATH')
   })
 
+  it('lets the application stop by itself on Ctrl+C on Windows, SIGKILL after --kill-timeout', async () => {
+    processes.childOptions = { exitAfterMs: undefined }
+    const running = start(['--kill-timeout', '10000'], { name: 'node', execPath: '/usr/bin/node', platform: 'win32' })
+    await waitFor(() => vite.watchers.length === 1)
+    vite.succeed()
+    await waitFor(() => processes.children.length === 1)
+    const child = processes.children[0]
+    // the console event reached the application, which stops gracefully: no TerminateProcess
+    signals.emit('SIGINT')
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(child?.signals).toEqual([])
+    child?.exit(0)
+    expect((await running).code).toBe(0)
+    expect(child?.signals).toEqual([])
+  })
+
   it('kills the application on a second signal (exit code 130)', async () => {
     processes.childOptions = { exitAfterMs: undefined }
     const running = runCli(['dev', '--debounce', '0', '--kill-timeout', '10000'], {

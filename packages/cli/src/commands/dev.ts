@@ -221,6 +221,16 @@ async function printDiagnostics(cli: CliContext, root: string, diagnostics: read
   cli.reporter.logError(text.trimEnd())
 }
 
+/**
+ * The signal stopping the application when the CLI received `signal`. On Windows the application
+ * shares the console: it received Ctrl+C and the console closing itself, and `kill()` would be a
+ * forced termination, so it is only waited for (`null`).
+ */
+function stopSignal(cli: CliContext, signal: NodeJS.Signals): NodeJS.Signals | null {
+  if (cli.runtime.platform === 'win32' && (signal === 'SIGINT' || signal === 'SIGHUP')) return null
+  return signal === 'SIGINT' ? 'SIGINT' : 'SIGTERM'
+}
+
 function waitForTermination(cli: CliContext, watcher: BuildWatcher, supervisor: AppSupervisor): Promise<number> {
   return new Promise<number>(resolveExit => {
     const dispose = onTermination(
@@ -231,7 +241,7 @@ function waitForTermination(cli: CliContext, watcher: BuildWatcher, supervisor: 
         void (async () => {
           // the application stops gracefully on SIGINT or SIGTERM; stop() refuses new starts right
           // away, so a restart still debounced cannot start while Vite closes its watcher
-          const stopped = supervisor.stop(signal === 'SIGINT' ? 'SIGINT' : 'SIGTERM')
+          const stopped = supervisor.stop(stopSignal(cli, signal))
           try {
             await watcher.close()
           } catch (error) {

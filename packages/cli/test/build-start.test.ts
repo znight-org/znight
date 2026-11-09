@@ -130,6 +130,29 @@ describe('znight start', () => {
     expect(signals.count('SIGTERM')).toBe(0)
   })
 
+  it('does not forward Ctrl+C on Windows: the application received the console event itself', async () => {
+    withBuild()
+    const processes = new FakeProcesses()
+    processes.childOptions = { exitAfterMs: undefined }
+    const signals = new FakeSignals()
+    const running = runCli(['start', '--root', '.'], {
+      cwd: project.path,
+      signals,
+      runtime: { name: 'node', execPath: 'C:\\node\\node.exe', platform: 'win32' },
+      services: { processes },
+    })
+    await waitFor(() => processes.children.length === 1)
+    const child = processes.children[0]
+    // child.kill() is TerminateProcess on Windows: it would cut the graceful shutdown short
+    signals.emit('SIGINT')
+    signals.emit('SIGHUP')
+    expect(child?.signals).toEqual([])
+    signals.emit('SIGTERM')
+    expect(child?.signals).toEqual(['SIGTERM'])
+    child?.exit(0)
+    expect((await running).code).toBe(0)
+  })
+
   it('mirrors a death by signal like a shell (128 + n)', () => {
     expect(exitCodeOf({ code: 0, signal: null })).toBe(0)
     expect(exitCodeOf({ code: null, signal: 'SIGTERM' })).toBe(143)
