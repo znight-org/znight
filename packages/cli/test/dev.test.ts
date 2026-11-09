@@ -326,6 +326,43 @@ describe('znight dev', () => {
     await running
   })
 
+  it('does not start a debounced restart while the build watcher closes', async () => {
+    const running = start(['--debounce', '40'])
+    await waitFor(() => vite.watchers.length === 1)
+    vite.succeed()
+    await waitFor(() => processes.children.length === 1)
+    vite.succeed() // schedules a restart in 40 ms
+    const watcher = vite.watchers[0]
+    if (watcher !== undefined) watcher.closeWith = () => new Promise(resolve => setTimeout(resolve, 80))
+    signals.emit('SIGINT')
+    expect((await running).code).toBe(0)
+    expect(processes.children).toHaveLength(1)
+    expect(processes.children[0]?.signals).toEqual(['SIGINT'])
+  })
+
+  it('reports a build watcher failing to close, and still stops the application', async () => {
+    const unhandled: unknown[] = []
+    const onUnhandled = (reason: unknown) => unhandled.push(reason)
+    process.on('unhandledRejection', onUnhandled)
+    try {
+      const running = start()
+      await waitFor(() => vite.watchers.length === 1)
+      vite.succeed()
+      await waitFor(() => processes.children.length === 1)
+      const watcher = vite.watchers[0]
+      if (watcher !== undefined) watcher.closeWith = () => Promise.reject(new Error('closeWatcher hook failed'))
+      signals.emit('SIGINT')
+      const run = await running
+      await new Promise(resolve => setTimeout(resolve, 10))
+      expect(run.code).toBe(0)
+      expect(run.stderr).toContain('closeWatcher hook failed')
+      expect(processes.children[0]?.signals).toEqual(['SIGINT'])
+      expect(unhandled).toEqual([])
+    } finally {
+      process.off('unhandledRejection', onUnhandled)
+    }
+  })
+
   it('stops the application when the terminal is closed (SIGHUP)', async () => {
     const running = start()
     await waitFor(() => vite.watchers.length === 1)

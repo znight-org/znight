@@ -16,7 +16,7 @@ import { resolve } from 'node:path'
 import { defineCommand } from '../command.ts'
 import { ORPHAN_GUARD_POLL_MS, orphanGuard } from '../dev/orphan.ts'
 import { AppSupervisor } from '../dev/supervisor.ts'
-import { CliError } from '../errors.ts'
+import { CliError, errorMessage } from '../errors.ts'
 import { fallbackFormatDiagnostics } from '../integrations/compiler.ts'
 import { exitCodeOf } from '../integrations/process.ts'
 import { createOutputTracker, formatBuildError, watchBuild } from '../integrations/vite.ts'
@@ -229,14 +229,21 @@ function waitForTermination(cli: CliContext, watcher: BuildWatcher, supervisor: 
         // SIGHUP: the terminal is gone, nothing can be printed
         if (signal !== 'SIGHUP') cli.reporter.info(cli.colors.dim('Stopping... (press Ctrl+C again to force)'))
         void (async () => {
+          // the application stops gracefully on SIGINT or SIGTERM; stop() refuses new starts right
+          // away, so a restart still debounced cannot start while Vite closes its watcher
+          const stopped = supervisor.stop(signal === 'SIGINT' ? 'SIGINT' : 'SIGTERM')
           try {
             await watcher.close()
-          } finally {
-            // the application stops gracefully on SIGINT or SIGTERM
-            await supervisor.stop(signal === 'SIGINT' ? 'SIGINT' : 'SIGTERM')
-            dispose()
-            resolveExit(0)
+          } catch (error) {
+            cli.reporter.error(`Cannot close the Vite build watcher: ${errorMessage(error)}`)
           }
+          try {
+            await stopped
+          } catch (error) {
+            cli.reporter.error(`Cannot stop the application: ${errorMessage(error)}`)
+          }
+          dispose()
+          resolveExit(0)
         })()
       },
       () => {

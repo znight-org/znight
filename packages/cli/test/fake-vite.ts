@@ -7,6 +7,8 @@ import { join } from 'node:path'
 export class FakeWatcher {
   readonly listeners: ((event: WatcherEvent) => void)[] = []
   closed = false
+  /** What `close()` returns (a slow or failing `closeWatcher` hook). */
+  closeWith: (() => Promise<void>) | undefined
 
   on(_event: 'event', listener: (event: WatcherEvent) => void): this {
     this.listeners.push(listener)
@@ -15,7 +17,7 @@ export class FakeWatcher {
 
   close(): Promise<void> {
     this.closed = true
-    return Promise.resolve()
+    return this.closeWith?.() ?? Promise.resolve()
   }
 
   emit(event: WatcherEvent): void {
