@@ -154,7 +154,7 @@ outbox table written in the same transaction.
 ```ts
 import { recordEvents } from '@znight/events/testing'
 
-const events = recordEvents(test)
+const events = recordEvents(app) // a TestApp or an Application, after create()
 await createUser.execute('ada@example.com')
 await events.idle() // detached listeners settled
 expect(events.of(UserCreated)).toHaveLength(1)
@@ -166,6 +166,19 @@ In unit tests, `TestBed` auto-mocks `EventPublisher`:
 
 ## Shutdown
 
-On `app.stop()`, the plugin waits for detached listeners in flight (`drainTimeoutMs`, 10 s by
-default). Listing it first in `plugins` makes it stop last, once no request, message or job can
+On `app.stop()`, the plugin waits for detached listeners in flight, up to `drainTimeoutMs` (10 s by
+default). Like every shutdown step, the wait is also cut at `shutdown.hookTimeoutMs` of
+`Application.create()` (5 s by default): raise `hookTimeoutMs` above `drainTimeoutMs`, or lower
+`drainTimeoutMs` below it (see [Deployment](/guide/deployment#graceful-shutdown-in-orchestrators)).
+Listing the plugin first in `plugins` makes it stop last, once no request, message or job can
 publish any more.
+
+## Observability
+
+With [`@znight/observability`](/packages/observability), each publication with listeners is an
+`INTERNAL` span `publish <Event>` around the inline phase, with one child span
+`<Event> → <Class.method>` per listener (detached ones too, even when they end after the response).
+`znight_events_published_total{event}` and
+`znight_event_listener_duration_seconds{event, listener, detached, outcome}` measure them, and each
+publication logs `event published` at `debug`. The `events:publish` and `events:listener`
+[hooks](/guide/plugins#hooks) are there for your own instrumentation.

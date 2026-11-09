@@ -14,6 +14,11 @@ of the example, and its tests are the tests of this guide.
 A gateway is a provider decorated with `@Gateway(path)`. `WebSocketPlugin` serves every gateway
 through `HttpPlugin`'s server, on the same port, with any adapter:
 
+```sh
+npm install @znight/core @znight/http @znight/websocket zod
+npm install ws   # Node.js only: Bun serves WebSockets natively
+```
+
 ```ts
 import { HttpPlugin } from '@znight/http'
 import { WebSocketPlugin } from '@znight/websocket'
@@ -23,6 +28,8 @@ const plugins = [
   WebSocketPlugin.configure({ maxPayload: '64kb' }),
 ]
 ```
+
+Without `ws` on Node.js, the boot fails with [`ZNIGHT051`](/reference/error-codes#znight051).
 
 The **handshake is an HTTP request**: it goes through the request scope, the `http:request` hook
 (logs, metrics, traces), the global guards, the gateway's handshake guards and the access decisions
@@ -371,7 +378,7 @@ describe('/chat', () => {
 })
 ```
 
-`connectWebSocket(url)` gives the same client over the network, and
+`connectWebSocket(url)` of `@znight/testing` gives the same client over the network, and
 `@znight/websocket/testing` provides `createTestConnection()` and `createTestServer()` for unit
 tests of gateways and services.
 

@@ -1,5 +1,5 @@
 ---
-description: Write Znight plugins - lifecycle hooks, supplying runtime values to the container, options computed from the container, HTTP routes served for a plugin, and the typed hooks bus (http:request, messaging:message, schedule:run, graphql:operation).
+description: Write Znight plugins - lifecycle hooks, supplying runtime values to the container, options computed from the container, HTTP routes served for a plugin, and the typed hooks bus (http:request, messaging:message, messaging:publish, schedule:run, graphql:operation, websocket:message, websocket:connection, events:publish, events:listener).
 ---
 
 # Plugins & hooks
@@ -170,9 +170,12 @@ When several registrations target the same token, the highest wins:
 
 `overrides` > plugin `register()` > `Application.create({ providers })` > compiled providers
 
-Two plugins registering the same token is an error
-([`ZNIGHT004`](/reference/error-codes#znight004)), and any registration after `init()` is
-[`ZNIGHT016`](/reference/error-codes#znight016).
+A plugin's `register()` / `registerValue()` cannot target a compiled provider: that is
+[`ZNIGHT004`](/reference/error-codes#znight004) (replace it with `overrides` or
+`container.override()`). So is a token registered twice at the same level (two plugins registering
+the same token), and any registration after `init()` is
+[`ZNIGHT016`](/reference/error-codes#znight016). In practice, plugins supply tokens no compiled
+provider declares, and may replace values given to `Application.create({ providers })`.
 
 ## Options computed from the container
 
@@ -239,13 +242,17 @@ Paths are relative to the HTTP `prefix`; `meta` carries the route decisions guar
 `app.hooks` (also `ctx.hooks`) is a small, typed event bus that lets plugins observe and wrap what
 other plugins do, without depending on each other. Feature packages emit:
 
-| Hook                | Event                   | Emitted by                             |
-| ------------------- | ----------------------- | -------------------------------------- |
-| `http:request`      | `HttpRequestEvent`      | `@znight/http`                         |
-| `messaging:message` | `MessageDeliveryEvent`  | `@znight/messaging`                    |
-| `messaging:publish` | `MessagePublishEvent`   | `@znight/messaging`                    |
-| `schedule:run`      | `ScheduledRunEvent`     | `@znight/schedule`                     |
-| `graphql:operation` | `GraphQLOperationEvent` | [`@znight/graphql`](/packages/graphql) |
+| Hook                   | Event                      | Emitted by                                                |
+| ---------------------- | -------------------------- | --------------------------------------------------------- |
+| `http:request`         | `HttpRequestEvent`         | `@znight/http`                                            |
+| `messaging:message`    | `MessageDeliveryEvent`     | `@znight/messaging`                                       |
+| `messaging:publish`    | `MessagePublishEvent`      | `@znight/messaging`                                       |
+| `schedule:run`         | `ScheduledRunEvent`        | `@znight/schedule`                                        |
+| `graphql:operation`    | `GraphQLOperationEvent`    | [`@znight/graphql`](/packages/graphql)                    |
+| `websocket:message`    | `WebSocketMessageEvent`    | [`@znight/websocket`](/packages/websocket)                |
+| `websocket:connection` | `WebSocketConnectionEvent` | [`@znight/websocket`](/packages/websocket) (emitted only) |
+| `events:publish`       | `EventPublishEvent`        | [`@znight/events`](/packages/events)                      |
+| `events:listener`      | `EventListenerEvent`       | [`@znight/events`](/packages/events)                      |
 
 ### Observe: `on`
 
