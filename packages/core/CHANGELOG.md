@@ -1,5 +1,11 @@
 # @znight/core
 
+## 0.6.3
+
+### Patch Changes
+
+- dede0c2: Bound the wait of `stop()` for a hanging start, report a re-entrant request-scoped or transient creation as ZNIGHT002, dispose an instance whose interceptors fail, and close a scope synchronously when nothing in it is disposable.
+
 ## 0.6.2
 
 No changes in this release.

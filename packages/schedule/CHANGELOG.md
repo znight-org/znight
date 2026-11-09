@@ -1,5 +1,15 @@
 # @znight/schedule
 
+## 0.6.3
+
+### Patch Changes
+
+- 815c9d9: Fix audit findings: out-of-range epochs no longer hang `parseCron().next()`, linear duration error hints, a bounded zone year cache, early first lease extension after a slow acquire, runs aborted on dispose and while waiting for their lease, and queued manual runs kept on `pause()`.
+- Updated dependencies [0eeac37]
+- Updated dependencies [dede0c2]
+  - @znight/compiler@0.6.3
+  - @znight/core@0.6.3
+
 ## 0.6.2
 
 ### Patch Changes

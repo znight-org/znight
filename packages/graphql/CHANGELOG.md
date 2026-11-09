@@ -1,5 +1,18 @@
 # @znight/graphql
 
+## 0.6.3
+
+### Patch Changes
+
+- 364e495: Fix audit findings: linear SDL comment check, ZNIGHT023 for decisions only an HTTP-only guard enforces, a size-bounded document cache, abort signal listeners that no longer leak and follow delayed executions, ZNIGHT060 for alias cycles, and a per-principal response cache example.
+- Updated dependencies [0eeac37]
+- Updated dependencies [dede0c2]
+- Updated dependencies [dc4be25]
+  - @znight/compiler@0.6.3
+  - @znight/core@0.6.3
+  - @znight/http@0.6.3
+  - @znight/testing@0.6.3
+
 ## 0.6.2
 
 ### Patch Changes
