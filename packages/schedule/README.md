@@ -177,7 +177,8 @@ UTC. `matches()` agrees with `next()`: the end of a gap is an occurrence of the 
 
 Zone names may come from user input (`parseCron(expression, { timeZone })`): memory stays bounded
 whatever the spellings (`Intl` accepts IANA names in any case), since every spelling of a zone shares
-its data.
+its data, and whatever the dates queried, since a zone keeps the transitions of its last 128 years
+used.
 
 ## Plugin configuration
 

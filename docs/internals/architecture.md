@@ -2910,7 +2910,8 @@ interface ScheduleMetadata {
   (`SUN-SUN`, `0-SUN`: Sunday, like `0-0`). Occurrences before 1970 are computed like any other
   (`next()`, `nextRuns()`, `matches()`). Zones are shared by the identifier `Intl` resolves a name to
   and only the last 256 spellings are remembered, so zone names from user input keep memory
-  bounded. Intervals fire at the multiples of `every` since the Unix epoch; a timeout fires once,
+  bounded; Impl.: a zone caches the transitions of its last 128 years used, so dates from user
+  input keep it bounded too. Intervals fire at the multiples of `every` since the Unix epoch; a timeout fires once,
   `delay` after the scheduler started. A late wake-up runs a job once, for its latest missed
   occurrence; an occurrence never runs twice in a process.
 - **A run**: the overlap policy first (`skip`: outcome `skipped`; `queue`: one pending run, the

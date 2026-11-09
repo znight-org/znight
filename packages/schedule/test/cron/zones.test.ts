@@ -336,6 +336,16 @@ describe('resolveTimeZone', () => {
     expect(after.names).toBeLessThanOrEqual(256)
   })
 
+  it('keeps its transition cache bounded whatever the dates (they may come from user input)', () => {
+    const zone = resolveTimeZone('Europe/Paris')
+    if (!zone.ok) throw new Error(zone.message)
+    const engine = compileCron(spec('0 0 * * *'), zone.zone)
+    for (let index = 0; index < 1000; index++) engine.next(Date.UTC(1000 + index, 0, 1))
+    expect(zoneCacheSizes().years).toBeLessThanOrEqual(128 * zoneCacheSizes().zones)
+    // the years still in use are cached again on demand
+    expect(engine.next(Date.parse('2026-10-27T10:00:00Z'))).toBe(Date.parse('2026-10-27T23:00:00Z'))
+  })
+
   it('finds the transitions of a year', () => {
     const zone = resolveTimeZone('Europe/Paris')
     if (!zone.ok) throw new Error('no zone')

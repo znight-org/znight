@@ -8,7 +8,8 @@
  *
  * Memory stays bounded whatever names are resolved (they may come from user input, and `Intl` accepts
  * IANA names in any case): zones are shared by the identifier `Intl` resolves a name to, a finite set,
- * and only the last {@link MAX_NAMES} names as written are remembered.
+ * and only the last {@link MAX_NAMES} names as written are remembered. Each zone keeps the transitions
+ * of its last {@link MAX_YEARS} years used, whatever the dates queried.
  */
 import { civilFromDays, daysFromCivil, MAX_INSTANT } from './fields.ts'
 
@@ -45,6 +46,8 @@ const FIXED_OFFSET = /^([+-])(\d{2})(?::?(\d{2}))?$/
 /** Names as written remembered by {@link resolveTimeZone}, least recently used first. */
 const MAX_NAMES = 256
 const names = new Map<string, TimeZone>()
+/** Years whose transitions a zone remembers, least recently used first (a search spans 400 years). */
+const MAX_YEARS = 128
 /** One zone (formatter and transitions) per identifier resolved by `Intl`, whatever the spelling. */
 const zones = new Map<string, IntlZone>()
 
@@ -111,9 +114,11 @@ export function resolveTimeZone(name: string): ZoneResult {
   return { ok: true, zone }
 }
 
-/** Internal (tests): sizes of the caches. */
-export function zoneCacheSizes(): { readonly names: number; readonly zones: number } {
-  return { names: names.size, zones: zones.size }
+/** Internal (tests): sizes of the caches (`years`: the years of transitions cached by all zones). */
+export function zoneCacheSizes(): { readonly names: number; readonly zones: number; readonly years: number } {
+  let years = 0
+  for (const zone of zones.values()) years += zone.cachedYears
+  return { names: names.size, zones: zones.size, years }
 }
 
 /** Time zones known to this runtime (`Intl.supportedValuesOf('timeZone')`), for suggestions. */
@@ -209,12 +214,20 @@ class IntlZone implements TimeZone {
     return undefined
   }
 
+  /** Internal (tests): number of years cached. */
+  get cachedYears(): number {
+    return this.#years.size
+  }
+
   #year(year: number): YearInfo {
     let info = this.#years.get(year)
     if (info === undefined) {
       info = this.#scan(year)
-      this.#years.set(year, info)
+      if (this.#years.size >= MAX_YEARS) this.#years.delete(this.#years.keys().next().value as number)
+    } else {
+      this.#years.delete(year)
     }
+    this.#years.set(year, info)
     return info
   }
 
