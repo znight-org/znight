@@ -1,10 +1,12 @@
 import type { IncomingMessage, Server, ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
+import type { VaultLoaderOptions } from '../../src/index.ts'
 
 import { createServer } from 'node:http'
 import { ErrorCode, type ZnightError } from '@znight/core'
 
 import { ConfigLoaderError, dotenv, inline, loadConfigSource, vault } from '../../src/index.ts'
+import { MAX_RETRY_DELAY_MS, retryDelay } from '../../src/loaders/shared.ts'
 import { caught, tempDir } from '../helpers.ts'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test'
 
@@ -403,5 +405,30 @@ describe('vault()', () => {
       const error = await caught(() => vault(options as never))
       expect((error as ZnightError).code).toBe(ErrorCode.InvalidConfig)
     }
+    const numbers: [keyof VaultLoaderOptions, number][] = [
+      ['retries', Number.NaN],
+      ['retries', -1],
+      ['retries', Number.POSITIVE_INFINITY],
+      ['timeoutMs', Number.NaN],
+      ['timeoutMs', -1],
+      ['timeoutMs', 0],
+      ['timeoutMs', 1.5],
+      ['timeoutMs', 2 ** 31],
+      ['retryDelayMs', Number.NaN],
+      ['retryDelayMs', -1],
+      ['retryDelayMs', Number.POSITIVE_INFINITY],
+    ]
+    for (const [option, value] of numbers) {
+      const error = await caught(() => vault({ path: 'secret/app', [option]: value }))
+      expect((error as ZnightError).code).toBe(ErrorCode.InvalidConfig)
+      expect(error.message).toContain(`"${option}"`)
+    }
+  })
+
+  it('caps the backoff between retries', () => {
+    expect([1, 2, 3].map(attempt => retryDelay(200, attempt))).toEqual([200, 400, 800])
+    expect(retryDelay(200, 15)).toBe(MAX_RETRY_DELAY_MS)
+    expect(retryDelay(200, 2000)).toBe(MAX_RETRY_DELAY_MS)
+    expect(retryDelay(0, 3)).toBe(0)
   })
 })

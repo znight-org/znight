@@ -3,7 +3,16 @@ import type { ConfigLoader, ConfigLoaderContext } from './types.ts'
 
 import { ConfigLoaderError, errorMessage, invalidConfig } from '../errors.ts'
 import { nestUnder } from '../source.ts'
-import { delay, isRecord, readOptionalFile, resolveFile, setting } from './shared.ts'
+import {
+  delay,
+  isRecord,
+  nonNegativeOption,
+  readOptionalFile,
+  resolveFile,
+  retryDelay,
+  setting,
+  timeoutOption,
+} from './shared.ts'
 
 /** Options of {@link vault}. */
 export interface VaultLoaderOptions {
@@ -33,7 +42,7 @@ export interface VaultLoaderOptions {
   readonly timeoutMs?: number
   /** Retries on network errors, timeouts, HTTP 429 and 5xx, and bodies that are not JSON. Default: `2`. */
   readonly retries?: number
-  /** Base delay between retries (doubled each time), in milliseconds. Default: `200`. */
+  /** Base delay between retries (doubled each time, at most 30 s), in milliseconds. Default: `200`. */
   readonly retryDelayMs?: number
   /** `fetch` implementation (tests, proxies). Default: the global `fetch`. */
   readonly fetch?: typeof fetch
@@ -163,9 +172,9 @@ export function vault(options: VaultLoaderOptions): ConfigLoader {
     throw invalidConfig('vault(): "kvVersion" must be 1 or 2')
   }
   const locations = paths.map(path => locate(options, path))
-  const timeoutMs = options.timeoutMs ?? 5000
-  const retries = Math.max(0, Math.floor(options.retries ?? 2))
-  const retryDelayMs = options.retryDelayMs ?? 200
+  const timeoutMs = timeoutOption('vault()', options.timeoutMs, 5000)
+  const retries = Math.floor(nonNegativeOption('vault()', 'retries', options.retries, 2))
+  const retryDelayMs = nonNegativeOption('vault()', 'retryDelayMs', options.retryDelayMs, 200)
 
   return {
     name: 'vault',
@@ -195,7 +204,7 @@ export function vault(options: VaultLoaderOptions): ConfigLoader {
       const read = async (location: SecretLocation): Promise<ConfigLayer | undefined> => {
         let lastError: unknown
         for (let attempt = 0; attempt <= retries; attempt++) {
-          if (attempt > 0) await delay(retryDelayMs * 2 ** (attempt - 1))
+          if (attempt > 0) await delay(retryDelay(retryDelayMs, attempt))
           try {
             const response = await fetchImpl(`${address}${location.apiPath}`, {
               headers,

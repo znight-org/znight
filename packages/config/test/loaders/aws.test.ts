@@ -198,6 +198,11 @@ describe('awsSecretsManager() with a client', () => {
       const error = await caught(() => awsSecretsManager(options as never))
       expect((error as ZnightError).code).toBe(ErrorCode.InvalidConfig)
     }
+    for (const timeoutMs of [Number.NaN, -1, 0, 1.5, Number.POSITIVE_INFINITY, 2 ** 31]) {
+      const error = await caught(() => awsSecretsManager({ secretId: 'x', timeoutMs }))
+      expect((error as ZnightError).code).toBe(ErrorCode.InvalidConfig)
+      expect(error.message).toContain('timeoutMs')
+    }
   })
 })
 

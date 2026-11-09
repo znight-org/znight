@@ -3,7 +3,7 @@ import type { ConfigLoader, ConfigLoaderContext } from './types.ts'
 
 import { ConfigLoaderError, errorMessage, invalidConfig } from '../errors.ts'
 import { nestUnder } from '../source.ts'
-import { importOptionalPeer, isRecord, setting } from './shared.ts'
+import { importOptionalPeer, isRecord, setting, timeoutOption } from './shared.ts'
 
 /** One secret read by {@link awsSecretsManager}. */
 export interface AwsSecretRef {
@@ -147,7 +147,7 @@ export function awsSecretsManager(options: AwsSecretsManagerLoaderOptions): Conf
   if (client !== undefined && typeof client?.getSecretValue !== 'function' && typeof client?.send !== 'function') {
     throw invalidConfig('awsSecretsManager(): "client" must have a getSecretValue(input) or send(command) method')
   }
-  const timeoutMs = options.timeoutMs ?? 10_000
+  const timeoutMs = timeoutOption('awsSecretsManager()', options.timeoutMs, 10_000)
 
   return {
     name: LOADER,

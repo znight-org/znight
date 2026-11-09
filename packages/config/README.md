@@ -302,8 +302,12 @@ ConfigPlugin.configure({
 | `optional`     | `false`                         | Skip secrets that do not exist (404)                                             |
 | `timeoutMs`    | `5000`                          | Timeout of each request                                                          |
 | `retries`      | `2`                             | Retries on network errors, timeouts, 429, 5xx and bodies that are not JSON       |
-| `retryDelayMs` | `200`                           | Base delay between retries (doubled each time)                                   |
+| `retryDelayMs` | `200`                           | Base delay between retries (doubled each time, at most 30 s)                     |
 | `fetch`        | global `fetch`                  | Custom `fetch` (proxies, tests)                                                  |
+
+`timeoutMs` must be an integer from 1 to 2^31 − 1, `retries` and `retryDelayMs` finite numbers
+> = 0: other values fail when the loader is created (ZNIGHT012), and so does an invalid `timeoutMs`
+> of `awsSecretsManager()`.
 
 `VAULT_*` settings are read from the values loaded by the previous loaders first (a `.env` file
 works), then from the environment. A token or namespace that is not a valid header value (a token
