@@ -30,6 +30,21 @@ describe('validate', () => {
     expect(validate(schema, { id: '12' }, 'query')).toEqual({ id: 12 })
   })
 
+  it('lists at most 100 issues in the details', async () => {
+    const error = await invalid(() =>
+      validate(
+        z.array(z.string()),
+        Array.from({ length: 10_000 }, () => 1),
+        'body',
+      ),
+    )
+    expect(error.message).toBe('Invalid body (10000 issues, the first 100 listed)')
+    expect(error.details).toHaveLength(100)
+    expect((error.details as { path: string }[])[99]?.path).toBe('99')
+    expect(error.issues).toHaveLength(10_000)
+    expect(JSON.stringify(error.toBody()).length).toBeLessThan(10_000)
+  })
+
   it('throws a ValidationException with dotted paths', async () => {
     const schema = z.object({ user: z.object({ emails: z.array(z.email()) }) })
     const error = await invalid(() => validate(schema, { user: { emails: ['ok@example.com', 'nope'] } }, 'body'))

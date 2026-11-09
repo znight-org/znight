@@ -282,7 +282,9 @@ search(@Query(SearchQuery) query: z.output<typeof SearchQuery>) {
 
 - Handlers receive the schema **output**: defaults, transforms, coercions, stripped keys.
 - Async schemas (async refinements) are supported.
-- A failure answers `400` with one entry per issue (`path` is dotted, `''` for the root):
+- A failure answers `400` with one entry per issue (`path` is dotted, `''` for the root), the first
+  100 only: past that, the message gives the total (`Invalid body (524287 issues, the first 100
+  listed)`), so a large invalid array never produces a response larger than the request:
 
 ```json
 {
@@ -294,7 +296,7 @@ search(@Query(SearchQuery) query: z.output<typeof SearchQuery>) {
 ```
 
 The error is a `ValidationException` (a `BadRequestException`) carrying `location` (`body`,
-`query`, `param "id"`...) and the raw Standard Schema `issues`: map it to your own format with an
+`query`, `param "id"`...) and the raw Standard Schema `issues` (all of them): map it to your own format with an
 [exception mapper](#exception-mappers).
 
 A non-primitive `@Body()` / `@Query()` without schema is reported by the compiler (ZNIGHT017, an

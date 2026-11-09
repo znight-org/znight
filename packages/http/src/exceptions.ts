@@ -95,9 +95,16 @@ export class BadRequestException extends HttpException {
 }
 
 /**
+ * The most issues listed in the `details` of a {@link ValidationException}: a 1 MB array of invalid
+ * items would otherwise produce an error response tens of times larger than the request.
+ */
+const MAX_ISSUE_DETAILS = 100
+
+/**
  * 400 Bad Request raised when an input fails its schema (`@Body(schema)`, `@Query(schema)`...).
- * `details` lists the issues as `{ path, message }`; the raw Standard Schema issues are kept in
- * {@link issues} for exception mappers.
+ * `details` lists the issues as `{ path, message }`, the first 100 only (the message then gives the
+ * total: `Invalid body (524287 issues, the first 100 listed)`); the raw Standard Schema issues are
+ * all kept in {@link issues} for exception mappers.
  */
 export class ValidationException extends BadRequestException {
   /** What was validated: `body`, `query`, `query "page"`, `param "id"`... */
@@ -105,7 +112,9 @@ export class ValidationException extends BadRequestException {
   readonly issues: readonly StandardSchemaV1Issue[]
 
   constructor(location: string, issues: readonly StandardSchemaV1Issue[], options?: HttpExceptionOptions) {
-    super(`Invalid ${location}`, issues.map(toIssueDetail), options)
+    const listed = issues.length > MAX_ISSUE_DETAILS ? issues.slice(0, MAX_ISSUE_DETAILS) : issues
+    const total = listed === issues ? '' : ` (${issues.length} issues, the first ${MAX_ISSUE_DETAILS} listed)`
+    super(`Invalid ${location}${total}`, listed.map(toIssueDetail), options)
     this.name = 'ValidationException'
     this.location = location
     this.issues = issues

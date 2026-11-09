@@ -141,8 +141,8 @@ create(@Body(CreateUser) input: CreateUser) {
 ```
 
 - Handlers receive the schema **output** (defaults, transforms, stripped keys); async schemas work.
-- Failures answer `400` with `details: [{ path, message }]` (a `ValidationException` carrying the raw
-  issues, to map with an exception mapper).
+- Failures answer `400` with `details: [{ path, message }]`, the first 100 issues (a
+  `ValidationException` carrying all the raw issues, to map with an exception mapper).
 - Schemas must be **exported** (the generated module imports them).
 - A non-primitive `@Body()` or `@Query()` without a schema is reported as
   [`ZNIGHT017`](/reference/error-codes#znight017): a warning, or an error with the compiler's

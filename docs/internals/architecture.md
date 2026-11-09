@@ -1973,7 +1973,8 @@ not call `next()` gets the same reply as in the general pipeline.
   and size, Web `Response` → sent as is.
 - Errors: `HttpException(status, message?, details?, { headers, cause })` and subclasses render
   `{ statusCode, error, message, details? }`; schema failures → 400 (`ValidationException`) with
-  `details: [{ path, message }]`, the shape also used by the upload 400s about a field; other errors → `{ statusCode: 500, error: 'Internal Server Error' }`
+  `details: [{ path, message }]` (the first 100 issues; past that the message is
+  `Invalid <location> (<n> issues, the first 100 listed)`, and `issues` keeps them all), the shape also used by the upload 400s about a field; other errors → `{ statusCode: 500, error: 'Internal Server Error' }`
   (message only with `exposeErrors: true`), sent to hooks and the logger. An exception mapper
   returning an `HttpResponse` without status keeps the error's status.
 - Response headers are validated by the plugin (after the handler, and after the headers added by
