@@ -2543,8 +2543,9 @@ More on the drivers:
   blocked (`connection.blocked`), so that publishers never hang on a blocked connection.
   Retried and dead-lettered copies carry the type that selected the handler (a type read from the
   routing key, `typeFromRoutingKey`, included) and never the `CC` / `BCC` headers, the broker's
-  `x-death` headers nor the `user-id` property (validated by the broker against the publishing user,
-  a mismatch closes the publisher channel).
+  `x-death` headers, and keep the `user-id` property only when it is the user of the connection
+  (`guest` without credentials in the URL; validated by the broker against the publishing user, a
+  mismatch closes the publisher channel; unknown with `socketOptions.credentials`, then dropped).
 - **Kafka.** Each partition remembers the next offset it expects: after a rebalance, records a kept
   partition fetches again from the committed offset are skipped (commits never move back), and the
   buffered (or late) records of a revoked partition are dropped, its new owner handles them. The
