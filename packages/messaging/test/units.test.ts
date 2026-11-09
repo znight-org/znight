@@ -340,6 +340,9 @@ describe('internal async helpers', () => {
   it('truncates', () => {
     expect(truncate('abc', 5)).toBe('abc')
     expect(truncate('abcdef', 4)).toBe('abc…')
+    // never splits a surrogate pair
+    expect(truncate('ab\u{1F600}cd', 4)).toBe('ab…')
+    expect(truncate('ab\u{1F600}cd', 5)).toBe('ab\u{1F600}…')
   })
 })
 

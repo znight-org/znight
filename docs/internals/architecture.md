@@ -2523,6 +2523,10 @@ More on the drivers:
   logged). The not-before timer is capped at 2^31 − 1 ms.
 - **SQS.** The lease extension of a message stops, once any extension in flight completed, before
   its settlement is sent, so that it never overrides the visibility set by a retry or a release.
+  The FIFO deduplication id of a dead-letter copy is a SHA-256 of the SQS `MessageId` (never the
+  `x-znight-id` a producer chose), characters SQS refuses are replaced (U+FFFD) in `x-znight-error`,
+  and a copy refused with a client fault is sent once more without `x-znight-error` and the headers
+  (a warning is logged), so that a message cannot make its own dead-lettering fail forever.
 
 ### 9.3 Config (`@znight/config`)
 

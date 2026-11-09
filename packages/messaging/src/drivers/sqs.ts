@@ -28,6 +28,7 @@ import type {
 } from '../driver.ts'
 import type { OutboundMessage } from '../message.ts'
 
+import { createHash } from 'node:crypto'
 import {
   ChangeMessageVisibilityCommand,
   DeleteMessageCommand,
@@ -70,6 +71,8 @@ const MAX_VISIBILITY_SECONDS = 43_200
 const MAX_DELAY_SECONDS = 900
 const MAX_ATTRIBUTES = 10
 const ATTRIBUTE_NAME = /^(?!aws\.|amazon\.)(?!\.)(?!.*\.\.)[\w.-]{1,256}(?<!\.)$/i
+/** Characters SQS refuses in a message body or a string attribute (control characters, lone surrogates...). */
+const INVALID_TEXT = /[^\t\n\r\u0020-\uD7FF\uE000-\uFFFD\u{10000}-\u{10FFFF}]/gu
 /** Message attributes carrying transport fields (not exposed as headers). */
 const TRANSPORT_ATTRIBUTES = new Set<string>([
   MessagingHeaders.Id,
@@ -102,6 +105,18 @@ interface SqsSubscription {
   active: boolean
   wake: (() => void) | undefined
   loop: Promise<void> | undefined
+}
+
+/** What a dead-letter copy is made of. */
+interface DeadLetterCopy {
+  readonly target: QueueInfo
+  readonly source: QueueInfo
+  readonly body: string
+  readonly transport: Readonly<Record<string, string>>
+  readonly headers: Readonly<Record<string, string>>
+  readonly request: DeadLetterRequest
+  readonly groupId: string | undefined
+  readonly id: string
 }
 
 /** Amazon SQS {@link MessagingDriver}. See the module documentation. */
@@ -465,11 +480,19 @@ export class SqsDriver implements MessagingDriver {
         const target =
           request.queue === undefined ? undefined : (subscription.deadLetter ?? (await this.#queue(request.queue)))
         if (target !== undefined) {
-          await client.send(
-            new SendMessageCommand(
-              this.#deadLetterInput(target, queue, encoded, transport, headers, request, groupId, id),
-            ),
-          )
+          const copy = { target, source: queue, body: encoded, transport, headers, request, groupId, id }
+          const key = message.MessageId ?? id
+          try {
+            await client.send(new SendMessageCommand(this.#deadLetterInput(copy, key, true)))
+          } catch (error) {
+            // a copy SQS refuses (too large...) would be refused again on every redelivery
+            if ((error as { $fault?: unknown } | null)?.$fault !== 'client') throw error
+            this.#logger.warn(
+              `SQS: the dead-letter copy of message ${id} was refused, sending it without the error and the headers`,
+              { err: error },
+            )
+            await client.send(new SendMessageCommand(this.#deadLetterInput(copy, key, false)))
+          }
         }
         await remove()
         done()
@@ -493,25 +516,25 @@ export class SqsDriver implements MessagingDriver {
     if (serialKey !== undefined) subscription.groups.set(serialKey, handled)
   }
 
-  #deadLetterInput(
-    target: QueueInfo,
-    source: QueueInfo,
-    body: string,
-    transport: Readonly<Record<string, string>>,
-    headers: Readonly<Record<string, string>>,
-    request: DeadLetterRequest,
-    groupId: string | undefined,
-    id: string,
-  ): SendMessageCommandInput {
+  /**
+   * The dead-letter copy of a message: its body and transport attributes, the dead-letter attributes
+   * and, when `full`, the error and the headers. `key` (the SQS message id) derives the FIFO
+   * deduplication id, which must not depend on the `x-znight-id` a producer chose.
+   */
+  #deadLetterInput(copy: DeadLetterCopy, key: string, full: boolean): SendMessageCommandInput {
+    const { target, source, body, transport, headers, request, groupId, id } = copy
     const attributes = headerRecord()
     Object.assign(attributes, transport)
     attributes[MessagingHeaders.DeadLetterReason] = request.reason
-    attributes[MessagingHeaders.Error] =
-      truncate(errorMessage(request.error), MAX_ERROR_HEADER_LENGTH) || 'unknown error'
+    if (full) {
+      attributes[MessagingHeaders.Error] =
+        truncate(errorMessage(request.error), MAX_ERROR_HEADER_LENGTH).replace(INVALID_TEXT, '\uFFFD') ||
+        'unknown error'
+    }
     attributes[MessagingHeaders.OriginalQueue] = source.name
     attributes[MessagingHeaders.Attempts] = String(request.attempt)
     const dropped: string[] = []
-    for (const [name, value] of Object.entries(headers)) {
+    for (const [name, value] of Object.entries(full ? headers : {})) {
       if (Object.keys(attributes).length >= MAX_ATTRIBUTES) dropped.push(name)
       else attributes[name] = value
     }
@@ -527,7 +550,7 @@ export class SqsDriver implements MessagingDriver {
     }
     if (target.fifo) {
       input.MessageGroupId = groupId ?? 'default'
-      input.MessageDeduplicationId = `${id}-dead-letter`.slice(0, 128)
+      input.MessageDeduplicationId = `${createHash('sha256').update(key).digest('hex')}-dead-letter`
     }
     return input
   }
