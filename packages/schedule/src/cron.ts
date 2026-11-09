@@ -13,7 +13,7 @@ import type { CronEngine } from './cron/schedule.ts'
 import type { TimeZone } from './cron/zone.ts'
 
 import { neverFires } from './cron/analysis.ts'
-import { FIELDS_HINT } from './cron/fields.ts'
+import { FIELDS_HINT, MAX_INSTANT } from './cron/fields.ts'
 import { parseCronSpec } from './cron/parse.ts'
 import { compileCron } from './cron/schedule.ts'
 import { knownTimeZones, resolveTimeZone } from './cron/zone.ts'
@@ -33,7 +33,10 @@ export interface CronSchedule {
   readonly expression: string
   /** As written (`'local'` is resolved once, when parsing). */
   readonly timeZone: string
-  /** The first occurrence strictly after `after` (default: now), `undefined` within 400 years. */
+  /**
+   * The first occurrence strictly after `after` (default: now), `undefined` within 400 years or before
+   * the end of the `Date` range.
+   */
   next(after?: Date | number): Date | undefined
   /** The next `count` occurrences after `from` (default: now). */
   nextRuns(count: number, from?: Date | number): Date[]
@@ -144,6 +147,9 @@ function instant(value: Date | number, method: string): number {
   const time = value instanceof Date ? value.getTime() : value
   if (typeof time !== 'number' || !Number.isFinite(time)) {
     throw new InvalidScheduleError(`${method}(): expected a valid Date or epoch milliseconds, got ${String(value)}`)
+  }
+  if (Math.abs(time) > MAX_INSTANT) {
+    throw new InvalidScheduleError(`${method}(): ${time} is outside the Date range (±8.64e15 epoch milliseconds)`)
   }
   return time
 }

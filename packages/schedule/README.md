@@ -155,7 +155,9 @@ parseDuration('1.5h') // 5_400_000
 ```
 
 `InvalidScheduleError` carries `field` (`'hour'`...), `start` and `end` (offsets in the expression).
-An expression that never fires (`'0 0 30 2 *'`) is invalid too.
+An expression that never fires (`'0 0 30 2 *'`) is invalid too. `next()`, `nextRuns()` and
+`matches()` take a `Date` or epoch milliseconds within the `Date` range (±8.64e15): anything else
+throws `InvalidScheduleError`, and the search stops at the end of that range.
 
 ## Time zones and daylight saving time
 

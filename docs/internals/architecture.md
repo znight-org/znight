@@ -2955,7 +2955,9 @@ interface ScheduleMetadata {
   scheduled again), `trigger()`, `nextRun`, `lastRun`, `nextRuns(count)`. Reschedules and dynamic
   jobs are not persisted.
 - `parseCron(expression, { timeZone? })` (`next`, `nextRuns`, `matches`) and `parseDuration` expose
-  the engine (ZNIGHT040 as `InvalidScheduleError` with `field`, `start`, `end`).
+  the engine (ZNIGHT040 as `InvalidScheduleError` with `field`, `start`, `end`). `next`, `nextRuns`
+  and `matches` MUST reject an instant outside the `Date` range (±8.64e15 epoch ms) with ZNIGHT040,
+  and the search MUST stop at the end of that range.
   `@znight/schedule/testing` exports `createTestClock(start?, { settleTimeoutMs? })` (virtual time:
   `advance`, `advanceTo`, waiting for the runs it starts, real I/O included; a run that makes no
   progress for `settleTimeoutMs` of real time, default 1 000, is not waited for again during that

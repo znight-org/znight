@@ -94,6 +94,9 @@ export const NICKNAMES: Readonly<Record<string, string>> = Object.freeze({
 /** Hint shown under field-level errors. */
 export const FIELDS_HINT = 'Fields: [second] minute hour day-of-month month day-of-week'
 
+/** Largest epoch milliseconds a `Date` holds (`±8.64e15`, 275760-09-13 and -271821-04-20). */
+export const MAX_INSTANT: number = 8.64e15
+
 /** Days in a month of the proleptic Gregorian calendar (`month` 1-12). */
 export function daysInMonth(year: number, month: number): number {
   if (month === 2) return isLeapYear(year) ? 29 : 28

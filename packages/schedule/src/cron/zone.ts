@@ -10,7 +10,7 @@
  * IANA names in any case): zones are shared by the identifier `Intl` resolves a name to, a finite set,
  * and only the last {@link MAX_NAMES} names as written are remembered.
  */
-import { civilFromDays, daysFromCivil } from './fields.ts'
+import { civilFromDays, daysFromCivil, MAX_INSTANT } from './fields.ts'
 
 /** A change of UTC offset. Offsets are in milliseconds, wall time minus UTC. */
 export interface ZoneTransition {
@@ -255,10 +255,11 @@ class IntlZone implements TimeZone {
     return { at: high, before, after: this.#raw(high) }
   }
 
-  /** Offset at a whole second, through `Intl`. */
+  /** Offset at a whole second, through `Intl` (the offset at the bound outside the `Date` range). */
   #raw(instant: number): number {
+    const at = Math.min(Math.max(instant, -MAX_INSTANT), MAX_INSTANT)
     const values = { year: 0, month: 0, day: 0, hour: 0, minute: 0, second: 0 }
-    for (const part of this.#formatter.formatToParts(instant)) {
+    for (const part of this.#formatter.formatToParts(at)) {
       if (part.type in values) values[part.type as keyof typeof values] = Number(part.value)
     }
     const wall =
@@ -266,7 +267,7 @@ class IntlZone implements TimeZone {
       values.hour * 3_600_000 +
       values.minute * 60_000 +
       values.second * 1000
-    return wall - Math.floor(instant / 1000) * 1000
+    return wall - Math.floor(at / 1000) * 1000
   }
 }
 
