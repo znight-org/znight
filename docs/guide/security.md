@@ -858,6 +858,7 @@ decorator and a guard give per-route limits keyed by caller, with
 import type { Lazy } from '@znight/core'
 import type { RequestUser } from '../auth/request-user.js'
 
+import { isIPv6 } from 'node:net'
 import { Injectable } from '@znight/core'
 import { type CanActivate, createRouteDecorator, type HttpContext, TooManyRequestsException } from '@znight/http'
 import { type RateLimiterAbstract, RateLimiterMemory, RateLimiterRes } from 'rate-limiter-flexible'
@@ -885,7 +886,7 @@ export class RateLimitGuard implements CanActivate {
     if (policy === undefined || ctx.route === undefined) return true // no limit on this route
     const user = this.user.get()
     // the caller when known, else the client address (correct behind a proxy only with trustProxy)
-    const key = user.isAuthenticated ? `user:${user.principal.id}` : `ip:${ctx.ip ?? 'unknown'}`
+    const key = user.isAuthenticated ? `user:${user.principal.id}` : addressKey(ctx.ip)
     try {
       await this.#limiter(`${ctx.route.method} ${ctx.route.path}`, policy).consume(key)
       return true
@@ -907,6 +908,25 @@ export class RateLimitGuard implements CanActivate {
     return limiter
   }
 }
+
+/**
+ * The budget key of a client address. An IPv6 client usually holds a whole /64 (2^64 addresses):
+ * keyed by address, it would get a fresh budget per request. IPv6 addresses are keyed by /64 prefix.
+ */
+export function addressKey(ip: string | undefined): string {
+  if (ip === undefined || !isIPv6(ip)) return `ip:${ip ?? 'unknown'}`
+  const [head = '', tail] = ip.split('::')
+  const groups = (part: string): string[] => (part === '' ? [] : part.split(':'))
+  // an embedded IPv4 address (`::ffff:192.0.2.1`) counts as two groups
+  const size = (parts: string[]): number => parts.reduce((total, part) => total + (part.includes('.') ? 2 : 1), 0)
+  const first = groups(head)
+  const last = tail === undefined ? [] : groups(tail)
+  const all = [...first, ...Array<string>(8 - size(first) - size(last)).fill('0'), ...last].map(group =>
+    group.includes('.') ? group : Number.parseInt(group, 16).toString(16),
+  )
+  if (all.slice(0, 6).join(':') === '0:0:0:0:0:ffff') return `ip:${all[6]}` // IPv4-mapped: an IPv4 client
+  return `ip:${all.slice(0, 4).join(':')}::/64`
+}
 ```
 
 - `RateLimit` is a decision group of its own (not required): routes without it are not limited.
@@ -915,6 +935,10 @@ export class RateLimitGuard implements CanActivate {
 - The guard runs after `AuthGuard`: refused requests never consume a budget, and authenticated
   callers are counted by principal. The example limits note creation (30 per minute and user), the
   password sign-in (5 attempts per minute and address) and the webhook.
+- Anonymous callers are keyed by address, IPv6 ones by `/64` prefix (`addressKey`): a client
+  usually holds a whole `/64`, and keyed by full address it would get a fresh budget per address.
+  A per-address limit still lets a botnet spread its guesses against one account; add a
+  per-account budget (with the lockout trade-off it brings) when that matters.
 - The memory store is per process. With several instances, use `RateLimiterRedis` (or another
   shared store of the library) so that the limit holds across the fleet.
 - Behind a load balancer, `ctx.ip` is the load balancer unless `trustProxy` is set: every anonymous

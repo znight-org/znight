@@ -1,3 +1,4 @@
+import { addressKey } from '../src/security/rate-limit.js'
 import { bearer, createTestApp } from './support/app.js'
 import { mintToken } from './support/tokens.js'
 import { describe, expect, test as it } from 'bun:test'
@@ -36,6 +37,31 @@ describe('rate limiting', () => {
     for (let i = 0; i < 5; i++) expect((await signIn('198.51.100.1')).status).toBe(401) // 5 attempts per minute
     expect((await signIn('198.51.100.1')).status).toBe(429)
     expect((await signIn('198.51.100.2')).status).toBe(401)
+  })
+
+  it('keys IPv4 callers by address, IPv6 callers by /64 prefix', () => {
+    expect(addressKey('198.51.100.1')).toBe('ip:198.51.100.1')
+    expect(addressKey(undefined)).toBe('ip:unknown')
+    expect(addressKey('2001:db8:1:2::1')).toBe('ip:2001:db8:1:2::/64')
+    expect(addressKey('2001:0DB8:0001:0002:ffff:ffff:ffff:ffff')).toBe('ip:2001:db8:1:2::/64')
+    expect(addressKey('2001:db8::1')).toBe('ip:2001:db8:0:0::/64')
+    expect(addressKey('::1')).toBe('ip:0:0:0:0::/64')
+    expect(addressKey('::ffff:198.51.100.1')).toBe('ip:198.51.100.1') // IPv4-mapped
+  })
+
+  it('keys IPv6 callers by /64 prefix: one client holds a whole /64', async () => {
+    await using app = await createTestApp()
+    const signIn = (ip: string) =>
+      app.inject({
+        method: 'POST',
+        url: '/session',
+        headers: { 'x-forwarded-for': ip },
+        body: { username: 'nobody', password: 'wrong' },
+      })
+
+    for (let i = 1; i <= 5; i++) expect((await signIn(`2001:db8:1:2::${i}`)).status).toBe(401)
+    expect((await signIn('2001:0db8:0001:0002:ffff:ffff:ffff:ffff')).status).toBe(429) // same /64, another spelling
+    expect((await signIn('2001:db8:1:3::1')).status).toBe(401) // another /64
   })
 
   it('does not count requests refused by AuthGuard: they never reach the limiter', async () => {
