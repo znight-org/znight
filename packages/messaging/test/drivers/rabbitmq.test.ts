@@ -265,7 +265,7 @@ describe('republished copies', () => {
 
     fakeBroker.deliver('q', { properties: { messageId: 'm2', userId: 'partner' } })
     await waitFor(() => deliveries.length === 2)
-    await deliveries[1]?.deadLetter({ queue: 'q.dlq', reason: 'rejected', error: new Error('boom'), attempt: 1 })
+    await deliveries[1]?.deadLetter({ queue: 'q.dlq', reason: 'non-retryable', error: new Error('boom'), attempt: 1 })
     const dead = fakeBroker.publications.at(-1)
     expect(dead?.routingKey).toBe('q.dlq')
     expect(dead !== undefined && 'userId' in dead.options).toBe(false)
