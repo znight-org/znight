@@ -1285,7 +1285,8 @@ control:
   per group: `@Public() @Roles(['admin'])` on one method is ZNIGHT005 at build time.
 - **Route decorators are applied directly.** A `const` alias (`export const RequireRoles = Roles`)
   is the same decorator, but a function applying one (`const AdminOnly = () => Roles(['admin'])`,
-  NestJS's `applyDecorators` habit) is ZNIGHT005: the compiler never runs your code, so the decision
+  NestJS's `applyDecorators` habit) or one already applied (`const AdminOnly = Roles(['admin'])`,
+  used as `@AdminOnly`) is ZNIGHT005: the compiler never runs your code, so the decision
   would be dropped and the controller's weaker one would apply to the route.
 - **The nearest decision wins.** The effective metadata of a route (`ctx.route.meta`,
   `decorator.get(ctx)`) is made of the controller's entries whose group the route does not decide,

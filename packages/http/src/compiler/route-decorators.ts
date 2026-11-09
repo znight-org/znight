@@ -136,8 +136,11 @@ function resolve(ctx: Context, identity: string): RouteDecoratorResolution {
     return OTHER
   }
   const resolved = ctx.project.resolveIdentifier(scope, unwrap(callee) as unknown as EntityName, 'value')
-  if (resolved.identity?.identity !== Ids.createRouteDecorator) {
-    return OTHER
+  const calleeIdentity = resolved.identity?.identity
+  if (calleeIdentity !== Ids.createRouteDecorator) {
+    // `const AdminOnly = Roles(['admin'])`, applied as `@AdminOnly`: the decision is not visible either
+    const applied = calleeIdentity === undefined ? OTHER : resolveRouteDecorator(ctx, calleeIdentity)
+    return applied.kind === 'route' ? preApplied(declaration.name, applied, file.location(declaration.span)) : OTHER
   }
   const definition = file.location(declaration.span)
   const [keyNode, optionsNode, ...extra] = children(call, 'arguments')
@@ -192,6 +195,19 @@ function resolve(ctx: Context, identity: string): RouteDecoratorResolution {
     }
   }
   return { kind: 'route', key: key.value, ...parsed, name: declaration.name, definition }
+}
+
+/** `const AdminOnly = Roles(['admin'])`: a route decorator already applied, stored in a `const`. */
+function preApplied(name: string, inner: RouteDecoratorDefinition, definition: Location): RouteDecoratorResolution {
+  return {
+    kind: 'invalid',
+    message: `it is the route decorator @${inner.name} already applied, which the compiler cannot see: the "${inner.group}" decision would be ignored`,
+    hints: [
+      `Apply @${inner.name}(...) directly on the controller or the route`,
+      `Or make ${name} a route decorator of its own: export const ${name} = createRouteDecorator('${name.charAt(0).toLowerCase()}${name.slice(1)}', { group: '${inner.group}' })`,
+    ],
+    definition,
+  }
 }
 
 type Declaration = Extract<ReturnType<Project['lookupIdentity']>, { kind: 'declaration' }>['declarations'][number]

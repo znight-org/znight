@@ -703,8 +703,9 @@ options `{ group?, required? }` (`required` default `false`; `group` default the
 `'app/tag'`). Invalid values throw a `TypeError` when the module loads, and the compiler reports
 them as ZNIGHT005. A `const` alias of a route decorator (`const RequireRoles = Roles`) is the same
 route decorator; a function applying one (`const AdminOnly = () => Roles(['admin'])`, a `function`
-returning one) MUST be reported as a ZNIGHT005 error where it is applied, since the decision it
-applies would otherwise be silently dropped. The decorator carries `key`, `group`, `required` (`RouteDecoratorInfo`), `get(ctx)`
+returning one) or a route decorator already applied and stored in a `const` (`const AdminOnly =
+Roles(['admin'])`, applied as `@AdminOnly`) MUST be reported as a ZNIGHT005 error where it is
+applied, since the decision it applies would otherwise be silently dropped. The decorator carries `key`, `group`, `required` (`RouteDecoratorInfo`), `get(ctx)`
 (the effective value of the current route) and `meta(value?)` (the same metadata as data, `{ key,
 value, group, required }`, for plugin routes, §9.1). `get` accepts any `RouteMetaCarrier`
 (`{ readonly route?: { readonly meta: Readonly<Record<string, unknown>> } | undefined }`) and returns
