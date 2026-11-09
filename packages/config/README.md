@@ -394,7 +394,10 @@ export function consul(prefix: string): ConfigLoader {
 | `ConfigLoaderError`                              | `ZNIGHT006`, with `loader`                                            |
 
 `ConfigSource`: `get(key)` (raw string or structured value), `has(key)`, `keys()`, `origin(key)`
-(`process.env`, `.env.local`, `vault:secret/app`...) and optionally `describe()`.
+(`process.env`, `.env.local`, `vault:secret/app`...) and optionally `describe()`. `keys()` lists
+the paths of structured values without walking a cycle twice, and visits at most 10 000 entries
+per layer (values from a custom loader sharing sub-objects would otherwise list exponentially many
+paths).
 
 ## Errors
 

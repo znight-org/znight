@@ -2615,7 +2615,7 @@ class reads a snapshot of `process.env` when created (failure: ZNIGHT015 caused 
 interface ConfigSource {
   get(key: string): unknown
   has(key: string): boolean
-  keys(): readonly string[]
+  keys(): readonly string[] // Impl.: built-in sources walk cycles once and at most 10 000 entries per layer
   origin(key: string): string | undefined // 'process.env', '.env.local', 'vault:secret/app'...
   describe?(): string
 }
