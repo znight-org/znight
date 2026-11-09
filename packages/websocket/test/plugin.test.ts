@@ -472,3 +472,68 @@ describe('WebSocketPlugin handshakes in flight', () => {
     }
   })
 })
+
+describe('WebSocketPlugin route metadata', () => {
+  const FEED = 'src/feed.gateway.ts#FeedGateway'
+
+  class FeedGateway {}
+
+  /** `@Public() @Gateway('/feed')`, `@Authenticated()` on `comment.post`: one `access` group. */
+  const feed: GatewayDefinition = {
+    token: FEED,
+    path: '/feed',
+    protocol: 'events',
+    meta: { public: true },
+    handshakeGuards: [],
+    messageGuards: [],
+    handlers: [
+      { method: 'read', event: 'feed.read', meta: {}, guards: [], params: [], invoke: () => 'feed' },
+      {
+        method: 'post',
+        event: 'comment.post',
+        meta: { authenticated: true },
+        guards: [],
+        params: [],
+        invoke: () => 'posted',
+      },
+    ],
+  }
+
+  it("drops the gateway's entries of a group the handler decides (nearest wins per group)", async () => {
+    const seen: Record<string, unknown>[] = []
+    // the documented AuthGuard style: a public route lets anyone in
+    const auth = {
+      canHandle(ctx: WsMessageContext): boolean {
+        seen.push({ ...ctx.route.meta })
+        if (ctx.route.meta['public'] === true) return true
+        return ctx.connection.handshake.headers['authorization'] !== undefined
+      },
+    }
+    const app = await Application.create({
+      metadata: {
+        ...metadata,
+        providers: { [FEED]: singleton(FeedGateway) },
+        resolutionOrder: [FEED],
+        extensions: {
+          http: { controllers: [] },
+          websocket: {
+            gateways: [feed],
+            groups: { access: { keys: ['authenticated', 'public'], required: false } },
+          },
+        },
+      },
+      logger: silentLogger,
+      shutdown: { signals: false },
+      plugins: [WebSocketPlugin.configure({ messageGuards: [auth] }), HttpPlugin.configure({ port: 0 })],
+    })
+    try {
+      const websocket = app.getPlugin<WebSocketPlugin>('websocket') as WebSocketPlugin
+      await using anonymous = await websocket.connect('/feed')
+      expect(await anonymous.request('feed.read')).toBe('feed')
+      await expect(anonymous.request('comment.post')).rejects.toMatchObject({ code: 'FORBIDDEN' })
+      expect(seen).toEqual([{ public: true }, { authenticated: true }])
+    } finally {
+      await app.stop()
+    }
+  })
+})

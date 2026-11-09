@@ -19,7 +19,7 @@ export interface HandlerPlan {
   readonly definition: WsHandlerDefinition
   /** Plugin, gateway, then method guards. */
   readonly guards: readonly WsGuard[]
-  /** Gateway meta merged with the method's (nearest wins). */
+  /** The gateway entries of the groups the method does not decide, then the method entries. */
   readonly meta: Readonly<Record<string, unknown>>
 }
 

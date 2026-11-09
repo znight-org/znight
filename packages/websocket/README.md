@@ -99,7 +99,7 @@ export class ChatGateway {
 | `@Ctx()`                                | parameter     | The `WsMessageContext` of the message                                                               |
 | `@UseHandshakeGuard(...guards)`         | class         | HTTP guards (`CanActivate`) of the handshake, after the `HttpPlugin` global guards                  |
 | `@UseMessageGuard(...guards)`           | class, method | `WsGuard`s run before each handler (plugin, class, then method)                                     |
-| `createRouteDecorator` decorators       | class, method | Class: handshake and messages; method: its messages (nearest wins)                                  |
+| `createRouteDecorator` decorators       | class, method | Class: handshake and messages; method: its messages (nearest wins per group)                        |
 
 `@Gateway` options (static): `path`, `scope` (`'singleton'` or `'request'`: one instance per
 connection, which may inject `WsConnection`), `protocol` (`'events'` or `'raw'`), `protocols`

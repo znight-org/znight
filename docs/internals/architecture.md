@@ -820,7 +820,8 @@ type name in `@Resolver` is ZNIGHT005 in code-first mode.
 Handlers are inherited from analysable base classes (an abstract base needs no `@Gateway`). A
 method has one role; an event has one handler per gateway; a `raw` gateway has a single default
 handler and no event. Route decorators (`createRouteDecorator`) on the class decide the handshake
-and the messages, on a handler its messages only (nearest wins).
+and the messages, on a handler its messages only (nearest wins per group: a handler deciding a
+group drops the gateway's entries of that group, the `ctx.route.meta` rule of HTTP routes, §9.1).
 
 ### `@znight/messaging`
 

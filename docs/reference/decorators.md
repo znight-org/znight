@@ -255,7 +255,7 @@ Guide: [GraphQL](/guide/graphql)
 | `@Ctx()`                                            | parameter     | the `WsMessageContext` (`@OnMessage` handlers)                                                                                                |
 | `@UseHandshakeGuard(...guards)`                     | class         | HTTP guards (`CanActivate`) of the handshake, after the `HttpPlugin` global guards                                                            |
 | `@UseMessageGuard(...guards)`                       | class, method | `WsGuard`s (`canHandle(ctx)`) run before each handler                                                                                         |
-| `createRouteDecorator` decorators of `@znight/http` | class, method | class: decide the handshake and the messages; method: the messages of that handler (nearest wins)                                             |
+| `createRouteDecorator` decorators of `@znight/http` | class, method | class: decide the handshake and the messages; method: the messages of that handler (nearest wins per group)                                   |
 
 A gateway is a provider (`singleton` or `request`: one instance per connection). Handlers are
 inherited from base classes; `@OnConnect` and `@OnDisconnect` methods take `@Conn()` only. Invalid
