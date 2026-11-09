@@ -3659,9 +3659,9 @@ are ZNIGHT050):
   inbound event name that does not match the event name grammar (other than `$ping`) is a
   `BAD_FRAME` ("Invalid event name"), whatever the codec: it never reaches a handler, and the hook
   event carries no `event`. A codec
-  whose `decode` throws (instead of returning a failure) yields a logged `BAD_FRAME`, on the
-  rate-limit path too (it runs in the transport's message callback, where nothing may throw); an
-  `encode` failure of a runtime frame (reply, `$error`) is logged and the frame is not sent.
+  whose `decode` throws (instead of returning a failure) yields a `BAD_FRAME`, on the rate-limit
+  path too (it runs in the transport's message callback, where nothing may throw), logged at `warn`
+  at most once per connection (client input must not flood the logs); an `encode` failure of a runtime frame (reply, `$error`) is logged and the frame is not sent.
 - A close frame MUST carry a code a server may send (`1000`–`1014` except `1004`–`1006`, or
   `3000`–`4999`; `1011` replaces any other) and a reason of at most 123 UTF-8 bytes (cut on a code
   point boundary): reasons come from exception messages, which may hold client input. The close

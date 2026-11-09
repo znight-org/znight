@@ -442,6 +442,15 @@ export class WebSocketPlugin implements Plugin, PluginHttpUpgrades {
               requestId: conn.requestId,
             })
           },
+          logClientError: (message, error, conn) => {
+            ctx.logger.warn(`WebSocketPlugin: ${message}`, {
+              err: error,
+              gateway: name,
+              path,
+              connectionId: conn.id,
+              requestId: conn.requestId,
+            })
+          },
           closed: (conn, info) => this.#closed(plan, conn, info),
         }),
       }

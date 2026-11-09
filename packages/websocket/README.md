@@ -183,7 +183,8 @@ each recipient applies its own backpressure policy. Rooms are per gateway and pe
 
 A codec's `decode` returns a failure (`{ error: 'BAD_FRAME', message, id }`) for a frame it cannot
 read. One that throws instead is tolerated: the frame is answered with `BAD_FRAME` and the error is
-logged, as is an `encode` failure of a reply (the reply is then not sent).
+logged at `warn`, once per connection (the client chooses its frames). An `encode` failure of a
+reply is a server bug: it is logged at `error` every time (the reply is then not sent).
 
 The instance exposes `server` (`WsServer`), `transport`, `gateways`, `connections`, `stats()`
 (`{ connections, opened, closed, messagesIn, messagesOut, bytesIn, bytesOut, dropped,
