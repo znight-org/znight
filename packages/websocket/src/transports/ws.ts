@@ -19,6 +19,8 @@ import type {
 import { ErrorCode, ZnightError } from '@znight/core'
 import { HttpException } from '@znight/http'
 
+import { safeHeaders } from '../transport.ts'
+
 /** The part of a `ws` `WebSocket` the transport uses (no `@types/ws`). */
 interface WsSocket {
   /** `1` while open. */
@@ -201,7 +203,8 @@ export function wsTransport(options: WsTransportOptions = {}): WebSocketTranspor
       if (init.protocol === '') delete request.headers['sec-websocket-protocol']
       else request.headers['sec-websocket-protocol'] = init.protocol
       request.znightProtocol = init.protocol
-      pendingHeaders.set(request, init.headers)
+      // written raw by ws: a CR or LF from request data would inject headers
+      pendingHeaders.set(request, safeHeaders(init.headers))
       // ws destroys the socket without calling back when the client left or a header is malformed
       const ws = await new Promise<WsSocket>((resolve, reject) => {
         const aborted = (): void => reject(new HttpException(400, 'The WebSocket handshake was aborted'))

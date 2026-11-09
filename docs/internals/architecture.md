@@ -3568,7 +3568,9 @@ are ZNIGHT050):
   time the transport is called; a connection completed while the drain began is closed with
   `shutdown.code` / `shutdown.reason` at once. A transport's `accept` MUST settle: the `ws`
   transport rejects (`400`) when the socket closes before `ws` completes the handshake (client gone,
-  header `ws` refuses), and hands `ws` only the selected subprotocol.
+  header `ws` refuses), and hands `ws` only the selected subprotocol. Transports write only the
+  `101` headers whose name is an RFC 9110 token and whose value has no control character (CR, LF,
+  NUL...; the rule of `res.setHeader()`), and drop the others.
   Socket events run in the async context captured at the handshake (`AsyncLocalStorage.snapshot()`).
 - Each connection handles its messages in order (`concurrency`), `@OnConnect` first, through
   `hooks.run('websocket:message')` (wrappers) then `hooks.emit` (listeners): decode (`$ping`

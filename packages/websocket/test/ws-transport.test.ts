@@ -1,8 +1,10 @@
 /** The `ws` transport behind `HttpPlugin` upgrade routes, with a real client (on Node.js `node:http`). */
 import type { Plugin, ZnightMetadata } from '@znight/core'
-import type { HttpContext, PendingUpgrade, PluginHttpUpgrades } from '@znight/http'
+import type { HeaderValue, HttpContext, PendingUpgrade, PluginHttpUpgrades } from '@znight/http'
 import type { TransportSocket, WebSocketTransport } from '../src/index.ts'
 
+import { once } from 'node:events'
+import { connect } from 'node:net'
 import { Duplex } from 'node:stream'
 import { Application, silentLogger } from '@znight/core'
 import { HttpException, HttpPlugin } from '@znight/http'
@@ -24,7 +26,11 @@ const metadata: ZnightMetadata = {
 }
 
 /** A plugin echoing every frame through the transport. */
-function echoPlugin(transport: WebSocketTransport, closes: string[]): Plugin & PluginHttpUpgrades {
+function echoPlugin(
+  transport: WebSocketTransport,
+  closes: string[],
+  headers: Readonly<Record<string, HeaderValue>> = { 'x-gateway': 'echo' },
+): Plugin & PluginHttpUpgrades {
   transport.configure({ maxPayload: 1024, backpressureLimit: 1024 * 1024, heartbeatMs: 0 })
   return {
     name: 'echo',
@@ -41,7 +47,7 @@ function echoPlugin(transport: WebSocketTransport, closes: string[]): Plugin & P
               upgrade.native,
               {
                 protocol: offered.includes('echo.v1') ? 'echo.v1' : '',
-                headers: { 'x-gateway': 'echo' },
+                headers,
                 maxPayload: 1024,
               },
               {
@@ -95,6 +101,44 @@ describe('ws transport', () => {
       await Bun.sleep(20)
       expect(closes).toEqual(['4000:bye'])
     } finally {
+      await transport.close()
+      await app.stop()
+    }
+  })
+
+  it('drops 101 response headers whose name or value would break the response', async () => {
+    const transport = wsTransport()
+    const http = HttpPlugin.configure({ port: 0, host: '127.0.0.1', adapter: nodeAdapter() })
+    const app = await Application.create({
+      metadata,
+      logger: silentLogger,
+      shutdown: { signals: false },
+      plugins: [
+        http,
+        echoPlugin(transport, [], {
+          'x-gateway': 'echo',
+          'x-lang': 'en\r\nset-cookie: pwn=1',
+          'x-list': ['ok', 'no\nset-cookie: pwn=2'],
+          'x-bad name': 'value',
+        }),
+      ],
+    })
+    await app.start()
+    const socket = connect(http.address?.port ?? 0, '127.0.0.1')
+    try {
+      await once(socket, 'connect')
+      socket.write(
+        'GET /echo HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n' +
+          'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n',
+      )
+      const [chunk] = (await once(socket, 'data')) as [Buffer]
+      const lines = chunk.toString('latin1').split('\r\n\r\n')[0]?.split('\r\n') ?? []
+      expect(lines[0]).toBe('HTTP/1.1 101 Switching Protocols')
+      expect(lines).toContain('x-gateway: echo')
+      expect(lines).toContain('x-list: ok')
+      expect(lines.filter(line => /set-cookie|x-lang|x-bad/i.test(line))).toEqual([])
+    } finally {
+      socket.destroy()
       await transport.close()
       await app.stop()
     }
