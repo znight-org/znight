@@ -116,10 +116,16 @@ export interface YogaDriver extends GraphQLDriver {
  * an operation (CSRF). Errors thrown outside the engine (by Yoga or an Envelop plugin) are masked
  * like the engine's (`Unexpected error.` unless `exposeErrors`) and logged.
  *
+ * A response cache hit answers without the engine: guards, loaders, error mappers and the
+ * `graphql:operation` hook do not run. Key the cache per principal (`session`), never globally
+ * next to guards:
+ *
  * ```ts
  * GraphQLPlugin.configure({
  *   guards: [AccessGuard],
- *   driver: yogaDriver({ plugins: [useResponseCache({ session: () => null })] }),
+ *   driver: yogaDriver({
+ *     plugins: [useResponseCache({ session: request => request.headers.get('authorization') })],
+ *   }),
  * })
  * ```
  */
@@ -434,7 +440,7 @@ interface ResultPayload {
  * the engine Yoga's `parse`, `validate`, `execute` and `subscribe` (Envelop's `useEngine`), and a
  * guard installed after them, which refuses an operation that a plugin executed elsewhere
  * (`useGraphQlJit`): its resolvers would not get the `GraphQLContext`. Plugins wrapping the
- * execution (`useResponseCache`) keep working: they call the engine.
+ * execution (`useResponseCache`) keep working: they call the engine (on a cache miss only).
  */
 function engineFunctions(engine: GraphQLEngine, logger: CoreLogger): { plugin: YogaPlugin; guard: YogaPlugin } {
   const parse = engine.parse

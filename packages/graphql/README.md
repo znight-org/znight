@@ -1034,9 +1034,12 @@ GraphQLPlugin.configure({ driver: yogaDriver({ plugins: [usePersistedOperations(
   cache (Yoga's `parserAndValidationCache` is off), the engine's limits and introspection rule,
   rejected documents observed by the hook, one `graphql:operation` event per operation with
   `driver: 'yoga'` (`transport: 'sse'` for subscriptions). Plugins wrapping the execution
-  (`useResponseCache`) call the engine; an operation executed by a plugin that replaces it
-  (`useGraphQlJit`) fails with ZNIGHT066, logged once: its resolvers would not get the
-  `GraphQLContext`.
+  (`useResponseCache`) call the engine, but a response cache hit answers without it: guards,
+  loaders, error mappers, request-scoped providers and the hook do not run for that request, so
+  key the cache per principal (`session: request => request.headers.get('authorization')`),
+  never with one global session next to guards. An operation executed by a plugin that replaces
+  the execution (`useGraphQlJit`) fails with ZNIGHT066, logged once: its resolvers would not get
+  the `GraphQLContext`.
 - **Owned options**, refused with ZNIGHT066 (a type error first): `schema`, `context`,
   `graphqlEndpoint` (`path`), `maskedErrors` (the engine masks once, see below),
   `cors` (`HttpPlugin`'s), `maxRequestBodySize` (`http.bodyLimit`), `parserAndValidationCache`,
