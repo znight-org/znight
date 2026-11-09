@@ -195,6 +195,35 @@ describe('vault()', () => {
     }
   })
 
+  it('rejects a token or a namespace that is not a valid header value, without sending it or quoting it', async () => {
+    const calls: string[] = []
+    const spy = ((input: string | URL | Request) => {
+      calls.push(String(input))
+      return Promise.resolve(Response.json({ data: { data: {} } }))
+    }) as typeof fetch
+    const { dir, cleanup } = await tempDir({ token: 'hvs.SECRET\n# rotated by agent\n' })
+    try {
+      const cases: [Parameters<typeof vault>[0], Record<string, string>, string][] = [
+        [{ path: 'secret/app', token: 'hvs.SECRET\nx' }, {}, 'the "token" option'],
+        [{ path: 'secret/app', tokenFile: 'token' }, {}, 'the token file token'],
+        [{ path: 'secret/app' }, { VAULT_TOKEN: 'hvs.SECRET\u0000x' }, 'VAULT_TOKEN'],
+        [{ path: 'secret/app', token: TOKEN, namespace: 'team\r\nhvs.SECRET' }, {}, 'the "namespace" option'],
+        [{ path: 'secret/app', token: 'hvs.SECRET\u20ac' }, {}, 'the "token" option'],
+      ]
+      for (const [options, env, origin] of cases) {
+        const error = await caught(() =>
+          loadConfigSource([vault({ address, retries: 2, ...fast, fetch: spy, ...options })], { cwd: dir, env }),
+        )
+        expect(error).toBeInstanceOf(ConfigLoaderError)
+        expect(error.message).toContain(origin)
+        expect(error.message).not.toContain('hvs.SECRET')
+      }
+      expect(calls).toEqual([])
+    } finally {
+      cleanup()
+    }
+  })
+
   it('requires an address and a token', async () => {
     const noAddress = await caught(() => loadConfigSource([vault({ token: TOKEN, path: 'secret/myapp' })], { env: {} }))
     expect(noAddress).toBeInstanceOf(ConfigLoaderError)

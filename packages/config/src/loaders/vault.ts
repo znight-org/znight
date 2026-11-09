@@ -100,21 +100,47 @@ async function secretBody(response: Response): Promise<unknown> {
   }
 }
 
+/** Whether `value` holds a line break, NUL or a character above U+00FF (not allowed in a header value). */
+function isInvalidHeaderValue(value: string): boolean {
+  for (let index = 0; index < value.length; index++) {
+    const code = value.charCodeAt(index)
+    if (code === 0 || code === 10 || code === 13 || code > 0xff) return true
+  }
+  return false
+}
+
+/**
+ * Rejects a value `fetch` would refuse as a header. `fetch` quotes the value in its error (Node.js),
+ * so the check runs first and names where the value came from, never the value: it may be a secret.
+ */
+function headerValue(value: string, what: string, origin: string): string {
+  if (isInvalidHeaderValue(value)) {
+    throw new ConfigLoaderError(
+      'vault',
+      `the ${what} from ${origin} is not a valid HTTP header value (line break, NUL or a character above U+00FF)`,
+      { hints: [`Check ${origin}: it must hold the ${what} alone, on one line`] },
+    )
+  }
+  return value
+}
+
 async function resolveToken(context: ConfigLoaderContext, options: VaultLoaderOptions): Promise<string> {
-  if (options.token !== undefined && options.token !== '') return options.token
+  if (options.token !== undefined && options.token !== '') {
+    return headerValue(options.token, 'token', 'the "token" option')
+  }
   if (options.tokenFile !== undefined) {
     const text = await readOptionalFile('vault', resolveFile(context, options.tokenFile), options.tokenFile)
     const token = text?.trim()
     if (token === undefined || token === '') {
       throw new ConfigLoaderError('vault', `the token file ${options.tokenFile} is missing or empty`)
     }
-    return token
+    return headerValue(token, 'token', `the token file ${options.tokenFile}`)
   }
   const token = setting(context, undefined, 'VAULT_TOKEN')
   if (token === undefined) {
     throw new ConfigLoaderError('vault', 'no token: pass { token } or { tokenFile }, or set VAULT_TOKEN')
   }
-  return token
+  return headerValue(token, 'token', 'VAULT_TOKEN')
 }
 
 /**
@@ -158,7 +184,11 @@ export function vault(options: VaultLoaderOptions): ConfigLoader {
         Accept: 'application/json',
       }
       const namespace = setting(context, options.namespace, 'VAULT_NAMESPACE')
-      if (namespace !== undefined) headers['X-Vault-Namespace'] = namespace
+      if (namespace !== undefined) {
+        const origin =
+          options.namespace !== undefined && options.namespace !== '' ? 'the "namespace" option' : 'VAULT_NAMESPACE'
+        headers['X-Vault-Namespace'] = headerValue(namespace, 'namespace', origin)
+      }
       const fetchImpl = options.fetch ?? globalThis.fetch
       const kv2 = (options.kvVersion ?? 2) === 2
 

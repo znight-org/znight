@@ -2590,6 +2590,9 @@ region?, client?, clientConfig?, optional?, timeoutMs? })` (optional peer
 quote values: a JSON or YAML syntax error gives the file, the line, the column and a fixed reason
 (the YAML error code), never the parser message, which quotes the input (a secret, maybe), and the
 parser error is not kept as `cause`; YAML warnings are re-emitted the same way (`YAMLWarning`).
+`vault()` checks the token and the namespace before any request: a value `fetch` would refuse as a
+header (line break, NUL, a character above U+00FF) is a `ConfigLoaderError` naming its origin
+(option, token file, `VAULT_TOKEN`, `VAULT_NAMESPACE`), never the value.
 
 **Impl.** Bun loads `.env`, `.env.<mode>`, `.env.local` (not in `test`) and `.env.<mode>.local` into
 `process.env` before the application runs, with its own rules (mode `production` or `test` when
