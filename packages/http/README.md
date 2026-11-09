@@ -282,7 +282,9 @@ search(@Query(SearchQuery) query: z.output<typeof SearchQuery>) {
 
 - Handlers receive the schema **output**: defaults, transforms, coercions, stripped keys.
 - Async schemas (async refinements) are supported.
-- A failure answers `400` with one entry per issue (`path` is dotted, `''` for the root):
+- A failure answers `400` with one entry per issue (`path` is dotted, `''` for the root), the first
+  100 only: past that, the message gives the total (`Invalid body (524287 issues, the first 100
+  listed)`), so a large invalid array never produces a response larger than the request:
 
 ```json
 {
@@ -294,7 +296,7 @@ search(@Query(SearchQuery) query: z.output<typeof SearchQuery>) {
 ```
 
 The error is a `ValidationException` (a `BadRequestException`) carrying `location` (`body`,
-`query`, `param "id"`...) and the raw Standard Schema `issues`: map it to your own format with an
+`query`, `param "id"`...) and the raw Standard Schema `issues` (all of them): map it to your own format with an
 [exception mapper](#exception-mappers).
 
 A non-primitive `@Body()` / `@Query()` without schema is reported by the compiler (ZNIGHT017, an
@@ -344,7 +346,9 @@ interceptors, for routes declaring `@Body()` or [upload parameters](#uploads):
 
 **Header precedence:** content type < `@Header` < `ctx.setHeader()` < `HttpResponse` headers.
 Headers set with `ctx.setHeader()` / `ctx.appendHeader()` are also sent with error responses (a
-guard can set `www-authenticate` and throw). Every response carries the request id header and the
+guard can set `www-authenticate` and throw), except those describing the body the handler meant to
+send (`content-type`, `content-length`, `content-encoding`, `content-range`,
+`content-disposition`, `transfer-encoding`, `etag`, `last-modified`): the error body has its own. Every response carries the request id header and the
 [security headers](#security-headers) it does not set itself.
 
 ```ts
@@ -804,8 +808,12 @@ logs() {
 
 - **Backpressure**: the source is read only as fast as the client receives the data (on every
   adapter); a slow client never makes the server buffer the whole stream.
-- **Cancellation**: when the client disconnects, the source is cancelled (`return()` of the
-  iterator — `finally` blocks run —, `destroy()` of a `Readable`, `cancel()` of a Web stream).
+- **Cancellation**: when the client disconnects, `ctx.signal` aborts and the source is cancelled
+  (`return()` of the iterator — `finally` blocks run —, `destroy()` of a `Readable`, `cancel()` of a
+  Web stream). The request scope closes once the source stopped, or after 5 s with a warning
+  (`The response stream source did not stop within 5000 ms after its signal was aborted: make it
+  honour ctx.signal`): an async generator blocked in an `await` that ignores the signal cannot be
+  stopped before that `await` settles.
 - **Request scope**: request-scoped instances live until the stream has been fully sent or
   cancelled, and the source runs in the request scope (`Lazy<HttpContext>`, request-scoped
   providers and tracing contexts keep working while it produces chunks).
@@ -875,7 +883,9 @@ Uploaded files are buffered in memory. For files of hundreds of megabytes or mor
   store files under generated identifiers and keep the original name as metadata. When you must
   display or reuse it, `path.basename()` it and limit its characters.
 - **Never trust the client's media type.** `File.type` and `mimeTypes` filters rely on what the client
-  declares: they reject honest mistakes, not attackers. When the type matters, check the content
+  declares: they reject honest mistakes, not attackers (a malformed type such as
+  `image/png, text/html` matches no filter and becomes an empty `File.type`, but `image/*` accepts
+  `image/svg+xml`, which can carry scripts). When the type matters, check the content
   (magic numbers, e.g. with [`file-type`](https://github.com/sindresorhus/file-type)) and decode
   images with a library that re-encodes them.
 - **Confine downloads.** Always pass `root` to `HttpResponse.file()` when any part of the path comes
@@ -1273,6 +1283,10 @@ control:
 
 - **Decorators of a group are alternatives.** A route (or a controller) has at most one decision
   per group: `@Public() @Roles(['admin'])` on one method is ZNIGHT005 at build time.
+- **Route decorators are applied directly.** A `const` alias (`export const RequireRoles = Roles`)
+  is the same decorator, but a function applying one (`const AdminOnly = () => Roles(['admin'])`,
+  NestJS's `applyDecorators` habit) is ZNIGHT005: the compiler never runs your code, so the decision
+  would be dropped and the controller's weaker one would apply to the route.
 - **The nearest decision wins.** The effective metadata of a route (`ctx.route.meta`,
   `decorator.get(ctx)`) is made of the controller's entries whose group the route does not decide,
   then the route's entries. `@Public()` on a controller and `@Roles(['admin'])` on one of its
@@ -1436,7 +1450,9 @@ stops the walk at the last valid address. When the socket peer is trusted, `ctx.
 leftmost `x-forwarded-proto` (`http` or `https` only); otherwise it is the protocol of the
 connection. `true` is refused (ZNIGHT005): trusting every hop would let any client choose its
 `ctx.ip`. Without the option, `ctx.ip` is the adapter's address, so the proxy settings of Fastify
-(`trustProxy`) and Express (`trust proxy`) still apply. The `Forwarded` header (RFC 7239) is not
+(`trustProxy`) and Express (`trust proxy`) still apply; for the same reason, `trustProxy: true` in
+the options of `fastifyAdapter()` and an Express application whose `trust proxy` is `true` are
+refused (ZNIGHT005). Prefer the Znight option, the same on every adapter. The `Forwarded` header (RFC 7239) is not
 read.
 
 ## Interceptors
@@ -1668,7 +1684,8 @@ A plugin accepting WebSocket connections (`@znight/websocket`, RFC 0003) impleme
 optional `meta`, `guards`, `timeoutMs` and `precheck`, and an `accept(ctx, upgrade)` that completes
 the handshake on `upgrade.native` (a `node:http` socket, a `Bun.serve()` request or an in-memory
 peer) and calls `upgrade.hold(closed)`. Once `timeoutMs` answered `408`, `upgrade.expired` is
-`true` and `accept` must not complete the handshake. The handshake runs the request pipeline (hook, request scope,
+`true`, `ctx.signal` aborts (`kind: 'expired'`, so guards waiting on it stop) and `accept` must not
+complete the handshake. The handshake runs the request pipeline (hook, request scope,
 global and route guards); a refusal is an HTTP response, and a plain `GET` of an upgrade path answers
 `426`. Every built-in adapter supports upgrades; `HttpPlugin.upgradeInMemory()` runs a handshake
 without socket. Applications without upgrade routes pay nothing.
@@ -1700,7 +1717,7 @@ bun add fastify
 ```ts
 import { fastifyAdapter } from '@znight/http/fastify'
 
-HttpPlugin.configure({ adapter: fastifyAdapter({ options: { trustProxy: true } }) })
+HttpPlugin.configure({ adapter: fastifyAdapter({ options: { connectionTimeout: 30_000 } }), trustProxy: 1 })
 
 // or with your instance (plugins, hooks, native routes)
 const instance = Fastify()
@@ -1708,10 +1725,10 @@ await instance.register(helmet)
 HttpPlugin.configure({ adapter: fastifyAdapter({ instance }) })
 ```
 
-| Option     | Description                                                                    |
-| ---------- | ------------------------------------------------------------------------------ |
-| `instance` | An existing Fastify instance (plugins, hooks, native routes)                   |
-| `options`  | Options of the instance created otherwise (`trustProxy`, `https`, timeouts...) |
+| Option     | Description                                                                                       |
+| ---------- | ------------------------------------------------------------------------------------------------- |
+| `instance` | An existing Fastify instance (plugins, hooks, native routes)                                      |
+| `options`  | Options of the instance created otherwise (`https`, timeouts...; `trustProxy: true` is ZNIGHT005) |
 
 Znight routes are registered in an encapsulated context with their own body handling and 404
 handler, so your other routes keep Fastify's parsers. A `content-type` Fastify cannot parse (`foo`,
@@ -2027,7 +2044,8 @@ accepted too. `file?: File` / `File | undefined` makes an upload optional (`requ
   `@Controller()`, and those on the parameters of its handlers (`@OnMessage`) are left to that
   extension (`@znight/messaging` reports a `Headers` imported from `@znight/http`), unless the
   parameter is also read through its decorators or is optional. Route decorator groups: invalid
-  `createRouteDecorator` options (at the usage, related to the definition), two decisions of one
+  `createRouteDecorator` options (at the usage, related to the definition), a function applying a
+  route decorator (`const AdminOnly = () => Roles(['admin'])`: its decision would be dropped), two decisions of one
   group on a class or a method, two definitions of one key with different options, decorators of
   one group disagreeing on `required` (at the second definition). Cookies: an invalid cookie name
   (not an RFC 9110 token), `@SignedCookie` without name, `@Cookie` and `@SignedCookie` on one
@@ -2164,8 +2182,11 @@ Rules:
   `mimeTypes`) are omitted when absent (`exactOptionalPropertyTypes`).
 - `meta` values: a `createRouteDecorator` call without argument stores `true`. A decorator is a
   route decorator when its callee is a `const` initialised with a call to
-  `@znight/http#createRouteDecorator`; its `key` (first argument) and its options (second
-  argument) are static. A target holds at most one key per group.
+  `@znight/http#createRouteDecorator`, or a `const` alias of one (`const RequireRoles = Roles`);
+  its `key` (first argument) and its options (second argument) are static. A function applying a
+  route decorator (`const AdminOnly = () => Roles(['admin'])`, a `function` returning one) is
+  ZNIGHT005 where it is applied: the decision it applies is invisible to the compiler. A target
+  holds at most one key per group.
 - `groups` (`HttpRouteGroupDefinition`: `{ keys, required }`): a key belongs to one group at most;
   a key listed nowhere is its own group, not required. A group name is a letter followed by
   letters, digits, `_`, `.` or `-`, or the single key of the group (a decorator without `group`). The plugin computes the effective metadata

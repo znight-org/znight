@@ -2,7 +2,10 @@
 import type { TrustProxy } from '../src/index.ts'
 
 import { ErrorCode, ZnightError } from '@znight/core'
+import express from 'express'
 
+import { expressAdapter } from '../src/adapters/express.ts'
+import { fastifyAdapter } from '../src/adapters/fastify.ts'
 import { parseAddress, resolveTrustProxy } from '../src/proxy.ts'
 import { controller, createApp, metadata, provider, route, t } from './helpers.ts'
 import { describe, expect, it } from 'bun:test'
@@ -184,5 +187,35 @@ describe('ctx.ip and ctx.protocol', () => {
     } finally {
       await app.stop()
     }
+  })
+})
+
+describe('adapter proxy settings', () => {
+  const meta = metadata({}, [])
+
+  it('refuse a Fastify instance trusting every hop (ZNIGHT005)', () => {
+    let error: unknown
+    try {
+      fastifyAdapter({ options: { trustProxy: true } })
+    } catch (caught) {
+      error = caught
+    }
+    expect(error).toBeInstanceOf(ZnightError)
+    expect((error as ZnightError).code).toBe(ErrorCode.InvalidDecorator)
+    expect((error as ZnightError).message).toContain('trustProxy')
+    // a hop count or an address list stays allowed
+    expect(fastifyAdapter({ options: { trustProxy: '10.0.0.1' } }).name).toBe('fastify')
+  })
+
+  it('refuse an Express application trusting every hop (ZNIGHT005)', async () => {
+    const app = express()
+    app.set('trust proxy', true)
+    const error = await createApp(meta, { adapter: expressAdapter({ app }) }).then(
+      started => started.stop().then(() => undefined),
+      (caught: unknown) => caught,
+    )
+    expect(error).toBeInstanceOf(ZnightError)
+    expect((error as ZnightError).code).toBe(ErrorCode.InvalidDecorator)
+    expect((error as ZnightError).message).toContain('trust proxy')
   })
 })

@@ -36,6 +36,7 @@ import {
   addMissingHeaders,
   assignHeaders,
   ContentType,
+  errorContextHeaders,
   type SerializedReply,
   type SerializeOptions,
   serializeError,
@@ -828,7 +829,9 @@ export class Pipeline {
           ? { kind: 'route', plan }
           : { kind: 'error', error: new BadRequestException(`Malformed URL parameter "${malformed}"`) }
       let pending: PendingUpgradeState | undefined
+      let context: RequestContext | undefined
       const replied = this.#serve(request, url, plan.info, params, target, startTime, plan.body, ctx => {
+        context = ctx
         pending = new PendingUpgradeState(native, () => this.#upgradeHeaders(ctx))
         UPGRADES.set(ctx, pending)
       })
@@ -839,6 +842,8 @@ export class Pipeline {
       const expired = new Promise<AdapterReply>(resolve => {
         timer = setTimeout(() => {
           if (pending !== undefined) pending.expired = true
+          // the guards still running stop their work (a call to an auth service honouring ctx.signal)
+          context?.abort('expired')
           const body = { statusCode: 408, error: 'Request Timeout', message: 'WebSocket handshake timed out' }
           resolve(adapterReply(serializeError(408, body, 'GET'), null))
         }, timeoutMs)
@@ -1114,7 +1119,9 @@ export class Pipeline {
       return undefined
     }
     // files too: a file-backed Blob is read lazily, after the handler returned
-    const tracked = trackStream(body, run ?? captureContext(), () => ctx.abort('client'))
+    const tracked = trackStream(body, run ?? captureContext(), () => ctx.abort('client'), {
+      warn: message => this.#logger.warn(message, { requestId: x.requestId, path: ctx.path }),
+    })
     const session = serialized.sse
     const reply = adapterReply(serialized, tracked.stream, body instanceof Blob ? body : undefined)
     if (session !== undefined) {
@@ -1496,7 +1503,7 @@ export class Pipeline {
             routeMethod: ctx.method,
             status: undefined,
             headers: undefined,
-            context: ctx.hasResponseHeaders ? ctx.responseHeaders : undefined,
+            context: ctx.hasResponseHeaders ? errorContextHeaders(ctx.responseHeaders) : undefined,
           })
         }
         if (isHttpException(mapped)) return this.#renderException(mapped, ctx, error)
@@ -1545,7 +1552,8 @@ export class Pipeline {
       reply = serializeError(500, this.#internalBody(serializeFailure), ctx.method)
       extra = undefined
     }
-    if (ctx.hasResponseHeaders) assignHeaders(reply.headers, ctx.responseHeaders)
+    // not the content type or length of the body the handler meant to send: this one is the error's
+    if (ctx.hasResponseHeaders) assignHeaders(reply.headers, errorContextHeaders(ctx.responseHeaders))
     if (extra !== undefined) assignHeaders(reply.headers, extra)
     return reply
   }

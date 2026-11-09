@@ -31,7 +31,7 @@ await app.start() // SIGINT / SIGTERM: stop accepting connections, drain, close
 import { HttpPlugin } from '@znight/http'
 import { fastifyAdapter } from '@znight/http/fastify'
 
-HttpPlugin.configure({ adapter: fastifyAdapter({ options: { trustProxy: true } }), port: 3000 })
+HttpPlugin.configure({ adapter: fastifyAdapter(), port: 3000, trustProxy: 1 }) // one load balancer in front
 ```
 
 :::
@@ -141,8 +141,8 @@ create(@Body(CreateUser) input: CreateUser) {
 ```
 
 - Handlers receive the schema **output** (defaults, transforms, stripped keys); async schemas work.
-- Failures answer `400` with `details: [{ path, message }]` (a `ValidationException` carrying the raw
-  issues, to map with an exception mapper).
+- Failures answer `400` with `details: [{ path, message }]`, the first 100 issues (a
+  `ValidationException` carrying all the raw issues, to map with an exception mapper).
 - Schemas must be **exported** (the generated module imports them).
 - A non-primitive `@Body()` or `@Query()` without a schema is reported as
   [`ZNIGHT017`](/reference/error-codes#znight017): a warning, or an error with the compiler's
@@ -467,7 +467,9 @@ HttpPlugin.configure({ trustProxy: ['loopback', '10.0.0.0/8'] }) // the addresse
 in `ctx.protocol` (`'http'` or `'https'`), read from `x-forwarded-for` and `x-forwarded-proto` only
 when they come from a trusted proxy. It works the same way on every adapter: a number of hops, or
 IPv4 / IPv6 addresses, CIDR ranges and the aliases `'loopback'`, `'private'` and `'linklocal'`.
-`true` is refused at boot: trusting every hop lets any client choose its `ctx.ip`.
+`true` is refused at boot: trusting every hop lets any client choose its `ctx.ip`. The same goes for
+`trustProxy: true` in the options of `fastifyAdapter()` and for an Express application whose
+`trust proxy` is `true`.
 
 ## Cookies
 

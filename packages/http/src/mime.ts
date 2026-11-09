@@ -142,12 +142,22 @@ export function mediaTypeEssence(type: string): string {
   return (separator === -1 ? type : type.slice(0, separator)).trim().toLowerCase()
 }
 
-/** Whether the media type `type` (parameters ignored) matches one of `patterns` (`image/png`, `image/*`, `*\/*`). */
+/**
+ * Whether `type` is a single media type: a `type/subtype` token pair, optionally followed by
+ * parameters, without a comma (browsers read the last type of a list: `image/png, text/html` is HTML).
+ */
+export function isSingleMediaType(type: string): boolean {
+  return !type.includes(',') && MEDIA_TYPE.test(mediaTypeEssence(type))
+}
+
+/**
+ * Whether the media type `type` (parameters ignored) matches one of `patterns` (`image/png`,
+ * `image/*`, `*\/*`). A malformed type (not a single `type/subtype`) matches nothing.
+ */
 export function matchesMediaType(type: string, patterns: readonly string[]): boolean {
+  if (!isSingleMediaType(type)) return false
   const essence = mediaTypeEssence(type)
-  const slash = essence.indexOf('/')
-  if (slash <= 0 || slash === essence.length - 1) return false
-  const major = essence.slice(0, slash)
+  const major = essence.slice(0, essence.indexOf('/'))
   for (const raw of patterns) {
     const pattern = raw.toLowerCase()
     if (pattern === '*/*' || pattern === essence) return true

@@ -701,7 +701,10 @@ options `{ group?, required? }` (`required` default `false`; `group` default the
 `/^[A-Za-z][\w.-]*$/` applies to an explicit `group` only: a decorator without `group` (or whose
 `group` is its key) is its own group, named after its key, whatever the key (`'auth:public'`,
 `'app/tag'`). Invalid values throw a `TypeError` when the module loads, and the compiler reports
-them as ZNIGHT005. The decorator carries `key`, `group`, `required` (`RouteDecoratorInfo`), `get(ctx)`
+them as ZNIGHT005. A `const` alias of a route decorator (`const RequireRoles = Roles`) is the same
+route decorator; a function applying one (`const AdminOnly = () => Roles(['admin'])`, a `function`
+returning one) MUST be reported as a ZNIGHT005 error where it is applied, since the decision it
+applies would otherwise be silently dropped. The decorator carries `key`, `group`, `required` (`RouteDecoratorInfo`), `get(ctx)`
 (the effective value of the current route) and `meta(value?)` (the same metadata as data, `{ key,
 value, group, required }`, for plugin routes, §9.1). `get` accepts any `RouteMetaCarrier`
 (`{ readonly route?: { readonly meta: Readonly<Record<string, unknown>> } | undefined }`) and returns
@@ -1943,7 +1946,8 @@ not call `next()` gets the same reply as in the general pipeline.
 - Uploads (`multipart/form-data`, RFC 7578): Znight's own streaming parser, shared by every adapter
   (not `Request.formData()`). On upload routes, files are accepted only in the declared fields
   (400 otherwise), each `maxSize` / `maxFiles` (413), `mimeTypes` (415, compared with the declared
-  type) is enforced while reading; a second file for `@UploadedFile` → 400; non-multipart non-empty
+  type; a type that is not a single `type/subtype`, such as `image/png, text/html`, matches no
+  pattern and is kept as an empty `File.type`) is enforced while reading; a second file for `@UploadedFile` → 400; non-multipart non-empty
   bodies → 415. A 400 about a named file field (unexpected field, missing file, text value in a file
   field, second single file) carries `details: [{ path: <field>, message }]`, the issue shape of
   `ValidationException`; the 413 of a file carries `{ field, maxSize }` or `{ field, maxFiles }`, the
@@ -1959,7 +1963,9 @@ not call `next()` gets the same reply as in the general pipeline.
   (Web stream, Node.js `Readable` or async iterable; pull-based, cancelled when the client
   disconnects; chunked). A file (or any `Blob`) body is sent as a tracked stream like any other
   stream body: the request scope and the in-flight count last until it has been sent or the client
-  went away, so a request-scoped provider may own the file. Details:
+  went away, so a request-scoped provider may own the file. When the client went away, they last
+  until the cancelled source stopped, at most 5 s: past that bound a warning is logged (a source
+  blocked in an `await` that ignores `ctx.signal`) and the scope closes anyway. Details:
   [packages/http/README.md#files](../../packages/http/README.md#files).
 - Status precedence: `@HttpCode` > `HttpResponse.status` > default (201 for POST, 200 otherwise);
   `undefined` return → empty body (204 unless POST or `@HttpCode`). Objects → JSON, strings → text,
@@ -1968,9 +1974,14 @@ not call `next()` gets the same reply as in the general pipeline.
   and size, Web `Response` → sent as is.
 - Errors: `HttpException(status, message?, details?, { headers, cause })` and subclasses render
   `{ statusCode, error, message, details? }`; schema failures → 400 (`ValidationException`) with
-  `details: [{ path, message }]`, the shape also used by the upload 400s about a field; other errors → `{ statusCode: 500, error: 'Internal Server Error' }`
+  `details: [{ path, message }]` (the first 100 issues; past that the message is
+  `Invalid <location> (<n> issues, the first 100 listed)`, and `issues` keeps them all), the shape also used by the upload 400s about a field; other errors → `{ statusCode: 500, error: 'Internal Server Error' }`
   (message only with `exposeErrors: true`), sent to hooks and the logger. An exception mapper
-  returning an `HttpResponse` without status keeps the error's status.
+  returning an `HttpResponse` without status keeps the error's status. The headers set on the
+  context (`ctx.setHeader()`) are sent with an error reply and a mapper's reply, except those
+  describing the body the handler meant to send (`content-type`, `content-length`,
+  `content-encoding`, `content-range`, `content-disposition`, `transfer-encoding`, `etag`,
+  `last-modified`).
 - Response headers are validated by the plugin (after the handler, and after the headers added by
   hook wrappers), never by the adapter: a name or value that cannot be sent (CR/LF, a character
   above `\xff`) gives the same generic 500 on every adapter, the body is cancelled and the error
@@ -2056,7 +2067,9 @@ not call `next()` gets the same reply as in the general pipeline.
   not set them (`@Res()` raw replies excepted), so they lose to the handler, an interceptor, an
   exception or a hook wrapper.
 - **Trusted proxies** (option `trustProxy`, default `false`). `false`: `ctx.ip` is the adapter's
-  `request.ip` (Fastify and Express apply their own proxy settings) and `ctx.protocol` comes from
+  `request.ip` (Fastify and Express apply their own proxy settings; an adapter set to trust every hop,
+  `fastifyAdapter({ options: { trustProxy: true } })` or an Express application whose `trust proxy`
+  is `true`, is ZNIGHT005, at creation for Fastify and when the adapter starts for Express) and `ctx.protocol` comes from
   `request.encrypted`. A number (an integer ≥ 1) or a list of IPv4 / IPv6 addresses, CIDR ranges and
   the aliases `loopback` (127.0.0.0/8, ::1/128), `private` (10.0.0.0/8, 172.16.0.0/12,
   192.168.0.0/16, fc00::/7) and `linklocal` (169.254.0.0/16, fe80::/10) walk the list
@@ -2102,8 +2115,9 @@ not call `next()` gets the same reply as in the general pipeline.
   with the supported version, a valid `sec-websocket-key` else `400`), then `precheck`, the guards
   and `accept(ctx, upgrade)`; `accept` MUST call `upgrade.hold(closed)` once the transport completed
   the handshake, which keeps the request scope and the in-flight count open until `closed` settles.
-  When `timeoutMs` elapses first, the handshake is answered `408` and `upgrade.expired` becomes
-  `true`: `accept` MUST NOT complete it (it checks the flag after every `await`, right before the
+  When `timeoutMs` elapses first, the handshake is answered `408`, `ctx.signal` aborts with the kind
+  `expired` (the guards still running can stop their work) and `upgrade.expired` becomes `true`:
+  `accept` MUST NOT complete it (it checks the flag after every `await`, right before the
   transport, and refuses with a `4xx`).
   A refusal (an exception) is written as an HTTP response on the raw socket. A plain `GET` of an
   upgrade path answers `426`. `HttpPlugin.upgradeInMemory(request, { kind: 'memory', peer })` runs

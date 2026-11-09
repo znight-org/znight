@@ -280,6 +280,12 @@ class HonoHttpAdapter implements HonoAdapter {
       this.#fallback !== undefined && request.rawTarget && pathOf(request.url) !== pathOf(pathAndQuery(c.req.raw.url))
         ? await this.#fallback(request)
         : await handler(request)
+    if (c.finalized) {
+      // a middleware answered meanwhile (hono/timeout, then onError): Hono drops this reply without
+      // reading its body, so release it (request scope, in-flight count, event source)
+      discardStream(reply.body instanceof ReadableStream ? reply.body : null)
+      return c.res
+    }
     return this.#toResponse(c, reply)
   }
 

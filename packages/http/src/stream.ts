@@ -126,16 +126,34 @@ export interface TrackedStream {
 }
 
 /**
+ * How long a cancelled response stream waits for its source to stop (ms): an async generator blocked
+ * in an `await` that ignores `ctx.signal` never settles its `return()`, which would hold the request
+ * scope forever.
+ */
+export const STREAM_STOP_TIMEOUT_MS = 5_000
+
+/** Options of {@link trackStream}. */
+export interface TrackStreamOptions {
+  /** Bound of the source stop after a cancellation (ms). Default: {@link STREAM_STOP_TIMEOUT_MS}. */
+  readonly stopTimeoutMs?: number
+  /** Called when the source did not stop within the bound. */
+  readonly warn?: (message: string) => void
+}
+
+/**
  * Wraps a response body so that the pipeline knows when it has been fully sent (or abandoned) and
  * reads the source in `run` (the async context of the request scope, so that stream producers can
  * use request-scoped providers). The wrapper is pull-based (no read-ahead): backpressure is the
  * consumer's. A `Blob` is read through `blob.stream()`, opened on the first read only. `onCancel`
- * runs when the consumer cancels the stream (the client left), before the source is cancelled.
+ * runs when the consumer cancels the stream (the client left), before the source is cancelled; the
+ * stream is then over once the source stopped, or after `stopTimeoutMs` (with a warning) when it does
+ * not.
  */
 export function trackStream(
   body: ReadableStream<Uint8Array> | Blob,
   run: ContextRunner,
   onCancel?: () => void,
+  options: TrackStreamOptions = {},
 ): TrackedStream {
   let reader: ByteReader | undefined = body instanceof Blob ? undefined : body.getReader()
   let settle: (error: unknown) => void = () => undefined
@@ -170,19 +188,43 @@ export function trackStream(
       },
       async cancel(reason) {
         onCancel?.()
-        try {
-          const current = reader
-          if (current !== undefined) await run(() => current.cancel(reason))
-        } catch {
-          // the source failed while being cancelled: nothing left to send anyway
-        } finally {
-          finish()
-        }
+        const current = reader
+        if (current !== undefined) await stopSource(() => run(() => current.cancel(reason)), options)
+        finish()
       },
     },
     { highWaterMark: 0 },
   )
   return { stream, done }
+}
+
+/**
+ * Cancels a stream source and waits for it at most `stopTimeoutMs`. Never rejects: a source failing
+ * while being cancelled has nothing left to send anyway.
+ */
+async function stopSource(cancel: () => Promise<void>, options: TrackStreamOptions): Promise<void> {
+  const timeoutMs = options.stopTimeoutMs ?? STREAM_STOP_TIMEOUT_MS
+  let stopping: Promise<'stopped'>
+  try {
+    stopping = cancel().then(
+      () => 'stopped' as const,
+      () => 'stopped' as const,
+    )
+  } catch {
+    return
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<'timeout'>(resolve => {
+    timer = setTimeout(() => resolve('timeout'), timeoutMs)
+    ;(timer as { unref?: () => void }).unref?.()
+  })
+  const outcome = await Promise.race([stopping, timeout])
+  clearTimeout(timer)
+  if (outcome === 'timeout') {
+    options.warn?.(
+      `The response stream source did not stop within ${timeoutMs} ms after its signal was aborted: make it honour ctx.signal`,
+    )
+  }
 }
 
 /** A stream failing with `error` on first read. */

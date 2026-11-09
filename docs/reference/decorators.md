@@ -11,7 +11,11 @@ returning a decorator (`const Timed = () => Intercept(TimingInterceptor)`) is no
 compiler never runs your code, so it ignores the decorator with a
 [`ZNIGHT005`](/reference/error-codes#znight005) warning. Re-export it under another name instead
 (`export { Injectable as Service } from '@znight/core'`), or declare a shorthand in a package
-manifest ([below](#znight-core)).
+manifest ([below](#znight-core)). Your own route decorators
+([`createRouteDecorator`](#znight-http)) are stricter: a `const` alias
+(`export const RequireRoles = Roles`) is followed, and a function applying one
+(`const AdminOnly = () => Roles(['admin'])`) is a `ZNIGHT005` **error**, since dropping an access
+decision would let the controller's weaker decision apply to the route.
 
 Arguments come in two kinds:
 

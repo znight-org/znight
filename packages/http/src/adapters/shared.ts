@@ -417,6 +417,8 @@ export function lightStreamResponse(response: LightStreamResponse, signal?: Abor
     readable.destroy()
   }
   let finished = false
+  // the caller's signal may outlive this response (one signal for many requests): stop listening
+  const release = (): void => signal?.removeEventListener('abort', disconnect)
   const body = new ReadableStream<Uint8Array>(
     {
       start(controller) {
@@ -428,11 +430,13 @@ export function lightStreamResponse(response: LightStreamResponse, signal?: Abor
         readable.once('end', () => {
           if (finished) return
           finished = true
+          release()
           controller.close()
         })
         readable.once('error', error => {
           if (finished) return
           finished = true
+          release()
           controller.error(error)
         })
       },
@@ -441,6 +445,7 @@ export function lightStreamResponse(response: LightStreamResponse, signal?: Abor
       },
       cancel() {
         finished = true
+        release()
         disconnect()
       },
     },
@@ -471,12 +476,21 @@ export async function injectFetchStream(
   signal?.throwIfAborted()
   const normalized = await normalizeInject(request)
   const abort = new AbortController()
-  signal?.addEventListener('abort', () => abort.abort(signal.reason), { once: true })
+  const forward = (): void => abort.abort(signal?.reason)
+  // the caller's signal may outlive this response (one signal for many requests): stop listening
+  const release = (): void => signal?.removeEventListener('abort', forward)
+  signal?.addEventListener('abort', forward, { once: true })
   const init: RequestInit = { method: normalized.method, headers: normalized.headers, signal: abort.signal }
   if (normalized.payload !== undefined && normalized.method !== 'GET' && normalized.method !== 'HEAD') {
     init.body = normalized.payload
   }
-  const response = await fetch(new Request(`http://localhost${normalized.url}`, init))
+  let response: Response
+  try {
+    response = await fetch(new Request(`http://localhost${normalized.url}`, init))
+  } catch (error) {
+    release()
+    throw error
+  }
   const headers: Record<string, string | readonly string[]> = {}
   for (const [name, value] of response.headers) if (name !== 'set-cookie') headers[name] = value
   const cookies = response.headers.getSetCookie()
@@ -487,14 +501,24 @@ export async function injectFetchStream(
     {
       async pull(controller) {
         if (reader === undefined) {
+          release()
           controller.close()
           return
         }
-        const result = await reader.read()
-        if (result.done) controller.close()
-        else controller.enqueue(result.value)
+        let result: Awaited<ReturnType<typeof reader.read>>
+        try {
+          result = await reader.read()
+        } catch (error) {
+          release()
+          throw error
+        }
+        if (result.done) {
+          release()
+          controller.close()
+        } else controller.enqueue(result.value)
       },
       async cancel(reason) {
+        release()
         abort.abort(reason)
         await reader?.cancel(reason).catch(() => undefined)
       },

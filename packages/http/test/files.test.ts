@@ -26,7 +26,7 @@ import { isMediaTypePattern, mediaTypeEssence } from '../src/mime.ts'
 import { serializeResult } from '../src/serialize.ts'
 import { captureContext, discardStream, failedStream, toByteStream, trackStream } from '../src/stream.ts'
 import { createFilesDir } from './files-app.ts'
-import { caught } from './helpers.ts'
+import { caught, sleep } from './helpers.ts'
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
 
 const DECODER = new TextDecoder()
@@ -64,6 +64,10 @@ describe('media types', () => {
     expect(matchesMediaType('anything/at-all', ['*/*'])).toBe(true)
     expect(matchesMediaType('invalid', ['*/*'])).toBe(false)
     expect(matchesMediaType('image/', ['image/*'])).toBe(false)
+    // a single type only: browsers render the last type of a list
+    expect(matchesMediaType('image/png, text/html', ['image/*'])).toBe(false)
+    expect(matchesMediaType('image/png; x=1, text/html', ['image/*'])).toBe(false)
+    expect(matchesMediaType('image/p ng', ['image/*'])).toBe(false)
   })
 })
 
@@ -135,6 +139,15 @@ describe('Range header', () => {
   ])('ignores %s (the whole representation is sent)', header => {
     expect(parseRange(header, 300)).toBeUndefined()
   })
+
+  it.each([`bytes=${' '.repeat(16_000)}x`, `bytes=-${' '.repeat(16_000)}x`, `bytes=0${' '.repeat(16_000)}x-1`])(
+    'parses a long malformed header in linear time',
+    header => {
+      const started = performance.now()
+      expect(parseRange(header, 100)).toBeUndefined()
+      expect(performance.now() - started).toBeLessThan(20)
+    },
+  )
 
   it('reports unsatisfiable ranges', () => {
     expect(parseRange('bytes=300-', 300)).toBe('unsatisfiable')
@@ -540,6 +553,31 @@ describe('stream helpers', () => {
     const failed = trackStream(failedStream(failure), captureContext())
     expect(await caught(() => new Response(failed.stream).arrayBuffer())).toBe(failure)
     expect(await failed.done).toBe(failure)
+  })
+
+  it('bounds the stop of a source that ignores its cancellation', async () => {
+    // an async generator blocked in an await: return() waits behind the pending next()
+    const source = (async function* () {
+      yield 'a'
+      await new Promise(() => undefined)
+    })()
+    const warnings: string[] = []
+    const tracked = trackStream(toByteStream(source), captureContext(), undefined, {
+      stopTimeoutMs: 30,
+      warn: message => warnings.push(message),
+    })
+    const reader = tracked.stream.getReader()
+    expect(new TextDecoder().decode((await reader.read()).value)).toBe('a')
+    const pending = reader.read()
+    await sleep(10) // the source is now blocked in its await
+    const cancelling = reader.cancel('client gone')
+    const outcome = await Promise.race([tracked.done.then(() => 'done'), sleep(1_000).then(() => 'stuck')])
+    expect(outcome).toBe('done')
+    expect(warnings).toEqual([
+      'The response stream source did not stop within 30 ms after its signal was aborted: make it honour ctx.signal',
+    ])
+    expect((await pending).done).toBe(true)
+    await cancelling
   })
 
   it('tracks a Blob, opened on the first read only', async () => {

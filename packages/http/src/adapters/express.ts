@@ -20,6 +20,7 @@ import { createServer, type Server } from 'node:http'
 import express, { type Express, type NextFunction, type Request, type Response, type Router } from 'express'
 
 import { toRegExpSource } from '../path.ts'
+import { trustEveryProxyError } from '../proxy.ts'
 import { ConnectionTracker, closeServer, nodeAdapterRequest, writeNodeFailure, writeNodeReply } from './node-io.ts'
 import { bufferInjectStream, injectNodeStream, serverAddress } from './shared.ts'
 import { NodeUpgrades } from './upgrade-io.ts'
@@ -112,6 +113,10 @@ class ExpressHttpAdapter implements ExpressAdapter {
 
   #mount(): void {
     if (this.#mounted) return
+    // like the trustProxy option of HttpPlugin, trusting every hop would let any client choose its ctx.ip
+    if (this.app.get('trust proxy') === true) {
+      throw trustEveryProxyError('expressAdapter', "the Express setting 'trust proxy' set to true")
+    }
     this.#mounted = true
     // Express answers unmatched OPTIONS requests itself (200): route them to the Znight fallback
     this.router.options(/^.*$/, (request: Request, response: Response) =>
