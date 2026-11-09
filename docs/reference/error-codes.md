@@ -982,7 +982,7 @@ the schema, its library, the direction (input or output) and its source location
   fallback.
 - A converter throws (a Zod `.transform()` has no JSON Schema), or returns something other than an
   object.
-- A whole-object `@Query(S)`, `@Param(S)` or `@Headers(S)` schema is not an object schema, so it
+- A whole-object `@Query(S)`, `@Param(S)` or `@Cookie(S)` schema is not an object schema, so it
   cannot be split into parameters.
 
 Every failure is listed in one error:
