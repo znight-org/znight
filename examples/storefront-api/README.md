@@ -72,11 +72,15 @@ The production bundle runs on both runtimes, configured by environment variables
 
 ```sh
 bun run build
-export ADMIN_API_KEY=change-me CUSTOMER_TOKENS='{"alice":"change-me-too"}'
+export NODE_ENV=production ADMIN_API_KEY=change-me CUSTOMER_TOKENS='{"alice":"change-me-too"}'
 node --enable-source-maps dist/main.js   # Node.js
-bun dist/main.js                         # Bun
+bun --no-env-file dist/main.js           # Bun
 bun run start                            # znight start (same PID, signals forwarded)
 ```
+
+`--no-env-file` (and `env = false` in `bunfig.toml`) stops Bun from loading `.env.development` into
+`process.env` by itself when `NODE_ENV` is unset: the development keys of that file never apply to a
+production run.
 
 In production (`NODE_ENV=production`) the document is the file `znight build` wrote next to the
 bundle, `dist/openapi.json`: no schema conversion at boot, and the bytes served are the ones
