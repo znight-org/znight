@@ -1428,7 +1428,8 @@ type ProviderKey<T> = TypedToken<T> | ProviderClass<T> | ClassKey<T> // ClassKey
   singletons run concurrently). `only` instantiates the dependency closure of the given keys; other
   synchronous singletons (and the target of a `Lazy.get()` called during `init()`) are created on
   first use, async ones outside the closure are refused (ZNIGHT015) and a re-entrant creation is
-  ZNIGHT002. A singleton created on demand while a request scope is active is created outside of it
+  ZNIGHT002 (also for a request-scoped or transient provider whose construction requests itself
+  again, e.g. through `Lazy<T>.get()`). A singleton created on demand while a request scope is active is created outside of it
   (`AsyncLocalStorage.exit`): its factory, dependencies and interceptors never capture the scope of
   the request that used it first.
   Missing externals are reported together (ZNIGHT001 naming `providedBy`). Factory errors are
@@ -1444,8 +1445,9 @@ type ProviderKey<T> = TypedToken<T> | ProviderClass<T> | ClassKey<T> // ClassKey
   disposal failure rejects, with ZNIGHT021). `openScope` is the callback-free form for hot paths:
   the same scope, whose owner calls `run(fn, ...args)` (synchronous; the code and the continuations
   it creates see the scope) as many times as needed, then `close()`, which disposes the instances
-  created in it and returns `undefined` when there were none (nothing to wait for), otherwise a
-  promise rejecting with ZNIGHT021 when a disposal fails. Seed values are copied into the scope's
+  created in it and returns `undefined` when none of them has anything to dispose (no dispose
+  method, `[Symbol.asyncDispose]` or `[Symbol.dispose]`: nothing to wait for), otherwise a promise
+  rejecting with ZNIGHT021 when a disposal fails. Seed values are copied into the scope's
   map when it is first read.
 - **Lifecycle** is duck-typed on instantiated singletons (compiled providers and `@Provides`
   values): `onStart`, `onReady`, `onStop`, then disposal (`dispose` method name,
@@ -1554,7 +1556,9 @@ Sequence:
    providers `onStart` (resolution order) → plugins `onStart` → providers `onReady` → plugins
    `onReady`. `state = 'ready'`. A failure stops what was started, disposes, and rethrows.
 3. `stop()` (idempotent; waits for an in-progress `start()`, except when called from a start hook,
-   below): `state = 'stopping'` → plugins `onStop` (reverse) → providers `onStop` (only those whose
+   below; that wait is a step bounded like the others, labelled `Waiting for start()`: when it
+   times out, the remaining start hooks are skipped and the shutdown goes on with the rest of the
+   deadline, stopping what completed its `onStart`): `state = 'stopping'` → plugins `onStop` (reverse) → providers `onStop` (only those whose
    `onStart` ran) + disposal (always, reverse resolution order) → plugins `onDispose` (reverse) →
    `state = 'stopped'` (also when `stop()` rejects). Every step is attempted with `hookTimeoutMs`
    inside the global `timeoutMs` deadline (both MUST be non-negative numbers, ZNIGHT005 otherwise;

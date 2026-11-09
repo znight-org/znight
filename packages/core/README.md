@@ -153,7 +153,10 @@ token; keys may be tokens or classes. Override values that look like a provider 
 (start listening), then providers' and plugins' `onReady`. Signal handlers are installed when the start
 begins. If a step fails, what was started is stopped, everything is disposed and the error is rethrown.
 
-**`app.stop()`** is idempotent and waits for an in-progress start. It runs three phases:
+**`app.stop()`** is idempotent and waits for an in-progress start, at most `hookTimeoutMs` (a start
+hook that never settles cannot block the shutdown: past that budget, a `Waiting for start() timed out`
+failure is recorded, the remaining start hooks are skipped and what completed its `onStart` is
+stopped). It runs three phases:
 
 1. plugins' `onStop`, in reverse order (stop ingress, drain in-flight work);
 2. for each provider in reverse resolution order: `onStop` (if it was started), then disposal;
@@ -271,7 +274,8 @@ active scope (`get`, `set`, `has`). Plugins (HTTP, messaging) open the scopes fo
 `container.openScope(values?)` opens the same scope without a callback, for hot paths that stay
 synchronous as long as their work is (the HTTP pipeline): `run(fn, ...args)` calls `fn` in the scope
 and returns its result (its continuations stay in the scope), `close()` disposes the instances created
-in it. `close()` returns `undefined` when there is nothing to dispose, otherwise a promise that
+in it. `close()` returns `undefined` when there is nothing to dispose (no instance created in the scope
+has a dispose method, `[Symbol.asyncDispose]` or `[Symbol.dispose]`), otherwise a promise that
 rejects with `ZNIGHT021` when a disposal fails; it must be called once the work is over.
 
 ```ts

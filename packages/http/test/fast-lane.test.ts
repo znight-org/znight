@@ -516,8 +516,8 @@ describe('fast lane', () => {
     // a HEAD reply has no body: an object goes through the general pipeline, `undefined` stays
     ['an object from a @Head route (general pipeline)', { method: 'HEAD', url: '/head-object' }, '/head-object', false],
     ['undefined from a @Head route', { method: 'HEAD', url: '/head-nothing' }, '/head-nothing', true],
-    // the scope holds an instance: the request is over once it was disposed (asynchronously)
-    ['a request-scoped controller', { url: '/per-request' }, '/per-request', false],
+    // the scope holds an instance with nothing to dispose: the scope closes synchronously
+    ['a request-scoped controller', { url: '/per-request' }, '/per-request', true],
     [
       'a JSON body',
       { method: 'POST', url: '/create', headers: { 'content-type': 'application/json' }, body: '{"name":"Ada"}' },

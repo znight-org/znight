@@ -17,7 +17,10 @@ export interface ScopeContext {
   readonly closed: boolean
 }
 
-/** A request-scoped instance created by the container, disposed when its scope closes. */
+/**
+ * A request-scoped instance created by the container that has something to dispose (a dispose
+ * method or `[Symbol.asyncDispose]`/`[Symbol.dispose]`), disposed when its scope closes.
+ */
 export interface ScopedInstance {
   readonly token: Token
   readonly instance: unknown

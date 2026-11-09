@@ -338,4 +338,31 @@ describe('container integration', () => {
     expect(container.get<{ ping(): string }>(t('Service')).ping()).toBe('pong')
     expect(calls).toEqual(['ping'])
   })
+
+  for (const scope of ['request', 'transient'] as const) {
+    it(`disposes the instance when its interceptors cannot be applied (${scope})`, async () => {
+      let disposed = 0
+      const container = Container.create(
+        meta({
+          [t('Interceptor')]: factoryDef(() => ({ intercept: (invocation: MethodInvocation) => invocation.proceed() })),
+          [t('Service')]: factoryDef(
+            () => ({
+              ping: () => 'pong',
+              [Symbol.dispose]: () => {
+                disposed++
+              },
+            }),
+            [t('Interceptor')],
+            { scope, interceptors: { ping: { async: false, chain: [{ dep: 0 }] } } },
+          ),
+        }),
+      )
+      container.override(t('Interceptor'), { notAnInterceptor: true })
+      await container.init()
+      const error = (await caught(() => container.runInScope(() => container.get(t('Service'))))) as ZnightError
+      expect(error.code).toBe(ErrorCode.InstantiationFailed)
+      expect((error.cause as ZnightError).code).toBe(ErrorCode.InvalidDecorator)
+      expect(disposed).toBe(1)
+    })
+  }
 })

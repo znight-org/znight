@@ -472,6 +472,75 @@ describe('start / stop', () => {
     ])
   })
 
+  it('waits for a hanging start at most hookTimeoutMs, then shuts down what started', async () => {
+    const log: string[] = []
+    const app = await Application.create(
+      options(log, {
+        shutdown: { signals: false, hookTimeoutMs: 30, timeoutMs: 1000 },
+        plugins: [
+          plugin('a', log, { register: ctx => ctx.container.registerValue(LOGGER, 'l') }),
+          plugin('hung', log, { onStart: () => new Promise(() => {}) }),
+        ],
+      }),
+    )
+    log.length = 0
+    const start = app.start()
+    start.catch(() => undefined)
+    await sleep(1)
+    const started = performance.now()
+    const error = (await caught(() => app.stop())) as ZnightAggregateError
+    const elapsed = performance.now() - started
+    expect(elapsed).toBeGreaterThanOrEqual(25)
+    expect(elapsed).toBeLessThan(500)
+    expect(error.code).toBe(ErrorCode.LifecycleFailed)
+    expect(error.errors).toHaveLength(1)
+    expect((error.errors[0] as ZnightError).message).toContain('Waiting for start() timed out after 30ms')
+    expect(app.state).toBe('stopped')
+    // providers and plugin "a" started: they are stopped; "hung" never started, but is disposed
+    expect(log).toEqual([
+      'Db.onStart',
+      'Repo.onStart',
+      'a.onStart',
+      'hung.onStart',
+      'a.onStop',
+      'Repo.onStop',
+      'Repo.dispose',
+      'Db.onStop',
+      'Db.dispose',
+      'hung.onDispose',
+      'a.onDispose',
+    ])
+  })
+
+  it('skips the remaining start hooks when a start outlives the wait of stop()', async () => {
+    const log: string[] = []
+    let release: () => void = () => undefined
+    const app = await Application.create(
+      options(log, {
+        shutdown: { signals: false, hookTimeoutMs: 20, timeoutMs: 1000 },
+        plugins: [
+          plugin('late', log, {
+            register: ctx => ctx.container.registerValue(LOGGER, 'l'),
+            onStart: () =>
+              new Promise<void>(resolve => {
+                release = resolve
+              }),
+          }),
+        ],
+      }),
+    )
+    log.length = 0
+    const start = app.start()
+    await sleep(1)
+    await caught(() => app.stop())
+    release()
+    await start
+    expect(app.state).toBe('stopped')
+    expect(log).not.toContain('late.onReady')
+    expect(log).not.toContain('late.onStop')
+    expect(log).toContain('late.onDispose')
+  })
+
   it('times out hanging steps and keeps going', async () => {
     const log: string[] = []
     const app = await Application.create(
