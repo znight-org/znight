@@ -454,7 +454,7 @@ kafka({ bootstrapBrokers: ['localhost:9092'], groupId: 'billing' })
 | `retryTopicName`      | `` `${group}.retry` `` | Retry topic of a consumer group.                                                |
 | `deadLetterName`      | `` `${topic}.dlq` ``   | Default dead-letter topic.                                                      |
 | `maxInProcessDelayMs` | `0`                    | Longest retry delay waited in-process (blocks the partition).                   |
-| `maxRetryDelayMs`     | 15 min                 | Longest wait of a retry record.                                                 |
+| `maxRetryDelayMs`     | 15 min                 | Longest wait of a retry record, whatever its `x-znight-not-before` says.        |
 
 `@Consumer({ queue: 'orders', groupId: 'billing-orders' })` overrides the group of one consumer (two
 consumers cannot share a group). Offsets are committed manually, once a record is settled; records of
@@ -462,7 +462,9 @@ a partition are handled sequentially, partitions concurrently (`concurrency`). R
 non-blocking: the record goes to the group's retry topic with `x-znight-not-before`; a dedicated
 consumer (group `<group>.retry`, always from the beginning) waits until then without holding a
 concurrency slot, and the main and retry streams have their own back-pressure (a backlog of retries
-waiting for their time never pauses the main topic). After a rebalance, the records of a partition this
+waiting for their time never pauses the main topic). Only records of the retry topic honour
+`x-znight-not-before`, and none waits more than `maxRetryDelayMs` after it was fetched (a later
+not-before, from another producer or a skewed clock, is logged and cut short). After a rebalance, the records of a partition this
 member kept are fetched again from the committed offset: those already buffered or handled are
 skipped (committed offsets never move back); the buffered records of the partitions it lost are
 dropped, their new owner handles them. On shutdown, unsettled records are not committed and are

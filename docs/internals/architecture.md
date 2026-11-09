@@ -2516,8 +2516,10 @@ More on the drivers:
   buffered (or late) records of a revoked partition are dropped, its new owner handles them. The
   main and retry streams have their own buffer and thresholds (a backlog of retries waiting for
   their `x-znight-not-before` never pauses the main topic); a stream is paused again even if it was
-  paused, since the client resumes its streams after a rebalance. The not-before timer is capped at
-  2^31 − 1 ms.
+  paused, since the client resumes its streams after a rebalance. Only the retry stream honours
+  `x-znight-not-before` (the header of a main-topic record is ignored), and a retry record is due at
+  the latest `maxRetryDelayMs` after it was first fetched, whatever its header says (a warning is
+  logged). The not-before timer is capped at 2^31 − 1 ms.
 - **SQS.** The lease extension of a message stops, once any extension in flight completed, before
   its settlement is sent, so that it never overrides the visibility set by a retry or a release.
 
