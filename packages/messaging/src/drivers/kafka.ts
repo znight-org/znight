@@ -8,8 +8,9 @@
  *   concurrently up to the consumer concurrency.
  * - Retries are non-blocking: the record is produced to the group's retry topic (`<group>.retry`) with
  *   `x-znight-attempt` and `x-znight-not-before`, then committed. A dedicated retry consumer waits
- *   until `not-before` (bounded by `maxRetryDelayMs`) without blocking the main topic (each stream has
- *   its own back-pressure). Retried records lose their ordering relative to the partition.
+ *   until `not-before` (at most `maxRetryDelayMs` after the record was fetched) without blocking the
+ *   main topic (each stream has its own back-pressure). Records of the main topic never wait, whatever
+ *   their headers. Retried records lose their ordering relative to the partition.
  * - After a rebalance, records fetched again from the committed offset of a partition this member kept
  *   are skipped (already buffered or handled); buffered records of the partitions it lost are dropped.
  * - Dead letters are produced to `<topic>.dlq` (acks from all in-sync replicas), then committed.
@@ -406,6 +407,8 @@ function topicCreationFailures(error: unknown, response?: unknown): TopicCreatio
  */
 interface StreamState {
   readonly topic: string
+  /** Whether this is the retry topic: only its records honour `x-znight-not-before`. */
+  readonly retry: boolean
   readonly consumer: Consumer<string, Buffer, string, string>
   stream: MessagesStream<string, Buffer, string, string> | undefined
   /** Records of this stream in the partition queues (the ones being handled included). */
@@ -454,6 +457,8 @@ class KafkaSubscription {
   readonly #highWater: number
   readonly #lowWater: number
   readonly #idle = new Set<() => void>()
+  /** When each retry record waiting for its `not-before` becomes due (bounded by `maxRetryDelayMs`). */
+  readonly #due = new WeakMap<KafkaRecord, number>()
   #running = 0
   #active = true
   #closed: Promise<void> | undefined
@@ -469,17 +474,26 @@ class KafkaSubscription {
     fromBeginning: boolean,
   ): Promise<void> {
     const { topic, group, retryTopic } = this.#config
-    await this.#consume(createConsumer(group), topic, fromBeginning)
+    await this.#consume(createConsumer(group), topic, fromBeginning, false)
     // the retry topic only holds records of this group: always read it from the beginning
-    if (retryTopic !== undefined) await this.#consume(createConsumer(`${group}.retry`), retryTopic, true)
+    if (retryTopic !== undefined) await this.#consume(createConsumer(`${group}.retry`), retryTopic, true, true)
   }
 
   async #consume(
     consumer: Consumer<string, Buffer, string, string>,
     topic: string,
     fromBeginning: boolean,
+    retry: boolean,
   ): Promise<void> {
-    const source: StreamState = { topic, consumer, stream: undefined, buffered: 0, paused: false, assigned: undefined }
+    const source: StreamState = {
+      topic,
+      retry,
+      consumer,
+      stream: undefined,
+      buffered: 0,
+      paused: false,
+      assigned: undefined,
+    }
     this.#sources.push(source)
     consumer.on('consumer:group:join', () => this.#onGroupJoin(source))
     const stream = await consumer.consume({
@@ -599,7 +613,7 @@ class KafkaSubscription {
       queue.queued = false
       const head = queue.records[0]
       if (head === undefined) continue
-      const wait = notBefore(head) - Date.now()
+      const wait = queue.source.retry ? this.#dueTime(head) - Date.now() : 0
       if (wait > 0) {
         // a retry that is not due yet: wait without holding a slot (timers cannot wait more than 2^31 - 1 ms)
         queue.timer = setTimeout(
@@ -609,7 +623,7 @@ class KafkaSubscription {
             this.#enqueue(queue)
             this.#pump()
           },
-          Math.min(wait, this.#config.driver.capabilities.maxNativeDelayMs, MAX_TIMER_DELAY_MS),
+          Math.min(wait, MAX_TIMER_DELAY_MS),
         )
         continue
       }
@@ -620,6 +634,28 @@ class KafkaSubscription {
         () => undefined,
       )
     }
+  }
+
+  /**
+   * When a retry record becomes due: its `x-znight-not-before`, but never more than `maxRetryDelayMs`
+   * after it was first seen (the header may come from a producer that is not Znight, or a skewed clock).
+   */
+  #dueTime(record: KafkaRecord): number {
+    let due = this.#due.get(record)
+    if (due === undefined) {
+      const now = Date.now()
+      const latest = now + this.#config.driver.capabilities.maxNativeDelayMs
+      due = notBefore(record)
+      if (due > latest) {
+        this.#config.logger.warn(
+          `Kafka: the not-before of a retry record of ${record.topic}:${record.partition}@${record.offset} is ` +
+            `beyond maxRetryDelayMs, it is handled in ${latest - now} ms`,
+        )
+        due = latest
+      }
+      this.#due.set(record, due)
+    }
+    return due
   }
 
   async #work(queue: PartitionQueue, record: KafkaRecord): Promise<void> {

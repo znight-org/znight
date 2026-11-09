@@ -2512,18 +2512,31 @@ More on the drivers:
   Messages in flight on a lost channel are redelivered by RabbitMQ.
 - **RabbitMQ publications.** A returned (unroutable) message fails only its own `publish()`: it is
   matched with the oldest pending publication with the same exchange, routing key and message id.
+  A publication (publish, retry or dead-letter copy) not confirmed within `publishTimeoutMs`
+  (30 s; `0` disables) fails with `ZNIGHT021`, naming the broker alarm when the connection is
+  blocked (`connection.blocked`), so that publishers never hang on a blocked connection.
   Retried and dead-lettered copies carry the type that selected the handler (a type read from the
-  routing key, `typeFromRoutingKey`, included) and never the `CC` / `BCC` headers nor the broker's
-  `x-death` headers.
+  routing key, `typeFromRoutingKey`, included) and never the `CC` / `BCC` headers, the broker's
+  `x-death` headers nor the `user-id` property (validated by the broker against the publishing user,
+  a mismatch closes the publisher channel).
 - **Kafka.** Each partition remembers the next offset it expects: after a rebalance, records a kept
   partition fetches again from the committed offset are skipped (commits never move back), and the
   buffered (or late) records of a revoked partition are dropped, its new owner handles them. The
   main and retry streams have their own buffer and thresholds (a backlog of retries waiting for
   their `x-znight-not-before` never pauses the main topic); a stream is paused again even if it was
-  paused, since the client resumes its streams after a rebalance. The not-before timer is capped at
-  2^31 − 1 ms.
+  paused, since the client resumes its streams after a rebalance. Only the retry stream honours
+  `x-znight-not-before` (the header of a main-topic record is ignored), and a retry record is due at
+  the latest `maxRetryDelayMs` after it was first fetched, whatever its header says (a warning is
+  logged). The not-before timer is capped at 2^31 − 1 ms.
 - **SQS.** The lease extension of a message stops, once any extension in flight completed, before
   its settlement is sent, so that it never overrides the visibility set by a retry or a release.
+  The FIFO deduplication id of a dead-letter copy is a SHA-256 of the SQS `MessageId` (never the
+  `x-znight-id` a producer chose), characters SQS refuses are replaced (U+FFFD) in `x-znight-error`,
+  and a copy refused with a client fault is sent once more without `x-znight-error` and the headers
+  (a warning is logged), so that a message cannot make its own dead-lettering fail forever.
+  Closing a subscription, or the driver, waits for every received message, those of a FIFO group
+  still queued behind their predecessor included (handed to the stopped runtime, which releases
+  them), before the client is destroyed.
 
 ### 9.3 Config (`@znight/config`)
 

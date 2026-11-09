@@ -141,7 +141,7 @@ function prepareConsumer(
     ])
   }
   const exact = new Map<string, PreparedHandler>()
-  const patterns: { readonly regex: RegExp; readonly handler: PreparedHandler }[] = []
+  const patterns: { readonly matches: (type: string) => boolean; readonly handler: PreparedHandler }[] = []
   let fallback: PreparedHandler | undefined
   let maxAttempts = 1
   const nativeDelays = new Set<number>()
@@ -164,7 +164,7 @@ function prepareConsumer(
       if (patterns.some(entry => entry.handler.definition.type === type)) {
         throw duplicateType(name, type)
       }
-      patterns.push({ regex: patternToRegExp(type), handler })
+      patterns.push({ matches: patternMatcher(type), handler })
     } else {
       if (exact.has(type)) throw duplicateType(name, type)
       exact.set(type, handler)
@@ -199,7 +199,7 @@ function prepareConsumer(
       if (type === undefined) return fallback
       const handler = exact.get(type)
       if (handler !== undefined) return handler
-      for (const entry of patterns) if (entry.regex.test(type)) return entry.handler
+      for (const entry of patterns) if (entry.matches(type)) return entry.handler
       return fallback
     },
   }
@@ -263,13 +263,29 @@ function duplicateType(consumer: string, type: string): Error {
   return consumerError(`@Consumer ${consumer}: several @OnMessage handlers for type "${type}"`)
 }
 
-/** `order.*` → `/^order\..*$/`: `*` matches any sequence of characters. */
-function patternToRegExp(pattern: string): RegExp {
-  const source = pattern
-    .split('*')
-    .map(part => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&'))
-    .join('.*')
-  return new RegExp(`^${source}$`, 's')
+/**
+ * Matcher of a pattern (`order.*`): `*` matches any sequence of characters. The type comes from the
+ * broker, unbounded: the literal parts between the stars are searched left to right (the leftmost
+ * occurrence is always the best one), never backtracking like a regular expression would.
+ */
+function patternMatcher(pattern: string): (type: string) => boolean {
+  const parts = pattern.split('*')
+  const prefix = parts[0] as string
+  const suffix = parts[parts.length - 1] as string
+  const middle = parts.slice(1, -1).filter(part => part !== '')
+  return type => {
+    if (type.length < prefix.length + suffix.length || !type.startsWith(prefix) || !type.endsWith(suffix)) {
+      return false
+    }
+    const end = type.length - suffix.length
+    let index = prefix.length
+    for (const part of middle) {
+      const found = type.indexOf(part, index)
+      if (found === -1 || found + part.length > end) return false
+      index = found + part.length
+    }
+    return true
+  }
 }
 
 function resolveDeadLetter(

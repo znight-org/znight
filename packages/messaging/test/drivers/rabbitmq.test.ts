@@ -183,6 +183,23 @@ describe('recovery', () => {
     await driver.close()
   })
 
+  it('closes a connection that opens once the driver was closed during a reconnection', async () => {
+    const { driver } = await connected()
+    await driver.subscribe('q', ignore, options)
+    let open: (() => void) | undefined
+    fakeBroker.connectGate = new Promise<void>(resolve => {
+      open = resolve
+    })
+    fakeBroker.models[0]?.kill(new Error('CONNECTION_FORCED'))
+    await waitFor(() => fakeBroker.connects === 2)
+    await driver.close()
+    open?.()
+    await waitFor(() => fakeBroker.models.length === 2)
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(fakeBroker.models[1]?.closed).toBe(true)
+    expect(fakeBroker.consumers).toHaveLength(1)
+  })
+
   it('does not resubscribe a cancelled or closed subscription', async () => {
     const { driver } = await connected()
     const subscription = await driver.subscribe('q', ignore, options)
@@ -252,6 +269,23 @@ describe('republished copies', () => {
     await waitFor(() => deliveries.length === 1)
     await deliveries[0]?.retry({ attempt: 3, delayMs: 0, error: new Error('boom') })
     expect(fakeBroker.publications.at(-1)?.options.headers).toEqual({ 'x-tenant': 'acme', 'x-znight-attempt': '3' })
+    await driver.close()
+  })
+  it('never copies the user-id property, which the broker validates against the publishing user', async () => {
+    const { driver, deliveries } = await received()
+    fakeBroker.deliver('q', { properties: { messageId: 'm1', userId: 'partner', appId: 'billing' } })
+    await waitFor(() => deliveries.length === 1)
+    await deliveries[0]?.retry({ attempt: 2, delayMs: 0, error: new Error('boom') })
+    const retried = fakeBroker.publications.at(-1)?.options
+    expect(retried?.appId).toBe('billing')
+    expect(retried !== undefined && 'userId' in retried).toBe(false)
+
+    fakeBroker.deliver('q', { properties: { messageId: 'm2', userId: 'partner' } })
+    await waitFor(() => deliveries.length === 2)
+    await deliveries[1]?.deadLetter({ queue: 'q.dlq', reason: 'non-retryable', error: new Error('boom'), attempt: 1 })
+    const dead = fakeBroker.publications.at(-1)
+    expect(dead?.routingKey).toBe('q.dlq')
+    expect(dead !== undefined && 'userId' in dead.options).toBe(false)
     await driver.close()
   })
 })
@@ -445,6 +479,39 @@ describe('returned publications', () => {
     fakeBroker.missingQueues.delete('q.delay.10000')
     await deliveries[1]?.retry({ attempt: 2, delayMs: 10_000, error: new Error('x') })
     expect(declarations()).toHaveLength(2)
+    await driver.close()
+  })
+})
+
+describe('publish timeout', () => {
+  const settle = (promise: Promise<void>): Promise<string> =>
+    promise.then(
+      () => 'ok',
+      (error: unknown) => `failed: ${messageOf(error)}`,
+    )
+
+  it('fails a publication the broker does not confirm in time', async () => {
+    const { driver } = await connected({ publishTimeoutMs: 50 })
+    fakeBroker.confirmDelayMs = 1000
+    const started = Date.now()
+    expect(await settle(driver.publish('orders', outbound('evt-1')))).toBe(
+      'failed: ZNIGHT021: RabbitMQ: publishing to "orders" was not confirmed: no confirmation within 50 ms',
+    )
+    expect(Date.now() - started).toBeLessThan(1000)
+    await driver.close()
+  })
+
+  it('names the alarm of a blocked connection', async () => {
+    const { driver } = await connected({ publishTimeoutMs: 50 })
+    fakeBroker.confirmDelayMs = 1000
+    fakeBroker.models[0]?.emit('blocked', 'low on memory')
+    expect(await settle(driver.publish('orders', outbound('evt-1')))).toBe(
+      'failed: ZNIGHT021: RabbitMQ: publishing to "orders" was not confirmed: no confirmation within 50 ms ' +
+        '(the broker blocks the connection: low on memory)',
+    )
+    fakeBroker.models[0]?.emit('unblocked')
+    fakeBroker.confirmDelayMs = 0
+    expect(await settle(driver.publish('orders', outbound('evt-2')))).toBe('ok')
     await driver.close()
   })
 })

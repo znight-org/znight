@@ -423,6 +423,53 @@ describe('retry delays', () => {
     timeouts = undefined
   })
 
+  it('ignores x-znight-not-before on records of the main topic', async () => {
+    const driver = kafka({ bootstrapBrokers: ['kafka:9092'] })
+    await driver.connect({ logger: memoryLogger() })
+    const handled: string[] = []
+    const subscription = await driver.subscribe(
+      'orders',
+      async (delivery: DriverDelivery) => {
+        handled.push(String(delivery.body))
+        await delivery.ack()
+      },
+      { ...options, maxAttempts: 3 },
+    )
+    const [main] = streams as [FakeStream]
+    // written by a producer that is not Znight: only the retry topic schedules records
+    main.emit('data', record('orders', 0, 0, [['x-znight-not-before', String(Date.now() + 365 * 86_400_000)]]))
+    main.emit('data', record('orders', 0, 1))
+    await waitFor(() => handled.length === 2, 500)
+    expect(handled).toEqual(['0:0', '0:1'])
+    await subscription.cancel()
+    await subscription.close()
+    await driver.close()
+  })
+
+  it('waits at most maxRetryDelayMs for a retry record, whatever its not-before says', async () => {
+    const driver = kafka({ bootstrapBrokers: ['kafka:9092'], maxRetryDelayMs: 50 })
+    const logger = memoryLogger()
+    await driver.connect({ logger })
+    const handled: string[] = []
+    const subscription = await driver.subscribe(
+      'orders',
+      async (delivery: DriverDelivery) => {
+        handled.push(String(delivery.body))
+        await delivery.ack()
+      },
+      { ...options, maxAttempts: 3 },
+    )
+    const [, retry] = streams as [FakeStream, FakeStream]
+    const started = Date.now()
+    retry.emit('data', record('znight.orders.retry', 0, 0, [['x-znight-not-before', String(Date.now() + 500_000)]]))
+    await waitFor(() => handled.length === 1, 1000)
+    expect(Date.now() - started).toBeGreaterThanOrEqual(40)
+    expect(logger.entries.some(entry => entry.level === 'warn' && entry.message.includes('not-before'))).toBe(true)
+    await subscription.cancel()
+    await subscription.close()
+    await driver.close()
+  })
+
   it('never arms a timer longer than 2^31 - 1 ms for a retry that is not due', async () => {
     const driver = kafka({ bootstrapBrokers: ['kafka:9092'], maxRetryDelayMs: 40 * 24 * 3_600_000 })
     await driver.connect({ logger: memoryLogger() })

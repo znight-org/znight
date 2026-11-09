@@ -126,6 +126,27 @@ describe('handler selection by type', () => {
     expect(app.get(EventConsumer).calls).toEqual(['created:1', 'order.*', 'default', 'default'])
   })
 
+  it('matches patterns with several wildcards in linear time', async () => {
+    const { app, broker, driver } = await setup([
+      {
+        class: EventConsumer,
+        queue: 'events',
+        handlers: [handler('anyOrder', { type: '*.*.created' }), handler('fallback')],
+      },
+    ])
+    for (const type of ['a.b.created', '..created', 'a.b.c.created', 'a.b.created.x', 'a.created', '*.*.created']) {
+      await broker.publish('events', 0, { type })
+      await driver.idle()
+    }
+    expect(app.get(EventConsumer).calls).toEqual(['order.*', 'order.*', 'order.*', 'default', 'default', 'order.*'])
+    // a backtracking regular expression takes seconds on such a type (and blocks the event loop)
+    const started = performance.now()
+    await broker.publish('events', 0, { type: `${'.'.repeat(60_000)}x` })
+    await driver.idle()
+    expect(performance.now() - started).toBeLessThan(250)
+    expect(app.get(EventConsumer).calls.at(-1)).toBe('default')
+  })
+
   it('dead-letters messages no handler matches', async () => {
     const { app, broker, driver } = await setup([
       { class: EventConsumer, queue: 'events', handlers: [handler('created', { type: 'order.created' })] },

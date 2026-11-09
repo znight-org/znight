@@ -44,6 +44,8 @@ export class FakeBroker {
   connects = 0
   /** Number of `connect()` calls that fail before one succeeds. */
   connectFailures = 0
+  /** Awaited by `connect()` before it resolves (delays the connection). */
+  connectGate: Promise<void> | undefined
   readonly models: FakeModel[] = []
   readonly consumers: FakeConsumer[] = []
   readonly publications: FakePublication[] = []
@@ -72,6 +74,7 @@ export class FakeBroker {
     this.version = '4.1.8'
     this.connects = 0
     this.connectFailures = 0
+    this.connectGate = undefined
     this.models.length = 0
     this.consumers.length = 0
     this.publications.length = 0
@@ -330,6 +333,7 @@ export class FakeModel extends EventEmitter {
 export async function connect(): Promise<FakeModel> {
   await Promise.resolve()
   fakeBroker.connects++
+  await fakeBroker.connectGate
   if (fakeBroker.connectFailures > 0) {
     fakeBroker.connectFailures--
     throw new Error('connect ECONNREFUSED')

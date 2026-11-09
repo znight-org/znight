@@ -104,9 +104,13 @@ export function errorMessage(error: unknown): string {
   }
 }
 
-/** Truncates `text` to `max` characters (with an ellipsis). */
+/** Truncates `text` to `max` UTF-16 code units (with an ellipsis), never splitting a surrogate pair. */
 export function truncate(text: string, max: number): string {
-  return text.length <= max ? text : `${text.slice(0, Math.max(0, max - 1))}…`
+  if (text.length <= max) return text
+  let end = Math.max(0, max - 1)
+  const last = text.charCodeAt(end - 1)
+  if (last >= 0xd800 && last <= 0xdbff) end--
+  return `${text.slice(0, end)}…`
 }
 
 /** Whether `value` is a positive integer. */

@@ -51,7 +51,7 @@ import { connect as amqpConnect } from 'amqplib'
 
 import { brokerUnavailableError, consumerError } from '../errors.ts'
 import { attemptFromHeaders, MessagingHeaders } from '../headers.ts'
-import { errorMessage, sleep, truncate } from '../internal/async.ts'
+import { errorMessage, MAX_TIMER_DELAY_MS, sleep, truncate } from '../internal/async.ts'
 import { durationOption, MAX_ERROR_HEADER_LENGTH, readHeader, toHeaderRecord } from './shared.ts'
 
 /** Reconnection settings. */
@@ -92,6 +92,12 @@ export interface RabbitMQDriverOptions {
   readonly delayLevelPrefix?: string
   /** Default dead-letter queue name. Default: `${queue}.dlq`. */
   readonly deadLetterName?: (queue: string) => string
+  /**
+   * Longest wait for the broker confirmation of a publication (publish, retry, dead letter) before it
+   * fails, for instance while a memory or disk alarm blocks the connection. `0` waits forever.
+   * Default: 30 000 ms.
+   */
+  readonly publishTimeoutMs?: number
   /** Publish with `mandatory`: unroutable messages make `publish()` fail. Default: `true`. */
   readonly mandatory?: boolean
   /** Persistent messages (delivery mode 2). Default: `true`. */
@@ -107,6 +113,7 @@ export interface RabbitMQDriverOptions {
 /** Largest TTL RabbitMQ accepts (2^32 - 1 ms). */
 const MAX_TTL_MS = 4_294_967_295
 const DEFAULT_IN_PROCESS_DELAY_MS = 5000
+const DEFAULT_PUBLISH_TIMEOUT_MS = 30_000
 const DEFAULT_DELAY_LEVEL_PREFIX = 'znight.delays'
 /** Delay levels of delayed publications: level n waits 2^n ms, all of them together `MAX_TTL_MS`. */
 const DELAY_LEVELS = 32
@@ -161,6 +168,7 @@ export class RabbitMQDriver implements MessagingDriver {
   readonly #options: RabbitMQDriverOptions
   readonly #queueType: 'quorum' | 'classic'
   readonly #assertTopology: boolean
+  readonly #publishTimeoutMs: number
   readonly #subscriptions = new Set<ConsumerSubscription>()
   /** Retry delay queues already declared, by name. */
   readonly #delayQueues = new Map<string, Promise<void>>()
@@ -173,6 +181,8 @@ export class RabbitMQDriver implements MessagingDriver {
   /** Declaration of the delay levels on the current connection. */
   #delayLevels: Promise<void> | undefined
   #closing = false
+  /** Reason of the broker alarm blocking the current connection (`connection.blocked`). */
+  #blocked: string | undefined
   /** Running recovery loop (reconnection and resubscriptions). */
   #recovering: Promise<void> | undefined
 
@@ -189,6 +199,11 @@ export class RabbitMQDriver implements MessagingDriver {
     this.#options = options
     this.#queueType = options.queueType ?? 'quorum'
     this.#assertTopology = options.assertTopology ?? true
+    this.#publishTimeoutMs = durationOption(
+      options.publishTimeoutMs,
+      DEFAULT_PUBLISH_TIMEOUT_MS,
+      'rabbitmq publishTimeoutMs',
+    )
     this.capabilities = Object.freeze({
       nativeDelay: true,
       maxNativeDelayMs: MAX_TTL_MS,
@@ -257,17 +272,29 @@ export class RabbitMQDriver implements MessagingDriver {
       },
     }
     const model = await amqpConnect(this.#options.url, socketOptions)
+    if (this.#closing) {
+      // closed while connecting (a reconnection): nothing else would ever close this connection
+      try {
+        await model.close()
+      } catch {
+        // already closed
+      }
+      throw brokerUnavailableError('RabbitMQ: the driver is closed')
+    }
     model.on('error', (error: Error) => {
       this.#logger.error('RabbitMQ connection error', { err: error })
     })
     model.on('close', (error?: Error) => this.#onConnectionClosed(model, error))
     model.on('blocked', (reason: string) => {
+      if (this.#model === model) this.#blocked = reason
       this.#logger.warn(`RabbitMQ connection blocked: ${reason}`)
     })
     model.on('unblocked', () => {
+      if (this.#model === model) this.#blocked = undefined
       this.#logger.info('RabbitMQ connection unblocked')
     })
     this.#model = model
+    this.#blocked = undefined
     this.#publisher = undefined
     this.#delayQueues.clear()
     this.#delayLevels = undefined
@@ -320,6 +347,7 @@ export class RabbitMQDriver implements MessagingDriver {
             await this.#open()
             reconnected = true
           } catch (error) {
+            if (this.#closing) return
             delay = Math.min(delay * 2, maxDelay)
             this.#logger.warn(`RabbitMQ reconnection failed, next attempt in ${delay} ms`, { err: error })
             continue
@@ -456,6 +484,7 @@ export class RabbitMQDriver implements MessagingDriver {
       this.#pending.set(key, waiting)
     }
     waiting.push(pending)
+    let timer: ReturnType<typeof setTimeout> | undefined
     try {
       await new Promise<void>((resolve, reject) => {
         try {
@@ -465,7 +494,17 @@ export class RabbitMQDriver implements MessagingDriver {
           })
         } catch (error) {
           reject(error)
+          return
         }
+        const timeout = this.#publishTimeoutMs
+        if (timeout === 0) return
+        timer = setTimeout(
+          () => {
+            const blocked = this.#blocked === undefined ? '' : ` (the broker blocks the connection: ${this.#blocked})`
+            reject(new Error(`no confirmation within ${timeout} ms${blocked}`))
+          },
+          Math.min(timeout, MAX_TIMER_DELAY_MS),
+        )
       })
     } catch (error) {
       throw brokerUnavailableError(
@@ -473,6 +512,7 @@ export class RabbitMQDriver implements MessagingDriver {
         error,
       )
     } finally {
+      if (timer !== undefined) clearTimeout(timer)
       const index = waiting.indexOf(pending)
       if (index !== -1) waiting.splice(index, 1)
       if (waiting.length === 0 && this.#pending.get(key) === waiting) this.#pending.delete(key)
@@ -931,7 +971,7 @@ function definedProperties(properties: MessageProperties): Options.Publish {
   if (properties.type !== undefined) result.type = properties.type
   if (properties.appId !== undefined) result.appId = properties.appId
   if (properties.priority !== undefined) result.priority = properties.priority
-  if (properties.userId !== undefined) result.userId = properties.userId
+  // never `userId`: the broker closes the channel (406) when it is not the user of this connection
   return result
 }
 
