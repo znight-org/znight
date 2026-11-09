@@ -2530,6 +2530,9 @@ More on the drivers:
   `x-znight-id` a producer chose), characters SQS refuses are replaced (U+FFFD) in `x-znight-error`,
   and a copy refused with a client fault is sent once more without `x-znight-error` and the headers
   (a warning is logged), so that a message cannot make its own dead-lettering fail forever.
+  Closing a subscription, or the driver, waits for every received message, those of a FIFO group
+  still queued behind their predecessor included (handed to the stopped runtime, which releases
+  them), before the client is destroyed.
 
 ### 9.3 Config (`@znight/config`)
 

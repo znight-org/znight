@@ -1,6 +1,7 @@
 /**
  * SQS driver against a fake client (the driver accepts an `SQSClient`): ordering between the lease
- * extension of an in-flight message and its settlement, dead-letter copies that SQS always accepts. The behaviour of a real queue is covered by
+ * extension of an in-flight message and its settlement, dead-letter copies that SQS always accepts,
+ * FIFO messages waiting behind their group when the subscription stops. The behaviour of a real queue is covered by
  * `test/integration/sqs.test.ts`.
  */
 import type { SQSClient } from '@aws-sdk/client-sqs'
@@ -15,7 +16,7 @@ import {
 } from '@aws-sdk/client-sqs'
 
 import { sqs } from '../../src/drivers/sqs.ts'
-import { memoryLogger } from '../helpers.ts'
+import { deferred, memoryLogger } from '../helpers.ts'
 import { describe, expect, it, jest } from 'bun:test'
 
 const URL = 'https://sqs.eu-west-1.amazonaws.com/123456789012/orders'
@@ -311,5 +312,75 @@ describe('dead-letter copies', () => {
     ])
     expect(deleted).toEqual(['receipt-1'])
     expect(logger.entries.some(entry => entry.level === 'warn' && entry.message.includes('refused'))).toBe(true)
+  })
+})
+
+describe('FIFO groups on stop', () => {
+  it('closes once the messages queued behind their group were handed over and settled', async () => {
+    const calls: string[] = []
+    let closed = false
+    let delivered = false
+    const client = {
+      send(command: unknown, sendOptions?: { abortSignal?: AbortSignal }): Promise<unknown> {
+        if (command instanceof GetQueueAttributesCommand) return Promise.resolve({ Attributes: {} })
+        if (command instanceof ReceiveMessageCommand) {
+          if (!delivered) {
+            delivered = true
+            return Promise.resolve({
+              Messages: [1, 2, 3].map(index => ({
+                MessageId: `m${index}`,
+                ReceiptHandle: `receipt-${index}`,
+                Body: '{}',
+                Attributes: { ApproximateReceiveCount: '1', MessageGroupId: 'g' },
+                MessageAttributes: {},
+              })),
+            })
+          }
+          return new Promise((_resolve, reject) => {
+            sendOptions?.abortSignal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true })
+          })
+        }
+        let label = 'unexpected'
+        if (command instanceof DeleteMessageCommand) label = `delete ${command.input.ReceiptHandle}`
+        if (command instanceof ChangeMessageVisibilityCommand) {
+          label = `visibility ${command.input.VisibilityTimeout} ${command.input.ReceiptHandle}`
+        }
+        if (closed) calls.push(`after close: ${label}`)
+        return new Promise(resolve =>
+          setTimeout(() => {
+            calls.push(label)
+            resolve({})
+          }, 5),
+        )
+      },
+    }
+    const driver = sqs({
+      client: client as unknown as SQSClient,
+      queueUrls: { 'orders.fifo': `${URL}.fifo` },
+      waitTimeSeconds: 0,
+      extendVisibility: false,
+    })
+    await driver.connect({ logger: memoryLogger() })
+    const first = deferred()
+    let stopping = false
+    const subscription = await driver.subscribe(
+      'orders.fifo',
+      async (delivery: DriverDelivery) => {
+        // what the runtime does: handle the first message, release the ones handed over once stopping
+        if (stopping) return delivery.release()
+        await first.promise
+        await delivery.ack()
+      },
+      { ...options, concurrency: 3 },
+    )
+    while (!delivered) await new Promise(resolve => setTimeout(resolve, 2))
+    stopping = true
+    await subscription.cancel()
+    first.resolve()
+    await subscription.close()
+    await driver.close()
+    closed = true
+    await new Promise(resolve => setTimeout(resolve, 30))
+    expect(calls).toEqual(['delete receipt-1', 'visibility 0 receipt-2', 'visibility 0 receipt-3'])
   })
 })

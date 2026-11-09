@@ -101,6 +101,11 @@ interface SqsSubscription {
   readonly abort: AbortController
   /** Last delivery of each FIFO message group (serialised per group). */
   readonly groups: Map<string, Promise<void>>
+  /**
+   * Deliveries not finished yet, including FIFO messages waiting for their group (handed to the
+   * runtime only once their predecessor settled, possibly after the runtime stopped).
+   */
+  readonly handling: Set<Promise<void>>
   inflight: number
   active: boolean
   wake: (() => void) | undefined
@@ -178,6 +183,7 @@ export class SqsDriver implements MessagingDriver {
     this.#subscriptions.clear()
     for (const subscription of subscriptions) this.#stopPolling(subscription)
     await Promise.allSettled(subscriptions.map(subscription => subscription.loop))
+    await Promise.all(subscriptions.map(settled))
     if (this.#ownsClient) this.#client?.destroy()
     this.#client = undefined
   }
@@ -299,6 +305,7 @@ export class SqsDriver implements MessagingDriver {
       visibilityTimeout,
       abort: new AbortController(),
       groups: new Map(),
+      handling: new Set(),
       inflight: 0,
       active: true,
       wake: undefined,
@@ -315,6 +322,7 @@ export class SqsDriver implements MessagingDriver {
         this.#stopPolling(subscription)
         this.#subscriptions.delete(subscription)
         await subscription.loop
+        await settled(subscription)
       },
     }
   }
@@ -507,12 +515,14 @@ export class SqsDriver implements MessagingDriver {
         this.#logger.error(`SQS: unexpected failure handling message ${id}`, { err: error })
       })
       .finally(() => {
+        subscription.handling.delete(handled)
         if (lease !== undefined) clearInterval(lease)
         subscription.inflight--
         if (serialKey !== undefined && subscription.groups.get(serialKey) === handled)
           subscription.groups.delete(serialKey)
         subscription.wake?.()
       })
+    subscription.handling.add(handled)
     if (serialKey !== undefined) subscription.groups.set(serialKey, handled)
   }
 
@@ -554,6 +564,11 @@ export class SqsDriver implements MessagingDriver {
     }
     return input
   }
+}
+
+/** Resolves once every delivery of `subscription` finished (they never reject). */
+async function settled(subscription: SqsSubscription): Promise<void> {
+  while (subscription.handling.size > 0) await Promise.allSettled([...subscription.handling])
 }
 
 /** Queue name of a name, URL or ARN (last segment). */
