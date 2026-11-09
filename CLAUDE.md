@@ -17,8 +17,8 @@ ahead of time. It is the approach of Micronaut and Dagger, brought to TypeScript
 `reflect-metadata`, no `emitDecoratorMetadata`, wiring errors at build time.
 
 - Repository: <https://github.com/znight-org/znight> (MIT), npm scope `@znight`.
-- Published on npm (`0.6.0` at the time of writing), every `@znight/*` package versioned in lockstep
-  (changesets "fixed" group); `packages/core/package.json` holds the current version.
+- Published on npm, every `@znight/*` package versioned in lockstep (changesets "fixed" group);
+  `packages/core/package.json` holds the current version.
 - Runtime packages run on Node.js >= 24 and Bun >= 1.3, ESM only.
 
 ## Principles
@@ -55,21 +55,21 @@ Every change must keep these. A change that bends one starts with an RFC (see [R
 
 ### Packages (in this repository)
 
-| Package                 | What it is                                                                                                                                                                       |
-| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@znight/core`          | Container, application lifecycle, plugins, hooks, AOP (method interceptors), scopes, marker decorators, error catalogue                                                          |
-| `@znight/compiler`      | Analysis, binding, validation, code generation; programmatic API, Vite plugin (`znight()`), Bun preload (`@znight/compiler/bun`)                                                 |
-| `@znight/http`          | Controllers, Standard Schema validation, guards, interceptors, uploads, streams, cookies, SSE, route decisions, CORS, security headers; `/node`, `/fastify`, `/express`, `/hono` |
-| `@znight/openapi`       | OpenAPI 3.1 document built at compile time, served with Scalar or Swagger UI, emitted by `znight openapi` (RFC 0002)                                                             |
-| `@znight/messaging`     | Consumers, retries, dead letters; `/memory`, `/rabbitmq`, `/sqs`, `/kafka` drivers                                                                                               |
-| `@znight/schedule`      | `@Cron`, `@Interval`, `@Timeout`, `SchedulerRegistry`, lock stores, virtual clock for tests (RFC 0004)                                                                           |
-| `@znight/graphql`       | Code-first GraphQL (schema derived from TypeScript types, RFC 0005) or schema-first (SDL files, resolvers checked against them, RFC 0007), loaders, guards, HTTP and SSE         |
-| `@znight/events`        | In-process application events: `@OnEvent` listeners wired at build time, `EventPublisher`, inline or detached dispatch (RFC 0011)                                                |
-| `@znight/websocket`     | WebSocket gateways on the HTTP server (RFC 0003): handshakes through the HTTP pipeline, validated events, replies, rooms, backpressure; `/ws`                                    |
-| `@znight/config`        | Typed config classes loaded from env, `.env`, JSON/YAML, Vault, AWS Secrets Manager                                                                                              |
-| `@znight/observability` | Pino logger, Prometheus metrics (prom-client), OpenTelemetry tracing, `@Logged`, `@Traced`, `@Metric`                                                                            |
-| `@znight/testing`       | `TestBed` (auto-mocked dependencies), `TestApp` (in-memory end-to-end tests), mocks and spies                                                                                    |
-| `@znight/cli`           | The `znight` binary: `new`, `generate`, `g`, `dev`, `build`, `start`, `openapi`                                                                                                  |
+| Package                 | What it is                                                                                                                                                                                                               |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `@znight/core`          | Container, application lifecycle, plugins, hooks, AOP (method interceptors), scopes, marker decorators, error catalogue                                                                                                  |
+| `@znight/compiler`      | Analysis, binding, validation, code generation; programmatic API, Vite plugin (`znight()`), Bun preload (`@znight/compiler/bun`)                                                                                         |
+| `@znight/http`          | Controllers, Standard Schema validation, guards, interceptors, uploads, streams, cookies, SSE, route decisions, CORS, security headers; `/node`, `/fastify`, `/express`, `/hono`                                         |
+| `@znight/openapi`       | OpenAPI 3.1 document built at compile time, served with Scalar or Swagger UI, emitted by `znight openapi` (RFC 0002)                                                                                                     |
+| `@znight/messaging`     | Consumers, retries, dead letters; `/memory`, `/rabbitmq`, `/sqs`, `/kafka` drivers                                                                                                                                       |
+| `@znight/schedule`      | `@Cron`, `@Interval`, `@Timeout`, `SchedulerRegistry`, lock stores, virtual clock for tests (RFC 0004)                                                                                                                   |
+| `@znight/graphql`       | Code-first GraphQL (schema derived from TypeScript types, RFC 0005) or schema-first (SDL files, resolvers checked against them, RFC 0007), loaders, guards, HTTP and SSE; built-in executor or `/yoga` driver (RFC 0009) |
+| `@znight/events`        | In-process application events: `@OnEvent` listeners wired at build time, `EventPublisher`, inline or detached dispatch (RFC 0011)                                                                                        |
+| `@znight/websocket`     | WebSocket gateways on the HTTP server (RFC 0003): handshakes through the HTTP pipeline, validated events, replies, rooms, backpressure; `/ws`, `/bun`                                                                    |
+| `@znight/config`        | Typed config classes loaded from env, `.env`, JSON/YAML, Vault, AWS Secrets Manager                                                                                                                                      |
+| `@znight/observability` | Pino logger, Prometheus metrics (prom-client), OpenTelemetry tracing, `@Logged`, `@Traced`, `@Metric`                                                                                                                    |
+| `@znight/testing`       | `TestBed` (auto-mocked dependencies), `TestApp` (in-memory end-to-end tests), mocks and spies                                                                                                                            |
+| `@znight/cli`           | The `znight` binary: `new`, `generate`, `g`, `dev`, `build`, `start`, `openapi`                                                                                                                                          |
 
 Releases: [`RELEASING.md`](RELEASING.md). `main` is protected, so every change goes through a pull
 request whose CI (`ci.yml`, every check; the ruleset requires its `all-checks-complete` job)
@@ -144,13 +144,16 @@ examples/                runnable applications with their tests: rest-api, micro
                          graphql-api (code-first GraphQL on Hono, SSE subscriptions, schema.graphql),
                          realtime-chat (WebSocket gateways on node:http, tickets, a raw binary feed)
 benchmarks/              performance benchmarks, run by hand (not in CI): apps/ (znight, nestjs,
-                         hand-wired baseline), src/ (runner, report), results/results.json; they
-                         feed docs/benchmarks.md, the home page and the README (checked by docs/test)
+                         hand-wired baseline, and their GraphQL counterparts), src/ (runner, report),
+                         results/results.json; they feed docs/benchmarks.md, the home page and the
+                         README (checked by docs/test)
 docs/                    VitePress site: guide/, packages/, reference/, contributing/, test/,
                          internals/architecture.md (the normative spec, served at /contributing/architecture)
 rfcs/                    design documents, their status and the error code allocation (README.md)
-scripts/                 brand/ (logo generator), docs/diagrams/ (generates docs/public/diagrams/*.svg)
-tests/                   repository-wide tests: boundaries.test.ts, golden.test.ts, support/
+scripts/                 brand/ (logo generator), docs/diagrams/ (generates docs/public/diagrams/*.svg),
+                         release/ (pack, publish, smoke, status, trust, Dependabot changesets)
+tests/                   repository-wide tests: boundaries, golden, release-scripts, dependabot-changeset,
+                         support/
 ```
 
 ## How it works
@@ -304,11 +307,11 @@ Affects, Decision) and a row in `rfcs/README.md`. Implement it only once it is a
 | `bun run test:examples`          | The `test` script of every example                                                     |
 | `bun run test:e2e`               | Build, then the examples, the golden test and the CLI end-to-end test with their flags |
 | `bun run test:integration`       | Messaging drivers against real brokers (Docker required)                               |
-| `bun run typecheck`              | `tsc --noEmit` for every workspace (sources and tests) and `tests/`                    |
+| `bun run typecheck`              | `tsc --noEmit` for every workspace (sources and tests), `tests/` and `scripts/release` |
 | `bun run check`                  | Biome lint + format check (`check:fix` to fix, `lint`, `format`)                       |
 | `bun run docs:dev`               | Documentation site in development mode                                                 |
 | `bun run docs:build`             | Production build of the site (fails on dead links)                                     |
-| `bun run --cwd benchmarks bench` | The benchmarks (about 40 minutes, by hand), then `report` to update the docs           |
+| `bun run --cwd benchmarks bench` | The benchmarks (about an hour, by hand), then `report` to update the docs              |
 
 Targeted runs: `bun test --conditions=@znight/source ./packages/http` (one package),
 `bunx biome check --diagnostic-level=error <paths>`, `bun run --cwd packages/http typecheck`.
@@ -333,7 +336,9 @@ and docs updated with the code.
 - **The `@znight/source` condition.** Each package exports its TypeScript sources under the
   `@znight/source` condition, before `types`/`default` (`dist`). Without
   `--conditions=@znight/source`, `bun test` resolves `@znight/*` imports to `dist`, which may be
-  missing or stale. The root scripts and the example `test` scripts pass the flag; do the same.
+  missing or stale. The root scripts and most example `test` scripts pass the flag; do the same.
+  `examples/microservice` and the `examples/monorepo` workspaces do not and test against `dist`:
+  run `bun run build` before testing them after a package change.
 - **A `tsconfig.json` type-checking the sources through the condition**
   (`customConditions: ["@znight/source"]`, like the examples) also needs
   `allowImportingTsExtensions` (hence `noEmit`), since the sources import each other with `.ts`
@@ -368,10 +373,11 @@ and docs updated with the code.
   [`docs/contributing/index.md`](docs/contributing/index.md).
 - Roadmap: [`docs/roadmap.md`](docs/roadmap.md); RFCs: [`rfcs/README.md`](rfcs/README.md) (0001
   security, 0002 openapi, 0003 websocket, 0004 schedule, 0005 graphql, 0006 cookies and SSE, 0007
-  graphql schema-first, 0008 graphql errors as data, 0009 graphql drivers).
+  graphql schema-first, 0008 graphql errors as data, 0009 graphql drivers, 0010 custom parameter
+  decorators, 0011 application events).
 - Guides (`docs/guide/`): introduction, getting-started, project-structure, dependency-injection,
-  scopes, lifecycle, plugins, aop, compiler, data-access, testing, security, scheduling,
-  deployment, migrating-from-nestjs.
+  scopes, lifecycle, plugins, aop, custom-parameters, compiler, data-access, testing, security,
+  scheduling, graphql, websockets, events, deployment, migrating-from-nestjs.
 - Reference: `docs/packages/<name>.md` (one page per package), `docs/reference/decorators.md`,
   `docs/reference/error-codes.md`; the package READMEs (`packages/<name>/README.md`) hold the full
   details.

@@ -185,16 +185,16 @@ await using app = await TestApp.create({
 when the start fails because a port is taken (`EADDRINUSE` anywhere in the `cause` chain), the error
 carries a hint naming these options.
 
-| Option      | Type                              | Description                                                                                                                                                                                                                                                                                                                                    |
-| ----------- | --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `metadata`  | `ZnightMetadata`                  | **Required.** The generated metadata.                                                                                                                                                                                                                                                                                                          |
-| `plugins`   | `Plugin[]`                        | Plugins, as in `Application.create`.                                                                                                                                                                                                                                                                                                           |
-| `providers` | `Map` / `[key, value][]` / record | Values for externals (`Logger`, `ConfigSource`...), as in `Application.create`.                                                                                                                                                                                                                                                                |
-| `overrides` | `Map` / `[key, value][]` / record | Values or provider definitions replacing providers, applied last. Overridden providers are instantiated at boot.                                                                                                                                                                                                                               |
-| `only`      | `'all'` \| `(Class \| Token)[]`   | Providers instantiated at boot (with their dependencies), plus the overrides and the plugin roots (below). Default: the entry points of the metadata (HTTP controllers with their guards and interceptors, message consumers, hosts of scheduled jobs, GraphQL resolvers with their guards and loaders), or every provider when there is none. |
-| `start`     | `boolean`                         | Run `app.start()` (plugins listen/subscribe). Default `true`; `false` stops after `onBootstrap`.                                                                                                                                                                                                                                               |
-| `logger`    | `CoreLogger`                      | Default: a console logger writing warnings and errors only.                                                                                                                                                                                                                                                                                    |
-| `shutdown`  | `{ timeoutMs?, hookTimeoutMs? }`  | Shutdown timeouts.                                                                                                                                                                                                                                                                                                                             |
+| Option      | Type                              | Description                                                                                                                                                                                                                                                                                                                                                                                                |
+| ----------- | --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `metadata`  | `ZnightMetadata`                  | **Required.** The generated metadata.                                                                                                                                                                                                                                                                                                                                                                      |
+| `plugins`   | `Plugin[]`                        | Plugins, as in `Application.create`.                                                                                                                                                                                                                                                                                                                                                                       |
+| `providers` | `Map` / `[key, value][]` / record | Values for externals (`Logger`, `ConfigSource`...), as in `Application.create`.                                                                                                                                                                                                                                                                                                                            |
+| `overrides` | `Map` / `[key, value][]` / record | Values or provider definitions replacing providers, applied last. Overridden providers are instantiated at boot.                                                                                                                                                                                                                                                                                           |
+| `only`      | `'all'` \| `(Class \| Token)[]`   | Providers instantiated at boot (with their dependencies), plus the overrides and the plugin roots (below). Default: the entry points of the metadata (HTTP controllers with their guards and interceptors, message consumers, hosts of scheduled jobs, GraphQL resolvers with their guards and loaders, WebSocket gateways with their handshake and message guards), or every provider when there is none. |
+| `start`     | `boolean`                         | Run `app.start()` (plugins listen/subscribe). Default `true`; `false` stops after `onBootstrap`.                                                                                                                                                                                                                                                                                                           |
+| `logger`    | `CoreLogger`                      | Default: a console logger writing warnings and errors only.                                                                                                                                                                                                                                                                                                                                                |
+| `shutdown`  | `{ timeoutMs?, hookTimeoutMs? }`  | Shutdown timeouts.                                                                                                                                                                                                                                                                                                                                                                                         |
 
 Keys of `providers` and `overrides` may be classes, tokens, aliases or unique display names
 (`'UserRepository'`), like in `TestBed`; other strings are used as tokens (values for tokens
@@ -303,6 +303,27 @@ test('uploads and downloads', async () => {
   expect(download.status).toBe(206)
   expect(download.bytes.byteLength).toBe(100)
 })
+```
+
+### WebSocket connections
+
+`app.connect(path, { query?, headers?, protocols?, origin?, cookies? })` runs the real WebSocket
+handshake of `WebSocketPlugin` (`@znight/websocket`) through the HTTP pipeline, in memory, and
+resolves with a `TestWsClient`: `request(event, data?)` (the reply's data; rejects with a
+`WsRequestError` `{ code, message, details }`), `next(event?)` (the oldest server event not taken
+yet: frames are buffered from the start), `send`, `sendRaw`, `nextRaw`, `frames`, `close()` and
+`closed`. A refused handshake rejects with a `WsHandshakeError` (`status`, `headers`, `body`,
+`json()`). `connectWebSocket(url, { headers?, protocols? })` gives the same client over the network
+(the global `WebSocket` of Node.js and Bun).
+
+```ts
+import { connectWebSocket, WsHandshakeError } from '@znight/testing'
+
+await using alice = await app.connect('/chat', { protocols: ['chat.v1'] })
+expect(await alice.request('room.join', { room: 'general' })).toEqual({ members: 1 })
+await expect(app.connect('/chat', { origin: 'https://evil.example' })).rejects.toBeInstanceOf(WsHandshakeError)
+
+await using remote = await connectWebSocket(`ws://127.0.0.1:${port}/chat`, { protocols: ['chat.v1'] })
 ```
 
 ## Mocks
@@ -425,27 +446,7 @@ without importing any feature package:
 | `extensions.messaging.consumers[].token`                                                           | `TestApp` boot roots                         |
 | `extensions.schedule.jobs[].token`                                                                 | `TestApp` boot roots                         |
 | `extensions.graphql.types[kind: 'object'].fields[].resolver.{ token, guards, loaders }`            | `TestApp` boot roots                         |
-
-### WebSocket connections
-
-`app.connect(path, { query?, headers?, protocols?, origin?, cookies? })` runs the real WebSocket
-handshake of `WebSocketPlugin` (`@znight/websocket`) through the HTTP pipeline, in memory, and
-resolves with a `TestWsClient`: `request(event, data?)` (the reply's data; rejects with a
-`WsRequestError` `{ code, message, details }`), `next(event?)` (the oldest server event not taken
-yet: frames are buffered from the start), `send`, `sendRaw`, `nextRaw`, `frames`, `close()` and
-`closed`. A refused handshake rejects with a `WsHandshakeError` (`status`, `headers`, `body`,
-`json()`). `connectWebSocket(url, { headers?, protocols? })` gives the same client over the network
-(the global `WebSocket` of Node.js and Bun).
-
-```ts
-import { connectWebSocket, WsHandshakeError } from '@znight/testing'
-
-await using alice = await app.connect('/chat', { protocols: ['chat.v1'] })
-expect(await alice.request('room.join', { room: 'general' })).toEqual({ members: 1 })
-await expect(app.connect('/chat', { origin: 'https://evil.example' })).rejects.toBeInstanceOf(WsHandshakeError)
-
-await using remote = await connectWebSocket(`ws://127.0.0.1:${port}/chat`, { protocols: ['chat.v1'] })
-```
+| `extensions.websocket.gateways[].{ token, handshakeGuards, messageGuards, handlers[].guards }`     | `TestApp` boot roots                         |
 
 Runtime contract with `@znight/http`: the plugin named `'http'` exposes
 `inject(request: { method: string; url: string; headers?; body?; query?; cookies?; signedCookies? }): Promise<{ status: number; headers; body: string; bytes?: Uint8Array; cookies?: Record<string, SetCookieInfo>; json<T>(): T }>`

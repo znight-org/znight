@@ -67,9 +67,10 @@ results/
   results.json the published results
 ```
 
-Every application serves the same routes with the same controller, service and repository:
-`GET /users/:id` and `POST /users`, whose body is validated by the same Zod 4 schema. The runner
-checks every response of a load test: an error or a non-2xx status fails the run.
+Every HTTP application serves the same routes with the same controller, service and repository:
+`GET /users/:id` and `POST /users`, whose body is validated by the same Zod 4 schema. The GraphQL
+applications follow [the GraphQL contract](#the-graphql-contract). The runner checks every response
+of a load test: an error or a non-2xx status fails the run.
 
 ## The GraphQL contract
 

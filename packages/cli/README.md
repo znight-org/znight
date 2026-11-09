@@ -186,8 +186,9 @@ import options from './znight.config.ts'
 export default defineConfig({ plugins: [znight(options)] })
 ```
 
-`znight generate` compiles in `serve` mode (provider source locations kept) while `vite build` writes
-the disk copy without them: run `znight generate --check` before `znight build`, as below.
+`znight generate` and `vite build` write the same disk copy (the `serve` rendering, provider source
+locations kept, whatever the mode): only the bundle served from memory omits them in `build` mode.
+Run `znight generate --check` in CI before `tsc` and `znight build`, as below.
 
 In CI:
 

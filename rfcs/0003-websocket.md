@@ -1236,6 +1236,12 @@ export class TickerGateway {
 | Handler duration   | 30 s                              | plugin                                        | `TIMEOUT`                                           |
 | Close handshake    | 2 s                               | transport                                     | terminate                                           |
 
+**Implementation note (0.6.0).** A gateway's `maxPayload` may also be larger than the plugin's: the
+transport (server-wide) is sized to the largest value among the plugin and its gateways, and each
+connection enforces its gateway's own limit (`maxPayload` of the gateway, else of the plugin), on
+`ws` and on Bun alike. The "lower per gateway" and "at most the plugin value on Bun" wording above
+is the original design.
+
 Per-IP connection limits are a handshake guard (`ctx.ip`, correct behind proxies with RFC 0001's
 `trustProxy`), shown in the guide.
 
