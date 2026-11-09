@@ -7,6 +7,7 @@ import type { HttpContext } from '../src/index.ts'
 
 import net from 'node:net'
 import { Hono } from 'hono'
+import { timeout } from 'hono/timeout'
 
 import { honoAdapter } from '../src/adapters/hono.ts'
 import { BadRequestException, HttpResponse } from '../src/index.ts'
@@ -42,6 +43,10 @@ class BigController {
   blob() {
     return new Blob(['file content'], { type: 'text/plain' })
   }
+  async late() {
+    await sleep(80)
+    return HttpResponse.stream(new Blob(['late']).stream())
+  }
 }
 
 const meta = metadata({ [t('BigController')]: provider(BigController) }, [
@@ -57,6 +62,7 @@ const meta = metadata({ [t('BigController')]: provider(BigController) }, [
     }),
     route('slow', '/slow', (c: BigController) => c.slow()),
     route('blob', '/blob', (c: BigController) => c.blob()),
+    route('late', '/late', (c: BigController) => c.late()),
   ]),
 ])
 
@@ -220,6 +226,20 @@ describe('honoAdapter() on Bun.serve()', () => {
     const response = await fetch(`${String(app.http.address)}/echo`, { method: 'POST', body: 'hello' })
     expect(response.status).toBe(500)
     await app.stop()
+  })
+
+  it('releases a streamed reply Hono drops because a middleware already answered', async () => {
+    const native = new Hono()
+    native.use('*', timeout(30))
+    const app = await createApp(meta, { adapter: honoAdapter({ app: native }) })
+    const response = await fetch(`${String(app.http.address)}/late`)
+    expect(response.status).toBe(500) // the timeout error, rendered by Znight's fallback
+    await response.arrayBuffer()
+    await sleep(200)
+    // the late reply was released: its request scope closed and no request is left in flight
+    expect(app.http.inflight).toBe(0)
+    await app.stop()
+    expect(app.logger.entries.some(entry => entry.message.includes('in-flight'))).toBe(false)
   })
 
   it('gives the stream to a Hono middleware replacing the body, then serves text replies', async () => {
