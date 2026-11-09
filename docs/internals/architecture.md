@@ -1946,7 +1946,8 @@ not call `next()` gets the same reply as in the general pipeline.
 - Uploads (`multipart/form-data`, RFC 7578): Znight's own streaming parser, shared by every adapter
   (not `Request.formData()`). On upload routes, files are accepted only in the declared fields
   (400 otherwise), each `maxSize` / `maxFiles` (413), `mimeTypes` (415, compared with the declared
-  type) is enforced while reading; a second file for `@UploadedFile` → 400; non-multipart non-empty
+  type; a type that is not a single `type/subtype`, such as `image/png, text/html`, matches no
+  pattern and is kept as an empty `File.type`) is enforced while reading; a second file for `@UploadedFile` → 400; non-multipart non-empty
   bodies → 415. A 400 about a named file field (unexpected field, missing file, text value in a file
   field, second single file) carries `details: [{ path: <field>, message }]`, the issue shape of
   `ValidationException`; the 413 of a file carries `{ field, maxSize }` or `{ field, maxFiles }`, the

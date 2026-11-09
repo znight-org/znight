@@ -881,7 +881,9 @@ Uploaded files are buffered in memory. For files of hundreds of megabytes or mor
   store files under generated identifiers and keep the original name as metadata. When you must
   display or reuse it, `path.basename()` it and limit its characters.
 - **Never trust the client's media type.** `File.type` and `mimeTypes` filters rely on what the client
-  declares: they reject honest mistakes, not attackers. When the type matters, check the content
+  declares: they reject honest mistakes, not attackers (a malformed type such as
+  `image/png, text/html` matches no filter and becomes an empty `File.type`, but `image/*` accepts
+  `image/svg+xml`, which can carry scripts). When the type matters, check the content
   (magic numbers, e.g. with [`file-type`](https://github.com/sindresorhus/file-type)) and decode
   images with a library that re-encodes them.
 - **Confine downloads.** Always pass `root` to `HttpResponse.file()` when any part of the path comes

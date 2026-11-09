@@ -19,7 +19,7 @@ import type { QueryRecord } from './query.ts'
 import { Buffer } from 'node:buffer'
 
 import { BadRequestException, issue, PayloadTooLargeException, UnsupportedMediaTypeException } from './exceptions.ts'
-import { matchesMediaType, mediaTypeEssence, OCTET_STREAM } from './mime.ts'
+import { isSingleMediaType, matchesMediaType, mediaTypeEssence, OCTET_STREAM } from './mime.ts'
 import { formatByteSize } from './size.ts'
 import { emptyRecord } from './utils.ts'
 
@@ -83,12 +83,12 @@ const PRINTABLE = /^[\u0020-\u007e]*$/
 
 /**
  * A received file. Its `type` is the media type declared by the client, lower-cased (empty when it
- * contains characters outside printable ASCII), identical on every runtime (Bun's `File` adds
- * `;charset=utf-8` to some text types).
+ * contains characters outside printable ASCII or is not a single `type/subtype`), identical on every
+ * runtime (Bun's `File` adds `;charset=utf-8` to some text types).
  */
 function createFile(chunks: Uint8Array[], name: string, type: string): File {
   const file = new File(chunks, name, { type })
-  const normalized = PRINTABLE.test(type) ? type.toLowerCase() : ''
+  const normalized = PRINTABLE.test(type) && isSingleMediaType(type) ? type.toLowerCase() : ''
   if (file.type !== normalized) Object.defineProperty(file, 'type', { value: normalized, configurable: true })
   return file
 }

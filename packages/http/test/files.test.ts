@@ -64,6 +64,10 @@ describe('media types', () => {
     expect(matchesMediaType('anything/at-all', ['*/*'])).toBe(true)
     expect(matchesMediaType('invalid', ['*/*'])).toBe(false)
     expect(matchesMediaType('image/', ['image/*'])).toBe(false)
+    // a single type only: browsers render the last type of a list
+    expect(matchesMediaType('image/png, text/html', ['image/*'])).toBe(false)
+    expect(matchesMediaType('image/png; x=1, text/html', ['image/*'])).toBe(false)
+    expect(matchesMediaType('image/p ng', ['image/*'])).toBe(false)
   })
 })
 

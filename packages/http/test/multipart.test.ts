@@ -308,6 +308,15 @@ describe('part headers', () => {
     )
   })
 
+  it('keeps no malformed file type (browsers read the last type of a list)', () => {
+    const type = (value: string): string | undefined =>
+      part(`Content-Disposition: form-data; name="f"; filename="a"\r\nContent-Type: ${value}`).list[0]?.type
+    expect(type('text/html, image/png')).toBe('')
+    expect(type('image/png; x=1, text/html')).toBe('')
+    expect(type('image png')).toBe('')
+    expect(type('Image/PNG; q="a b"')).toBe('image/png; q="a b"')
+  })
+
   it.each([
     ['no Content-Disposition', 'Content-Type: text/plain', 'a part has no Content-Disposition header'],
     ['another disposition', 'Content-Disposition: attachment; name="a"', 'a part is not "form-data"'],
