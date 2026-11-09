@@ -249,7 +249,10 @@ export class OpenApiPlugin implements Plugin, PluginHttpRoutes {
     ctx.logger.info(`API reference: ${String(address.url).replace(/\/$/, '')}${this.#prefix()}${options.uiPath}`)
   }
 
-  onDispose(): void {
+  onDispose(ctx: PluginContext): void {
+    // an application refused by register() (this plugin serves another one) is rolled back too:
+    // only the application that owns the plugin resets it
+    if (this.#active && ctx.container !== this.#container) return
     this.#active = false
     this.#served = undefined
     this.#building = undefined

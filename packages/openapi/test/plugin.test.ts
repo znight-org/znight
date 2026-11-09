@@ -392,6 +392,19 @@ describe('lifecycle and options', () => {
     expect((await again.inject({ method: 'GET', url: '/openapi.json' })).status).toBe(200)
   })
 
+  it('keeps serving the first application after refusing a second one, and keeps refusing', async () => {
+    const plugin = OpenApiPlugin.configure()
+    await using app = await create(plugin)
+    const first = await app.inject({ method: 'GET', url: '/openapi.json' })
+    const etag = String(first.headers['etag'])
+    // the refused application is rolled back: its onDispose must not reset the live plugin
+    await expect(create(plugin)).rejects.toMatchObject({ code: 'ZNIGHT004' })
+    await expect(create(plugin)).rejects.toMatchObject({ code: 'ZNIGHT004' })
+    expect((await app.inject({ method: 'GET', url: '/openapi.json', headers: { 'if-none-match': etag } })).status).toBe(
+      304,
+    )
+  })
+
   it('requires HttpPlugin and the OpenAPI section (ZNIGHT030)', async () => {
     await expect(
       Application.create({
