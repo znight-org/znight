@@ -1,5 +1,15 @@
 # @znight/schedule
 
+## 0.6.4
+
+### Patch Changes
+
+- 74b6b04: A run aborted by `onDispose` after a failed start releases its lock lease when it settles, instead of holding it until its ttl expires.
+- Updated dependencies [74b6b04]
+- Updated dependencies [74b6b04]
+  - @znight/compiler@0.6.4
+  - @znight/core@0.6.4
+
 ## 0.6.3
 
 ### Patch Changes

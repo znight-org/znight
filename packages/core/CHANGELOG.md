@@ -1,5 +1,11 @@
 # @znight/core
 
+## 0.6.4
+
+### Patch Changes
+
+- 74b6b04: Stop and dispose a plugin or provider whose `onStart` settles after `stop()` stopped waiting for it, instead of leaking what it opened.
+
 ## 0.6.3
 
 ### Patch Changes

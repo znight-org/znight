@@ -1,5 +1,18 @@
 # @znight/http
 
+## 0.6.4
+
+### Patch Changes
+
+- 74b6b04: An adapter trusting every proxy hop (Fastify `trustProxy: true`, an Express `trust proxy` accepting any address, including a function or ranges) is refused at boot only when the `trustProxy` option of `HttpPlugin` is not set, since `ctx.ip` then comes from the adapter (0.6.3 refused it in every case). Migration from 0.6.2: set `HttpPlugin.configure({ trustProxy })` to your proxies (a hop count or addresses), or remove the framework setting.
+- 74b6b04: The WebSocket handshake timeout aborts `ctx.signal` with the message "The WebSocket handshake timed out" instead of the SSE `maxDuration` one; `RequestAbortedError` takes an optional message.
+- 74b6b04: Report a route decorator already applied and stored in a `const` (`const AdminOnly = Roles(['admin'])`, used as `@AdminOnly`) as ZNIGHT005 instead of dropping its decision.
+- 74b6b04: `matchesMediaType()` and upload part types accept a comma inside a quoted parameter value (`multipart/form-data; boundary="a,b"`) and still refuse a list of types.
+- Updated dependencies [74b6b04]
+- Updated dependencies [74b6b04]
+  - @znight/compiler@0.6.4
+  - @znight/core@0.6.4
+
 ## 0.6.3
 
 ### Patch Changes

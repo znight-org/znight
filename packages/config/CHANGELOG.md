@@ -1,5 +1,16 @@
 # @znight/config
 
+## 0.6.4
+
+### Patch Changes
+
+- 74b6b04: `ConfigSource.keys()` (and `toJSON()`) visit at most 10 000 entries per layer, so values whose shared sub-objects make the paths grow exponentially no longer hang the process.
+- 74b6b04: `vault()` trims the white space around an explicit `token` or `namespace` (a token read with `readFileSync` keeps its final newline) instead of rejecting it, as `fetch` did before.
+- Updated dependencies [74b6b04]
+- Updated dependencies [74b6b04]
+  - @znight/compiler@0.6.4
+  - @znight/core@0.6.4
+
 ## 0.6.3
 
 ### Patch Changes

@@ -1,5 +1,12 @@
 # @znight/testing
 
+## 0.6.4
+
+### Patch Changes
+
+- Updated dependencies [74b6b04]
+  - @znight/core@0.6.4
+
 ## 0.6.3
 
 ### Patch Changes
