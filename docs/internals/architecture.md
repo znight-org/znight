@@ -965,11 +965,12 @@ interface Diagnostic {
   only in `build` mode, whose bundle drops provider `source` locations), and so are the extra files,
   so every tool (`znight generate`, `vite build`, the Bun preload under any `NODE_ENV`, `--check`
   after a build) writes and expects the same files.
-  `createCompiler()` keeps the parse cache and the loaded extensions between compiles; changes to
-  `outFile` are ignored. An incremental compile re-reads the changed files; unchanged contents keep
-  their parse. Every compile first drops from the cache the files that were not inputs of the
-  previous compile (they were not watched, so their entries are not trusted, and dropping them
-  bounds the memory of long sessions): they are read again when needed.
+  `createCompiler()` keeps the parse cache and the loaded extensions between compiles (extensions
+  that failed to load are loaded again by the next compile); changes to `outFile` are ignored. An
+  incremental compile re-reads the changed files; unchanged contents keep their parse. Every
+  compile first drops from the cache the files that were not inputs of the previous compile (they
+  were not watched, so their entries are not trusted, and dropping them bounds the memory of long
+  sessions): they are read again when needed.
 - `watchFiles` lists every file the result depends on: the scanned sources and every other file the
   analysis read outside `node_modules` (a constant imported from `shared/`, a type of
   `src/types.d.ts`, a workspace package, the input files of the extensions, §6.5), package

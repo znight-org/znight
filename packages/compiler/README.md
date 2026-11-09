@@ -532,7 +532,8 @@ The same, without writing anything: returns
 ### `createCompiler(options)`
 
 An incremental compiler, used by the Vite plugin, the Bun preload and `znight dev`: it keeps the
-parse cache and the loaded compiler extensions between compiles.
+parse cache and the loaded compiler extensions between compiles (an extension that failed to load,
+for example a package not built yet, is loaded again by the next compile).
 
 ```ts
 const compiler = createCompiler({ root, mode: 'serve' })
