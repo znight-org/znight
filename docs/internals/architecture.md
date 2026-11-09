@@ -3200,7 +3200,10 @@ below; absent: the built-in transport); unknown keys and invalid values are ZNIG
   resolves singleton resolvers, guards and mappers once (others per call, in the current scope),
   builds one resolve function per resolver-backed field, and runs the RFC 0001 enforcement check
   on the guard chain of every field with a decision (ZNIGHT023, or a warning with
-  `enforcement: 'warn'`). A guard class without `canResolve()` is ZNIGHT066; a global guard or
+  `enforcement: 'warn'`): as for HTTP routes, `known` also holds the groups enforced by the guard
+  classes of the application (the classes of `metadata.providers` with a `canResolve()` or
+  `canActivate()` method, in a GraphQL chain or not), so that a decision of a group only an
+  HTTP-only guard enforces is reported, with a hint naming those guards. A guard class without `canResolve()` is ZNIGHT066; a global guard or
   mapper class that is not a provider is ZNIGHT001. The `types` of every result mapper (a class's
   `static types`, an instance's `types` property or its class's) MUST be a non-empty array of names of
   object types of the section, ZNIGHT066 otherwise (every problem in one error).

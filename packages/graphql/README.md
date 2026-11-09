@@ -629,7 +629,9 @@ GraphQLPlugin.configure({
   give it route metadata and guards, and with a required group it needs a decision like any route.
 - **Fields** follow RFC 0001: the decorators of a group are alternatives, the method's decision
   replaces the class's, a `required` group must be decided on every **root field** (ZNIGHT023 at
-  build time, the code HTTP routes use), and every decided group must be enforced by a guard of the
+  build time, the code HTTP routes use), and every decision of a required group, or of a group that
+  a guard class of the application enforces (a provider with `canResolve()` or `canActivate()`, in a
+  GraphQL chain or not, such as an HTTP-only `RateLimitGuard`), must be enforced by a guard of the
   field's chain (`static enforces`, checked at boot: ZNIGHT023, or a warning with
   `enforcement: 'warn'`).
 - `ResolverContext` satisfies `RouteMetaCarrier`, so `Roles.get(ctx)` works: `route: { meta,

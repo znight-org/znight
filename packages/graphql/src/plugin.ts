@@ -30,7 +30,7 @@ import type { GraphQLErrorMapper, GraphQLGuard, GraphQLResultMapper } from './ty
 import { displayName, ErrorCode, resolveOptions, ZnightError } from '@znight/core'
 import { printSchema } from 'graphql'
 
-import { checkFieldDecisions } from './decisions.ts'
+import { checkFieldDecisions, isGuardClass } from './decisions.ts'
 import { Engine } from './engine.ts'
 import { GraphQLExecutor, singleResult } from './execution.ts'
 import { ErrorFormatter } from './format.ts'
@@ -499,7 +499,12 @@ export class GraphQLPlugin implements Plugin, PluginHttpRoutes {
         results: (field, coordinate) => results.recover(field, coordinate),
       }),
     )
-    checkFieldDecisions(fields, section.groups, options.enforcement, ctx.logger)
+    // the guard classes of the application, in a GraphQL chain or not (an HTTP-only guard): their
+    // groups become known, so that a decision no GraphQL guard enforces is reported
+    const applicationGuards = Object.entries(metadata.providers)
+      .filter(([, provider]) => isGuardClass(provider?.class))
+      .map(([token, provider]) => ({ cls: provider?.class, name: displayName(token) }))
+    checkFieldDecisions(fields, section.groups, options.enforcement, ctx.logger, applicationGuards)
     const formatter = new ErrorFormatter({
       container,
       mappers: mappers.map(mapper => mapper.resolvable),
