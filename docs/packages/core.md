@@ -178,13 +178,17 @@ implement the `XxxPlugin.configure(container => options)` convention. See
 `run(name, event, fn)`, `hasListeners(name)`, `hasWrappers(name)`. The events of the feature
 packages are defined in core so producers and observers share one type:
 
-| Hook                | Event                   | Produced by                                                            |
-| ------------------- | ----------------------- | ---------------------------------------------------------------------- |
-| `http:request`      | `HttpRequestEvent`      | `@znight/http` (one request)                                           |
-| `messaging:message` | `MessageDeliveryEvent`  | `@znight/messaging` (one delivery)                                     |
-| `messaging:publish` | `MessagePublishEvent`   | `@znight/messaging` (one publish)                                      |
-| `schedule:run`      | `ScheduledRunEvent`     | `@znight/schedule` (one occurrence of a job: trigger, outcome, error)  |
-| `graphql:operation` | `GraphQLOperationEvent` | `@znight/graphql` (one GraphQL operation: type, name, outcome, errors) |
+| Hook                   | Event                      | Produced by                                                            |
+| ---------------------- | -------------------------- | ---------------------------------------------------------------------- |
+| `http:request`         | `HttpRequestEvent`         | `@znight/http` (one request)                                           |
+| `messaging:message`    | `MessageDeliveryEvent`     | `@znight/messaging` (one delivery)                                     |
+| `messaging:publish`    | `MessagePublishEvent`      | `@znight/messaging` (one publish)                                      |
+| `schedule:run`         | `ScheduledRunEvent`        | `@znight/schedule` (one occurrence of a job: trigger, outcome, error)  |
+| `graphql:operation`    | `GraphQLOperationEvent`    | `@znight/graphql` (one GraphQL operation: type, name, outcome, errors) |
+| `websocket:message`    | `WebSocketMessageEvent`    | `@znight/websocket` (one inbound message; `$ping` frames excluded)     |
+| `websocket:connection` | `WebSocketConnectionEvent` | `@znight/websocket` (a connection opened or closed; emitted only)      |
+| `events:publish`       | `EventPublishEvent`        | `@znight/events` (one publication that matched at least one listener)  |
+| `events:listener`      | `EventListenerEvent`       | `@znight/events` (one listener invocation, inline or detached)         |
 
 Augment `ZnightHooks` to declare your own. See [Plugins & hooks](/guide/plugins#hooks).
 
@@ -193,8 +197,9 @@ Augment `ZnightHooks` to declare your own. See [Plugins & hooks](/guide/plugins#
 `ZNIGHT001` to `ZNIGHT029` belong to the core, the compiler and the features of 0.1 (http, messaging,
 config, observability). From `ZNIGHT030`, each first-party package owns a block of ten:
 `ZNIGHT030`–`039` [`@znight/openapi`](/packages/openapi), `ZNIGHT040`–`049`
-[`@znight/schedule`](/packages/schedule), `ZNIGHT060`–`069` [`@znight/graphql`](/packages/graphql)
-(`050`–`059` are reserved for `@znight/websocket`). Third-party packages get no `ZNIGHT` code.
+[`@znight/schedule`](/packages/schedule), `ZNIGHT050`–`059` [`@znight/websocket`](/packages/websocket),
+`ZNIGHT060`–`069` [`@znight/graphql`](/packages/graphql) and `ZNIGHT070`–`079`
+[`@znight/events`](/packages/events). Third-party packages get no `ZNIGHT` code.
 Every code is in the [error reference](/reference/error-codes).
 
 ## AOP

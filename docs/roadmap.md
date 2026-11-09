@@ -1,5 +1,5 @@
 ---
-description: What each Znight release brought (0.1 to 0.6, from the first packages to GraphQL, custom parameter decorators, application events and WebSocket gateways), what is planned without a date (a cache package), what is being considered, and what is deliberately not planned.
+description: What each Znight release brought (0.1 to 0.6, from the first packages to GraphQL, custom parameter decorators, application events and WebSocket gateways), what is planned without a date (a cache package, the Apollo Server driver), what is being considered, and what is deliberately not planned.
 ---
 
 # Roadmap
@@ -23,7 +23,6 @@ and the release that brought it. Until 1.0, minor versions may change APIs; each
 | [0009](https://github.com/znight-org/znight/blob/main/rfcs/0009-graphql-drivers.md)             | GraphQL drivers (`@znight/graphql`)       | M1–M2 implemented (0.3.0), M3 planned |
 | [0010](https://github.com/znight-org/znight/blob/main/rfcs/0010-custom-parameter-decorators.md) | Custom parameter decorators               | Implemented (0.4.0)                   |
 | [0011](https://github.com/znight-org/znight/blob/main/rfcs/0011-application-events.md)          | Application events (`@znight/events`)     | Implemented (0.5.0)                   |
-| Package                                                                                         | What it brings                            |
 
 ## Released {#released}
 
@@ -65,7 +64,8 @@ Code-first GraphQL ([RFC 0005](https://github.com/znight-org/znight/blob/main/rf
 in 0.2.0: the TypeScript types are the schema. Resolvers are providers marked with `@Resolver`,
 `@Query`, `@Mutation`, `@Subscription` and `@ResolveField`; the compiler derives the schema from
 their signatures at build time, with descriptions from JSDoc, and reports schema mistakes as
-diagnostics ([`ZNIGHT060`](/reference/error-codes#znight060)–[`ZNIGHT066`](/reference/error-codes#znight066)).
+diagnostics ([`ZNIGHT060`](/reference/error-codes#znight060)–[`ZNIGHT065`](/reference/error-codes#znight065)),
+with setup problems at boot as [`ZNIGHT066`](/reference/error-codes#znight066).
 It runs on graphql-js 17, served over HTTP by `HttpPlugin` on every adapter, with subscriptions
 over Server-Sent Events, batching with loaders, access control with the same route decorators and
 guards as HTTP, and the `graphql:operation` hook.
@@ -126,7 +126,8 @@ settings and access decisions as any route. Payloads are validated with Standard
 replies, rooms, broadcasts, backpressure, rate limits, heartbeats and a graceful shutdown. The
 transport is `ws` on Node.js and `Bun.serve()` natively on Bun; `TestApp.connect()` opens
 connections in memory, and `@znight/observability` traces, measures and logs every message. Error
-codes: `ZNIGHT050`–`ZNIGHT059`.
+codes: [`ZNIGHT050`](/reference/error-codes#znight050) and [`ZNIGHT051`](/reference/error-codes#znight051),
+in the `ZNIGHT050`–`059` block reserved for the package.
 
 ## Planned, without a date {#planned}
 
@@ -136,6 +137,12 @@ A first-party cache package: method results cached with shared stores, built on 
 mechanism. Its design has not been written yet. Until it lands, the
 [cache recipe](/guide/aop#cache) is the recommended way to cache method results, and its
 `CacheStore` interface lets you plug Redis in.
+
+### Apollo Server driver
+
+Milestone 3 of [RFC 0009](https://github.com/znight-org/znight/blob/main/rfcs/0009-graphql-drivers.md):
+`@znight/graphql/apollo`, serving the engine with Apollo Server, once Apollo Server accepts
+graphql-js 17. The engine and the GraphQL Yoga driver are in place.
 
 ## Considered, not scheduled {#considered}
 
@@ -159,10 +166,7 @@ These are tracked in the RFCs as follow-ups. None has a date.
   cookies; a hook measuring the lifetime of event streams; fan-out of events across instances.
 - **WebSocket follow-ups**: rooms shared across instances, a typed client generated from the
   metadata, an AsyncAPI document.
-- **GraphQL follow-ups**: an Apollo Server driver once Apollo Server accepts graphql-js 17 (the
-  engine and the GraphQL Yoga driver are in place,
-  [RFC 0009](https://github.com/znight-org/znight/blob/main/rfcs/0009-graphql-drivers.md)),
-  GraphQL interfaces in code-first, `__resolveType` methods and custom
+- **GraphQL follow-ups**: GraphQL interfaces in code-first, `__resolveType` methods and custom
   directives in schema-first, `graphql-ws` subscriptions, `@defer` / `@stream`,
   trusted documents checked at build time, query cost analysis, federation, resolver-level spans
   in `@znight/observability`.

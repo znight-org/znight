@@ -1,5 +1,5 @@
 ---
-description: The example applications of the Znight repository - a REST API with Drizzle, a secured API, an OpenAPI storefront, an uptime monitor with scheduled jobs, a GraphQL API, an event-driven microservice, a worker and a monorepo - what each one shows and how to run it.
+description: The example applications of the Znight repository - a REST API with Drizzle, a secured API, an OpenAPI storefront, an uptime monitor with scheduled jobs, a GraphQL API, a WebSocket chat, an event-driven microservice, a worker and a monorepo - what each one shows and how to run it.
 ---
 
 # Examples
@@ -54,7 +54,9 @@ The application itself runs on Node.js 24+ or Bun 1.3+ (`npm run dev` works too)
 `bun:test`. From the repository root, `bun run test:examples` runs the tests of every example. Each
 README lists the endpoints with `curl` commands and the configuration variables.
 
-All examples use `@znight/core`, `@znight/config` and `@znight/observability`, with
+All examples except `realtime-chat` use `@znight/core`, `@znight/config` and
+`@znight/observability`; `realtime-chat` uses `@znight/core` without config or observability. Every
+example has
 `@znight/compiler`, `@znight/cli` and `@znight/testing` as development dependencies. The lists below
 name the other packages.
 
@@ -70,10 +72,13 @@ the reference example of a Znight HTTP service and of the [recommended data laye
   keys compared in constant time, the caller in a request-scoped provider read through `Lazy<T>`.
 - Zod schemas, coerced query parameters, multipart upload with limits, downloads with `ETag` and
   ranges; CORS, security headers and trusted proxies.
+- Application events: a `BookAdded` event published by the service, an inline and a detached
+  `@OnEvent` listener.
 - Logs with request ids, Prometheus metrics, `@Logged` and `@Metric`; graceful shutdown.
 - Tests: `TestBed`, repository tests on a fresh migrated database per test, `TestApp`, end to end.
 
-Packages: [`@znight/http`](/packages/http) (`@znight/http/fastify`). Libraries: Drizzle ORM, PGlite,
+Packages: [`@znight/http`](/packages/http) (`@znight/http/fastify`), [`@znight/events`](/packages/events).
+Libraries: Drizzle ORM, PGlite,
 Zod, Fastify, prom-client.
 [Source on GitHub](https://github.com/znight-org/znight/tree/main/examples/rest-api).
 

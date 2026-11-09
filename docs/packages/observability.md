@@ -1,11 +1,12 @@
 ---
-description: "@znight/observability - structured logging with Pino, Prometheus metrics and OpenTelemetry tracing, wired into HTTP requests, message deliveries, scheduled runs and GraphQL operations."
+description: "@znight/observability - structured logging with Pino, Prometheus metrics and OpenTelemetry tracing, wired into HTTP requests, message deliveries, scheduled runs, GraphQL operations, WebSocket messages and application events."
 ---
 
 # @znight/observability <Badge type="tip" text="available" />
 
-Logs, metrics and traces for Znight applications, wired automatically into every HTTP request and
-message delivery through [hooks](/guide/plugins#hooks). Runs on Node.js 24+ and Bun 1.3+.
+Logs, metrics and traces for Znight applications, wired automatically into every HTTP request,
+message delivery, scheduled run, GraphQL operation, WebSocket message and application event through
+[hooks](/guide/plugins#hooks). Runs on Node.js 24+ and Bun 1.3+.
 
 ```sh
 npm install @znight/observability prom-client   # prom-client only for metrics
@@ -154,6 +155,29 @@ ObservabilityPlugin.configure({
 
 `tracing.graphql`, `metrics.graphql` and `logging.graphql` turn each part off or tune it; when all
 three are off, no wrapper is registered and operations do not pay for the hook.
+
+## Scheduled jobs, WebSockets and application events
+
+The plugin also observes the hooks of [`@znight/schedule`](/packages/schedule),
+[`@znight/websocket`](/packages/websocket) and [`@znight/events`](/packages/events). Each part has its
+own switch, on by default: `logging.jobs`, `metrics.schedule`, `tracing.schedule`;
+`logging.websocket`, `metrics.websocket`, `tracing.websocket`; `logging.events`, `metrics.events`,
+`tracing.events`.
+
+- **Scheduled runs**: an `INTERNAL` span `schedule <job>` per executed run (the root of a new trace,
+  except for manual runs), one log entry per run, and `schedule_runs_total{job, outcome}`,
+  `schedule_run_duration_seconds`, `schedule_run_lateness_seconds`, `schedule_active_runs` and
+  `schedule_last_success_timestamp_seconds{job}` (for "has not succeeded since" alerts).
+- **WebSocket**: a `SERVER` span `WS <path> <event>` per inbound message, the root of a new trace
+  linked to the handshake span; one log entry per closed connection and per failed message
+  (`logging: { websocket: { messages: true } }` adds a `debug` entry per message);
+  `websocket_connections_active{gateway}`, `websocket_connections_total{gateway, initiator}`,
+  `websocket_messages_received_total` and `websocket_message_duration_seconds{gateway, event, outcome}`.
+- **Application events**: an `INTERNAL` span `publish <Event>` around the inline phase and one span
+  per listener, a `debug` entry per publication, `znight_events_published_total{event}` and
+  `znight_event_listener_duration_seconds{event, listener, detached, outcome}`.
+
+The [package README](../../packages/observability/README.md) lists every attribute, label and option.
 
 ## Interceptor decorators
 

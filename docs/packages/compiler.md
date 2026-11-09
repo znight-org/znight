@@ -89,6 +89,7 @@ interface CompileResult {
   graph: ApplicationGraph
   stats: { files: number; providers: number; durationMs: number; parsed: number }
   library: LibraryOutput | undefined // library mode: dist/znight.providers.json
+  extraFiles: ExtraFile[] // outputs of compiler extensions (an SDL schema...), sorted by path; empty on errors
   watchFiles: string[] // sources, other files read outside node_modules, manifests, libraries
   decorators: ReadonlyMap<string, DecoratorRanges> // decorator ranges stripped by the Vite plugin / Bun preload
 }
