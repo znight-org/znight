@@ -3470,7 +3470,7 @@ Runtime (`EventsPlugin`):
   `EventsPlugin.configure({ onError })` (default: `logger.error`), never to the publisher.
   `emit(event)` runs the whole publication on a macrotask in a fresh scope and reports every error.
 - **Shutdown.** `onStop` waits for detached listeners and `emit()` work in flight, bounded by
-  `drainTimeoutMs` (default 10 000), and logs those still running; from then on `publish()` awaits its
+  `drainTimeoutMs` (default 4 000, below the default `shutdown.hookTimeoutMs`), and logs those still running; from then on `publish()` awaits its
   detached listeners itself, so none outlives provider disposal. List `EventsPlugin` before
   `HttpPlugin`, `MessagingPlugin` and `SchedulePlugin` (plugins stop in reverse order).
 - **Hooks.** `events:publish` wraps the inline phase of a publication with listeners

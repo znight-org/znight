@@ -166,7 +166,7 @@ In unit tests, `TestBed` auto-mocks `EventPublisher`:
 
 ## Shutdown
 
-On `app.stop()`, the plugin waits for detached listeners in flight, up to `drainTimeoutMs` (10 s by
+On `app.stop()`, the plugin waits for detached listeners in flight, up to `drainTimeoutMs` (4 s by
 default). Like every shutdown step, the wait is also cut at `shutdown.hookTimeoutMs` of
 `Application.create()` (5 s by default) and at what is left of `shutdown.timeoutMs` (10 s by
 default, shared by all the stop steps): raise `hookTimeoutMs` and `timeoutMs` above
