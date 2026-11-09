@@ -582,6 +582,8 @@ class KafkaSubscription {
     // fetched again after a rebalance (from the committed offset): already buffered or handled
     if (queue.next !== undefined && record.offset < queue.next) return
     queue.next = record.offset + 1n
+    // the maxRetryDelayMs cap runs from the fetch, not from when the record reaches the head
+    if (source.retry) this.#dueTime(record)
     queue.records.push(record)
     source.buffered++
     if (!queue.running && !queue.queued && queue.timer === undefined) this.#enqueue(queue)
@@ -638,7 +640,9 @@ class KafkaSubscription {
 
   /**
    * When a retry record becomes due: its `x-znight-not-before`, but never more than `maxRetryDelayMs`
-   * after it was first seen (the header may come from a producer that is not Znight, or a skewed clock).
+   * after it was fetched (the header may come from a producer that is not Znight, or a skewed clock).
+   * Computed by `#push` when the record is fetched, so that records queued behind a far-future one
+   * do not wait `maxRetryDelayMs` each.
    */
   #dueTime(record: KafkaRecord): number {
     let due = this.#due.get(record)

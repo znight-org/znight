@@ -470,6 +470,33 @@ describe('retry delays', () => {
     await driver.close()
   })
 
+  it('bounds the wait of every far-future retry record from when it was fetched, not when it reaches the head', async () => {
+    const driver = kafka({ bootstrapBrokers: ['kafka:9092'], maxRetryDelayMs: 60 })
+    await driver.connect({ logger: memoryLogger() })
+    const handled: number[] = []
+    const subscription = await driver.subscribe(
+      'orders',
+      async (delivery: DriverDelivery) => {
+        handled.push(Date.now())
+        await delivery.ack()
+      },
+      { ...options, maxAttempts: 3 },
+    )
+    const [, retry] = streams as [FakeStream, FakeStream]
+    const started = Date.now()
+    const far = String(Date.now() + 365 * 86_400_000)
+    // one partition, five records written with a not-before a year away
+    for (let offset = 0; offset < 5; offset++) {
+      retry.emit('data', record('znight.orders.retry', 0, offset, [['x-znight-not-before', far]]))
+    }
+    await waitFor(() => handled.length === 5, 2000)
+    // all due about maxRetryDelayMs after the fetch (5 x 60 ms if computed at the head)
+    expect(Math.max(...handled) - started).toBeLessThan(200)
+    await subscription.cancel()
+    await subscription.close()
+    await driver.close()
+  })
+
   it('never arms a timer longer than 2^31 - 1 ms for a retry that is not due', async () => {
     const driver = kafka({ bootstrapBrokers: ['kafka:9092'], maxRetryDelayMs: 40 * 24 * 3_600_000 })
     await driver.connect({ logger: memoryLogger() })
