@@ -2,7 +2,7 @@
 description: "@znight/graphql - GraphQL on graphql-js 17 whose schema is derived from TypeScript types at build time, or read from SDL files and checked against the resolvers: loaders, subscriptions over SSE, route decisions and guards, and drivers such as GraphQL Yoga."
 ---
 
-# @znight/graphql <Badge type="tip" text="new in v0.2" />
+# @znight/graphql <Badge type="tip" text="available" />
 
 Code-first GraphQL where **the TypeScript types are the schema**. Resolvers are providers marked
 with `@Resolver`, `@Query`, `@Mutation`, `@Subscription` and `@ResolveField`; the compiler follows
@@ -23,7 +23,7 @@ deprecations from JSDoc. `GraphQLPlugin` serves it on graphql-js 17 through `Htt
   required groups apply to resolvers; one guard class protects routes and fields.
 
 ```sh
-npm install @znight/graphql graphql
+npm install @znight/graphql @znight/http graphql
 ```
 
 `@znight/http` and `graphql` 17 are required peers. The full reference is the

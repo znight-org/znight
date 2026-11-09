@@ -23,6 +23,22 @@ The
   connection and outbound buffer limits, heartbeats, handler timeouts and a graceful shutdown with
   close frames.
 
+## Install
+
+```sh
+npm install @znight/websocket @znight/http
+npm install ws   # Node.js only (Bun provides it): the transport of node:http servers
+```
+
+Without a usable transport the boot fails with [`ZNIGHT051`](/reference/error-codes#znight051).
+Entries: `@znight/websocket/ws` (`wsTransport()`), `@znight/websocket/bun` (`bunTransport()`),
+`@znight/websocket/testing` (`createTestConnection()`, `createTestServer()` for unit tests).
+`WebSocketPlugin.configure()` takes `transport` (`'auto'`), `origins` (`'same-origin'`), `maxPayload`
+(`'1mb'`), `maxConnections`, `maxPendingMessages` (32), `backpressure`
+(`{ limit: '1mb', onLimit: 'close' }`), `heartbeat` (30 s), `handshakeTimeoutMs`, `handlerTimeoutMs`,
+`closeTimeoutMs`, `messageGuards`, `exceptionMappers`, `exposeErrors` and `shutdown`: the package
+README describes each.
+
 ## A gateway
 
 ```ts
@@ -76,9 +92,10 @@ expect(await alice.request('room.join', { room: 'general' })).toEqual({ members:
 See the [`@znight/testing` reference](/packages/testing) for `connect()` and `connectWebSocket()`,
 and the [observability reference](/packages/observability) for the WebSocket spans, metrics and logs.
 
-## Status
+## Learn more
 
-Implemented: decorators and compiler extension, the plugin (origins, subprotocols, limits,
-heartbeats, shutdown), the three transports, rooms and broadcasts, testing helpers and
-observability. Coming next: the WebSocket guide and the `realtime-chat` example, then the release.
-Until then, [Server-Sent Events](/packages/http#server-sent-events) cover server-to-client streams.
+- The [WebSockets guide](/guide/websockets) walks through a complete chat (tickets, rooms, guards, a
+  raw binary feed).
+- The [`realtime-chat` example](/examples#realtime-chat) runs it, with its tests.
+- For server-to-client streams only, [Server-Sent Events](/packages/http#server-sent-events) need no
+  extra package.

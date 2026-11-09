@@ -45,7 +45,7 @@ features:
     linkText: See the generated code
   - icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M17.5 14v7M14 17.5h7"/></svg>
     title: Composable plugins
-    details: HTTP (built-in server, Fastify, Express, Hono), messaging (RabbitMQ, SQS, Kafka), OpenAPI, code-first GraphQL, scheduled jobs, typed config and observability (Pino, Prometheus, OpenTelemetry) are independent packages. Install what you use.
+    details: HTTP (built-in server, Fastify, Express, Hono), WebSocket gateways, messaging (RabbitMQ, SQS, Kafka), application events, OpenAPI, GraphQL (code-first or schema-first), scheduled jobs, typed config and observability (Pino, Prometheus, OpenTelemetry) are independent packages. Install what you use.
     link: /packages/
     linkText: Explore the packages
   - icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2c3 2.5 4.5 6 4.5 10.5L14 17h-4l-2.5-4.5C7.5 8 9 4.5 12 2z"/><circle cx="12" cy="9" r="1.5"/><path d="m10 17-1 4 3-2 3 2-1-4"/></svg>
@@ -80,7 +80,7 @@ features:
     linkText: Upload and serve files
   - icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 2v7.5a2 2 0 0 1-.2.9L4.7 20.6a1 1 0 0 0 .9 1.4h12.8a1 1 0 0 0 .9-1.4l-5.1-10.2a2 2 0 0 1-.2-.9V2"/><path d="M8.5 2h7"/><path d="M7 16h10"/></svg>
     title: Tests without the wiring
-    details: TestBed builds a provider with its generated factory and auto-mocks its dependencies. TestApp starts the real application and sends HTTP requests and event streams in memory, with Bun, Vitest or Jest.
+    details: TestBed builds a provider with its generated factory and auto-mocks its dependencies. TestApp starts the real application and sends HTTP requests, event streams and WebSocket connections in memory, with Bun, Vitest or Jest.
     link: /guide/testing
     linkText: Write tests
 ---
@@ -226,6 +226,8 @@ application and end-to-end tests on Node.js and Bun:
   instances, live results over Server-Sent Events;
 - [**graphql-api**](/examples#graphql-api): a GraphQL schema derived from the types, loaders against
   N+1 queries, subscriptions over SSE and per-field access decisions;
+- [**realtime-chat**](/examples#realtime-chat): WebSocket gateways on the HTTP server, rooms,
+  single-use tickets for browsers, guards and a raw binary feed;
 - [**microservice**](/examples#microservice), [**worker**](/examples#worker) and
   [**monorepo**](/examples#monorepo): messaging, retries and dead letters, background workers,
   provider libraries shared between services.

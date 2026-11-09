@@ -77,6 +77,11 @@ constructor) and once it is disposed: [`ZNIGHT021`](/reference/error-codes#znigh
 | `onError`        | `logger.error(...)` | `(error, { event, eventName, listener, detached, mode }) => unknown`            |
 | `drainTimeoutMs` | `10000`             | How long `onStop` waits for detached listeners in flight (`Infinity`: no limit) |
 
+The application gives each `onStop` at most `shutdown.hookTimeoutMs` (5 s by default) within
+`shutdown.timeoutMs` (10 s): keep `drainTimeoutMs` below it, or raise both
+(`Application.create({ shutdown: { hookTimeoutMs: 12_000, timeoutMs: 15_000 } })`), otherwise the
+stop times out and fails with [`ZNIGHT021`](/reference/error-codes#znight021).
+
 ## Testing
 
 ```ts

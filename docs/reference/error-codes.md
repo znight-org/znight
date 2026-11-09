@@ -26,7 +26,7 @@ Codes are allocated in order inside a block, so the numbering has gaps between b
 | [ZNIGHT004](#znight004) | Duplicate provider                                  | error                                                | build, startup             |
 | [ZNIGHT005](#znight005) | Invalid decorator usage                             | error / warning                                      | build, runtime             |
 | [ZNIGHT006](#znight006) | Missing required configuration value                | error                                                | startup                    |
-| [ZNIGHT007](#znight007) | Invalid route                                       | error                                                | build                      |
+| [ZNIGHT007](#znight007) | Invalid route                                       | error                                                | build, startup             |
 | [ZNIGHT008](#znight008) | Ambiguous injection                                 | error                                                | build, runtime             |
 | [ZNIGHT009](#znight009) | Invalid lifecycle hook                              | error / warning                                      | build                      |
 | [ZNIGHT010](#znight010) | Unresolvable injection type                         | error / warning                                      | build                      |
@@ -88,7 +88,8 @@ related locations:
 attached to the original error: read them with `getSuppressedErrors(error)`.
 
 ```ts
-import { ErrorCode, ZnightError } from '@znight/core'
+import { Application, ErrorCode, ZnightError } from '@znight/core'
+import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
 
 try {
   await Application.create({ metadata: __ZNIGHT_METADATA__, plugins })
@@ -348,6 +349,10 @@ export class UserController {
 - Type path and query parameters as `string`, `number`, `boolean`, literal unions or arrays of those,
   or use a schema to transform the value.
 
+At startup, `HttpPlugin` rejects malformed `extensions.http` metadata and invalid or colliding plugin
+routes with the same code. `@znight/websocket` reports invalid `@Gateway` paths, and a gateway path
+that collides with another gateway, with it too.
+
 ## ZNIGHT008: Ambiguous injection {#znight008}
 
 Several providers implement or extend the requested type, none is an exact match, and none is
@@ -570,8 +575,10 @@ plugin's `register()` hook.
 
 ## ZNIGHT017: Unvalidated input {#znight017}
 
-A non-primitive `@Body()`, `@Query()` or `@Message()` parameter has no schema: its type is only a
-compile-time promise, nothing checks what clients actually send.
+A non-primitive `@Body()`, `@Query()` (whole query), `@Message()` or WebSocket `@Payload()` parameter
+has no schema, or every cookie (`@Cookie()`) is injected into a type other than
+`Record<string, string>`: its type is only a compile-time promise, nothing checks what clients
+actually send.
 
 ```ts
 @Post('/')
@@ -764,6 +771,9 @@ ZNIGHT023: HttpPlugin: No guard enforces the required "access" group on 9 routes
 
 Two decisions of one group on the same target, or decorators of a group disagreeing on `required`,
 are [`ZNIGHT005`](#znight005).
+
+WebSocket gateways need a decision too: on the gateway class (it decides the handshake and the
+messages), checked at build time like routes.
 
 ## ZNIGHT030: Invalid OpenAPI definition {#znight030}
 
@@ -1139,8 +1149,6 @@ legitimately slower; keep the lock `ttl` comfortably above the time a heartbeat 
 
 ## ZNIGHT050: Invalid gateway {#znight050}
 
-<!-- TODO(api): verify against implementation -->
-
 A WebSocket gateway of `@znight/websocket` is invalid: an unknown or invalid `@Gateway` option, an
 event handled twice, a reserved (`$`) event name, several `@OnConnect` or `@OnDisconnect` methods, a
 handler parameter without a decorator. At boot, the same code reports invalid `WebSocketPlugin`
@@ -1154,8 +1162,6 @@ ZNIGHT050: ChatGateway handles "message.send" twice: ChatGateway.send and ChatGa
 required handler parameter.
 
 ## ZNIGHT051: WebSocket transport unavailable {#znight051}
-
-<!-- TODO(api): verify against implementation -->
 
 Gateways exist but cannot be served by the HTTP server: no `HttpPlugin` in the application, an
 adapter without upgrade support, the `ws` package missing on Node.js, a transport that does not match

@@ -429,7 +429,7 @@ plugin adds to graphql-js `execute()` for a query whose document is cached, thro
 ## Reproduce
 
 The benchmarks are a workspace of the repository, [`benchmarks/`](../benchmarks/README.md). They are
-not run by the continuous integration: run them on your machine (about 40 minutes for everything).
+not run by the continuous integration: run them on your machine (about an hour for everything).
 
 ```sh
 git clone https://github.com/znight-org/znight.git

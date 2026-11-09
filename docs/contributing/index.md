@@ -61,12 +61,15 @@ znight/
 │  ├─ openapi/        # decorators, compiler extension, OpenApiPlugin (Scalar, Swagger UI), build-time emit
 │  ├─ messaging/      # decorators, compiler extension, MessagingPlugin, drivers
 │  ├─ schedule/       # decorators, compiler extension, SchedulePlugin, distributed locks
+│  ├─ graphql/        # decorators, compiler extension (code-first, schema-first), GraphQLPlugin, engine, Yoga driver
+│  ├─ websocket/      # decorators, compiler extension, WebSocketPlugin, ws and Bun transports
+│  ├─ events/         # @OnEvent, compiler extension, EventsPlugin, EventPublisher
 │  ├─ config/         # decorators, compiler extension, ConfigPlugin, loaders
 │  ├─ observability/  # logger (pino), metrics (prom-client), tracing (OpenTelemetry)
 │  ├─ testing/        # TestBed, TestApp, mock helpers
 │  └─ cli/            # the znight binary
 ├─ examples/          # runnable applications with their tests: rest-api, secure-api, storefront-api,
-│                     # uptime-monitor, graphql-api, microservice, worker, monorepo
+│                     # uptime-monitor, graphql-api, realtime-chat, microservice, worker, monorepo
 ├─ benchmarks/        # performance benchmarks, run by hand (not in CI): one application per
 │                     # framework, the runner, the results of the benchmarks page
 ├─ rfcs/              # design documents of significant features, with their status
@@ -112,8 +115,11 @@ When an implementation needs to deviate, update the specification in the same ch
   exports.
 - **Generated-code contract**: every helper the compiler-generated code calls is exported from the
   package's root entry, documented in a "Compiler contract" section of its README and kept stable.
-- **Errors** use codes from `ErrorCode` in `@znight/core`. A new code needs an entry in
-  `ERROR_DESCRIPTIONS`, in the specification and in the [error reference](/reference/error-codes).
+- **Errors** use codes from `ErrorCode` in `@znight/core`, allocated in order inside the package's
+  block (`rfcs/README.md`). A new code needs, in the same change: its `ERROR_DESCRIPTIONS` entry, a
+  row in the specification's validation table (§4.8), and in the [error reference](/reference/error-codes)
+  a row of the summary table, a `## ZNIGHTxxx: Title {#znightxxx}` section and the updated range in
+  the frontmatter description (`docs/test/site.test.ts` checks it).
 - **Commits** follow [Conventional Commits](https://www.conventionalcommits.org)
   (`feat(core): ...`, `fix(compiler): ...`, `docs: ...`).
 

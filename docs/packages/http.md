@@ -725,26 +725,27 @@ request.
 
 `HttpPlugin.configure(options)`, or `HttpPlugin.configure(container => options)`:
 
-| Option             | Default               | Description                                                                                 |
-| ------------------ | --------------------- | ------------------------------------------------------------------------------------------- |
-| `adapter`          | `nodeAdapter()`       | `fastifyAdapter()`, `expressAdapter()`, `honoAdapter()`...                                  |
-| `port`, `host`     | `3000`, `0.0.0.0`     | Listening address (`port: 0`: a free port)                                                  |
-| `prefix`           | —                     | Path prefix for every route (`/api`)                                                        |
-| `guards`           | `[]`                  | Global guards (classes or instances)                                                        |
-| `interceptors`     | `[]`                  | Global interceptors                                                                         |
-| `exceptionMappers` | `[]`                  | Map error types to responses                                                                |
-| `trailingSlash`    | `'strict'`            | `'strict'`, `'ignore'` or `'redirect'`                                                      |
-| `exposeErrors`     | `false`               | Include messages of unexpected errors in `500` responses                                    |
-| `bodyLimit`        | 1 MiB                 | Maximum request body size (bytes or `'10mb'`)                                               |
-| `uploads`          | see [Files](#uploads) | `{ maxFileSize, maxFiles, maxParts, maxFieldSize }`                                         |
-| `requestIdHeader`  | `x-request-id`        | Header read and echoed (`false`: always generate)                                           |
-| `drainTimeoutMs`   | `4000`                | Maximum wait for in-flight requests on shutdown (`Infinity`: no limit)                      |
-| `cors`             | off                   | [CORS](#cors) policy: `{ origin, credentials?, methods?, ... }`                             |
-| `securityHeaders`  | `true`                | [Security headers](#security-headers): `true`, `false` or settings                          |
-| `trustProxy`       | `false`               | [Trusted proxies](#behind-a-proxy): a hop count or addresses / CIDRs                        |
-| `enforcement`      | `'error'`             | Unenforced [route decisions](#route-metadata-and-decisions): fail or warn                   |
-| `cookies`          | —                     | `{ secrets?, defaults? }`: [signing keys](#signed-cookies) and [defaults](#setting-cookies) |
-| `sse`              | —                     | `{ heartbeat?, retry?, shutdownGraceMs? }` of [event streams](#server-sent-events)          |
+| Option              | Default               | Description                                                                                 |
+| ------------------- | --------------------- | ------------------------------------------------------------------------------------------- |
+| `adapter`           | `nodeAdapter()`       | `fastifyAdapter()`, `expressAdapter()`, `honoAdapter()`...                                  |
+| `port`, `host`      | `3000`, `0.0.0.0`     | Listening address (`port: 0`: a free port)                                                  |
+| `prefix`            | —                     | Path prefix for every route (`/api`)                                                        |
+| `guards`            | `[]`                  | Global guards (classes or instances)                                                        |
+| `interceptors`      | `[]`                  | Global interceptors                                                                         |
+| `exceptionMappers`  | `[]`                  | Map error types to responses                                                                |
+| `trailingSlash`     | `'strict'`            | `'strict'`, `'ignore'` or `'redirect'`                                                      |
+| `exposeErrors`      | `false`               | Include messages of unexpected errors in `500` responses                                    |
+| `bodyLimit`         | 1 MiB                 | Maximum request body size (bytes or `'10mb'`)                                               |
+| `uploads`           | see [Files](#uploads) | `{ maxFileSize, maxFiles, maxParts, maxFieldSize }`                                         |
+| `requestIdHeader`   | `x-request-id`        | Header read and echoed (`false`: always generate)                                           |
+| `generateRequestId` | `crypto.randomUUID()` | Request id generator, used when the header is absent, invalid or `requestIdHeader: false`   |
+| `drainTimeoutMs`    | `4000`                | Maximum wait for in-flight requests on shutdown (`Infinity`: no limit)                      |
+| `cors`              | off                   | [CORS](#cors) policy: `{ origin, credentials?, methods?, ... }`                             |
+| `securityHeaders`   | `true`                | [Security headers](#security-headers): `true`, `false` or settings                          |
+| `trustProxy`        | `false`               | [Trusted proxies](#behind-a-proxy): a hop count or addresses / CIDRs                        |
+| `enforcement`       | `'error'`             | Unenforced [route decisions](#route-metadata-and-decisions): fail or warn                   |
+| `cookies`           | —                     | `{ secrets?, defaults? }`: [signing keys](#signed-cookies) and [defaults](#setting-cookies) |
+| `sse`               | —                     | `{ heartbeat?, retry?, shutdownGraceMs? }` of [event streams](#server-sent-events)          |
 
 ## Plugin routes
 

@@ -69,11 +69,13 @@ download.bytes // Uint8Array: the raw body
   runs `Application.create()` then `start()` (unless `start: false`); signal handlers are disabled.
 - `overrides` are applied last (highest precedence).
 - Only the dependency closure of controllers (with their guards and interceptors), consumers, the
-  hosts of scheduled jobs, GraphQL resolvers (with their guards and loaders), overridden providers
-  and the providers plugins resolve at bootstrap (`HttpPlugin`'s global guards, interceptors and
-  exception mappers, listed by the plugin's [`initRoots(context)`](/packages/core#plugins)) is
-  instantiated by default (`only: 'all'` or a list of keys otherwise). The job hosts are read from `metadata.extensions.schedule`, the
-  resolvers from `metadata.extensions.graphql`; without any controller, consumer, job or resolver,
+  hosts of scheduled jobs, GraphQL resolvers (with their guards and loaders), WebSocket gateways
+  (with their handshake and message guards), overridden providers and the providers plugins resolve
+  at bootstrap (`HttpPlugin`'s global guards, interceptors and exception mappers, the listener hosts
+  of `EventsPlugin`, listed by the plugin's [`initRoots(context)`](/packages/core#plugins)) is
+  instantiated by default (`only: 'all'` or a list of keys otherwise). The job hosts are read from
+  `metadata.extensions.schedule`, the resolvers from `metadata.extensions.graphql`, the gateways
+  from `metadata.extensions.websocket`; without any controller, consumer, job, resolver or gateway,
   every provider is created.
 - `inject({ method?, url, headers?, body?, query?, cookies?, signedCookies? })` goes through the
   HTTP plugin in memory (no network call) and resolves with
@@ -89,6 +91,15 @@ download.bytes // Uint8Array: the raw body
   `reconnect()` with `last-event-id`, and `close()` (or `await using`) to disconnect.
   `injectStream(request)` resolves at the response headers with the body as a `ReadableStream`;
   both accept a `signal`. `inject()` rejects an event stream instead of waiting for its end.
+- `connect(path, { query?, headers?, protocols?, origin?, cookies? })` opens an in-memory WebSocket
+  connection through the plugin named `'websocket'` (`WebSocketPlugin` of `@znight/websocket`), with
+  the real handshake (guards, origin check); it rejects with a `WsHandshakeError` when the handshake
+  is refused, and with `ZNIGHT001` without the plugin. The `TestWsClient` has `send(event, data?)`,
+  `request(event, data?)` (the reply's `data`, or a `WsRequestError`), `next(event?)` (the oldest
+  server event not taken yet: frames are buffered from the start), `sendRaw()` / `nextRaw()`,
+  `frames`, `protocol`, `close()` and `closed`; waits time out after 1 000 ms (`request()`:
+  5 000 ms). `connectWebSocket(url, { headers?, protocols?, timeoutMs? })` gives the same client over
+  the network (Node.js and Bun).
 - `close()` (or `await using`) stops the application; `get(key)`, `container` and `app` give access
   to it.
 
@@ -96,6 +107,9 @@ download.bytes // Uint8Array: the raw body
 await using stream = await app.injectSse({ url: '/orders/o-1/events' })
 hub.publish({ orderId: 'o-1', sequence: 42, type: 'status', status: 'paid' })
 expect(await stream.next()).toMatchObject({ event: 'status', id: '42' })
+
+await using alice = await app.connect('/chat', { protocols: ['chat.v1'] })
+expect(await alice.request('room.join', { room: 'general' })).toEqual({ members: 1 })
 ```
 
 A plugin named `'http'` that does not implement `injectSse()` / `injectStream()` (another plugin
