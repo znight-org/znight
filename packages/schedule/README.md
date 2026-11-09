@@ -326,8 +326,10 @@ Each `ScheduledJob` exposes `name`, `kind`, `origin`, `schedule` (`'0 8 * * MON-
 - A run **starts** when its job is called. A run that has not started yet (waiting for its lease, or
   for a `schedule:run` wrapper to call `next()`) is dropped when the job is removed or paused, or
   when the application stops: outcome `skipped`, with `aborted` when its signal was aborted, logged
-  at `debug`. `pause()` also drops the queued occurrence of an `overlap: 'queue'` job. A running run
-  goes on. Manual runs (`trigger()`) of a paused job still run.
+  at `debug`. A run still waiting for its lease when its signal is aborted (the application stops,
+  `remove(name, { abort: true })`) is dropped at once, without waiting for the lock store, and a
+  lease granted later is released. `pause()` also drops the queued occurrence of an
+  `overlap: 'queue'` job. A running run goes on. Manual runs (`trigger()`) of a paused job still run.
 - `reschedule()` arms a timeout again, `delay` from now, also from its own run (a retry):
   `registry.get('retry')?.reschedule('10s')`.
 

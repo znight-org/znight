@@ -154,7 +154,7 @@ describe('leases', () => {
       name: 'slow',
       // the store answers 21 s after the claim, within the 30 s ttl
       acquire: async (key, claim) => {
-        await new Promise(resolve => clock.setTimer(resolve, 21_000))
+        await new Promise<void>(resolve => clock.setTimer(() => resolve(), 21_000))
         const lease = await inner.acquire(key, claim)
         return (
           lease && {
@@ -177,7 +177,7 @@ describe('leases', () => {
           kind: 'interval',
           every: 600_000,
           run: async ctx => {
-            await new Promise(resolve => clock.setTimer(resolve, 60_000))
+            await new Promise<void>(resolve => clock.setTimer(() => resolve(), 60_000))
             reason = ctx.signal.aborted ? ctx.signal.reason : undefined
           },
         },
@@ -314,6 +314,52 @@ describe('runs waiting for their lease', () => {
     expect(await inner.acquire('znight:schedule:job', next)).toBeDefined() // released: the job never ran
     expect(clock.pendingTimers).toBe(0) // no heartbeat nor store timer after dispose
   })
+
+  it('are dropped at once by stop(), without waiting for drainTimeoutMs, and release a late lease', async () => {
+    const clock = testClock()
+    const inner = memoryLockStore({ clock })
+    const late = deferred()
+    let released = false
+    const store: ScheduleLockStore = {
+      name: 'hung',
+      acquire: async (key, claim) => {
+        await late.promise // a store that does not answer before the application stops
+        const lease = await inner.acquire(key, claim)
+        return (
+          lease && {
+            extend: ttl => lease.extend(ttl),
+            release: () => {
+              released = true
+              return lease.release()
+            },
+          }
+        )
+      },
+    }
+    const executed: string[] = []
+    const events: ScheduledRunEvent[] = []
+    const booted = await boot({
+      clock,
+      schedule: { lock: { store, ttl: '30s' }, drainTimeoutMs: 5000 },
+      metadata: metadataWith([{ name: 'job', kind: 'interval', every: 60_000, run: () => executed.push('ran') }]),
+    })
+    booted.app.hooks.on('schedule:run', event => {
+      events.push(event)
+    })
+    await clock.advance('1m')
+    const job = booted.registry.get('job')
+    expect(job?.running).toBe(1)
+    const started = performance.now()
+    await booted.app.stop()
+    expect(performance.now() - started).toBeLessThan(1000)
+    expect(job?.lastRun).toMatchObject({ outcome: 'skipped', aborted: 'shutdown', startedAt: undefined })
+    expect(events.map(event => [event.outcome, event.aborted])).toEqual([['skipped', 'shutdown']])
+    expect(booted.logs.messages('warn').filter(message => message.includes('abandoned'))).toEqual([])
+    late.resolve()
+    await clock.settle()
+    expect(executed).toEqual([])
+    expect(released).toBe(true)
+  }, 10_000)
 
   it('never start their job once stop() began, even when the drain succeeds', async () => {
     const clock = testClock()

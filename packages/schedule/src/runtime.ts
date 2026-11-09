@@ -100,6 +100,8 @@ export type RuntimeState = 'bootstrapped' | 'running' | 'stopping' | 'stopped'
 const RESYNC_MS = 60_000
 const DAY = 86_400_000
 const MAX_DRAIN_MS = 2 ** 31 - 1
+/** {@link ScheduleRuntime} `#acquire()`: the run was aborted before the store answered. */
+const ABORTED: unique symbol = Symbol('aborted')
 
 /** The run in progress, for `stop()` called from inside a run (it must not wait for itself). */
 const currentRun = new AsyncLocalStorage<RunRecord>()
@@ -697,8 +699,9 @@ export class ScheduleRuntime {
     let lease: LockLease | undefined
     const claimedAt = this.clock.now()
     if (job.locked && lock !== undefined) {
+      let claimed: LockLease | undefined | typeof ABORTED
       try {
-        lease = await this.#acquire(run, lock, scheduledAt)
+        claimed = await this.#acquire(run, lock, scheduledAt)
       } catch (error) {
         logger.error(`Schedule: job '${job.name}' did not run: the ${lock.store.name} lock store failed`, {
           job: job.name,
@@ -707,7 +710,9 @@ export class ScheduleRuntime {
         })
         return this.#notExecuted(job, run.runId, scheduledAt, trigger, 'failed', startTime, error)
       }
-      if (lease === undefined) {
+      // aborted while waiting for the store: dropped below, like a run aborted once its lease is acquired
+      if (claimed !== ABORTED) lease = claimed
+      if (claimed === undefined) {
         logger.debug(`Schedule: job '${job.name}' not run: another instance holds the lock`, {
           job: job.name,
           runId: run.runId,
@@ -857,18 +862,26 @@ export class ScheduleRuntime {
     return this.#notExecuted(job, run.runId, scheduledAt, trigger, 'skipped', startTime, undefined, run.aborted)
   }
 
-  /** `store.acquire()`, bounded by the ttl: a store that does not answer fails closed (RFC 0004 §7.6). */
-  async #acquire(run: RunRecord, lock: ResolvedLock, occurrence: number): Promise<LockLease | undefined> {
+  /**
+   * `store.acquire()`, bounded by the ttl: a store that does not answer fails closed (RFC 0004 §7.6).
+   * An abort of the run (shutdown, `remove(name, { abort: true })`) stops the wait: {@link ABORTED}.
+   */
+  async #acquire(
+    run: RunRecord,
+    lock: ResolvedLock,
+    occurrence: number,
+  ): Promise<LockLease | undefined | typeof ABORTED> {
     const claim = Promise.resolve(
       lock.store.acquire(`${lock.keyPrefix}${run.job.name}`, { owner: lock.owner, occurrence, ttlMs: lock.ttlMs }),
     )
-    const answer = await this.#bounded(run, claim, lock.ttlMs)
+    const answer = await this.#bounded(run, claim, lock.ttlMs, run.controller.signal)
     if (answer.done) return answer.value
     // the claim may still succeed: its lease is released then, since the run did not start
     claim.then(
       late => (late === undefined ? undefined : Promise.resolve(late.release()).catch(() => undefined)),
       () => undefined,
     )
+    if (answer.aborted) return ABORTED
     throw new Error(`the ${lock.store.name} lock store did not answer within the lock ttl (${lock.ttlMs} ms)`)
   }
 
@@ -895,22 +908,37 @@ export class ScheduleRuntime {
     }
   }
 
-  /** Waits for a lock store call, at most `ms` on the scheduler clock. Rejections pass through. */
+  /**
+   * Waits for a lock store call, at most `ms` on the scheduler clock, or until `signal` aborts.
+   * Rejections pass through.
+   */
   #bounded<T>(
     run: RunRecord,
     call: Promise<T>,
     ms: number,
-  ): Promise<{ readonly done: true; readonly value: T } | { readonly done: false }> {
+    signal?: AbortSignal,
+  ): Promise<{ readonly done: true; readonly value: T } | { readonly done: false; readonly aborted: boolean }> {
     return new Promise((resolve, reject) => {
+      if (signal?.aborted) {
+        resolve({ done: false, aborted: true })
+        return
+      }
       const timer = this.clock.setTimer(() => {
         if (run.storeTimer === timer) run.storeTimer = undefined
-        resolve({ done: false })
+        signal?.removeEventListener('abort', onAbort)
+        resolve({ done: false, aborted: false })
       }, ms)
       run.storeTimer = timer
       const clear = (): void => {
         this.clock.clearTimer(timer)
         if (run.storeTimer === timer) run.storeTimer = undefined
+        signal?.removeEventListener('abort', onAbort)
       }
+      const onAbort = (): void => {
+        clear()
+        resolve({ done: false, aborted: true })
+      }
+      signal?.addEventListener('abort', onAbort, { once: true })
       call.then(
         value => {
           clear()
