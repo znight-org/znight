@@ -89,7 +89,7 @@ for (const adapter of ADAPTERS) {
         const page = await transport.send('GET', '/api/docs')
         expect(page.status).toBe(200)
         expect(String(page.headers['content-security-policy'])).toContain(
-          "script-src 'self' https://cdn.jsdelivr.net 'sha256-",
+          "script-src 'self' https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.75.1/dist/browser/standalone.js 'sha256-",
         )
         expect(page.body).toContain('"url":"/api/openapi.json"')
         expect((await transport.send('GET', '/api/docs/_assets/scalar@1.0.0/standalone.js')).status).toBe(404)

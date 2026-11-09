@@ -248,11 +248,14 @@ async function watch(cli: CliContext, compiler: CompilerApi, options: ZnightOpti
   const incremental: IncrementalCompiler = compiler.createIncremental(options)
   let state: WatchState = { known: new Set(), roots: [] }
   let pending = new Set<string>()
-  let running = false
+  let running: Promise<void> | undefined
+  // set on Ctrl+C: a generation in flight must neither watch again nor loop
+  let closed = false
   let timer: ReturnType<typeof setTimeout> | undefined
 
   // which events matter is the compiler's call: the CLI only tells their kind, which fs.watch does not
   const watchers = new TargetWatchers(cli.services.watch, file => {
+    if (closed) return
     const path = realPath(file)
     if (!incremental.isRelevantChange(changeKind(path, state.known), path, state.known, state.roots)) return
     pending.add(path)
@@ -263,33 +266,36 @@ async function watch(cli: CliContext, compiler: CompilerApi, options: ZnightOpti
     }, 50)
   })
 
-  const run = async (initial: boolean): Promise<void> => {
-    if (running) return
-    running = true
+  const run = (initial: boolean): Promise<void> => {
+    if (running !== undefined || closed) return running ?? Promise.resolve()
+    running = generations(initial).finally(() => {
+      running = undefined
+    })
+    return running
+  }
+
+  const generations = async (initial: boolean): Promise<void> => {
     let first = initial
-    try {
-      do {
-        const files = pending
-        pending = new Set()
-        const started = performance.now()
-        let known = state.known
-        try {
-          const result = await incremental.generate(first ? undefined : classifyChanges(files, state.known))
-          if (result.watchFiles !== undefined) {
-            known = new Set(result.watchFiles.map(file => toPosixPath(resolve(file))))
-          }
-          report(cli, compiler, result, root, performance.now() - started)
-        } catch (error) {
-          cli.reporter.error(`Generation failed: ${errorMessage(error)}`)
+    do {
+      const files = pending
+      pending = new Set()
+      const started = performance.now()
+      let known = state.known
+      try {
+        const result = await incremental.generate(first ? undefined : classifyChanges(files, state.known))
+        if (result.watchFiles !== undefined) {
+          known = new Set(result.watchFiles.map(file => toPosixPath(resolve(file))))
         }
-        // the include directories of the source libraries are known once compiled
-        state = { known, roots: incremental.includeRoots().map(realPath) }
-        watchers.update(watchTargets(realRoot, state.roots, state.known), files)
-        first = false
-      } while (pending.size > 0)
-    } finally {
-      running = false
-    }
+        report(cli, compiler, result, root, performance.now() - started)
+      } catch (error) {
+        cli.reporter.error(`Generation failed: ${errorMessage(error)}`)
+      }
+      if (closed) return
+      // the include directories of the source libraries are known once compiled
+      state = { known, roots: incremental.includeRoots().map(realPath) }
+      watchers.update(watchTargets(realRoot, state.roots, state.known), files)
+      first = false
+    } while (pending.size > 0 && !closed)
   }
 
   await run(true)
@@ -299,10 +305,13 @@ async function watch(cli: CliContext, compiler: CompilerApi, options: ZnightOpti
     const dispose = onTermination(
       cli,
       () => {
+        closed = true
         if (timer !== undefined) clearTimeout(timer)
         watchers.close()
         dispose()
-        resolveExit(0)
+        // the generation in flight finishes writing its files first
+        const exit = (): void => resolveExit(0)
+        void (running ?? Promise.resolve()).then(exit, exit)
       },
       () => undefined,
     )

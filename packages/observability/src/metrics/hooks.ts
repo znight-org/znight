@@ -3,6 +3,7 @@ import type { MetricsRegistry } from './registry.ts'
 
 import { invalidOption } from '../internal/errors.ts'
 import { normalizeMethod } from '../internal/hooks.ts'
+import { MAX_LABEL_LENGTH } from '../internal/labels.ts'
 import { guard } from '../internal/safe.ts'
 import { now, startOf } from '../internal/time.ts'
 
@@ -168,7 +169,8 @@ export function measureMessages(
 
 /**
  * The `type` label of a delivery: `unmatched` when no handler matched, otherwise the message type,
- * limited to `max` distinct values per handler (`_OTHER` beyond).
+ * limited to `max` distinct values per handler (`_OTHER` beyond); a type longer than
+ * {@link MAX_LABEL_LENGTH} is `_OTHER`.
  */
 function boundedTypeLabel(max: number = DEFAULT_MAX_TYPES_PER_HANDLER): (event: MessageDeliveryEvent) => string {
   if (!Number.isInteger(max) || max < 1) {
@@ -186,7 +188,8 @@ function boundedTypeLabel(max: number = DEFAULT_MAX_TYPES_PER_HANDLER): (event: 
       seen.set(key, types)
     }
     if (types.has(type)) return type
-    if (types.size >= max) return OTHER_MESSAGE_TYPE
+    // producers choose the type: an oversized one never takes a slot
+    if (types.size >= max || type.length > MAX_LABEL_LENGTH) return OTHER_MESSAGE_TYPE
     types.add(type)
     return type
   }

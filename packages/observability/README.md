@@ -288,7 +288,9 @@ Bit ship stdout. To follow Lambda's configured level: `level: process.env.AWS_LA
 The plugin flushes the logger in `onDispose`, and every entry logged afterwards (the framework's
 final `Application stopped` or `The application stopped with errors`) is flushed as soon as it is
 written: the pending request keeps the process alive until it is delivered. Standalone, call
-`await logger.close()` (or `transport.close()`) before exiting.
+`await logger.close()` (or `transport.close()`) before exiting. During `flush()` / `close()`, a batch
+that still fails after its retries drops the rest of the buffer (reported to `onError`): an
+unreachable intake costs the retries of one batch at shutdown, not of every buffered batch.
 
 ### Request, message, job, GraphQL, WebSocket and event logs
 
@@ -390,7 +392,8 @@ unknown methods become `_OTHER`: label cardinality stays bounded. Durations star
 message type when a handler matched, `unmatched` otherwise (never the raw type of an unhandled
 delivery: producers choose it); a handler records at most `maxTypesPerHandler` (50) distinct types,
 later ones are labelled `_OTHER` (a pattern or default `@OnMessage()` handler receives whatever types
-producers send). Label cardinality stays bounded.
+producers send), and so is a type longer than 128 characters, without taking a slot. Label
+cardinality stays bounded.
 
 ### Application event metrics
 
@@ -442,8 +445,9 @@ One series per operation of `@znight/graphql` (`graphql:operation` hook):
 
 `type` is `query`, `mutation`, `subscription`, or `unknown` for a request rejected before an
 operation was selected (a parse error). `name` is the operation name, `anonymous` for an anonymous
-operation; clients choose operation names, so at most `maxOperationNames` (100) distinct names are
-labelled, later ones are `_OTHER`. `outcome` is `success`, `partial` (data with field errors),
+operation and when no operation was selected (the `operationName` the client sent is never used);
+clients choose operation names, so at most `maxOperationNames` (100) distinct names are labelled,
+later ones are `_OTHER`, and so is a name longer than 128 characters, without taking a slot. `outcome` is `success`, `partial` (data with field errors),
 `error` (no data, or the execution threw) or `rejected` (parse, validation, variables or limits). A
 subscription is timed over its whole life: filter on `type` before reading latencies.
 
@@ -514,8 +518,9 @@ One `SERVER` span per request, named `GET /users/:id` (`GET` when no route match
 
 - attributes (stable HTTP semantic conventions): `http.request.method` (+ `http.request.method_original`
   for unknown methods), `url.path`, `http.route`, `http.response.status_code`, `user_agent.original`,
-  `server.address` / `server.port` (`Host` / `X-Forwarded-Host`), `url.scheme` (`X-Forwarded-Proto`),
-  `client.address` (`X-Forwarded-For`), `znight.request.id`;
+  `server.address` / `server.port` (`Host`), `url.scheme` and `client.address` (`ctx.protocol` and
+  `ctx.ip` of `@znight/http`, which read `X-Forwarded-*` only behind proxies listed in its
+  `trustProxy` option), `znight.request.id`;
 - 5xx and unhandled errors set the status to `ERROR`, record the exception and `error.type`; 4xx leave
   it unset (client errors, as the conventions require);
 - the response carries `traceresponse: 00-<trace-id>-<span-id>-<flags>` (W3C Trace Context level 2)

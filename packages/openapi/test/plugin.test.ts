@@ -103,7 +103,7 @@ describe('serving', () => {
       'Scalar.createApiReference(\'#app\', {"url":"/openapi.json","withDefaultFonts":false,"telemetry":false,"theme":"purple"})',
     )
     expect(csp).toContain(`'sha256-${createHash('sha256').update(inline).digest('base64')}'`)
-    expect(csp).toContain("script-src 'self' https://cdn.jsdelivr.net")
+    expect(csp).toContain("script-src 'self' https://cdn.jsdelivr.net/npm/@scalar/api-reference@")
     expect(csp).toContain("frame-ancestors 'none'")
     expect(page.body).toContain('integrity="sha384-')
     expect(page.body).toContain('<title>Bookshelf API — API reference</title>')
@@ -128,6 +128,27 @@ describe('serving', () => {
       expect(String(page.headers['content-security-policy'])).toContain("connect-src 'self' https://api.example.com;")
       expect(page.body).toContain('<title>Bookshelf API — API reference</title>')
     }
+  })
+
+  it('allows the origins of templated servers, their variables expanded, in the CSP of the UI', async () => {
+    await using app = await create(
+      OpenApiPlugin.configure({
+        assets: 'cdn',
+        servers: [
+          { url: 'https://{region}.api.example.com', variables: { region: { default: 'eu', enum: ['eu', 'us'] } } },
+          {
+            url: '{scheme}://admin.example.com:{port}',
+            variables: { scheme: { default: 'https' }, port: { default: '8443' } },
+          },
+          { url: 'https://{undeclared}.example.com' },
+        ],
+      }),
+    )
+    const csp = String((await app.inject({ method: 'GET', url: '/docs' })).headers['content-security-policy'])
+    expect(csp).toContain(
+      "connect-src 'self' https://admin.example.com:8443 https://eu.api.example.com https://us.api.example.com;",
+    )
+    expect(csp).not.toContain('{')
   })
 
   it('does not serve anything with enabled: false, and the OpenApi external still works', async () => {
@@ -390,6 +411,19 @@ describe('lifecycle and options', () => {
     }
     await using again = await create(plugin)
     expect((await again.inject({ method: 'GET', url: '/openapi.json' })).status).toBe(200)
+  })
+
+  it('keeps serving the first application after refusing a second one, and keeps refusing', async () => {
+    const plugin = OpenApiPlugin.configure()
+    await using app = await create(plugin)
+    const first = await app.inject({ method: 'GET', url: '/openapi.json' })
+    const etag = String(first.headers['etag'])
+    // the refused application is rolled back: its onDispose must not reset the live plugin
+    await expect(create(plugin)).rejects.toMatchObject({ code: 'ZNIGHT004' })
+    await expect(create(plugin)).rejects.toMatchObject({ code: 'ZNIGHT004' })
+    expect((await app.inject({ method: 'GET', url: '/openapi.json', headers: { 'if-none-match': etag } })).status).toBe(
+      304,
+    )
   })
 
   it('requires HttpPlugin and the OpenAPI section (ZNIGHT030)', async () => {

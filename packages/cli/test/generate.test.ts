@@ -57,6 +57,8 @@ class FakeCompiler implements CompilerApi {
   extraFiles: { file: string; content: string }[] | undefined
   /** `includeRoots()` of the incremental compiler (`undefined`: `<root>/src`, like the default `include`). */
   includeRoots: string[] | undefined
+  /** Awaited by each incremental generation before it completes (a slow compile). */
+  hold: Promise<void> | undefined
   /** `isRelevantChange()` of the incremental compiler (default: everything but the outFile and `.md` files). */
   relevant: ((kind: ChangeKind, file: string) => boolean) | undefined
   /** The events `isRelevantChange()` was asked about, with the state it was given. */
@@ -110,7 +112,7 @@ class FakeCompiler implements CompilerApi {
     return {
       generate: changes => {
         this.calls.push({ method: 'incremental', ...(changes === undefined ? {} : { changes }) })
-        return Promise.resolve(this.#write(options))
+        return (this.hold ?? Promise.resolve()).then(() => this.#write(options))
       },
       isOutFile,
       includeRoots: () => this.includeRoots ?? [resolve(options.root ?? '.', 'src')],
@@ -546,6 +548,32 @@ describe('znight generate', () => {
 
     signals.emit('SIGTERM')
     expect((await running).code).toBe(0)
+  })
+
+  it('stops for good when Ctrl+C lands during a generation', async () => {
+    const signals = new FakeSignals()
+    const root = realpathSync(project.path)
+    mkdirSync(join(root, 'src'))
+    writeFileSync(join(root, 'src/a.ts'), '')
+    const { running, watcher } = startWatch(root, signals)
+    await waitFor(() => watcher.onChange !== undefined)
+    const created = watcher.targets.length
+    let release = (): void => undefined
+    compiler.hold = new Promise(resolve => {
+      release = resolve
+    })
+    watcher.onChange?.(join(root, 'src/a.ts'))
+    await waitFor(() => compiler.calls.length === 2)
+    signals.emit('SIGINT')
+    release()
+    expect((await running).code).toBe(0)
+    await new Promise(resolve => setTimeout(resolve, 80))
+    // the generation in flight did not watch again once the command returned
+    expect(watcher.targets).toHaveLength(created)
+    expect(watcher.closed).toBe(created)
+    watcher.onChange?.(join(root, 'src/a.ts'))
+    await new Promise(resolve => setTimeout(resolve, 80))
+    expect(compiler.calls).toHaveLength(2)
   })
 
   it('stops watching on SIGHUP (terminal closed)', async () => {

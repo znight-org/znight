@@ -223,6 +223,31 @@ describe('traceHttpRequests', () => {
     return hooks
   }
 
+  it('takes the client address and scheme from the HTTP context (trustProxy), never from X-Forwarded-*', async () => {
+    const hooks = hooksWith()
+    // trustProxy off: @znight/http resolved the socket peer and the connection's protocol
+    const event = httpEvent({
+      headers: {
+        host: 'api.example.com',
+        'x-forwarded-for': '10.0.0.5',
+        'x-forwarded-host': 'evil.example',
+        'x-forwarded-proto': 'https',
+      },
+      context: { ip: '203.0.113.7', protocol: 'http' },
+    })
+    await hooks.run('http:request', event, async () => undefined)
+    const attributes = byName('GET /users/:id').attributes
+    expect(attributes[Attr.CLIENT_ADDRESS]).toBe('203.0.113.7')
+    expect(attributes[Attr.URL_SCHEME]).toBe('http')
+    expect(attributes[Attr.SERVER_ADDRESS]).toBe('api.example.com')
+    expect(Object.values(attributes)).not.toContain('evil.example')
+    expect(Object.values(attributes)).not.toContain('10.0.0.5')
+    // no HTTP context (another producer): neither is recorded
+    exporter.reset()
+    await hooks.run('http:request', httpEvent({ headers: { 'x-forwarded-for': '10.0.0.5' } }), async () => undefined)
+    expect(byName('GET /users/:id').attributes).not.toHaveProperty(Attr.CLIENT_ADDRESS)
+  })
+
   it('creates a SERVER span child of the incoming traceparent, active during the request', async () => {
     const hooks = hooksWith()
     const { stream, entries } = capture()
@@ -232,9 +257,11 @@ describe('traceHttpRequests', () => {
         traceparent: TRACEPARENT,
         'user-agent': 'curl/8',
         host: 'api.example.com:8443',
-        'x-forwarded-proto': 'https',
-        'x-forwarded-for': '203.0.113.7, 10.0.0.1',
+        'x-forwarded-proto': 'http',
+        'x-forwarded-for': '10.0.0.1',
       },
+      // resolved by @znight/http behind a trusted proxy
+      context: { ip: '203.0.113.7', protocol: 'https' },
       startTime: performance.now() - 30,
     })
     const result = await hooks.run('http:request', event, async () => {

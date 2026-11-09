@@ -83,6 +83,27 @@ describe('AppSupervisor', () => {
     await supervisor.stop()
   })
 
+  it('cancels a restart that is stopping the previous process, or queued behind it', async () => {
+    const { supervisor, children } = setup({ exitAfterMs: undefined }, { killTimeoutMs: 5000 })
+    await supervisor.restart()
+    // the previous process takes its time to shut down gracefully
+    const stopping = supervisor.restart()
+    await waitFor(() => children[0]?.signals.length === 1)
+    const queued = supervisor.restart()
+    // the next build failed to compile: neither restart may start its (broken) output
+    expect(supervisor.cancelRestart()).toBe(true)
+    children[0]?.exit(0)
+    await Promise.all([stopping, queued])
+    expect(children).toHaveLength(1)
+    expect(supervisor.running).toBe(false)
+    expect(supervisor.starts).toBe(1)
+    // a later good build starts again
+    await supervisor.restart()
+    expect(children).toHaveLength(2)
+    expect(supervisor.running).toBe(true)
+    await supervisor.stop('SIGKILL')
+  })
+
   it('debounces scheduled restarts', async () => {
     const { supervisor, children } = setup(undefined, { debounceMs: 30 })
     supervisor.scheduleRestart()

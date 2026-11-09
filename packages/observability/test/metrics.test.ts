@@ -251,6 +251,22 @@ describe('measureMessages type label', () => {
     expect(text.split('\n').filter(line => line.startsWith('messaging_messages_processed_total{'))).toHaveLength(5)
   })
 
+  it('labels oversized types _OTHER without using a slot of the cap', async () => {
+    const metrics = registry()
+    const hooks = new Hooks({ logger: silentLogger })
+    hooks.wrap('messaging:message', measureMessages(metrics, { maxTypesPerHandler: 1 }))
+    for (let index = 0; index < 5; index++) {
+      const type = `${index}-${'x'.repeat(10_000)}`
+      await hooks.run('messaging:message', messageEvent({ type, handler: 'onAny' }), async () => undefined)
+    }
+    await hooks.run('messaging:message', messageEvent({ type: 'a', handler: 'onAny' }), async () => undefined)
+    const text = await metrics.metrics()
+    expect(text).not.toContain('xxxx')
+    const total = (labels: string) => sample(metrics, `messaging_messages_processed_total{${base},${labels}}`)
+    expect(await total(`type="${OTHER_MESSAGE_TYPE}",outcome="ack"`)).toBe(5)
+    expect(await total('type="a",outcome="ack"')).toBe(1)
+  })
+
   it('validates maxTypesPerHandler', async () => {
     for (const maxTypesPerHandler of [0, 1.5, Number.NaN]) {
       const error = await caught(() => measureMessages(registry(), { maxTypesPerHandler }))
@@ -312,6 +328,27 @@ describe('MetricsServer', () => {
     await server.listen()
     expect(server.listening).toBe(true)
     await server.close()
+  })
+
+  it('starts one server for concurrent listen() calls, and close() during listen() stops it', async () => {
+    const probe = createServer()
+    await new Promise<void>(resolve => probe.listen(0, '127.0.0.1', resolve))
+    const port = (probe.address() as { port: number }).port
+    await new Promise(resolve => probe.close(resolve))
+    const refused = async () => (await caught(() => fetch(`http://127.0.0.1:${port}/metrics`))) !== undefined
+
+    const server = new MetricsServer(registry(), { port, host: '127.0.0.1' })
+    await Promise.all([server.listen(), server.listen()])
+    expect(server.port).toBe(port)
+    await server.close()
+    expect(server.listening).toBe(false)
+    expect(await refused()).toBe(true)
+
+    const listening = server.listen()
+    const closing = server.close()
+    await Promise.all([listening, closing])
+    expect(server.listening).toBe(false)
+    expect(await refused()).toBe(true)
   })
 
   it('fails to start on a busy port with a clear message', async () => {

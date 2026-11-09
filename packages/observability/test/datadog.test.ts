@@ -288,6 +288,27 @@ describe('datadogTransport', () => {
     expect(errors[0]?.dropped).toBe(1)
   })
 
+  it('drops the rest of the buffer once a batch fails during flush or close (bounded shutdown)', async () => {
+    let calls = 0
+    const dd = transport({
+      batchSize: 1,
+      maxRetries: 3,
+      retryDelayMs: 20,
+      fetch: (() => {
+        calls++
+        return Promise.reject(new Error('ECONNREFUSED'))
+      }) as unknown as typeof fetch,
+    })
+    const logger = new Logger({ transport: dd })
+    for (let index = 0; index < 50; index++) logger.info(`entry ${index}`)
+    await dd.close()
+    expect(dd.pending).toBe(0)
+    expect(dd.dropped).toBe(50)
+    expect(errors.reduce((sum, error) => sum + error.dropped, 0)).toBe(50)
+    // the retries of the first batch only, not of every buffered batch
+    expect(calls).toBe(4)
+  })
+
   it('uses an injected fetch and bounds the buffer (oldest dropped)', async () => {
     const bodies: string[] = []
     const dd = transport({

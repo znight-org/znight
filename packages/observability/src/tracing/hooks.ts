@@ -56,7 +56,7 @@ export function traceHttpRequests(tracer: Tracer, options: HttpTracingOptions = 
     }
     if (method === OTHER_METHOD) attributes[Attr.HTTP_REQUEST_METHOD_ORIGINAL] = event.method
     if (event.route !== undefined) attributes[Attr.HTTP_ROUTE] = event.route
-    addRequestAttributes(attributes, event.headers)
+    addRequestAttributes(attributes, event)
     const target = method === OTHER_METHOD ? 'HTTP' : method
     const span = tracer.otel.startSpan(
       event.route === undefined ? target : `${target} ${event.route}`,
@@ -106,22 +106,25 @@ function startTimeOf(startTime: unknown): { startTime?: number } {
     : {}
 }
 
-function addRequestAttributes(attributes: Attributes, headers: HttpRequestEvent['headers']): void {
+/**
+ * Request attributes. The client address and the scheme come from the `HttpContext` of
+ * `@znight/http` (`ip`, `protocol`, read structurally), which honours its `trustProxy` option:
+ * `X-Forwarded-*` headers, which any client can send, are never read here.
+ */
+function addRequestAttributes(attributes: Attributes, event: HttpRequestEvent): void {
+  const headers = event.headers
   const userAgent = headers['user-agent']
   if (userAgent !== undefined) attributes[Attr.USER_AGENT_ORIGINAL] = userAgent
-  const host = headers['x-forwarded-host'] ?? headers['host']
+  const host = headers['host']
   if (host !== undefined) {
-    const { address, port } = splitHost(host.split(',')[0]?.trim() ?? host)
+    const { address, port } = splitHost(host.trim())
     if (address !== '') attributes[Attr.SERVER_ADDRESS] = address
     if (port !== undefined) attributes[Attr.SERVER_PORT] = port
   }
-  const proto = headers['x-forwarded-proto']
-  if (proto !== undefined) attributes[Attr.URL_SCHEME] = proto.split(',')[0]?.trim() ?? proto
-  const forwarded = headers['x-forwarded-for']
-  if (forwarded !== undefined) {
-    const client = forwarded.split(',')[0]?.trim()
-    if (client !== undefined && client !== '') attributes[Attr.CLIENT_ADDRESS] = client
-  }
+  const context = event.context as { readonly ip?: unknown; readonly protocol?: unknown } | null | undefined
+  if (typeof context !== 'object' || context === null) return
+  if (context.protocol === 'http' || context.protocol === 'https') attributes[Attr.URL_SCHEME] = context.protocol
+  if (typeof context.ip === 'string' && context.ip !== '') attributes[Attr.CLIENT_ADDRESS] = context.ip
 }
 
 function splitHost(host: string): { address: string; port: number | undefined } {
