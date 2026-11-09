@@ -1277,6 +1277,10 @@ control:
 
 - **Decorators of a group are alternatives.** A route (or a controller) has at most one decision
   per group: `@Public() @Roles(['admin'])` on one method is ZNIGHT005 at build time.
+- **Route decorators are applied directly.** A `const` alias (`export const RequireRoles = Roles`)
+  is the same decorator, but a function applying one (`const AdminOnly = () => Roles(['admin'])`,
+  NestJS's `applyDecorators` habit) is ZNIGHT005: the compiler never runs your code, so the decision
+  would be dropped and the controller's weaker one would apply to the route.
 - **The nearest decision wins.** The effective metadata of a route (`ctx.route.meta`,
   `decorator.get(ctx)`) is made of the controller's entries whose group the route does not decide,
   then the route's entries. `@Public()` on a controller and `@Roles(['admin'])` on one of its
@@ -2033,7 +2037,8 @@ accepted too. `file?: File` / `File | undefined` makes an upload optional (`requ
   `@Controller()`, and those on the parameters of its handlers (`@OnMessage`) are left to that
   extension (`@znight/messaging` reports a `Headers` imported from `@znight/http`), unless the
   parameter is also read through its decorators or is optional. Route decorator groups: invalid
-  `createRouteDecorator` options (at the usage, related to the definition), two decisions of one
+  `createRouteDecorator` options (at the usage, related to the definition), a function applying a
+  route decorator (`const AdminOnly = () => Roles(['admin'])`: its decision would be dropped), two decisions of one
   group on a class or a method, two definitions of one key with different options, decorators of
   one group disagreeing on `required` (at the second definition). Cookies: an invalid cookie name
   (not an RFC 9110 token), `@SignedCookie` without name, `@Cookie` and `@SignedCookie` on one
@@ -2170,8 +2175,11 @@ Rules:
   `mimeTypes`) are omitted when absent (`exactOptionalPropertyTypes`).
 - `meta` values: a `createRouteDecorator` call without argument stores `true`. A decorator is a
   route decorator when its callee is a `const` initialised with a call to
-  `@znight/http#createRouteDecorator`; its `key` (first argument) and its options (second
-  argument) are static. A target holds at most one key per group.
+  `@znight/http#createRouteDecorator`, or a `const` alias of one (`const RequireRoles = Roles`);
+  its `key` (first argument) and its options (second argument) are static. A function applying a
+  route decorator (`const AdminOnly = () => Roles(['admin'])`, a `function` returning one) is
+  ZNIGHT005 where it is applied: the decision it applies is invisible to the compiler. A target
+  holds at most one key per group.
 - `groups` (`HttpRouteGroupDefinition`: `{ keys, required }`): a key belongs to one group at most;
   a key listed nowhere is its own group, not required. A group name is a letter followed by
   letters, digits, `_`, `.` or `-`, or the single key of the group (a decorator without `group`). The plugin computes the effective metadata

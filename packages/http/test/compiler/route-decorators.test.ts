@@ -102,3 +102,67 @@ export class AppController {
   ])
   expect(result.controllers[0]?.routes[0]?.meta).toEqual([])
 })
+
+it('follows const aliases of route decorators and reports wrappers that apply one', async () => {
+  const app = tempApp({
+    'src/auth/access.ts': `
+import { createRouteDecorator } from '@znight/http'
+export const Authenticated = createRouteDecorator('authenticated', { group: 'access', required: true })
+export const Roles = createRouteDecorator<readonly string[]>('roles', { group: 'access', required: true })
+export const RequireRoles = Roles
+export const Again = RequireRoles as typeof Roles
+export const AdminOnly = () => Roles(['admin'])
+export function Admin(): MethodDecorator {
+  return Roles(['admin'])
+}
+export const Owner = function () {
+  const roles = ['owner']
+  return Roles(roles)
+}
+export const Loop: typeof Roles = Loop2
+export const Loop2: typeof Roles = Loop
+`,
+    'src/app.controller.ts': `
+import { Controller, Delete } from '@znight/http'
+import { Admin, AdminOnly, Again, Authenticated, Loop, Owner, RequireRoles } from './auth/access.ts'
+
+@Controller('/admin')
+@Authenticated()
+export class AdminController {
+  @Delete('/a')
+  @AdminOnly()
+  a() { return 'a' }
+
+  @Delete('/b')
+  @RequireRoles(['admin'])
+  b() { return 'b' }
+
+  @Delete('/c')
+  @Admin()
+  c() { return 'c' }
+
+  @Delete('/d')
+  @Owner()
+  d() { return 'd' }
+
+  @Delete('/e')
+  @Again(['ops'])
+  e() { return 'e' }
+
+  @Delete('/f')
+  @Loop(['x'])
+  f() { return 'f' }
+}
+`,
+  })
+  const result = await analyzeApp(app.root)
+  const wrapper = (name: string) =>
+    `error ZNIGHT005 src/app.controller.ts:${{ AdminOnly: 9, Admin: 17, Owner: 21 }[name]}:3 Invalid route decorator @${name}: it applies the route decorator @Roles inside a function, which the compiler cannot see: the "access" decision would be ignored`
+  expect(httpDiagnostics(result)).toEqual([wrapper('AdminOnly'), wrapper('Admin'), wrapper('Owner')])
+  const routes = result.controllers[0]?.routes ?? []
+  const meta = (path: string) =>
+    routes.find(route => route.path === path)?.meta.map(entry => [entry.decorator, entry.key, entry.value])
+  expect(meta('/b')).toEqual([['RequireRoles', 'roles', ['admin']]])
+  expect(meta('/e')).toEqual([['Again', 'roles', ['ops']]])
+  expect(meta('/f')).toEqual([])
+})

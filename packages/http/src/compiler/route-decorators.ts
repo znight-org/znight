@@ -7,6 +7,10 @@
  * argument (literals, `const` references, references to exported bindings); without argument the
  * value is `true`. Decorators of one group are alternatives: one per controller or route.
  *
+ * A `const` alias of a route decorator (`const RequireRoles = Roles`) is the same route decorator. A
+ * function applying a route decorator (`const AdminOnly = () => Roles(['admin'])`) is reported
+ * (ZNIGHT005): the compiler cannot see the decision it applies, which would be silently dropped.
+ *
  * Every helper takes the analysis context of **any** extension: other extensions read route
  * decorators on their own targets (gateways, resolvers) with {@link readRouteMeta}, exported by
  * `@znight/http/compiler`.
@@ -71,6 +75,8 @@ export function resolveRouteDecorator(ctx: Context, identity: string): RouteDeco
   }
   let resolution = cache.get(identity)
   if (!resolution) {
+    // cycles of aliases (`const A = B`, `const B = A`) resolve to OTHER
+    cache.set(identity, OTHER)
     resolution = resolve(ctx, identity)
     cache.set(identity, resolution)
   }
@@ -84,6 +90,10 @@ function resolve(ctx: Context, identity: string): RouteDecoratorResolution {
   const symbol = ctx.project.lookupIdentity(identity)
   if (symbol.kind !== 'declaration') {
     return OTHER
+  }
+  const fn = symbol.declarations.find(candidate => candidate.kind === 'function')
+  if (fn !== undefined) {
+    return wrapperOf(ctx, fn, fn.node as unknown)
   }
   const declaration = symbol.declarations.find(candidate => candidate.kind === 'const')
   const node = declaration?.node as unknown
@@ -112,6 +122,15 @@ function resolve(ctx: Context, identity: string): RouteDecoratorResolution {
     return OTHER
   }
   const call = unwrap(init)
+  if (isEntityName(call)) {
+    // `const RequireRoles = Roles`: the same route decorator, under another name
+    const target = ctx.project.resolveIdentifier(scope, call as unknown as EntityName, 'value').identity?.identity
+    const resolution = target === undefined ? OTHER : resolveRouteDecorator(ctx, target)
+    return resolution.kind === 'route' ? { ...resolution, name: declaration.name } : resolution
+  }
+  if (call.type === 'ArrowFunctionExpression' || call.type === 'FunctionExpression') {
+    return wrapperOf(ctx, declaration, call)
+  }
   const callee = call.type === 'CallExpression' ? child(call, 'callee') : undefined
   if (!callee || !isEntityName(unwrap(callee))) {
     return OTHER
@@ -173,6 +192,70 @@ function resolve(ctx: Context, identity: string): RouteDecoratorResolution {
     }
   }
   return { kind: 'route', key: key.value, ...parsed, name: declaration.name, definition }
+}
+
+type Declaration = Extract<ReturnType<Project['lookupIdentity']>, { kind: 'declaration' }>['declarations'][number]
+
+/**
+ * A function declaration or expression whose body calls a route decorator (`() => Roles(['admin'])`):
+ * the decorator it returns is not visible to the compiler. Only analysed sources are inspected.
+ */
+function wrapperOf(ctx: Context, declaration: Declaration, fn: unknown): RouteDecoratorResolution {
+  const file = ctx.project.getFile(declaration.file)
+  const body = isNode(fn) ? child(fn, 'body') : undefined
+  if (!file || !body || !ctx.project.isScanned(declaration.file)) {
+    return OTHER
+  }
+  const scope = { file, namespace: declaration.namespace } as unknown as ScopeInput
+  let inner: RouteDecoratorDefinition | undefined
+  walk(body, node => {
+    if (inner !== undefined) {
+      return false
+    }
+    const callee = node.type === 'CallExpression' ? child(node, 'callee') : undefined
+    if (callee !== undefined && isEntityName(unwrap(callee))) {
+      const target = ctx.project.resolveIdentifier(scope, unwrap(callee) as unknown as EntityName, 'value').identity
+      const resolution = target === undefined ? OTHER : resolveRouteDecorator(ctx, target.identity)
+      if (resolution.kind === 'route') {
+        inner = resolution
+        return false
+      }
+    }
+    return true
+  })
+  if (inner === undefined) {
+    return OTHER
+  }
+  return {
+    kind: 'invalid',
+    message: `it applies the route decorator @${inner.name} inside a function, which the compiler cannot see: the "${inner.group}" decision would be ignored`,
+    hints: [
+      `Apply @${inner.name}(...) directly on the controller or the route`,
+      `Or make ${declaration.name} a route decorator of its own: export const ${declaration.name} = createRouteDecorator('${declaration.name.charAt(0).toLowerCase()}${declaration.name.slice(1)}', { group: '${inner.group}' })`,
+    ],
+    definition: file.location(declaration.span),
+  }
+}
+
+/** Visits the nodes of a subtree depth first; `visit` returns `false` to skip the children of a node. */
+function walk(node: AstNode, visit: (node: AstNode) => boolean): void {
+  if (!visit(node)) {
+    return
+  }
+  for (const [key, value] of Object.entries(node)) {
+    if (key === 'parent') {
+      continue
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        if (isNode(item)) {
+          walk(item, visit)
+        }
+      }
+    } else if (isNode(value)) {
+      walk(value, visit)
+    }
+  }
 }
 
 /**
