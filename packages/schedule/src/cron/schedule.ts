@@ -15,7 +15,7 @@
 import type { CronSpec } from './parse.ts'
 import type { TimeZone } from './zone.ts'
 
-import { civilFromDays, daysFromCivil, daysInMonth, weekdayOfDays } from './fields.ts'
+import { civilFromDays, daysFromCivil, daysInMonth, MAX_INSTANT, weekdayOfDays } from './fields.ts'
 
 /** Search horizon of {@link CronEngine.next}: 400 years (one Gregorian cycle). */
 export const HORIZON_MS: number = 146_097 * 86_400_000
@@ -29,7 +29,10 @@ const MAX_SEGMENTS = 4096
 export interface CronEngine {
   readonly spec: CronSpec
   readonly zone: TimeZone
-  /** The first occurrence strictly after `after` (epoch ms), `undefined` within 400 years. */
+  /**
+   * The first occurrence strictly after `after` (epoch ms), `undefined` within 400 years or before the
+   * end of the `Date` range ({@link MAX_INSTANT}); `undefined` too when `after` is outside that range.
+   */
   next(after: number): number | undefined
   /** Whether `instant` (epoch ms) is an occurrence. */
   matches(instant: number): boolean
@@ -50,9 +53,10 @@ export function compileCron(spec: CronSpec, zone: TimeZone): CronEngine {
 }
 
 function nextOccurrence(matcher: WallMatcher, zone: TimeZone, everyHour: boolean, after: number): number | undefined {
-  if (!Number.isFinite(after)) return undefined
+  // Outside the Date range, day numbers lose precision (`days++` stops changing them past 2^53).
+  if (!Number.isFinite(after) || Math.abs(after) > MAX_INSTANT) return undefined
   let from = Math.floor(after / 1000) * 1000 + 1000
-  const horizon = after + HORIZON_MS
+  const horizon = Math.min(after + HORIZON_MS, MAX_INSTANT)
   const limit = Math.floor((horizon + 2 * DAY) / 1000)
   if (!zone.fixed) {
     // The search starts exactly where a gap ends (`after` in the last second before it): `offsetAt`

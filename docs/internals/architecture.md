@@ -2938,7 +2938,8 @@ interface ScheduleMetadata {
   (`SUN-SUN`, `0-SUN`: Sunday, like `0-0`). Occurrences before 1970 are computed like any other
   (`next()`, `nextRuns()`, `matches()`). Zones are shared by the identifier `Intl` resolves a name to
   and only the last 256 spellings are remembered, so zone names from user input keep memory
-  bounded. Intervals fire at the multiples of `every` since the Unix epoch; a timeout fires once,
+  bounded; Impl.: a zone caches the transitions of its last 128 years used, so dates from user
+  input keep it bounded too. Intervals fire at the multiples of `every` since the Unix epoch; a timeout fires once,
   `delay` after the scheduler started. A late wake-up runs a job once, for its latest missed
   occurrence; an occurrence never runs twice in a process.
 - **A run**: the overlap policy first (`skip`: outcome `skipped`; `queue`: one pending run, the
@@ -2953,12 +2954,16 @@ interface ScheduleMetadata {
   scheduler is stopping or disposed, the job was removed, or it was paused (manual runs excepted):
   outcome `skipped` (with `aborted` when its signal was aborted), logged at `debug`, its lease
   released (its job never started), and no timer is armed after the dispose. `pause()` also drops
-  the queued occurrence of an `overlap: 'queue'` job; a queued `trigger()` still runs.
+  the queued occurrence of an `overlap: 'queue'` job, unless a queued `trigger()` waits for it (it
+  then runs). A dropped queued occurrence (pause, remove, stop) is emitted with outcome `skipped`
+  and trigger `queued`, recorded as `lastRun` and logged at `debug`.
 - **Locks** (normative): with a store, jobs are locked unless `lock: false` or `overlap: 'allow'`.
   `acquire(key, { owner, occurrence, ttlMs })` MUST grant a lease only when no lease is live **and**
   no later-or-equal occurrence of the key was claimed (occurrence fencing: clock skew between
   instances never runs an occurrence twice); a refusal is the outcome `not-acquired`. The lease is
-  extended every `ttl / 3`, one extension at a time; it is lost when `extend()` answers `false`, or
+  extended every `ttl / 3`, one extension at a time, the first one at most halfway between the
+  start of the run and `ttl` after the claim call (so a slow `acquire()` does not lose a healthy
+  lease); it is lost when `extend()` answers `false`, or
   `ttl` after the call of the last successful extension, even while an extension hangs (a
   partitioned client queuing commands): the run is then aborted (`lock-lost`). A store failure
   fails closed (outcome `failed`, no run), and so does an `acquire()` that does not answer within
@@ -2970,9 +2975,10 @@ interface ScheduleMetadata {
 - **Shutdown**: `onStop` disarms the timer, drops queued runs, aborts every running run's signal at
   once (`shutdown`) and waits up to `drainTimeoutMs`; runs still in flight are abandoned (logged):
   their leases are neither released nor extended (a run whose job had not started yet, still
-  waiting for its lease, is dropped and releases it). A `stop()` called from inside a run does not wait
-  for it. `onDispose` clears the timers and unbinds the registry. List `SchedulePlugin` before
-  `HttpPlugin`: plugins stop in reverse order, so HTTP drains first.
+  waiting for its lease, is dropped at once, without waiting for the store, and releases a lease
+  that comes later). A `stop()` called from inside a run does not wait for it. `onDispose` clears the timers and unbinds the registry; without a previous `onStop` (a
+  failed start), it also aborts the runs in flight (`shutdown`) and abandons them. List
+  `SchedulePlugin` before `HttpPlugin`: plugins stop in reverse order, so HTTP drains first.
 - `SchedulerRegistry`: `jobs()`, `get(name)`, `has(name)`, `addCron` / `addInterval` /
   `addTimeout(name, schedule, handler, options?)` (validated at once: ZNIGHT040, ZNIGHT041,
   ZNIGHT043), `remove(name, { abort? })` (runs not started yet are dropped, a running run goes on
@@ -2983,7 +2989,9 @@ interface ScheduleMetadata {
   scheduled again), `trigger()`, `nextRun`, `lastRun`, `nextRuns(count)`. Reschedules and dynamic
   jobs are not persisted.
 - `parseCron(expression, { timeZone? })` (`next`, `nextRuns`, `matches`) and `parseDuration` expose
-  the engine (ZNIGHT040 as `InvalidScheduleError` with `field`, `start`, `end`).
+  the engine (ZNIGHT040 as `InvalidScheduleError` with `field`, `start`, `end`). `next`, `nextRuns`
+  and `matches` MUST reject an instant outside the `Date` range (±8.64e15 epoch ms) with ZNIGHT040,
+  and the search MUST stop at the end of that range.
   `@znight/schedule/testing` exports `createTestClock(start?, { settleTimeoutMs? })` (virtual time:
   `advance`, `advanceTo`, waiting for the runs it starts, real I/O included; a run that makes no
   progress for `settleTimeoutMs` of real time, default 1 000, is not waited for again during that

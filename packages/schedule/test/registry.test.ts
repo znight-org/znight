@@ -310,7 +310,9 @@ describe('jobs', () => {
     for (let index = 0; index < 1000; index++) debounce.reschedule('30d')
     await new Promise(resolve => setTimeout(resolve, 0))
     Bun.gc(true)
-    expect(alive.filter(ref => ref.deref() !== undefined)).toHaveLength(0)
+    // JavaScriptCore scans the native stack conservatively: a stale pointer there may keep a few
+    // payloads alive (no heap path retains them), while a leak of removed jobs keeps all 20
+    expect(alive.filter(ref => ref.deref() !== undefined).length).toBeLessThanOrEqual(4)
     expect(booted.registry.jobs().map(job => job.name)).toEqual(['debounce'])
   })
 

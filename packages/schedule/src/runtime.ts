@@ -100,6 +100,8 @@ export type RuntimeState = 'bootstrapped' | 'running' | 'stopping' | 'stopped'
 const RESYNC_MS = 60_000
 const DAY = 86_400_000
 const MAX_DRAIN_MS = 2 ** 31 - 1
+/** {@link ScheduleRuntime} `#acquire()`: the run was aborted before the store answered. */
+const ABORTED: unique symbol = Symbol('aborted')
 
 /** The run in progress, for `stop()` called from inside a run (it must not wait for itself). */
 const currentRun = new AsyncLocalStorage<RunRecord>()
@@ -314,12 +316,21 @@ export class ScheduleRuntime {
     this.#state = 'stopped'
   }
 
-  /** `onDispose`: clears every timer (lock store calls in flight go on unbounded). */
+  /**
+   * `onDispose`: clears every timer (lock store calls in flight go on unbounded). Without a previous
+   * `stop()` (a failed start), the runs in flight are aborted (`shutdown`) and abandoned: their lease
+   * is neither extended nor watched any more.
+   */
   dispose(): void {
     this.#disposed = true
     this.#state = 'stopped'
     this.#deactivate()
+    for (const job of this.#jobs.values()) this.#dropPending(job)
     for (const run of this.#inflight) {
+      if (!run.settled) {
+        run.abort('shutdown')
+        run.abandoned = true
+      }
       this.#stopTimers(run)
       if (run.storeTimer !== undefined) this.clock.clearTimer(run.storeTimer)
       run.storeTimer = undefined
@@ -369,8 +380,9 @@ export class ScheduleRuntime {
     if (job.state !== 'scheduled') return
     job.state = 'paused'
     this.#disarm(job)
-    // a queued occurrence has not started: it is dropped like the next ones
-    this.#dropPending(job)
+    // a queued occurrence has not started: it is dropped like the next ones, unless a manual
+    // `trigger()` waits for it (manual runs of a paused job still run)
+    if (job.pending?.manual !== true) this.#dropPending(job)
   }
 
   resume(job: JobRecord): void {
@@ -618,11 +630,20 @@ export class ScheduleRuntime {
     return this.#notExecuted(job, runId, scheduledAt, trigger, 'skipped', performance.now())
   }
 
+  /** A queued occurrence that will not run: outcome `skipped` (logged at `debug`, emitted). */
   #dropPending(job: JobRecord): void {
     const pending = job.pending
     if (pending === undefined) return
     job.pending = undefined
-    const result = this.#result(job, randomUUID(), pending.scheduledAt, 'queued', 'skipped', undefined, undefined)
+    const runId = randomUUID()
+    let why = 'the scheduler is stopping'
+    if (job.state === 'removed') why = 'it was removed'
+    else if (job.state === 'paused') why = 'it was paused'
+    this.#services.logger.debug(`Schedule: job '${job.name}' did not run: its queued occurrence was dropped (${why})`, {
+      job: job.name,
+      runId,
+    })
+    const result = this.#notExecuted(job, runId, pending.scheduledAt, 'queued', 'skipped', performance.now())
     for (const waiter of pending.waiters) waiter(result)
   }
 
@@ -688,8 +709,9 @@ export class ScheduleRuntime {
     let lease: LockLease | undefined
     const claimedAt = this.clock.now()
     if (job.locked && lock !== undefined) {
+      let claimed: LockLease | undefined | typeof ABORTED
       try {
-        lease = await this.#acquire(run, lock, scheduledAt)
+        claimed = await this.#acquire(run, lock, scheduledAt)
       } catch (error) {
         logger.error(`Schedule: job '${job.name}' did not run: the ${lock.store.name} lock store failed`, {
           job: job.name,
@@ -698,7 +720,9 @@ export class ScheduleRuntime {
         })
         return this.#notExecuted(job, run.runId, scheduledAt, trigger, 'failed', startTime, error)
       }
-      if (lease === undefined) {
+      // aborted while waiting for the store: dropped below, like a run aborted once its lease is acquired
+      if (claimed !== ABORTED) lease = claimed
+      if (claimed === undefined) {
         logger.debug(`Schedule: job '${job.name}' not run: another instance holds the lock`, {
           job: job.name,
           runId: run.runId,
@@ -848,18 +872,26 @@ export class ScheduleRuntime {
     return this.#notExecuted(job, run.runId, scheduledAt, trigger, 'skipped', startTime, undefined, run.aborted)
   }
 
-  /** `store.acquire()`, bounded by the ttl: a store that does not answer fails closed (RFC 0004 §7.6). */
-  async #acquire(run: RunRecord, lock: ResolvedLock, occurrence: number): Promise<LockLease | undefined> {
+  /**
+   * `store.acquire()`, bounded by the ttl: a store that does not answer fails closed (RFC 0004 §7.6).
+   * An abort of the run (shutdown, `remove(name, { abort: true })`) stops the wait: {@link ABORTED}.
+   */
+  async #acquire(
+    run: RunRecord,
+    lock: ResolvedLock,
+    occurrence: number,
+  ): Promise<LockLease | undefined | typeof ABORTED> {
     const claim = Promise.resolve(
       lock.store.acquire(`${lock.keyPrefix}${run.job.name}`, { owner: lock.owner, occurrence, ttlMs: lock.ttlMs }),
     )
-    const answer = await this.#bounded(run, claim, lock.ttlMs)
+    const answer = await this.#bounded(run, claim, lock.ttlMs, run.controller.signal)
     if (answer.done) return answer.value
     // the claim may still succeed: its lease is released then, since the run did not start
     claim.then(
       late => (late === undefined ? undefined : Promise.resolve(late.release()).catch(() => undefined)),
       () => undefined,
     )
+    if (answer.aborted) return ABORTED
     throw new Error(`the ${lock.store.name} lock store did not answer within the lock ttl (${lock.ttlMs} ms)`)
   }
 
@@ -886,22 +918,37 @@ export class ScheduleRuntime {
     }
   }
 
-  /** Waits for a lock store call, at most `ms` on the scheduler clock. Rejections pass through. */
+  /**
+   * Waits for a lock store call, at most `ms` on the scheduler clock, or until `signal` aborts.
+   * Rejections pass through.
+   */
   #bounded<T>(
     run: RunRecord,
     call: Promise<T>,
     ms: number,
-  ): Promise<{ readonly done: true; readonly value: T } | { readonly done: false }> {
+    signal?: AbortSignal,
+  ): Promise<{ readonly done: true; readonly value: T } | { readonly done: false; readonly aborted: boolean }> {
     return new Promise((resolve, reject) => {
+      if (signal?.aborted) {
+        resolve({ done: false, aborted: true })
+        return
+      }
       const timer = this.clock.setTimer(() => {
         if (run.storeTimer === timer) run.storeTimer = undefined
-        resolve({ done: false })
+        signal?.removeEventListener('abort', onAbort)
+        resolve({ done: false, aborted: false })
       }, ms)
       run.storeTimer = timer
       const clear = (): void => {
         this.clock.clearTimer(timer)
         if (run.storeTimer === timer) run.storeTimer = undefined
+        signal?.removeEventListener('abort', onAbort)
       }
+      const onAbort = (): void => {
+        clear()
+        resolve({ done: false, aborted: true })
+      }
+      signal?.addEventListener('abort', onAbort, { once: true })
       call.then(
         value => {
           clear()
@@ -993,7 +1040,8 @@ export class ScheduleRuntime {
    * answers `false`, or `ttl` elapsed since the last successful extension (counted from the call).
    * The deadline is a timer of its own, so an `extend()` that never answers (a partitioned store
    * client queuing commands) still loses the lease on time. A beat skips the store while the
-   * previous extension is pending.
+   * previous extension is pending. The first beat comes at most halfway to the deadline of the claim,
+   * so a lease acquired late (a slow store) is extended before it expires.
    */
   #heartbeat(run: RunRecord, lease: LockLease, lock: ResolvedLock, claimedAt: number): void {
     const { logger } = this.#services
@@ -1043,19 +1091,17 @@ export class ScheduleRuntime {
       if (extended === true) deadline(calledAt)
       else if (extended === false) lose()
     }
-    const beat = (): void => {
-      run.heartbeat = this.clock.setTimer(
-        () => {
-          run.heartbeat = undefined
-          if (!live()) return
-          beat() // the next beat never waits for this extension
-          if (!extending) void extend()
-        },
-        Math.max(1, Math.floor(ttl / 3)),
-      )
+    const period = Math.max(1, Math.floor(ttl / 3))
+    const beat = (delay: number): void => {
+      run.heartbeat = this.clock.setTimer(() => {
+        run.heartbeat = undefined
+        if (!live()) return
+        beat(period) // the next beat never waits for this extension
+        if (!extending) void extend()
+      }, delay)
     }
     deadline(claimedAt)
-    beat()
+    beat(Math.min(period, Math.max(0, Math.floor((claimedAt + ttl - this.clock.now()) / 2))))
   }
 
   #stopLease(run: RunRecord): void {

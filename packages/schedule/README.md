@@ -155,7 +155,9 @@ parseDuration('1.5h') // 5_400_000
 ```
 
 `InvalidScheduleError` carries `field` (`'hour'`...), `start` and `end` (offsets in the expression).
-An expression that never fires (`'0 0 30 2 *'`) is invalid too.
+An expression that never fires (`'0 0 30 2 *'`) is invalid too. `next()`, `nextRuns()` and
+`matches()` take a `Date` or epoch milliseconds within the `Date` range (±8.64e15): anything else
+throws `InvalidScheduleError`, and the search stops at the end of that range.
 
 ## Time zones and daylight saving time
 
@@ -175,7 +177,8 @@ UTC. `matches()` agrees with `next()`: the end of a gap is an occurrence of the 
 
 Zone names may come from user input (`parseCron(expression, { timeZone })`): memory stays bounded
 whatever the spellings (`Intl` accepts IANA names in any case), since every spelling of a zone shares
-its data.
+its data, and whatever the dates queried, since a zone keeps the transitions of its last 128 years
+used.
 
 ## Plugin configuration
 
@@ -213,7 +216,7 @@ serves one running application at a time (ZNIGHT004 otherwise).
 | `onBootstrap` | Validates the options and the metadata, applies the overrides, checks locks, resolves singleton hosts, binds the registry |
 | `onReady`     | Arms the scheduler (when `enabled`), runs `runOnStart` jobs, logs `Schedule: N job(s), next: <job> at <date>`             |
 | `onStop`      | Stops arming, drops queued runs, aborts running runs (`shutdown`), waits up to `drainTimeoutMs`                           |
-| `onDispose`   | Clears the timers, unbinds the registry                                                                                   |
+| `onDispose`   | Clears the timers, unbinds the registry; after a failed start (no `onStop`), aborts the runs in flight (`shutdown`)       |
 
 Jobs start in `onReady`, once every provider started and every plugin listens: a job never runs
 against a half-started application. While the scheduler runs, its timer keeps the process alive (a
@@ -323,8 +326,12 @@ Each `ScheduledJob` exposes `name`, `kind`, `origin`, `schedule` (`'0 8 * * MON-
 - A run **starts** when its job is called. A run that has not started yet (waiting for its lease, or
   for a `schedule:run` wrapper to call `next()`) is dropped when the job is removed or paused, or
   when the application stops: outcome `skipped`, with `aborted` when its signal was aborted, logged
-  at `debug`. `pause()` also drops the queued occurrence of an `overlap: 'queue'` job. A running run
-  goes on. Manual runs (`trigger()`) of a paused job still run.
+  at `debug`. A run still waiting for its lease when its signal is aborted (the application stops,
+  `remove(name, { abort: true })`) is dropped at once, without waiting for the lock store, and a
+  lease granted later is released. `pause()` also drops the queued occurrence of an
+  `overlap: 'queue'` job, unless a `trigger()` waits for it. A dropped queued occurrence is emitted
+  (`skipped`, trigger `queued`) and logged at `debug`. A running run goes on. Manual runs
+  (`trigger()`) of a paused job still run.
 - `reschedule()` arms a timeout again, `delay` from now, also from its own run (a retry):
   `registry.get('retry')?.reschedule('10s')`.
 
@@ -409,7 +416,8 @@ claims occurrence 09:00, runs and releases. The second arrives late, finds 09:00
 is refused (outcome `not-acquired`): no `lockAtLeastFor` guesswork. `ctx.scheduledAt.getTime()` is a
 free fencing token for the job's writes.
 
-- The lease (`ttl`, default 30 s) is extended every `ttl / 3` while the run lasts. It is lost when
+- The lease (`ttl`, default 30 s) is extended every `ttl / 3` while the run lasts (the first time
+  sooner when `acquire()` was slow: at most halfway to the expiry of the claim). It is lost when
   `extend()` answers `false`, or `ttl` after the last successful extension, even while an extension
   hangs (a partitioned client queuing commands): the run's signal is aborted (`'lock-lost'`) when
   another instance may take the lease over.

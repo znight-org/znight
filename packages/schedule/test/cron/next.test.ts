@@ -2,6 +2,7 @@
  * Occurrences in UTC (RFC 0004 §4.3, §7.3): ranges, steps, lists, names, nicknames, `L`, `5L`,
  * `MON#2`, the OR rule, leap years, seconds, and the public `parseCron` / `parseDuration` API.
  */
+import { compileExpression } from '../../src/cron.ts'
 import { InvalidScheduleError, parseCron, parseDuration } from '../../src/index.ts'
 import { between, runs } from './helpers.ts'
 import { describe, expect, test as it } from 'bun:test'
@@ -140,6 +141,44 @@ describe('parseCron', () => {
     expect(() => parseCron('@daily', { timeZone: '+25:00' })).toThrow("invalid UTC offset '+25:00'")
     expect(() => parseCron('@daily').nextRuns(-1)).toThrow('count must be a non-negative integer')
     expect(() => parseCron('@daily').next(new Date('invalid'))).toThrow('expected a valid Date')
+  })
+
+  // A huge epoch number used to make the day walk spin forever once `days` passed 2^53.
+  it.each(['UTC', '+02:00', 'Europe/Paris'])(
+    'rejects epochs outside the Date range in %s (ZNIGHT040, no hang)',
+    timeZone => {
+      const schedule = parseCron('0 0 1 1 *', { timeZone })
+      for (const epoch of [1e24, -1e24, 8.64e15 + 1]) {
+        expect(() => schedule.next(epoch)).toThrow(InvalidScheduleError)
+        expect(() => schedule.nextRuns(1, epoch)).toThrow(InvalidScheduleError)
+        expect(() => schedule.matches(epoch)).toThrow(InvalidScheduleError)
+      }
+      expect(() => schedule.next(1e24)).toThrow('outside the Date range')
+    },
+    2000,
+  )
+
+  it.each(['UTC', '+02:00', 'Europe/Paris'])('stops at the end of the Date range in %s', timeZone => {
+    const max = 8.64e15
+    expect(parseCron('0 0 1 1 *', { timeZone }).next(max - 86_400_000)).toBeUndefined()
+    expect(parseCron('0 0 1 1 *', { timeZone }).nextRuns(3, max - 86_400_000)).toEqual([])
+    expect(parseCron('* * * * *', { timeZone }).next(max)).toBeUndefined()
+    expect(
+      parseCron('* * * * *', { timeZone })
+        .next(max - 120_000)
+        ?.getTime(),
+    ).toBeLessThanOrEqual(max)
+  })
+
+  it.each(['UTC', '+02:00', 'Europe/Paris'])('engine: nothing outside the Date range in %s', timeZone => {
+    const engine = compileExpression('0 0 1 1 *', timeZone)
+    expect(engine.next(1e24)).toBeUndefined()
+    expect(engine.next(-1e24)).toBeUndefined()
+    expect(engine.matches(1e24)).toBe(false)
+  })
+
+  it('starts at the beginning of the Date range', () => {
+    expect(parseCron('0 0 1 1 *').next(-8.64e15)?.getUTCFullYear()).toBe(-271820)
   })
 })
 

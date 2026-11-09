@@ -54,7 +54,8 @@ export const SCHEDULE_PLUGIN_NAME = 'schedule'
  *   `jobs` overrides, resolves singleton hosts and binds the registry;
  * - `onReady`: arms the scheduler (when `enabled`), runs `runOnStart` jobs and keeps the process alive;
  * - `onStop`: aborts the running runs (`shutdown`) and waits up to `drainTimeoutMs`;
- * - `onDispose`: clears the timers and unbinds the registry.
+ * - `onDispose`: clears the timers and unbinds the registry; after a failed start (no `onStop`), aborts
+ *   the runs in flight (`shutdown`).
  *
  * List it before `HttpPlugin`: plugins stop in reverse order, so HTTP stops taking requests (manual
  * triggers included) before the running jobs are drained. Options may be a function of the container

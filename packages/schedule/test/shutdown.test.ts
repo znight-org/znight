@@ -4,8 +4,10 @@
  * application stopped during its start.
  */
 import type { Plugin } from '@znight/core'
+import type { ScheduleLockStore } from '../src/index.ts'
 
-import { aborted, boot, deferred, metadataWith } from './helpers.ts'
+import { memoryLockStore } from '../src/index.ts'
+import { aborted, boot, deferred, metadataWith, testClock } from './helpers.ts'
 import { describe, expect, test as it } from 'bun:test'
 
 describe('onStop', () => {
@@ -141,6 +143,62 @@ describe('onStop', () => {
     expect(ran).toBe(false)
     expect(booted.app.state).toBe('stopped')
     expect(booted.clock.pendingTimers).toBe(0)
+  })
+
+  it('aborts the runs in flight when the start fails (onDispose without onStop)', async () => {
+    const clock = testClock()
+    const inner = memoryLockStore({ clock })
+    const extension = deferred<boolean>()
+    let extending = false
+    const store: ScheduleLockStore = {
+      name: 'spy',
+      acquire: async (key, claim) => {
+        const lease = await inner.acquire(key, claim)
+        return (
+          lease && {
+            extend: () => {
+              extending = true
+              return extension.promise
+            },
+            release: () => lease.release(),
+          }
+        )
+      },
+    }
+    const failing: Plugin = {
+      name: 'failing',
+      onStart() {
+        throw new Error('boom')
+      },
+    }
+    let reason: unknown
+    const booted = await boot({
+      clock,
+      start: false,
+      plugins: { before: [failing] },
+      schedule: { lock: { store, ttl: '3s' } },
+      metadata: metadataWith([
+        {
+          name: 'warmup',
+          kind: 'interval',
+          every: 3_600_000,
+          run: async ctx => {
+            reason = await aborted(ctx.signal)
+          },
+        },
+      ]),
+    })
+    // a provider's onStart may trigger a job: then a later onStart fails
+    void booted.registry.get('warmup')?.trigger()
+    await clock.advance('1s') // the heartbeat calls extend()
+    expect(extending).toBe(true)
+    await expect(booted.app.start()).rejects.toThrow('boom')
+    await clock.settle()
+    expect(reason).toMatchObject({ code: 'ZNIGHT044', reason: 'shutdown' })
+    extension.resolve(true) // an extension answering after the disposal re-arms nothing
+    await clock.settle()
+    expect(clock.pendingTimers).toBe(0)
+    expect(booted.logs.messages('warn').filter(message => message.includes('lost its lock'))).toEqual([])
   })
 })
 
