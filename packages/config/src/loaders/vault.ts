@@ -7,6 +7,7 @@ import {
   delay,
   isRecord,
   nonNegativeOption,
+  readAll,
   readOptionalFile,
   resolveFile,
   retryDelay,
@@ -201,14 +202,16 @@ export function vault(options: VaultLoaderOptions): ConfigLoader {
       const fetchImpl = options.fetch ?? globalThis.fetch
       const kv2 = (options.kvVersion ?? 2) === 2
 
-      const read = async (location: SecretLocation): Promise<ConfigLayer | undefined> => {
+      const read = async (location: SecretLocation, cancel: AbortSignal): Promise<ConfigLayer | undefined> => {
         let lastError: unknown
         for (let attempt = 0; attempt <= retries; attempt++) {
-          if (attempt > 0) await delay(retryDelay(retryDelayMs, attempt))
+          if (attempt > 0) await delay(retryDelay(retryDelayMs, attempt), cancel)
+          // another path failed: the loader already rejected
+          if (cancel.aborted) throw cancel.reason
           try {
             const response = await fetchImpl(`${address}${location.apiPath}`, {
               headers,
-              signal: AbortSignal.timeout(timeoutMs),
+              signal: AbortSignal.any([cancel, AbortSignal.timeout(timeoutMs)]),
             })
             if (response.status === 404) {
               await response.body?.cancel()
@@ -248,7 +251,7 @@ export function vault(options: VaultLoaderOptions): ConfigLoader {
         )
       }
 
-      const layers = await Promise.all(locations.map(read))
+      const layers = await readAll(locations, read)
       return layers.filter((layer): layer is ConfigLayer => layer !== undefined)
     },
   }

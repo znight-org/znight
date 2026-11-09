@@ -2592,7 +2592,8 @@ quote values: a JSON or YAML syntax error gives the file, the line, the column a
 parser error is not kept as `cause`; YAML warnings are re-emitted the same way (`YAMLWarning`).
 `vault()` and `awsSecretsManager()` reject, when created, a `timeoutMs` that is not an integer from 1
 to 2^31 − 1, and `vault()` a `retries` or `retryDelayMs` that is not a finite number >= 0 (ZNIGHT012);
-the backoff between retries is capped at 30 s. `vault()` checks the token and the namespace before any request: a value `fetch` would refuse as a
+the backoff between retries is capped at 30 s. Both read their secrets concurrently and, once one
+read fails, abort the requests and retry waits of the others. `vault()` checks the token and the namespace before any request: a value `fetch` would refuse as a
 header (line break, NUL, a character above U+00FF) is a `ConfigLoaderError` naming its origin
 (option, token file, `VAULT_TOKEN`, `VAULT_NAMESPACE`), never the value.
 

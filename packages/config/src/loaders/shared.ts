@@ -92,7 +92,36 @@ export function nonNegativeOption(where: string, name: string, value: number | u
   return value
 }
 
-/** Resolves after `ms` milliseconds. */
-export function delay(ms: number): Promise<void> {
-  return new Promise(resolvePromise => setTimeout(resolvePromise, ms))
+/** Resolves after `ms` milliseconds, or as soon as `signal` is aborted (the timer is then cleared). */
+export function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise(resolvePromise => {
+    if (signal?.aborted === true) {
+      resolvePromise()
+      return
+    }
+    const done = (): void => {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', done)
+      resolvePromise()
+    }
+    const timer = setTimeout(done, ms)
+    signal?.addEventListener('abort', done, { once: true })
+  })
+}
+
+/**
+ * Runs `read` on every item concurrently, like `Promise.all`; once one fails, the signal given to
+ * the others is aborted, so their requests and retry waits stop instead of outliving the failure.
+ */
+export async function readAll<I, R>(
+  items: readonly I[],
+  read: (item: I, signal: AbortSignal) => Promise<R>,
+): Promise<R[]> {
+  const controller = new AbortController()
+  try {
+    return await Promise.all(items.map(item => read(item, controller.signal)))
+  } catch (error) {
+    controller.abort(error)
+    throw error
+  }
 }

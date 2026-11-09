@@ -425,6 +425,36 @@ describe('vault()', () => {
     }
   })
 
+  it('cancels the other reads once one path failed', async () => {
+    const signals: Record<string, AbortSignal[]> = {}
+    const pending = ((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input)
+      const signal = init?.signal as AbortSignal
+      const recorded = signals[url] ?? []
+      signals[url] = recorded
+      recorded.push(signal)
+      if (url.endsWith('/denied'))
+        return Promise.resolve(Response.json({ errors: ['permission denied'] }, { status: 403 }))
+      // a black-holed server: settles only when the request is aborted
+      return new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason)))
+    }) as typeof fetch
+    const loader = vault({
+      address: 'https://vault.example.com',
+      token: TOKEN,
+      path: ['secret/hanging', 'secret/denied'],
+      timeoutMs: 1000,
+      retries: 2,
+      retryDelayMs: 1,
+      fetch: pending,
+    })
+    const error = await caught(() => loadConfigSource([loader], { env: {} }))
+    expect(error.message).toContain('cannot read secret secret/denied: HTTP 403')
+    const hanging = signals['https://vault.example.com/v1/secret/data/hanging'] ?? []
+    expect(hanging.map(signal => signal.aborted)).toEqual([true])
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(hanging).toHaveLength(1) // no retry after the loader failed
+  })
+
   it('caps the backoff between retries', () => {
     expect([1, 2, 3].map(attempt => retryDelay(200, attempt))).toEqual([200, 400, 800])
     expect(retryDelay(200, 15)).toBe(MAX_RETRY_DELAY_MS)

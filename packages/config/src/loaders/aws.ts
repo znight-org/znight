@@ -3,7 +3,7 @@ import type { ConfigLoader, ConfigLoaderContext } from './types.ts'
 
 import { ConfigLoaderError, errorMessage, invalidConfig } from '../errors.ts'
 import { nestUnder } from '../source.ts'
-import { importOptionalPeer, isRecord, setting, timeoutOption } from './shared.ts'
+import { importOptionalPeer, isRecord, readAll, setting, timeoutOption } from './shared.ts'
 
 /** One secret read by {@link awsSecretsManager}. */
 export interface AwsSecretRef {
@@ -153,23 +153,23 @@ export function awsSecretsManager(options: AwsSecretsManagerLoaderOptions): Conf
     name: LOADER,
     async load(context) {
       const { client, owned, sdk } = await createClient(context, options)
-      const fetchSecret = (ref: AwsSecretRef): Promise<GetSecretValueOutputLike> => {
+      const fetchSecret = (ref: AwsSecretRef, cancel: AbortSignal): Promise<GetSecretValueOutputLike> => {
         const input: GetSecretValueInputLike = {
           SecretId: ref.secretId,
           ...(ref.versionStage === undefined ? {} : { VersionStage: ref.versionStage }),
           ...(ref.versionId === undefined ? {} : { VersionId: ref.versionId }),
         }
-        const requestOptions = { abortSignal: AbortSignal.timeout(timeoutMs) }
+        const requestOptions = { abortSignal: AbortSignal.any([cancel, AbortSignal.timeout(timeoutMs)]) }
         if (typeof client.getSecretValue === 'function') return client.getSecretValue(input, requestOptions)
         // createClient guarantees `send` and the SDK otherwise
         const { send } = client as Required<Pick<SecretsManagerClientLike, 'send'>>
         const command = new (sdk as SecretsManagerModule).GetSecretValueCommand(input)
         return send.call(client, command, requestOptions)
       }
-      const read = async (ref: AwsSecretRef): Promise<ConfigLayer | undefined> => {
+      const read = async (ref: AwsSecretRef, cancel: AbortSignal): Promise<ConfigLayer | undefined> => {
         let output: GetSecretValueOutputLike
         try {
-          output = await fetchSecret(ref)
+          output = await fetchSecret(ref, cancel)
         } catch (error) {
           if (errorName(error) === 'ResourceNotFoundException' && (ref.optional ?? options.optional) === true) {
             return undefined
@@ -186,7 +186,7 @@ export function awsSecretsManager(options: AwsSecretsManagerLoaderOptions): Conf
         return { origin: `aws-secrets-manager:${ref.secretId}`, values: secretValues(ref, text) }
       }
       try {
-        const layers = await Promise.all(refs.map(read))
+        const layers = await readAll(refs, read)
         return layers.filter((layer): layer is ConfigLayer => layer !== undefined)
       } finally {
         if (owned) client.destroy?.()

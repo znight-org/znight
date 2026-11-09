@@ -307,7 +307,8 @@ ConfigPlugin.configure({
 
 `timeoutMs` must be an integer from 1 to 2^31 − 1, `retries` and `retryDelayMs` finite numbers
 > = 0: other values fail when the loader is created (ZNIGHT012), and so does an invalid `timeoutMs`
-> of `awsSecretsManager()`.
+> of `awsSecretsManager()`. Paths are read concurrently; once one fails, the requests and retry waits
+> of the others are cancelled (`awsSecretsManager()` does the same with its secrets).
 
 `VAULT_*` settings are read from the values loaded by the previous loaders first (a `.env` file
 works), then from the environment. A token or namespace that is not a valid header value (a token
