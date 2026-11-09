@@ -28,6 +28,9 @@ import {
 import { ConnectionQuotaGuard } from './connection-quota.guard.js'
 import { ModeratorGuard } from './moderator.guard.js'
 
+/** Chat rooms a connection may join, besides its `user:<name>` room. */
+export const MAX_ROOMS_PER_CONNECTION = 20
+
 @Gateway({ path: '/chat', protocols: ['chat.v1'], rateLimit: { messages: 30, intervalMs: 1_000 } })
 @Authenticated() // the handshake's access decision, enforced by the global AuthGuard
 @UseHandshakeGuard(ConnectionQuotaGuard) // after the global guards: at most 5 tabs per user
@@ -51,6 +54,9 @@ export class ChatGateway {
 
   @OnMessage('room.join')
   join(@Conn() conn: ChatConnection, @Payload(JoinRoom) input: JoinRoom): { members: number } {
+    if (!conn.rooms.has(input.room) && conn.rooms.size > MAX_ROOMS_PER_CONNECTION) {
+      throw new WsException('FORBIDDEN', `At most ${MAX_ROOMS_PER_CONNECTION} rooms per connection`)
+    }
     conn.join(input.room)
     conn.to(input.room).emit('presence.joined', { room: input.room, user: conn.data.user.name })
     return { members: this.#chat.members(input.room).size } // the reply, when the client sent an id

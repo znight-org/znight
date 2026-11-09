@@ -8,7 +8,9 @@ ticker. Data stays in memory.
 - **Gateways** (`src/chat/chat.gateway.ts`): `@Gateway({ path: '/chat', protocols: ['chat.v1'], rateLimit })`,
   `@OnConnect`, `@OnMessage` handlers with Zod payloads (`@Payload(SendMessage)`), replies,
   `@OnDisconnect`, rooms (`conn.join`, a `user:<name>` room per user) and broadcasts
-  (`WsServer.of(ChatGateway).to(room).emit(...)`, encoded once).
+  (`WsServer.of(ChatGateway).to(room).emit(...)`, encoded once). Memory stays bounded: a
+  connection joins at most 20 rooms, and the history is kept for the 1,000 most recently active
+  rooms.
 - **The handshake is an HTTP request**: the global `AuthGuard` (`src/auth/auth.guard.ts`) protects
   routes and handshakes alike, with an API key (`x-api-key`) or, for browsers, a single-use ticket
   (`POST /ws/tickets`, then `/chat?ticket=...`). The `TicketStore` stays bounded: expired tickets
