@@ -236,7 +236,8 @@ describe.each(adapters)('WebSocketPlugin on %s', (_name, adapter, transport) => 
       socket.pause() // a slow consumer: the server's outbound buffer grows
       await Bun.sleep(300)
       expect(gateway.queued).toBeGreaterThan(0)
-      expect(gateway.sent).toBeLessThan(FeedGateway.FRAMES)
+      // how many frames the kernel absorbs while the socket is paused depends on the platform (Linux
+      // buffers them all): what matters is that the producer was told to wait, before any close
       expect(websocket.stats().slowConsumerCloses).toBe(0)
       socket.on('data', () => undefined)
       socket.resume()
