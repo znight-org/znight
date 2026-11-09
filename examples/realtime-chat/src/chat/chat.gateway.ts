@@ -25,7 +25,7 @@ import {
   KickUser,
   SendMessage,
 } from './chat.protocol.js'
-import { ConnectionQuotaGuard } from './connection-quota.guard.js'
+import { ConnectionQuotaGuard, MAX_TABS } from './connection-quota.guard.js'
 import { ModeratorGuard } from './moderator.guard.js'
 
 /** Chat rooms a connection may join, besides its `user:<name>` room. */
@@ -50,7 +50,12 @@ export class ChatGateway {
   connected(@Conn() conn: ChatConnection): void {
     // the guards ran in this connection's scope: RequestUser is the authenticated caller
     conn.data.user = this.user.get().principal
-    conn.join(`user:${conn.data.user.name}`) // one room per user: every tab of a user
+    const tabs = `user:${conn.data.user.name}`
+    conn.join(tabs) // one room per user: every tab of a user
+    // concurrent handshakes all pass ConnectionQuotaGuard: count again once in the room (synchronously)
+    if (this.#chat.members(tabs).size > MAX_TABS) {
+      throw new WsException('RATE_LIMITED', `At most ${MAX_TABS} chat connections per user`, undefined, { close: 4429 })
+    }
   }
 
   @OnMessage('room.join')

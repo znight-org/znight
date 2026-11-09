@@ -19,7 +19,8 @@ ticker. Data stays in memory.
   `RequestUser` it fills is there for every message.
 - **Access decisions** (RFC 0001): `@Authenticated()` on the gateway, `@Public()` on the ticker,
   checked at build time.
-- **Handshake guards** (`ConnectionQuotaGuard`: at most five tabs per user, `429`) and **message
+- **Handshake guards** (`ConnectionQuotaGuard`: at most five tabs per user, `429`; `@OnConnect`
+  counts again and closes the extra tabs of concurrent handshakes with `4429`) and **message
   guards** (`ModeratorGuard` reading `@Roles(['moderator'])` on `room.kick`).
 - **A raw gateway** (`src/ticker/ticker.gateway.ts`): `/ticker/:symbol`, binary frames sent at the
   client's pace (`conn.send(...) === 'queued'` → `await conn.drained()`), a `4404` close from
