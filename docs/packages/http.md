@@ -469,7 +469,8 @@ when they come from a trusted proxy. It works the same way on every adapter: a n
 IPv4 / IPv6 addresses, CIDR ranges and the aliases `'loopback'`, `'private'` and `'linklocal'`.
 `true` is refused at boot: trusting every hop lets any client choose its `ctx.ip`. The same goes for
 `trustProxy: true` in the options of `fastifyAdapter()` and for an Express application whose
-`trust proxy` is `true`.
+`trust proxy` trusts any address, unless the `trustProxy` option of `HttpPlugin` is set: `ctx.ip`
+then follows the Znight option and ignores the framework's address.
 
 ## Cookies
 

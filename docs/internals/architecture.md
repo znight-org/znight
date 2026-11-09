@@ -2073,8 +2073,9 @@ not call `next()` gets the same reply as in the general pipeline.
 - **Trusted proxies** (option `trustProxy`, default `false`). `false`: `ctx.ip` is the adapter's
   `request.ip` (Fastify and Express apply their own proxy settings; an adapter set to trust every hop,
   `fastifyAdapter({ options: { trustProxy: true } })` or an Express application whose `trust proxy`
-  is `true`, is ZNIGHT005, at creation for Fastify and when the adapter starts for Express) and `ctx.protocol` comes from
-  `request.encrypted`. A number (an integer ≥ 1) or a list of IPv4 / IPv6 addresses, CIDR ranges and
+  trusts any address, reports it through `trustsEveryProxy()` and `HttpPlugin` refuses it at
+  `onBootstrap`, ZNIGHT005, unless its own `trustProxy` option is set: `ctx.ip` then ignores the
+  adapter's address) and `ctx.protocol` comes from `request.encrypted`. A number (an integer ≥ 1) or a list of IPv4 / IPv6 addresses, CIDR ranges and
   the aliases `loopback` (127.0.0.0/8, ::1/128), `private` (10.0.0.0/8, 172.16.0.0/12,
   192.168.0.0/16, fc00::/7) and `linklocal` (169.254.0.0/16, fe80::/10) walk the list
   `[remoteAddress ?? ip, ...x-forwarded-for from right to left]`: with a number, the client is the
@@ -2241,6 +2242,7 @@ interface HttpAdapter {
   inject(request: InjectRequest): Promise<InjectResponse> // in-memory, same pipeline; rejects an event stream
   injectStream?(request: InjectStreamRequest): Promise<InjectStreamResponse> // resolves at the headers (the 4 built-in adapters)
   upgrades?: AdapterUpgrades // WebSocket upgrades: { kind: 'node' | 'bun', enable(options) } called before listen() (RFC 0003 §8.2)
+  trustsEveryProxy?(): string | undefined // the framework setting trusting every proxy hop, when one is set
 }
 ```
 

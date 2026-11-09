@@ -250,4 +250,11 @@ export interface HttpAdapter {
    * `@znight/websocket` gateways. The four built-in adapters implement it.
    */
   readonly upgrades?: AdapterUpgrades
+  /**
+   * Describes the server framework setting that trusts every proxy hop (Fastify `trustProxy: true`,
+   * Express `trust proxy` set to `true`...), when one is set: the adapter's `ip` is then the leftmost
+   * `x-forwarded-for` entry, which any client chooses. `HttpPlugin` refuses it (ZNIGHT005) unless
+   * its own `trustProxy` option is set, since `ctx.ip` then ignores the adapter's address. Optional.
+   */
+  trustsEveryProxy?(): string | undefined
 }

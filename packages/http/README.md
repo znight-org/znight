@@ -1452,8 +1452,10 @@ leftmost `x-forwarded-proto` (`http` or `https` only); otherwise it is the proto
 connection. `true` is refused (ZNIGHT005): trusting every hop would let any client choose its
 `ctx.ip`. Without the option, `ctx.ip` is the adapter's address, so the proxy settings of Fastify
 (`trustProxy`) and Express (`trust proxy`) still apply; for the same reason, `trustProxy: true` in
-the options of `fastifyAdapter()` and an Express application whose `trust proxy` is `true` are
-refused (ZNIGHT005). Prefer the Znight option, the same on every adapter. The `Forwarded` header (RFC 7239) is not
+the options of `fastifyAdapter()` and an Express application whose `trust proxy` trusts any address
+(`true`, a function or ranges accepting any client) are refused at boot (ZNIGHT005) unless the
+`trustProxy` option of `HttpPlugin` is set, which `ctx.ip` then follows (keep such a setting for
+framework features like Express's `req.secure`). Prefer the Znight option, the same on every adapter. The `Forwarded` header (RFC 7239) is not
 read.
 
 ## Interceptors
@@ -1726,10 +1728,10 @@ await instance.register(helmet)
 HttpPlugin.configure({ adapter: fastifyAdapter({ instance }) })
 ```
 
-| Option     | Description                                                                                       |
-| ---------- | ------------------------------------------------------------------------------------------------- |
-| `instance` | An existing Fastify instance (plugins, hooks, native routes)                                      |
-| `options`  | Options of the instance created otherwise (`https`, timeouts...; `trustProxy: true` is ZNIGHT005) |
+| Option     | Description                                                                              |
+| ---------- | ---------------------------------------------------------------------------------------- |
+| `instance` | An existing Fastify instance (plugins, hooks, native routes)                             |
+| `options`  | Options of the instance created otherwise (`https`, timeouts...; see `trustProxy` below) |
 
 Znight routes are registered in an encapsulated context with their own body handling and 404
 handler, so your other routes keep Fastify's parsers. A `content-type` Fastify cannot parse (`foo`,
@@ -2466,6 +2468,7 @@ interface HttpAdapter {
   close(options?: { force?: boolean }): Promise<void>
   inject(request: InjectRequest): Promise<InjectResponse>
   injectStream?(request: InjectStreamRequest): Promise<InjectStreamResponse> // optional
+  trustsEveryProxy?(): string | undefined // optional: the setting trusting every proxy hop, when one is set
 }
 ```
 

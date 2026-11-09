@@ -55,20 +55,33 @@ const TRUST_HINTS: readonly string[] = [
 
 /**
  * ZNIGHT005 for an adapter configured to trust every proxy hop (Fastify `trustProxy: true`, Express
- * `trust proxy` set to `true`): the adapter's client address, used as `ctx.ip` without the Znight
- * `trustProxy` option, would be the leftmost `x-forwarded-for` entry, which any client chooses.
+ * `trust proxy` set to `true`) without the `trustProxy` option of `HttpPlugin`: the adapter's client
+ * address, then used as `ctx.ip`, would be the leftmost `x-forwarded-for` entry, which any client
+ * chooses. With the option, `ctx.ip` ignores the adapter's address and the setting is allowed.
  */
 export function trustEveryProxyError(adapter: string, setting: string): ZnightError {
   return new ZnightError(
     ErrorCode.InvalidDecorator,
-    `${adapter}: ${setting} trusts every proxy hop, so any client would choose its ctx.ip with an x-forwarded-for header`,
+    `HttpPlugin: ${setting} of the ${adapter} adapter trusts every proxy hop and the trustProxy option is not set, so any client would choose its ctx.ip with an x-forwarded-for header`,
     {
       hints: [
-        `Remove ${setting} and set the trusted proxies on HttpPlugin instead (a hop count or addresses)`,
+        `Set the trusted proxies with the trustProxy option of HttpPlugin (a hop count or addresses), or remove ${setting}`,
         TRUST_HINTS[0] as string,
       ],
     },
   )
+}
+
+/**
+ * Whether a proxy-addr style trust function (`(address, hop) => boolean`, as Fastify and Express
+ * use) trusts every hop: it trusts documentation addresses (RFC 5737, RFC 3849) far from the server.
+ */
+export function trustsEveryAddress(trust: (address: string, hop: number) => unknown): boolean {
+  try {
+    return trust('203.0.113.1', 1000) === true || trust('2001:db8::1', 1000) === true
+  } catch {
+    return false
+  }
 }
 
 /** Validates the `trustProxy` option (ZNIGHT005); `undefined` when proxies are not trusted. */
