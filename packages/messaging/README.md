@@ -435,8 +435,9 @@ Headers are message attributes: SQS allows 10 per message and Znight uses up to 
 (default `'default'`), the message id as deduplication id, and messages of a group are handled in
 order. A dead-letter copy is always one SQS accepts: its FIFO deduplication id is derived from the SQS
 `MessageId` (never from a producer's `x-znight-id`), the characters SQS refuses are replaced in
-`x-znight-error`, and a copy SQS still refuses (too large...) is sent again without `x-znight-error`
-and the headers (with a warning) instead of looping on redeliveries. The lease extension of a message stops (once any extension in flight completed) before its
+`x-znight-error`, and a copy SQS still refuses as invalid (too large...) is sent again without
+`x-znight-error` and the headers (with a warning) instead of looping on redeliveries; a transient
+failure (throttling, KMS, permissions) releases the message instead, for a full copy later. The lease extension of a message stops (once any extension in flight completed) before its
 settlement is sent, so that it never overrides the visibility set by a retry or a release. IAM
 permissions: `sqs:ReceiveMessage`, `sqs:DeleteMessage`, `sqs:ChangeMessageVisibility`,
 `sqs:SendMessage`, `sqs:GetQueueUrl`, `sqs:GetQueueAttributes`.

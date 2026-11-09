@@ -166,7 +166,11 @@ const DEDUPLICATION_ID = /^[\x21-\x7E]{1,128}$/
  * A client delivering one message and validating the dead-letter copies the way SQS does
  * (characters, deduplication id, size): an invalid copy is rejected with a client fault.
  */
-function validatingClient(message: { body: string; attributes: Record<string, string> }, maxSize = 1_048_576) {
+function validatingClient(
+  message: { body: string; attributes: Record<string, string> },
+  maxSize = 1_048_576,
+  transientFaults: string[] = [],
+) {
   const sent: SendMessageCommand['input'][] = []
   const deleted: string[] = []
   let delivered = false
@@ -199,7 +203,10 @@ function validatingClient(message: { body: string; attributes: Record<string, st
       if (command instanceof SendMessageCommand) {
         const input = command.input
         const reject = (reason: string): Promise<never> =>
-          Promise.reject(Object.assign(new Error(reason), { $fault: 'client' }))
+          Promise.reject(Object.assign(new Error(reason), { name: 'InvalidParameterValue', $fault: 'client' }))
+        const fault = transientFaults.shift()
+        if (fault !== undefined)
+          return Promise.reject(Object.assign(new Error(fault), { name: fault, $fault: 'client' }))
         let size = Buffer.byteLength(input.MessageBody ?? '')
         for (const [name, attribute] of Object.entries(input.MessageAttributes ?? {})) {
           const value = attribute.StringValue ?? ''
@@ -230,8 +237,9 @@ describe('dead-letter copies', () => {
     message: Parameters<typeof validatingClient>[0],
     error: unknown,
     maxSize?: number,
+    transientFaults?: string[],
   ) {
-    const { client, sent, deleted } = validatingClient(message, maxSize)
+    const { client, sent, deleted } = validatingClient(message, maxSize, transientFaults)
     const base = 'https://sqs.eu-west-1.amazonaws.com/123456789012/'
     const driver = sqs({
       client,
@@ -313,6 +321,23 @@ describe('dead-letter copies', () => {
     expect(deleted).toEqual(['receipt-1'])
     expect(logger.entries.some(entry => entry.level === 'warn' && entry.message.includes('refused'))).toBe(true)
   })
+
+  it.each(['RequestThrottled', 'KmsThrottled', 'KmsAccessDenied', 'QueueDoesNotExist'])(
+    'keeps the message for a full copy later when SQS fails with %s',
+    async fault => {
+      const { failure, sent, deleted } = await deadLetter(
+        'orders',
+        { body: '{}', attributes: { 'x-znight-type': 'order.created', 'x-tenant': 't1' } },
+        new Error('boom'),
+        undefined,
+        [fault],
+      )
+      // not a malformed copy: the failure is rethrown (the delivery is released), no degraded copy
+      expect((failure as Error | undefined)?.name).toBe(fault)
+      expect(sent).toEqual([])
+      expect(deleted).toEqual([])
+    },
+  )
 })
 
 describe('FIFO groups on stop', () => {

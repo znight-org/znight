@@ -2558,8 +2558,11 @@ More on the drivers:
   its settlement is sent, so that it never overrides the visibility set by a retry or a release.
   The FIFO deduplication id of a dead-letter copy is a SHA-256 of the SQS `MessageId` (never the
   `x-znight-id` a producer chose), characters SQS refuses are replaced (U+FFFD) in `x-znight-error`,
-  and a copy refused with a client fault is sent once more without `x-znight-error` and the headers
-  (a warning is logged), so that a message cannot make its own dead-lettering fail forever.
+  and a copy refused as invalid (`InvalidMessageContents`, `InvalidAttributeName`,
+  `InvalidAttributeValue`, `InvalidParameterValue`: too large...) is sent once more without
+  `x-znight-error` and the headers (a warning is logged), so that a message cannot make its own
+  dead-lettering fail forever; other failures (throttling, KMS, permissions) are rethrown, so the
+  message is released and its full copy written on a later attempt.
   Closing a subscription, or the driver, waits for every received message, those of a FIFO group
   still queued behind their predecessor included (handed to the stopped runtime, which releases
   them), before the client is destroyed.
