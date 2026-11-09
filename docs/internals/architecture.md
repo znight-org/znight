@@ -2508,6 +2508,9 @@ More on the drivers:
   Messages in flight on a lost channel are redelivered by RabbitMQ.
 - **RabbitMQ publications.** A returned (unroutable) message fails only its own `publish()`: it is
   matched with the oldest pending publication with the same exchange, routing key and message id.
+  A publication (publish, retry or dead-letter copy) not confirmed within `publishTimeoutMs`
+  (30 s; `0` disables) fails with `ZNIGHT021`, naming the broker alarm when the connection is
+  blocked (`connection.blocked`), so that publishers never hang on a blocked connection.
   Retried and dead-lettered copies carry the type that selected the handler (a type read from the
   routing key, `typeFromRoutingKey`, included) and never the `CC` / `BCC` headers, the broker's
   `x-death` headers nor the `user-id` property (validated by the broker against the publishing user,

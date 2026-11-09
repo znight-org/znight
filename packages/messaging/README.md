@@ -350,25 +350,28 @@ import { rabbitmq } from '@znight/messaging/rabbitmq'
 rabbitmq({ url: 'amqp://guest:guest@localhost:5672' })
 ```
 
-| Option                | Default                                      | Description                                                                 |
-| --------------------- | -------------------------------------------- | --------------------------------------------------------------------------- |
-| `url`                 | —                                            | AMQP URL or amqplib connection options.                                     |
-| `socketOptions`       | —                                            | TLS / socket options.                                                       |
-| `assertTopology`      | `true`                                       | Declare consumed, dead-letter and delay queues; `false`: verify they exist. |
-| `queueType`           | `'quorum'`                                   | Type of declared queues (`'classic'` for existing classic queues).          |
-| `queueArguments`      | —                                            | Extra arguments of declared queues (`x-delivery-limit` overrides `-1`).     |
-| `maxInProcessDelayMs` | `5000`                                       | Longest retry delay waited in-process.                                      |
-| `delayQueueName`      | `` `${q}.delay.${ms}` ``                     | Retry delay queue naming.                                                   |
-| `delayLevelPrefix`    | `'znight.delays'`                            | Names of the delay levels of delayed publications (`<prefix>.0` to `.31`).  |
-| `deadLetterName`      | `` `${q}.dlq` ``                             | Default dead-letter queue.                                                  |
-| `mandatory`           | `true`                                       | Fail `publish()` when no queue receives the message.                        |
-| `persistent`          | `true`                                       | Persistent messages.                                                        |
-| `typeFromRoutingKey`  | `false`                                      | Use the routing key as type for messages without type (topic exchanges).    |
-| `reconnect`           | `{ initialDelayMs: 100, maxDelayMs: 30000 }` | Reconnection with exponential backoff; `false` disables.                    |
-| `connectionName`      | `'znight'`                                   | Connection name in the management UI.                                       |
+| Option                | Default                                      | Description                                                                        |
+| --------------------- | -------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `url`                 | —                                            | AMQP URL or amqplib connection options.                                            |
+| `socketOptions`       | —                                            | TLS / socket options.                                                              |
+| `assertTopology`      | `true`                                       | Declare consumed, dead-letter and delay queues; `false`: verify they exist.        |
+| `queueType`           | `'quorum'`                                   | Type of declared queues (`'classic'` for existing classic queues).                 |
+| `queueArguments`      | —                                            | Extra arguments of declared queues (`x-delivery-limit` overrides `-1`).            |
+| `maxInProcessDelayMs` | `5000`                                       | Longest retry delay waited in-process.                                             |
+| `delayQueueName`      | `` `${q}.delay.${ms}` ``                     | Retry delay queue naming.                                                          |
+| `delayLevelPrefix`    | `'znight.delays'`                            | Names of the delay levels of delayed publications (`<prefix>.0` to `.31`).         |
+| `deadLetterName`      | `` `${q}.dlq` ``                             | Default dead-letter queue.                                                         |
+| `publishTimeoutMs`    | `30000`                                      | Longest wait for a publisher confirm (publish, retry, dead letter); `0`: no limit. |
+| `mandatory`           | `true`                                       | Fail `publish()` when no queue receives the message.                               |
+| `persistent`          | `true`                                       | Persistent messages.                                                               |
+| `typeFromRoutingKey`  | `false`                                      | Use the routing key as type for messages without type (topic exchanges).           |
+| `reconnect`           | `{ initialDelayMs: 100, maxDelayMs: 30000 }` | Reconnection with exponential backoff; `false` disables.                           |
+| `connectionName`      | `'znight'`                                   | Connection name in the management UI.                                              |
 
 Publishing goes through a confirm channel and the default exchange (routing key = queue); a returned
 (unroutable) message fails its own `publish()` only, even when concurrent publications share its id.
+A publication not confirmed within `publishTimeoutMs` fails, naming the broker alarm when the
+connection is blocked (memory or disk alarm), instead of hanging until the alarm clears.
 Each consumer has its own channel with `prefetch = concurrency`. Retries are republished copies
 carrying `x-znight-attempt` (to the queue, or to a per-delay queue `orders.delay.2000` whose TTL
 dead-letters back into `orders`, so delays never block each other); quorum delay queues use

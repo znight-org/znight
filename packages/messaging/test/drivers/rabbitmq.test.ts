@@ -482,3 +482,36 @@ describe('returned publications', () => {
     await driver.close()
   })
 })
+
+describe('publish timeout', () => {
+  const settle = (promise: Promise<void>): Promise<string> =>
+    promise.then(
+      () => 'ok',
+      (error: unknown) => `failed: ${messageOf(error)}`,
+    )
+
+  it('fails a publication the broker does not confirm in time', async () => {
+    const { driver } = await connected({ publishTimeoutMs: 50 })
+    fakeBroker.confirmDelayMs = 1000
+    const started = Date.now()
+    expect(await settle(driver.publish('orders', outbound('evt-1')))).toBe(
+      'failed: ZNIGHT021: RabbitMQ: publishing to "orders" was not confirmed: no confirmation within 50 ms',
+    )
+    expect(Date.now() - started).toBeLessThan(1000)
+    await driver.close()
+  })
+
+  it('names the alarm of a blocked connection', async () => {
+    const { driver } = await connected({ publishTimeoutMs: 50 })
+    fakeBroker.confirmDelayMs = 1000
+    fakeBroker.models[0]?.emit('blocked', 'low on memory')
+    expect(await settle(driver.publish('orders', outbound('evt-1')))).toBe(
+      'failed: ZNIGHT021: RabbitMQ: publishing to "orders" was not confirmed: no confirmation within 50 ms ' +
+        '(the broker blocks the connection: low on memory)',
+    )
+    fakeBroker.models[0]?.emit('unblocked')
+    fakeBroker.confirmDelayMs = 0
+    expect(await settle(driver.publish('orders', outbound('evt-2')))).toBe('ok')
+    await driver.close()
+  })
+})
