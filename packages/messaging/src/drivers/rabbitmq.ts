@@ -257,6 +257,15 @@ export class RabbitMQDriver implements MessagingDriver {
       },
     }
     const model = await amqpConnect(this.#options.url, socketOptions)
+    if (this.#closing) {
+      // closed while connecting (a reconnection): nothing else would ever close this connection
+      try {
+        await model.close()
+      } catch {
+        // already closed
+      }
+      throw brokerUnavailableError('RabbitMQ: the driver is closed')
+    }
     model.on('error', (error: Error) => {
       this.#logger.error('RabbitMQ connection error', { err: error })
     })
@@ -320,6 +329,7 @@ export class RabbitMQDriver implements MessagingDriver {
             await this.#open()
             reconnected = true
           } catch (error) {
+            if (this.#closing) return
             delay = Math.min(delay * 2, maxDelay)
             this.#logger.warn(`RabbitMQ reconnection failed, next attempt in ${delay} ms`, { err: error })
             continue

@@ -183,6 +183,23 @@ describe('recovery', () => {
     await driver.close()
   })
 
+  it('closes a connection that opens once the driver was closed during a reconnection', async () => {
+    const { driver } = await connected()
+    await driver.subscribe('q', ignore, options)
+    let open: (() => void) | undefined
+    fakeBroker.connectGate = new Promise<void>(resolve => {
+      open = resolve
+    })
+    fakeBroker.models[0]?.kill(new Error('CONNECTION_FORCED'))
+    await waitFor(() => fakeBroker.connects === 2)
+    await driver.close()
+    open?.()
+    await waitFor(() => fakeBroker.models.length === 2)
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(fakeBroker.models[1]?.closed).toBe(true)
+    expect(fakeBroker.consumers).toHaveLength(1)
+  })
+
   it('does not resubscribe a cancelled or closed subscription', async () => {
     const { driver } = await connected()
     const subscription = await driver.subscribe('q', ignore, options)
