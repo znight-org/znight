@@ -433,3 +433,75 @@ export interface Orphan { readonly id: string }
     ])
   })
 })
+
+describe('recursive aliases (ZNIGHT060)', () => {
+  /** The codes of the result, and whether an error is located in src/types.ts. */
+  function summary(result: Awaited<ReturnType<typeof schemaOf>>): { codes: string[]; atAlias: boolean } {
+    const lines = render(result)
+    return {
+      codes: [...new Set(lines.map(line => line.split(' ')[1] as string))],
+      atAlias: lines.some(line => line.includes('ZNIGHT060 src/types.ts:')),
+    }
+  }
+
+  it('reports aliases naming each other, used as a field type, instead of hanging', async () => {
+    const result = await schemaOf(
+      app(
+        'T.O',
+        `export type A = B
+export type B = A
+export interface O { readonly a: A }
+`,
+      ),
+    )
+    expect(summary(result)).toEqual({ codes: ['ZNIGHT060'], atAlias: true })
+    expect(render(result).join('\n')).toContain('recursive type alias')
+  })
+
+  it('reports an alias of a list of itself and an alias of itself or null', async () => {
+    for (const [type, types] of [
+      ['T.Nested', 'export type Nested = Nested[]\n'],
+      ['T.A', 'export type A = A | null\n'],
+    ] as const) {
+      const result = await schemaOf(app(type, types))
+      expect({ type, ...summary(result) }).toEqual({ type, codes: ['ZNIGHT060'], atAlias: true })
+    }
+  })
+
+  it('stops at recursive aliases as a @Parent() type and as a type argument', async () => {
+    const types = `export type A = B
+export type B = A
+export interface Page<T> { readonly items: readonly T[] }
+export interface Book { readonly id: string }
+`
+    const parent = await schemaOf(
+      app(
+        'T.Book',
+        types,
+        `
+  @ResolveField()
+  extra(@Parent() a: T.A): string {
+    return String(a)
+  }`,
+      ),
+    )
+    // not an object type: ZNIGHT062, as for any other parent type
+    expect(summary(parent).codes).toEqual(['ZNIGHT062'])
+    const argument = await schemaOf(app('T.Page<T.A>', types))
+    expect(summary(argument).codes).toEqual(['ZNIGHT060'])
+    expect(render(argument).join('\n')).toContain('its type argument A has no GraphQL name')
+  })
+
+  it('keeps aliases reached again through an object type', async () => {
+    const result = await schemaOf(
+      app(
+        'T.BookAlias',
+        `export interface Book { readonly id: string; readonly next: BookAlias | null; readonly hits: Hits }
+export type BookAlias = Book
+export type Hits = readonly BookAlias[]
+`,
+      ),
+    )
+    expect(render(result)).toEqual([])
+  })
+})

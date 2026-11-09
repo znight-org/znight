@@ -110,6 +110,8 @@ const NAME_HINT = 'GraphQL names match /^[_A-Za-z][_0-9A-Za-z]*$/ and do not sta
 const RECORD_HINT =
   "GraphQL objects have fixed fields: declare an interface, or use JSONValue (import type { JSONValue } from '@znight/graphql')"
 const ROOT_NAMES: ReadonlySet<string> = new Set(Object.values(ROOT_TYPE_NAMES))
+/** How many aliases the structural walks follow: the bound only guards against alias cycles. */
+const MAX_ALIAS_DEPTH = 32
 
 /** Builds the model; `undefined` when the application has no resolver. */
 export function buildModel(ctx: Context, options: ResolvedGraphQLCompilerOptions): GraphQLModel | undefined {
@@ -137,6 +139,8 @@ class SchemaBuilder {
   readonly #fieldResolvers = new Map<string, PendingFieldResolver[]>()
   readonly #defaults: PendingDefault[] = []
   readonly #methods = new Map<string, MethodInfo | undefined>()
+  /** The transparent aliases being expanded since the last object type (alias cycles, ZNIGHT060). */
+  #expanding = new Set<string>()
   #errors = 0
 
   constructor(ctx: Context, options: ResolvedGraphQLCompilerOptions) {
@@ -865,7 +869,41 @@ class SchemaBuilder {
       case 'alias':
         return this.#alias(named, use)
       default:
-        return this.#object(named, named, use)
+        return this.#fresh(() => this.#object(named, named, use))
+    }
+  }
+
+  /** Runs `build` (an object or union type) with no alias being expanded: its fields may name them again. */
+  #fresh<T>(build: () => T): T {
+    const expanding = this.#expanding
+    this.#expanding = new Set()
+    try {
+      return build()
+    } finally {
+      this.#expanding = expanding
+    }
+  }
+
+  /**
+   * Expands a transparent alias (`type Books = Book[]`). Met again before any object type, it is a
+   * cycle (`type A = B; type B = A`, `type Nested = Nested[]`): ZNIGHT060 at the alias.
+   */
+  #through(alias: NamedShape, use: Use, expand: () => Inner | undefined): Inner | undefined {
+    if (this.#expanding.has(alias.key)) {
+      this.#reportOnce(`recursive\0${alias.key}`, {
+        code: Codes.InvalidType,
+        severity: 'error',
+        message: `'${alias.name}' is a recursive type alias with no object type in between (${use.coordinate})`,
+        location: alias.location,
+        hints: ['Declare an interface or a class for the recursive structure'],
+      })
+      return undefined
+    }
+    this.#expanding.add(alias.key)
+    try {
+      return expand()
+    } finally {
+      this.#expanding.delete(alias.key)
     }
   }
 
@@ -879,7 +917,7 @@ class SchemaBuilder {
     switch (shape.kind) {
       case 'object':
       case 'intersection':
-        return this.#object(alias, alias, use)
+        return this.#fresh(() => this.#object(alias, alias, use))
       case 'named': {
         const target = this.#named.get(shape.key)
         if (
@@ -889,26 +927,26 @@ class SchemaBuilder {
           target.typeArgs.length > 0
         ) {
           // `type BookList = Page<Book>`: the alias names the instance
-          return this.#object(alias, target, use)
+          return this.#fresh(() => this.#object(alias, target, use))
         }
-        return this.#namedType(shape.key, use)
+        return this.#through(alias, use, () => this.#namedType(shape.key, use))
       }
       case 'union': {
         const rest = shape.members.filter(member => member.kind !== 'null' && member.kind !== 'undefined')
         const nullable = rest.length !== shape.members.length
         if (rest.length === 1) {
-          const inner = this.#inner(rest[0] as Shape, use)
+          const inner = this.#through(alias, use, () => this.#inner(rest[0] as Shape, use))
           return inner === undefined ? undefined : { ref: inner.ref, nullable: inner.nullable || nullable }
         }
         let converted: Inner | undefined
         if (rest.every(member => member.kind === 'literal')) converted = this.#literalEnum(alias, rest, use)
         else if (rest.length > 0 && rest.every(member => member.kind === 'named'))
-          converted = this.#union(alias, rest, use)
+          converted = this.#fresh(() => this.#union(alias, rest, use))
         else converted = this.#anonymousUnion(rest, use)
         return converted === undefined ? undefined : { ref: converted.ref, nullable }
       }
       default:
-        return this.#inner(shape, use)
+        return this.#through(alias, use, () => this.#inner(shape, use))
     }
   }
 
@@ -916,10 +954,11 @@ class SchemaBuilder {
    * The declaration key of the object type a shape maps to in output position (the parent of a
    * field resolver), `undefined` when it is not an object type. Mirrors {@link #alias}.
    */
-  #objectKeyOf(shape: Shape): string | undefined {
+  #objectKeyOf(shape: Shape, depth = 0): string | undefined {
+    if (depth > MAX_ALIAS_DEPTH) return undefined
     if (shape.kind === 'union') {
       const rest = shape.members.filter(member => member.kind !== 'null' && member.kind !== 'undefined')
-      return rest.length === 1 ? this.#objectKeyOf(rest[0] as Shape) : undefined
+      return rest.length === 1 ? this.#objectKeyOf(rest[0] as Shape, depth + 1) : undefined
     }
     if (shape.kind !== 'named') return undefined
     const named = this.#named.get(shape.key)
@@ -938,7 +977,7 @@ class SchemaBuilder {
         return named.key
       }
     }
-    return this.#objectKeyOf(target)
+    return this.#objectKeyOf(target, depth + 1)
   }
 
   /** An object type (output) or an input object type (input) for `named`, structured as `structure`. */
@@ -1066,18 +1105,21 @@ class SchemaBuilder {
    * The properties of an object structure (intersections merged, later members win), `'record'` for
    * a record or an index signature (ZNIGHT060: GraphQL objects have fixed fields).
    */
-  #propertiesOf(shape: Shape): readonly ShapeProperty[] | 'record' | undefined {
+  #propertiesOf(shape: Shape, depth = 0): readonly ShapeProperty[] | 'record' | undefined {
+    if (depth > MAX_ALIAS_DEPTH) return undefined
     switch (shape.kind) {
       case 'object':
         return shape.additional === undefined ? shape.properties : 'record'
       case 'named': {
         const named = this.#named.get(shape.key)
-        return named === undefined || named.declaration === 'enum' ? undefined : this.#propertiesOf(named.shape)
+        return named === undefined || named.declaration === 'enum'
+          ? undefined
+          : this.#propertiesOf(named.shape, depth + 1)
       }
       case 'intersection': {
         const merged = new Map<string, ShapeProperty>()
         for (const member of shape.members) {
-          const properties = this.#propertiesOf(member)
+          const properties = this.#propertiesOf(member, depth + 1)
           if (properties === undefined || properties === 'record') return properties
           for (const property of properties) {
             merged.delete(property.name)
@@ -1156,7 +1198,8 @@ class SchemaBuilder {
   }
 
   /** The GraphQL name a type argument contributes to a generic instance name. */
-  #argumentName(shape: Shape): string | undefined {
+  #argumentName(shape: Shape, depth = 0): string | undefined {
+    if (depth > MAX_ALIAS_DEPTH) return undefined
     switch (shape.kind) {
       case 'string':
         return 'String'
@@ -1175,7 +1218,7 @@ class SchemaBuilder {
       }
       case 'union': {
         const rest = shape.members.filter(member => member.kind !== 'null' && member.kind !== 'undefined')
-        return rest.length === 1 ? this.#argumentName(rest[0] as Shape) : undefined
+        return rest.length === 1 ? this.#argumentName(rest[0] as Shape, depth + 1) : undefined
       }
       case 'named': {
         const named = this.#named.get(shape.key)
@@ -1192,7 +1235,7 @@ class SchemaBuilder {
               instance.typeArgs.length > 0)
           const isEnum = target.kind === 'union' && target.members.every(member => member.kind === 'literal')
           const isUnion = target.kind === 'union' && target.members.filter(member => member.kind === 'named').length > 1
-          if (!isObject && !isEnum && !isUnion) return this.#argumentName(target)
+          if (!isObject && !isEnum && !isUnion) return this.#argumentName(target, depth + 1)
         }
         return this.#typeName(named, {
           position: 'output',
