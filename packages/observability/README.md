@@ -516,8 +516,9 @@ One `SERVER` span per request, named `GET /users/:id` (`GET` when no route match
 
 - attributes (stable HTTP semantic conventions): `http.request.method` (+ `http.request.method_original`
   for unknown methods), `url.path`, `http.route`, `http.response.status_code`, `user_agent.original`,
-  `server.address` / `server.port` (`Host` / `X-Forwarded-Host`), `url.scheme` (`X-Forwarded-Proto`),
-  `client.address` (`X-Forwarded-For`), `znight.request.id`;
+  `server.address` / `server.port` (`Host`), `url.scheme` and `client.address` (`ctx.protocol` and
+  `ctx.ip` of `@znight/http`, which read `X-Forwarded-*` only behind proxies listed in its
+  `trustProxy` option), `znight.request.id`;
 - 5xx and unhandled errors set the status to `ERROR`, record the exception and `error.type`; 4xx leave
   it unset (client errors, as the conventions require);
 - the response carries `traceresponse: 00-<trace-id>-<span-id>-<flags>` (W3C Trace Context level 2)
