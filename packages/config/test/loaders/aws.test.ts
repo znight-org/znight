@@ -186,6 +186,24 @@ describe('awsSecretsManager() with a client', () => {
     expect(destroyed).toBe(false)
   })
 
+  it('cancels the other requests once one secret failed', async () => {
+    const signals: AbortSignal[] = []
+    const client: SecretsManagerClientLike = {
+      getSecretValue: (input, options) => {
+        if (input.SecretId === 'prod/denied') {
+          return Promise.reject(new NamedError('AccessDeniedException', 'not authorized'))
+        }
+        const signal = options?.abortSignal as AbortSignal
+        signals.push(signal)
+        return new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason)))
+      },
+    }
+    const loader = awsSecretsManager({ secretId: ['prod/hanging', 'prod/denied'], client, timeoutMs: 60_000 })
+    const error = await caught(() => loadConfigSource([loader], { env: {} }))
+    expect(error.message).toContain('AccessDeniedException: not authorized')
+    expect(signals.map(signal => signal.aborted)).toEqual([true])
+  })
+
   it('validates its options when configured', async () => {
     const cases: unknown[] = [
       {},
@@ -197,6 +215,11 @@ describe('awsSecretsManager() with a client', () => {
     for (const options of cases) {
       const error = await caught(() => awsSecretsManager(options as never))
       expect((error as ZnightError).code).toBe(ErrorCode.InvalidConfig)
+    }
+    for (const timeoutMs of [Number.NaN, -1, 0, 1.5, Number.POSITIVE_INFINITY, 2 ** 31]) {
+      const error = await caught(() => awsSecretsManager({ secretId: 'x', timeoutMs }))
+      expect((error as ZnightError).code).toBe(ErrorCode.InvalidConfig)
+      expect(error.message).toContain('timeoutMs')
     }
   })
 })

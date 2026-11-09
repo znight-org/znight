@@ -2607,6 +2607,12 @@ region?, client?, clientConfig?, optional?, timeoutMs? })` (optional peer
 quote values: a JSON or YAML syntax error gives the file, the line, the column and a fixed reason
 (the YAML error code), never the parser message, which quotes the input (a secret, maybe), and the
 parser error is not kept as `cause`; YAML warnings are re-emitted the same way (`YAMLWarning`).
+`vault()` and `awsSecretsManager()` reject, when created, a `timeoutMs` that is not an integer from 1
+to 2^31 − 1, and `vault()` a `retries` or `retryDelayMs` that is not a finite number >= 0 (ZNIGHT012);
+the backoff between retries is capped at 30 s. Both read their secrets concurrently and, once one
+read fails, abort the requests and retry waits of the others. `vault()` checks the token and the namespace before any request: a value `fetch` would refuse as a
+header (line break, NUL, a character above U+00FF) is a `ConfigLoaderError` naming its origin
+(option, token file, `VAULT_TOKEN`, `VAULT_NAMESPACE`), never the value.
 
 **Impl.** Bun loads `.env`, `.env.<mode>`, `.env.local` (not in `test`) and `.env.<mode>.local` into
 `process.env` before the application runs, with its own rules (mode `production` or `test` when
@@ -3484,11 +3490,18 @@ Runtime (`EventsPlugin`):
   not scheduled.
 - **Detached (normative).** After a successful inline phase, detached listeners start on a macrotask
   (`setImmediate`), each in a fresh scope (`container.runInScope()`), concurrently. Their errors go to
-  `EventsPlugin.configure({ onError })` (default: `logger.error`), never to the publisher.
+  `EventsPlugin.configure({ onError })` (default: `logger.error`), never to the publisher. An async
+  `onError` is part of the tracked work: `idle()` and the drain wait until it settles.
   `emit(event)` runs the whole publication on a macrotask in a fresh scope and reports every error.
 - **Shutdown.** `onStop` waits for detached listeners and `emit()` work in flight, bounded by
-  `drainTimeoutMs` (default 10 000), and logs those still running; from then on `publish()` awaits its
-  detached listeners itself, so none outlives provider disposal. List `EventsPlugin` before
+  `drainTimeoutMs` (default 4 000, below the default `shutdown.hookTimeoutMs`), and logs those still running; from then on `publish()` awaits its
+  detached listeners itself, so none outlives provider disposal. An application stopped without having
+  started (or rolled back) runs no `onStop`: the plugin registers an internal singleton
+  (`@znight/events#EventsShutdownDrain`, last in the resolution order, so disposed first) whose
+  disposal runs the same drain before any other provider is disposed. `onDispose` waits (bounded by
+  `drainTimeoutMs`) only for the work started after the drain began, never again for what the drain
+  left running; an instance reused by a later application is not affected by a dispose that ends
+  late. List `EventsPlugin` before
   `HttpPlugin`, `MessagingPlugin` and `SchedulePlugin` (plugins stop in reverse order).
 - **Hooks.** `events:publish` wraps the inline phase of a publication with listeners
   (`failedListener` names the failing inline listener); `events:listener` wraps each invocation. The

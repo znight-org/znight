@@ -2,7 +2,7 @@
  * Runtime behaviour on a compiled application (RFC 0011 §5.7–§5.13): errors of inline and detached
  * listeners, `emit()`, `onError`, hooks, `recordEvents()`, lifecycle errors and the drain on stop.
  */
-import type { EventListenerEvent, EventPublishEvent, ZnightMetadata } from '@znight/core'
+import type { EventListenerEvent, EventPublishEvent, Plugin, ZnightMetadata } from '@znight/core'
 import type { EventErrorInfo } from '../../src/index.ts'
 
 import { Application, silentLogger, ZnightError } from '@znight/core'
@@ -23,9 +23,10 @@ export const gate: { release?: () => void } = {}
   constructor(readonly where: 'inline' | 'detached' | 'none') {}
 }
 export class Slow {}
+export class Late {}
 `,
   'src/listeners.ts': `import { OnEvent } from '@znight/events'
-import { Boom, Slow } from './events.ts'
+import { Boom, Late, Slow } from './events.ts'
 import { gate, log } from './log.ts'
 
 export class DomainError extends Error {}
@@ -68,6 +69,20 @@ export class Later {
     })
   }
 }
+
+export class Tracked {
+  disposed = false
+
+  @OnEvent({ detached: true })
+  async late(_event: Late): Promise<void> {
+    await new Promise(resolve => setTimeout(resolve, 20))
+    log.push(this.disposed ? 'late-after-dispose' : 'late-ran')
+  }
+
+  [Symbol.dispose](): void {
+    this.disposed = true
+  }
+}
 `,
 }
 
@@ -77,6 +92,7 @@ let mod: {
   gate: { release?: () => void }
   Boom: new (where: string) => object
   Slow: new () => object
+  Late: new () => object
   DomainError: new (message: string) => Error
 }
 
@@ -145,6 +161,24 @@ describe('errors', () => {
     expect(mod.log).toEqual(['first', 'second', 'detached-fail', 'detached-ok'])
     expect(errors.map(info => [info.listener, info.detached, info.mode])).toEqual([['Later.fail', true, 'emit']])
   })
+  it('waits for an async onError before the work counts as done', async () => {
+    mod.log.length = 0
+    const reported: string[] = []
+    const plugin = EventsPlugin.configure({
+      onError: async (_error, info) => {
+        await new Promise(resolve => setTimeout(resolve, 30))
+        reported.push(`${info.listener} ${info.mode}`)
+      },
+    })
+    await using test = await TestApp.create({ metadata, plugins: [plugin], logger: silentLogger })
+    const publisher = test.app.container.get(EventPublisher)
+    await publisher.publish(new mod.Boom('detached'))
+    await plugin.idle()
+    expect(reported).toEqual(['Later.fail publish'])
+    publisher.emit(new mod.Boom('inline'))
+    await test.app.stop()
+    expect(reported).toEqual(['Later.fail publish', 'First.run emit'])
+  })
 })
 
 describe('hooks', () => {
@@ -188,5 +222,56 @@ describe('lifecycle', () => {
       .catch((error: unknown) => error)
     expect(late).toBeInstanceOf(ZnightError)
     expect((late as ZnightError).code).toBe('ZNIGHT021')
+  })
+
+  it('drains detached listeners before disposing the providers of an application never started', async () => {
+    mod.log.length = 0
+    const errors: unknown[] = []
+    const app = await Application.create({
+      metadata,
+      plugins: [EventsPlugin.configure({ onError: error => errors.push(error) })],
+      logger: silentLogger,
+    })
+    const publisher = app.container.get(EventPublisher)
+    await publisher.publish(new mod.Late())
+    publisher.emit(new mod.Late())
+    await app.stop()
+    expect(errors).toEqual([])
+    expect(mod.log).toEqual(['late-ran', 'late-ran'])
+  })
+
+  it('a timed-out dispose of a shared instance leaves the next application alone', async () => {
+    mod.log.length = 0
+    const plugin = EventsPlugin.configure({ drainTimeoutMs: 200 })
+    const warnings: unknown[] = []
+    const logger = { ...silentLogger, warn: (message: string, context?: unknown) => warnings.push([message, context]) }
+    // listed first, so it stops after EventsPlugin: its emit() is work started after onStop
+    const late: Plugin = {
+      name: 'late',
+      async onStop(ctx) {
+        ctx.container.get(EventPublisher).emit(new mod.Slow())
+        await new Promise(resolve => setImmediate(resolve)) // its listener starts before the providers are disposed
+      },
+    }
+    const shutdown = { signals: false, hookTimeoutMs: 50, timeoutMs: 120 } as const
+    const first = await Application.create({ metadata, plugins: [late, plugin], logger, shutdown })
+    await first.start()
+    await first.container.get(EventPublisher).publish(new mod.Slow()) // never settles
+    await new Promise(resolve => setImmediate(resolve))
+    const failure = (await first.stop().catch((error: unknown) => error)) as { errors: readonly Error[] }
+    expect(failure.errors.map(error => error.message)).toEqual([
+      expect.stringContaining('Plugin "events" onStop() timed out'),
+      expect.stringContaining('Plugin "events" onDispose() timed out'),
+    ])
+    // onDispose waits for the emit() only, not again for the listener left over by onStop
+    expect(warnings).toContainEqual([
+      'Events: waiting for 1 listener(s) started after onStop',
+      { listeners: ['emit Slow'] },
+    ])
+
+    await using second = await TestApp.create({ metadata, plugins: [plugin], logger: silentLogger })
+    await new Promise(resolve => setTimeout(resolve, 300)) // the first dispose has ended meanwhile
+    expect(plugin.state).toBe('running')
+    await second.app.container.get(EventPublisher).publish(new mod.Boom('none'))
   })
 })

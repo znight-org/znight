@@ -4,7 +4,7 @@ import type { ConfigLoaderContext } from './types.ts'
 import { readFile } from 'node:fs/promises'
 import { isAbsolute, resolve } from 'node:path'
 
-import { ConfigLoaderError } from '../errors.ts'
+import { ConfigLoaderError, invalidConfig } from '../errors.ts'
 
 /** Absolute path of `path` relative to the loader context. */
 export function resolveFile(context: ConfigLoaderContext, path: string): string {
@@ -63,7 +63,65 @@ export async function importOptionalPeer<T>(specifier: string, loader: string): 
   }
 }
 
-/** Resolves after `ms` milliseconds. */
-export function delay(ms: number): Promise<void> {
-  return new Promise(resolvePromise => setTimeout(resolvePromise, ms))
+/** Largest timer delay: `setTimeout` clamps above it and `AbortSignal.timeout` throws. */
+const MAX_TIMER_DELAY_MS = 2_147_483_647
+
+/** Upper bound of one delay between two attempts of a loader request. */
+export const MAX_RETRY_DELAY_MS = 30_000
+
+/** Delay before retry `attempt` (1-based): `base` doubled at each retry, at most {@link MAX_RETRY_DELAY_MS}. */
+export function retryDelay(base: number, attempt: number): number {
+  return base === 0 ? 0 : Math.min(base * 2 ** (attempt - 1), MAX_RETRY_DELAY_MS)
+}
+
+/** A request timeout option: an integer number of milliseconds from 1 to 2^31 - 1 (ZNIGHT012 otherwise). */
+export function timeoutOption(where: string, value: number | undefined, fallback: number): number {
+  if (value === undefined) return fallback
+  if (!Number.isInteger(value) || value < 1 || value > MAX_TIMER_DELAY_MS) {
+    throw invalidConfig(`${where}: "timeoutMs" must be an integer from 1 to ${MAX_TIMER_DELAY_MS}, got ${value}`)
+  }
+  return value
+}
+
+/** A non-negative finite number option (ZNIGHT012 otherwise). */
+export function nonNegativeOption(where: string, name: string, value: number | undefined, fallback: number): number {
+  if (value === undefined) return fallback
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    throw invalidConfig(`${where}: "${name}" must be a finite number >= 0, got ${value}`)
+  }
+  return value
+}
+
+/** Resolves after `ms` milliseconds, or as soon as `signal` is aborted (the timer is then cleared). */
+export function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise(resolvePromise => {
+    if (signal?.aborted === true) {
+      resolvePromise()
+      return
+    }
+    const done = (): void => {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', done)
+      resolvePromise()
+    }
+    const timer = setTimeout(done, ms)
+    signal?.addEventListener('abort', done, { once: true })
+  })
+}
+
+/**
+ * Runs `read` on every item concurrently, like `Promise.all`; once one fails, the signal given to
+ * the others is aborted, so their requests and retry waits stop instead of outliving the failure.
+ */
+export async function readAll<I, R>(
+  items: readonly I[],
+  read: (item: I, signal: AbortSignal) => Promise<R>,
+): Promise<R[]> {
+  const controller = new AbortController()
+  try {
+    return await Promise.all(items.map(item => read(item, controller.signal)))
+  } catch (error) {
+    controller.abort(error)
+    throw error
+  }
 }

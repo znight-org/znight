@@ -93,6 +93,23 @@ describe('createConfigSource', () => {
     expect(source.keys()).toEqual(['PORT', 'HOST', 'database', 'database.host', 'database.port', 'EMPTY', 'NULLED'])
   })
 
+  it('lists the keys of cyclic values supplied by a custom loader without expanding the cycles', () => {
+    const node: Record<string, unknown> = { a: 1 }
+    node['x'] = node
+    node['y'] = node
+    const tree: Record<string, unknown> = { child: { name: 'c' } }
+    ;(tree['child'] as Record<string, unknown>)['parent'] = tree
+    ;(tree['child'] as Record<string, unknown>)['self'] = tree['child']
+    const cyclic = createConfigSource([
+      { origin: 'custom', values: node },
+      { origin: 'tree', values: tree },
+    ])
+    const started = performance.now()
+    expect(cyclic.keys()).toEqual(['a', 'x', 'y', 'child', 'child.name', 'child.parent', 'child.self'])
+    expect(JSON.stringify(cyclic)).toBe('{"origins":["custom","tree"],"keys":7}')
+    expect(performance.now() - started).toBeLessThan(1000)
+  })
+
   it('describes its layers', () => {
     expect(source.describe?.()).toBe('defaults < .env < process.env')
     expect(createConfigSource([]).describe?.()).toBe('no configuration source')

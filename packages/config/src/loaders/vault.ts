@@ -3,7 +3,17 @@ import type { ConfigLoader, ConfigLoaderContext } from './types.ts'
 
 import { ConfigLoaderError, errorMessage, invalidConfig } from '../errors.ts'
 import { nestUnder } from '../source.ts'
-import { delay, isRecord, readOptionalFile, resolveFile, setting } from './shared.ts'
+import {
+  delay,
+  isRecord,
+  nonNegativeOption,
+  readAll,
+  readOptionalFile,
+  resolveFile,
+  retryDelay,
+  setting,
+  timeoutOption,
+} from './shared.ts'
 
 /** Options of {@link vault}. */
 export interface VaultLoaderOptions {
@@ -33,7 +43,7 @@ export interface VaultLoaderOptions {
   readonly timeoutMs?: number
   /** Retries on network errors, timeouts, HTTP 429 and 5xx, and bodies that are not JSON. Default: `2`. */
   readonly retries?: number
-  /** Base delay between retries (doubled each time), in milliseconds. Default: `200`. */
+  /** Base delay between retries (doubled each time, at most 30 s), in milliseconds. Default: `200`. */
   readonly retryDelayMs?: number
   /** `fetch` implementation (tests, proxies). Default: the global `fetch`. */
   readonly fetch?: typeof fetch
@@ -100,21 +110,47 @@ async function secretBody(response: Response): Promise<unknown> {
   }
 }
 
+/** Whether `value` holds a line break, NUL or a character above U+00FF (not allowed in a header value). */
+function isInvalidHeaderValue(value: string): boolean {
+  for (let index = 0; index < value.length; index++) {
+    const code = value.charCodeAt(index)
+    if (code === 0 || code === 10 || code === 13 || code > 0xff) return true
+  }
+  return false
+}
+
+/**
+ * Rejects a value `fetch` would refuse as a header. `fetch` quotes the value in its error (Node.js),
+ * so the check runs first and names where the value came from, never the value: it may be a secret.
+ */
+function headerValue(value: string, what: string, origin: string): string {
+  if (isInvalidHeaderValue(value)) {
+    throw new ConfigLoaderError(
+      'vault',
+      `the ${what} from ${origin} is not a valid HTTP header value (line break, NUL or a character above U+00FF)`,
+      { hints: [`Check ${origin}: it must hold the ${what} alone, on one line`] },
+    )
+  }
+  return value
+}
+
 async function resolveToken(context: ConfigLoaderContext, options: VaultLoaderOptions): Promise<string> {
-  if (options.token !== undefined && options.token !== '') return options.token
+  if (options.token !== undefined && options.token !== '') {
+    return headerValue(options.token, 'token', 'the "token" option')
+  }
   if (options.tokenFile !== undefined) {
     const text = await readOptionalFile('vault', resolveFile(context, options.tokenFile), options.tokenFile)
     const token = text?.trim()
     if (token === undefined || token === '') {
       throw new ConfigLoaderError('vault', `the token file ${options.tokenFile} is missing or empty`)
     }
-    return token
+    return headerValue(token, 'token', `the token file ${options.tokenFile}`)
   }
   const token = setting(context, undefined, 'VAULT_TOKEN')
   if (token === undefined) {
     throw new ConfigLoaderError('vault', 'no token: pass { token } or { tokenFile }, or set VAULT_TOKEN')
   }
-  return token
+  return headerValue(token, 'token', 'VAULT_TOKEN')
 }
 
 /**
@@ -137,9 +173,9 @@ export function vault(options: VaultLoaderOptions): ConfigLoader {
     throw invalidConfig('vault(): "kvVersion" must be 1 or 2')
   }
   const locations = paths.map(path => locate(options, path))
-  const timeoutMs = options.timeoutMs ?? 5000
-  const retries = Math.max(0, Math.floor(options.retries ?? 2))
-  const retryDelayMs = options.retryDelayMs ?? 200
+  const timeoutMs = timeoutOption('vault()', options.timeoutMs, 5000)
+  const retries = Math.floor(nonNegativeOption('vault()', 'retries', options.retries, 2))
+  const retryDelayMs = nonNegativeOption('vault()', 'retryDelayMs', options.retryDelayMs, 200)
 
   return {
     name: 'vault',
@@ -158,18 +194,24 @@ export function vault(options: VaultLoaderOptions): ConfigLoader {
         Accept: 'application/json',
       }
       const namespace = setting(context, options.namespace, 'VAULT_NAMESPACE')
-      if (namespace !== undefined) headers['X-Vault-Namespace'] = namespace
+      if (namespace !== undefined) {
+        const origin =
+          options.namespace !== undefined && options.namespace !== '' ? 'the "namespace" option' : 'VAULT_NAMESPACE'
+        headers['X-Vault-Namespace'] = headerValue(namespace, 'namespace', origin)
+      }
       const fetchImpl = options.fetch ?? globalThis.fetch
       const kv2 = (options.kvVersion ?? 2) === 2
 
-      const read = async (location: SecretLocation): Promise<ConfigLayer | undefined> => {
+      const read = async (location: SecretLocation, cancel: AbortSignal): Promise<ConfigLayer | undefined> => {
         let lastError: unknown
         for (let attempt = 0; attempt <= retries; attempt++) {
-          if (attempt > 0) await delay(retryDelayMs * 2 ** (attempt - 1))
+          if (attempt > 0) await delay(retryDelay(retryDelayMs, attempt), cancel)
+          // another path failed: the loader already rejected
+          if (cancel.aborted) throw cancel.reason
           try {
             const response = await fetchImpl(`${address}${location.apiPath}`, {
               headers,
-              signal: AbortSignal.timeout(timeoutMs),
+              signal: AbortSignal.any([cancel, AbortSignal.timeout(timeoutMs)]),
             })
             if (response.status === 404) {
               await response.body?.cancel()
@@ -209,7 +251,7 @@ export function vault(options: VaultLoaderOptions): ConfigLoader {
         )
       }
 
-      const layers = await Promise.all(locations.map(read))
+      const layers = await readAll(locations, read)
       return layers.filter((layer): layer is ConfigLayer => layer !== undefined)
     },
   }

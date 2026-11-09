@@ -111,7 +111,8 @@ EventsPlugin.configure({
 })
 ```
 
-Without `onError`, errors are logged by the application logger. There are no retries: work that must
+Without `onError`, errors are logged by the application logger. An async `onError` is awaited:
+`recordEvents().idle()` and the drain on shutdown wait for the report. There are no retries: work that must
 eventually succeed belongs to a message consumer.
 
 ## Transactions
@@ -166,12 +167,14 @@ In unit tests, `TestBed` auto-mocks `EventPublisher`:
 
 ## Shutdown
 
-On `app.stop()`, the plugin waits for detached listeners in flight, up to `drainTimeoutMs` (10 s by
+On `app.stop()`, the plugin waits for detached listeners in flight, up to `drainTimeoutMs` (4 s by
 default). Like every shutdown step, the wait is also cut at `shutdown.hookTimeoutMs` of
 `Application.create()` (5 s by default) and at what is left of `shutdown.timeoutMs` (10 s by
 default, shared by all the stop steps): raise `hookTimeoutMs` and `timeoutMs` above
 `drainTimeoutMs`, or lower `drainTimeoutMs` below what they leave (see
 [Deployment](/guide/deployment#graceful-shutdown-in-orchestrators)).
+An application stopped without having started (a script, `TestApp.create({ start: false })`) gets
+the same drain before its providers are disposed.
 Listing the plugin first in `plugins` makes it stop last, once no request, message or job can
 publish any more.
 

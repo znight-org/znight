@@ -1,10 +1,12 @@
 import type { IncomingMessage, Server, ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
+import type { VaultLoaderOptions } from '../../src/index.ts'
 
 import { createServer } from 'node:http'
 import { ErrorCode, type ZnightError } from '@znight/core'
 
 import { ConfigLoaderError, dotenv, inline, loadConfigSource, vault } from '../../src/index.ts'
+import { MAX_RETRY_DELAY_MS, retryDelay } from '../../src/loaders/shared.ts'
 import { caught, tempDir } from '../helpers.ts'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test'
 
@@ -195,6 +197,35 @@ describe('vault()', () => {
     }
   })
 
+  it('rejects a token or a namespace that is not a valid header value, without sending it or quoting it', async () => {
+    const calls: string[] = []
+    const spy = ((input: string | URL | Request) => {
+      calls.push(String(input))
+      return Promise.resolve(Response.json({ data: { data: {} } }))
+    }) as typeof fetch
+    const { dir, cleanup } = await tempDir({ token: 'hvs.SECRET\n# rotated by agent\n' })
+    try {
+      const cases: [Parameters<typeof vault>[0], Record<string, string>, string][] = [
+        [{ path: 'secret/app', token: 'hvs.SECRET\nx' }, {}, 'the "token" option'],
+        [{ path: 'secret/app', tokenFile: 'token' }, {}, 'the token file token'],
+        [{ path: 'secret/app' }, { VAULT_TOKEN: 'hvs.SECRET\u0000x' }, 'VAULT_TOKEN'],
+        [{ path: 'secret/app', token: TOKEN, namespace: 'team\r\nhvs.SECRET' }, {}, 'the "namespace" option'],
+        [{ path: 'secret/app', token: 'hvs.SECRET\u20ac' }, {}, 'the "token" option'],
+      ]
+      for (const [options, env, origin] of cases) {
+        const error = await caught(() =>
+          loadConfigSource([vault({ address, retries: 2, ...fast, fetch: spy, ...options })], { cwd: dir, env }),
+        )
+        expect(error).toBeInstanceOf(ConfigLoaderError)
+        expect(error.message).toContain(origin)
+        expect(error.message).not.toContain('hvs.SECRET')
+      }
+      expect(calls).toEqual([])
+    } finally {
+      cleanup()
+    }
+  })
+
   it('requires an address and a token', async () => {
     const noAddress = await caught(() => loadConfigSource([vault({ token: TOKEN, path: 'secret/myapp' })], { env: {} }))
     expect(noAddress).toBeInstanceOf(ConfigLoaderError)
@@ -374,5 +405,60 @@ describe('vault()', () => {
       const error = await caught(() => vault(options as never))
       expect((error as ZnightError).code).toBe(ErrorCode.InvalidConfig)
     }
+    const numbers: [keyof VaultLoaderOptions, number][] = [
+      ['retries', Number.NaN],
+      ['retries', -1],
+      ['retries', Number.POSITIVE_INFINITY],
+      ['timeoutMs', Number.NaN],
+      ['timeoutMs', -1],
+      ['timeoutMs', 0],
+      ['timeoutMs', 1.5],
+      ['timeoutMs', 2 ** 31],
+      ['retryDelayMs', Number.NaN],
+      ['retryDelayMs', -1],
+      ['retryDelayMs', Number.POSITIVE_INFINITY],
+    ]
+    for (const [option, value] of numbers) {
+      const error = await caught(() => vault({ path: 'secret/app', [option]: value }))
+      expect((error as ZnightError).code).toBe(ErrorCode.InvalidConfig)
+      expect(error.message).toContain(`"${option}"`)
+    }
+  })
+
+  it('cancels the other reads once one path failed', async () => {
+    const signals: Record<string, AbortSignal[]> = {}
+    const pending = ((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input)
+      const signal = init?.signal as AbortSignal
+      const recorded = signals[url] ?? []
+      signals[url] = recorded
+      recorded.push(signal)
+      if (url.endsWith('/denied'))
+        return Promise.resolve(Response.json({ errors: ['permission denied'] }, { status: 403 }))
+      // a black-holed server: settles only when the request is aborted
+      return new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason)))
+    }) as typeof fetch
+    const loader = vault({
+      address: 'https://vault.example.com',
+      token: TOKEN,
+      path: ['secret/hanging', 'secret/denied'],
+      timeoutMs: 1000,
+      retries: 2,
+      retryDelayMs: 1,
+      fetch: pending,
+    })
+    const error = await caught(() => loadConfigSource([loader], { env: {} }))
+    expect(error.message).toContain('cannot read secret secret/denied: HTTP 403')
+    const hanging = signals['https://vault.example.com/v1/secret/data/hanging'] ?? []
+    expect(hanging.map(signal => signal.aborted)).toEqual([true])
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(hanging).toHaveLength(1) // no retry after the loader failed
+  })
+
+  it('caps the backoff between retries', () => {
+    expect([1, 2, 3].map(attempt => retryDelay(200, attempt))).toEqual([200, 400, 800])
+    expect(retryDelay(200, 15)).toBe(MAX_RETRY_DELAY_MS)
+    expect(retryDelay(200, 2000)).toBe(MAX_RETRY_DELAY_MS)
+    expect(retryDelay(0, 3)).toBe(0)
   })
 })

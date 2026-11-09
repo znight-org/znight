@@ -123,14 +123,19 @@ import { EventsPlugin } from '@znight/events'
 
 EventsPlugin.configure({
   onError: (error, info) => console.error(`${info.listener} failed on ${info.eventName}`, error),
-  drainTimeoutMs: 10_000,
+  drainTimeoutMs: 4_000,
 })
 ```
 
 | Option           | Default             | Effect                                                                        |
 | ---------------- | ------------------- | ----------------------------------------------------------------------------- |
-| `onError`        | `logger.error(...)` | Receives errors of detached listeners and of `emit()`; may be async           |
-| `drainTimeoutMs` | `10000`             | How long `onStop` waits for detached listeners in flight (`Infinity`: no cap) |
+| `onError`        | `logger.error(...)` | Receives errors of detached listeners and of `emit()`; may be async (awaited) |
+| `drainTimeoutMs` | `4000`              | How long `onStop` waits for detached listeners in flight (`Infinity`: no cap) |
+
+Keep `drainTimeoutMs` below `shutdown.hookTimeoutMs` of `Application.create()` (5 000 by default):
+the application cuts each shutdown step at that budget, and the stop then fails with ZNIGHT021.
+The same drain runs before the providers are disposed when the application is stopped without having
+started (a script, `TestApp.create({ start: false })`).
 
 ## Testing
 
