@@ -205,6 +205,51 @@ describe('heartbeat', () => {
     expect(recorded.closes).toEqual([{ code: 1006, reason: '', initiator: 'heartbeat' }])
   })
 
+  it('keeps a connection whose reading the server paused: its pongs cannot be read', async () => {
+    const { impl, recorded } = driver()
+    const conn = new WsConnectionImpl({
+      id: 'c5',
+      gateway: '/chat',
+      handshake,
+      protocol: '',
+      limits: { ...LIMITS, maxPendingMessages: 2 },
+      rooms: new RoomRegistry<WsConnectionImpl>(),
+      driver: impl,
+    })
+    const events = conn.socketEvents()
+    const calls: string[] = []
+    conn.start({
+      bufferedAmount: 0,
+      extensions: '',
+      send: () => 'sent',
+      ping: () => calls.push('ping'),
+      pause: () => calls.push('pause') > 0,
+      resume: () => calls.push('resume'),
+      close: (code, reason) => events.close(code, reason),
+      terminate: () => {
+        calls.push('terminate')
+        events.close(1006, '')
+      },
+    })
+    await Bun.sleep(1)
+    events.message('slow', false) // a handler waiting on a slow downstream
+    events.message('a', false)
+    events.message('b', false) // the queue is full: reading pauses
+    expect(calls).toEqual(['pause'])
+    conn.heartbeat()
+    conn.heartbeat()
+    conn.heartbeat()
+    expect(calls).not.toContain('terminate')
+    expect(conn.readyState).toBe('open')
+    recorded.release()
+    await Bun.sleep(5)
+    expect(calls).toContain('resume')
+    conn.heartbeat() // alive: reading was paused by the server until now
+    expect(conn.readyState).toBe('open')
+    conn.close()
+    await conn.finished
+  })
+
   it('resolves drained() once the buffer falls below limit / 4, even when the transport reports no drain there', async () => {
     const { impl } = driver()
     const conn = new WsConnectionImpl({

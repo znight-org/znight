@@ -341,10 +341,15 @@ export class WsConnectionImpl implements WsConnection, ChannelMember {
 
   /**
    * One heartbeat tick (RFC 0003 §8.7): a connection not seen alive since the previous tick is
-   * terminated, the others are marked and pinged.
+   * terminated, the others are marked and pinged. A connection whose reading the server paused
+   * (`maxPendingMessages`) counts as alive: its pongs cannot be read until reading resumes.
    */
   heartbeat(): void {
     if (this.#state !== 'open' || this.#socket === undefined) return
+    if (this.#paused) {
+      this.#alive = true
+      return
+    }
     if (!this.#alive) {
       this.terminateWith('heartbeat')
       return

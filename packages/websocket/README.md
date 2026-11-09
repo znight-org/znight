@@ -168,7 +168,7 @@ each recipient applies its own backpressure policy. Rooms are per gateway and pe
 | `maxConnections`     | `Infinity`                                                         | Open connections per process (handshakes in flight count); above, `503` with `retry-after: 1`                     |
 | `maxPendingMessages` | `32`                                                               | Inbound queue per connection before reading pauses                                                                |
 | `backpressure`       | `{ limit: '1mb', onLimit: 'close' }`                               | Outbound buffer per connection: close with `1013`, or `'drop'` frames                                             |
-| `heartbeat`          | `{ intervalMs: 30_000 }`                                           | `false` disables it; silent connections are terminated after two intervals                                        |
+| `heartbeat`          | `{ intervalMs: 30_000 }`                                           | `false` disables it; silent connections are terminated after two intervals (not while reading is paused)          |
 | `handshakeTimeoutMs` | `10_000`                                                           | `408` for handshakes whose guards did not answer                                                                  |
 | `handlerTimeoutMs`   | `30_000`                                                           | Per message and `@OnConnect`: `TIMEOUT`, `ctx.signal` aborted                                                     |
 | `closeTimeoutMs`     | `2_000`                                                            | Wait for the client's close frame before terminating                                                              |
