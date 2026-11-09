@@ -6,12 +6,12 @@
 import type { Hooks, WebSocketMessageEvent, WebSocketMessageOutcome } from '@znight/core'
 import type { ConnectionDriver, WsCloseInfo, WsConnectionImpl } from './connection.ts'
 import type { WsExceptionMapper, WsGuard, WsMessageContext } from './context.ts'
-import type { MessageId, WireError, WsCodec } from './envelope.ts'
+import type { InboundFailure, InboundMessage, MessageId, OutboundMessage, WireError, WsCodec } from './envelope.ts'
 import type { GatewayDefinition, WsHandlerDefinition } from './metadata.ts'
 
 import { HttpException } from '@znight/http'
 
-import { isFailure, jsonCodec } from './envelope.ts'
+import { isFailure, isInboundEvent, jsonCodec } from './envelope.ts'
 import { codeOfStatus, WsCloseCode, WsErrorCode, WsException, WsValidationException } from './exceptions.ts'
 
 /** A handler with its resolved guards and effective metadata. */
@@ -19,7 +19,7 @@ export interface HandlerPlan {
   readonly definition: WsHandlerDefinition
   /** Plugin, gateway, then method guards. */
   readonly guards: readonly WsGuard[]
-  /** Gateway meta merged with the method's (nearest wins). */
+  /** The gateway entries of the groups the method does not decide, then the method entries. */
   readonly meta: Readonly<Record<string, unknown>>
 }
 
@@ -152,7 +152,7 @@ export class GatewayDispatcher implements ConnectionDriver {
 
   rateLimited(conn: WsConnectionImpl, frame: string | Uint8Array, binary: boolean): void {
     if (this.raw) return
-    const decoded = this.#codec.decode(frame, binary)
+    const decoded = this.#decode(conn, frame, binary)
     const id = decoded.id
     const event = isFailure(decoded) ? undefined : decoded.event
     this.#fail(conn, id, event, { code: WsErrorCode.RateLimited, message: 'Too many messages' })
@@ -165,14 +165,14 @@ export class GatewayDispatcher implements ConnectionDriver {
     let data: unknown = frame
     let failure: WireError | undefined
     if (!this.raw) {
-      const decoded = this.#codec.decode(frame, binary)
+      const decoded = this.#decode(conn, frame, binary)
       if (isFailure(decoded)) {
         id = decoded.id
         failure = { code: decoded.error, message: decoded.message }
       } else {
         ;({ event, id, data } = decoded)
         if (event === '$ping') {
-          if (id !== undefined) conn.sendFrame(this.#codec.encode({ kind: 'reply', id, data: { t: Date.now() } }))
+          if (id !== undefined) this.#send(conn, { kind: 'reply', id, data: { t: Date.now() } })
           return
         }
       }
@@ -262,7 +262,7 @@ export class GatewayDispatcher implements ConnectionDriver {
         abort,
       )
       if (ctx.id !== undefined && conn.readyState === 'open') {
-        conn.sendFrame(this.#codec.encode({ kind: 'reply', id: ctx.id, data: result }))
+        this.#send(conn, { kind: 'reply', id: ctx.id, data: result })
       } else if (ctx.id === undefined && result !== undefined && !this.raw) {
         this.#ignoredResult(plan.definition.method, ctx.event)
       }
@@ -338,6 +338,37 @@ export class GatewayDispatcher implements ConnectionDriver {
 
   #fail(conn: WsConnectionImpl, id: MessageId | undefined, event: string | undefined, error: WireError): void {
     if (this.raw || conn.readyState !== 'open') return
-    conn.sendFrame(this.#codec.encode({ kind: 'error', id, event, error }))
+    this.#send(conn, { kind: 'error', id, event, error })
+  }
+
+  /**
+   * Decodes with the codec. A codec that throws instead of returning a failure (a MessagePack
+   * decoder on malformed input...) is a `BAD_FRAME`, logged: the rate-limit path runs in the
+   * transport's message callback, where an exception would crash the process.
+   */
+  #decode(conn: WsConnectionImpl, frame: string | Uint8Array, binary: boolean): InboundMessage | InboundFailure {
+    try {
+      const decoded = this.#codec.decode(frame, binary)
+      // whatever the codec: names reach hooks, spans, logs and replies
+      if (!isFailure(decoded) && !isInboundEvent(decoded.event)) {
+        return { error: WsErrorCode.BadFrame, message: 'Invalid event name', id: decoded.id }
+      }
+      return decoded
+    } catch (error) {
+      this.#options.logError('The codec failed to decode a frame', error, conn)
+      return { error: WsErrorCode.BadFrame, message: 'The frame could not be decoded', id: undefined }
+    }
+  }
+
+  /** Encodes and sends a frame of the runtime (reply, error); an encoding failure is logged. */
+  #send(conn: WsConnectionImpl, message: OutboundMessage): void {
+    let frame: string | Uint8Array
+    try {
+      frame = this.#codec.encode(message)
+    } catch (error) {
+      this.#options.logError('The codec failed to encode a frame', error, conn)
+      return
+    }
+    conn.sendFrame(frame)
   }
 }

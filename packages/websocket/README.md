@@ -10,6 +10,9 @@ backpressure, heartbeats and a graceful shutdown. Like every Znight feature, gat
 - The handshake **is an HTTP request**: request scope, `http:request` hook, `HttpPlugin` global
   guards, `@UseHandshakeGuard` guards, exception mappers, `trustProxy`. The request scope lasts as
   long as the connection: request-scoped providers filled by a guard are there for every message.
+  Headers and cookies a guard sets are sent with the `101` response, minus those `res.setHeader()`
+  would refuse on an HTTP route (a name that is not a token, a value with CR, LF or another control
+  character): they are dropped.
 - One server, every adapter: `node`, `fastify`, `express` and `hono` on Node.js and Bun. The `ws`
   transport serves `node:http` servers (Bun ships its own `ws`); Bun's native WebSocket serves
   `honoAdapter()` on `Bun.serve()`.
@@ -99,7 +102,7 @@ export class ChatGateway {
 | `@Ctx()`                                | parameter     | The `WsMessageContext` of the message                                                               |
 | `@UseHandshakeGuard(...guards)`         | class         | HTTP guards (`CanActivate`) of the handshake, after the `HttpPlugin` global guards                  |
 | `@UseMessageGuard(...guards)`           | class, method | `WsGuard`s run before each handler (plugin, class, then method)                                     |
-| `createRouteDecorator` decorators       | class, method | Class: handshake and messages; method: its messages (nearest wins)                                  |
+| `createRouteDecorator` decorators       | class, method | Class: handshake and messages; method: its messages (nearest wins per group)                        |
 
 `@Gateway` options (static): `path`, `scope` (`'singleton'` or `'request'`: one instance per
 connection, which may inject `WsConnection`), `protocol` (`'events'` or `'raw'`), `protocols`
@@ -124,12 +127,20 @@ applies to handlers.
 | server → client | `{ "event": "$error", "data": { "event": ..., "code": ..., "message": ... } }` | failure of a message without `id`         |
 | client ↔ server | `{ "event": "$ping", "id": 1 }` → `{ "id": 1, "data": { "t": ... } }`          | application ping (never reaches handlers) |
 
+An inbound event name matches `^[A-Za-z][\w.:/-]{0,127}$` (or is `$ping`), whatever the codec:
+any other name is a `BAD_FRAME` and never reaches hooks, guards or a default handler.
+
 Error codes: `BAD_FRAME`, `UNSUPPORTED_FRAME`, `BAD_REQUEST` (validation, `details: [{ path,
 message }]`), `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `UNPROCESSABLE`, `RATE_LIMITED`,
 `UNKNOWN_EVENT`, `TIMEOUT`, `INTERNAL` (message hidden unless `exposeErrors`). A `WsException(code,
 message?, details?, { close? })` answers its code; an `HttpException` thrown by a service is mapped
 from its status. In `@OnConnect`, a `WsException` closes with its `close` code (default `1008`), an
 `HttpException` with `4000 + status`, anything else with `1011`.
+
+Every close frame the server sends carries a code a server may send (`1000`–`1014` except `1004`,
+`1005` and `1006`, or `3000`–`4999`; `1011` replaces any other code) and a reason of at most 123
+UTF-8 bytes (a longer one, such as an exception message holding client input, is cut on a code
+point boundary). A transport that still refuses the close frame terminates the socket.
 
 `raw` gateways have no envelope: the default handler receives each frame (`string` or
 `Uint8Array`), `conn.send()` sends frames as they are.
@@ -140,7 +151,8 @@ from its status. In `@OnConnect`, a `WsException` closes with its `close` code (
 `params`, `protocol`, `data` (per-connection state), `rooms`, `readyState`, `bufferedAmount`,
 `signal`, `closeInfo` (set before `@OnDisconnect`), `emit(event, data)`, `send(frame)`,
 `join(room)`, `leave(room)`, `to(room)` (the other members), `drained()`, `close(code?, reason?)`,
-`terminate()`. `emit` and `send` return `'sent'`, `'queued'` or `'dropped'`.
+`terminate()`. `emit` and `send` return `'sent'`, `'queued'` (the outbound buffer is above half the
+gateway's `backpressure.limit`: `await conn.drained()` before sending more) or `'dropped'`.
 
 `WsServer` (injectable): `of(GatewayClass | '/path')` returns a lazy `GatewayChannel` (`path`,
 `size`, `connection(id)`, `connections()`, `members(room)`, `rooms()`, `to(room)`, `except(...)`,
@@ -159,7 +171,7 @@ each recipient applies its own backpressure policy. Rooms are per gateway and pe
 | `maxConnections`     | `Infinity`                                                         | Open connections per process (handshakes in flight count); above, `503` with `retry-after: 1`                     |
 | `maxPendingMessages` | `32`                                                               | Inbound queue per connection before reading pauses                                                                |
 | `backpressure`       | `{ limit: '1mb', onLimit: 'close' }`                               | Outbound buffer per connection: close with `1013`, or `'drop'` frames                                             |
-| `heartbeat`          | `{ intervalMs: 30_000 }`                                           | `false` disables it; silent connections are terminated after two intervals                                        |
+| `heartbeat`          | `{ intervalMs: 30_000 }`                                           | `false` disables it; silent connections are terminated after two intervals (not while reading is paused)          |
 | `handshakeTimeoutMs` | `10_000`                                                           | `408` for handshakes whose guards did not answer                                                                  |
 | `handlerTimeoutMs`   | `30_000`                                                           | Per message and `@OnConnect`: `TIMEOUT`, `ctx.signal` aborted                                                     |
 | `closeTimeoutMs`     | `2_000`                                                            | Wait for the client's close frame before terminating                                                              |
@@ -168,6 +180,10 @@ each recipient applies its own backpressure policy. Rooms are per gateway and pe
 | `exceptionMappers`   | `[]`                                                               | `WsExceptionMapper`s: `map(error, ctx) → WsException \| undefined`                                                |
 | `exposeErrors`       | `false`                                                            | Send the message of unexpected errors                                                                             |
 | `shutdown`           | `{ code: 1001, reason: 'Server shutting down', timeoutMs: 3_000 }` | Graceful shutdown: close frames, then terminate                                                                   |
+
+A codec's `decode` returns a failure (`{ error: 'BAD_FRAME', message, id }`) for a frame it cannot
+read. One that throws instead is tolerated: the frame is answered with `BAD_FRAME` and the error is
+logged, as is an `encode` failure of a reply (the reply is then not sent).
 
 The instance exposes `server` (`WsServer`), `transport`, `gateways`, `connections`, `stats()`
 (`{ connections, opened, closed, messagesIn, messagesOut, bytesIn, bytesOut, dropped,

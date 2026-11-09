@@ -30,8 +30,17 @@ describe('decodeFrame', () => {
     ['no event', '{"data":1}', 'BAD_FRAME'],
     ['an invalid id', '{"event":"a","id":1.5}', 'BAD_FRAME'],
     ['a long id', `{"event":"a","id":"${'x'.repeat(65)}"}`, 'BAD_FRAME'],
+    ['a long event name', `{"event":"${'a'.repeat(129)}"}`, 'BAD_FRAME'],
+    ['an event name with control characters', '{"event":"a\\r\\nb"}', 'BAD_FRAME'],
+    ['a reserved event name', '{"event":"$other"}', 'BAD_FRAME'],
   ])('refuses %s', (_label, frame, code) => {
     expect(decodeFrame(frame)).toMatchObject({ error: code })
+  })
+
+  it('accepts the longest event name and $ping', () => {
+    expect(decodeFrame(`{"event":"${'a'.repeat(128)}"}`)).toMatchObject({ event: 'a'.repeat(128) })
+    expect(decodeFrame('{"event":"$ping","id":1}')).toEqual({ event: '$ping', data: undefined, id: 1 })
+    expect(decodeFrame('{"event":" x","id":2}')).toEqual({ error: 'BAD_FRAME', message: 'Invalid event name', id: 2 })
   })
 
   it('refuses binary frames and keeps a readable id', () => {

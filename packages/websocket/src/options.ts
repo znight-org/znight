@@ -8,6 +8,7 @@ import { ErrorCode, ZnightError } from '@znight/core'
 import { parseByteSize } from '@znight/http'
 
 import { jsonCodec } from './envelope.ts'
+import { isCloseCode, MAX_CLOSE_REASON_BYTES } from './exceptions.ts'
 
 /** Options of `@Gateway` (RFC 0003 §5.2), all static: the compiler reads them. */
 export interface GatewayOptions {
@@ -218,7 +219,7 @@ export function resolveWebSocketOptions(options: unknown): ResolvedWebSocketOpti
   const code = shutdown.code ?? 1001
   if (!isCloseCode(code)) throw invalidOption('shutdown.code', 'a close code (1000, 1001, 1012, 3000-4999)', code)
   const reason = shutdown.reason ?? 'Server shutting down'
-  if (typeof reason !== 'string' || Buffer.byteLength(reason) > 123) {
+  if (typeof reason !== 'string' || Buffer.byteLength(reason) > MAX_CLOSE_REASON_BYTES) {
     throw invalidOption('shutdown.reason', 'a string of at most 123 bytes', reason)
   }
   const codec = o.codec ?? jsonCodec
@@ -254,13 +255,6 @@ export function resolveWebSocketOptions(options: unknown): ResolvedWebSocketOpti
       timeoutMs: positiveInteger('shutdown.timeoutMs', shutdown.timeoutMs, 3_000),
     }),
   })
-}
-
-/** Whether a close code may be sent by a server (RFC 6455 §7.4). */
-export function isCloseCode(code: unknown): code is number {
-  if (typeof code !== 'number' || !Number.isInteger(code)) return false
-  if (code >= 3000 && code <= 4999) return true
-  return code >= 1000 && code <= 1014 && code !== 1004 && code !== 1005 && code !== 1006
 }
 
 function refs(name: string, value: unknown, method: string): readonly unknown[] {

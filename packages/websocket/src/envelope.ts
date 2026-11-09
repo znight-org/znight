@@ -4,6 +4,14 @@ import { WsErrorCode } from './exceptions.ts'
 /** Event names: `^[A-Za-z][\w.:/-]{0,127}$`; names starting with `$` are reserved. */
 export const EVENT_NAME: RegExp = /^[A-Za-z][\w.:/-]{0,127}$/
 
+/** The reserved inbound event answered by the runtime. */
+const PING = '$ping'
+
+/** Whether `event` may be sent by a client: a valid event name, or `$ping`. */
+export function isInboundEvent(event: unknown): event is string {
+  return typeof event === 'string' && (event === PING || EVENT_NAME.test(event))
+}
+
 /** A message id: a string of at most 64 characters or a safe integer, chosen by the client. */
 export type MessageId = string | number
 
@@ -36,8 +44,8 @@ export function isMessageId(value: unknown): value is MessageId {
 
 /**
  * Decodes an inbound frame of an `events` gateway with the JSON codec: a binary frame is
- * `UNSUPPORTED_FRAME`, anything but a JSON object with a string `event` is `BAD_FRAME`. Unknown
- * fields are ignored.
+ * `UNSUPPORTED_FRAME`, anything but a JSON object with a valid `event` name (or `$ping`) is
+ * `BAD_FRAME`. Unknown fields are ignored.
  */
 export function decodeFrame(frame: string | Uint8Array): InboundMessage | InboundFailure {
   if (typeof frame !== 'string') {
@@ -60,6 +68,7 @@ export function decodeFrame(frame: string | Uint8Array): InboundMessage | Inboun
   }
   const event = record['event']
   if (typeof event !== 'string') return { error: WsErrorCode.BadFrame, message: 'Missing event name', id }
+  if (!isInboundEvent(event)) return { error: WsErrorCode.BadFrame, message: 'Invalid event name', id }
   return { event, data: record['data'], id }
 }
 

@@ -820,7 +820,8 @@ type name in `@Resolver` is ZNIGHT005 in code-first mode.
 Handlers are inherited from analysable base classes (an abstract base needs no `@Gateway`). A
 method has one role; an event has one handler per gateway; a `raw` gateway has a single default
 handler and no event. Route decorators (`createRouteDecorator`) on the class decide the handshake
-and the messages, on a handler its messages only (nearest wins).
+and the messages, on a handler its messages only (nearest wins per group: a handler deciding a
+group drops the gateway's entries of that group, the `ctx.route.meta` rule of HTTP routes, §9.1).
 
 ### `@znight/messaging`
 
@@ -3601,16 +3602,34 @@ are ZNIGHT050):
   time the transport is called; a connection completed while the drain began is closed with
   `shutdown.code` / `shutdown.reason` at once. A transport's `accept` MUST settle: the `ws`
   transport rejects (`400`) when the socket closes before `ws` completes the handshake (client gone,
-  header `ws` refuses), and hands `ws` only the selected subprotocol.
+  header `ws` refuses), and hands `ws` only the selected subprotocol. Transports write only the
+  `101` headers whose name is an RFC 9110 token and whose value has no control character (CR, LF,
+  NUL...; the rule of `res.setHeader()`), and drop the others.
   Socket events run in the async context captured at the handshake (`AsyncLocalStorage.snapshot()`).
 - Each connection handles its messages in order (`concurrency`), `@OnConnect` first, through
   `hooks.run('websocket:message')` (wrappers) then `hooks.emit` (listeners): decode (`$ping`
   answered before the hook), handler selection (`UNKNOWN_EVENT`, outcome `unhandled`), message
   guards (plugin, class, method; `FORBIDDEN`, outcome `rejected`), `invoke` bounded by
   `handlerTimeoutMs` (`TIMEOUT`), reply `{ id, data }` or `{ id, error }` / `$error`; the plugin
-  `exceptionMappers` run first. Close codes and limits are those of RFC 0003 §5.8 and §8.6.
+  `exceptionMappers` run first. Close codes and limits are those of RFC 0003 §5.8 and §8.6. An
+  inbound event name that does not match the event name grammar (other than `$ping`) is a
+  `BAD_FRAME` ("Invalid event name"), whatever the codec: it never reaches a handler, and the hook
+  event carries no `event`. A codec
+  whose `decode` throws (instead of returning a failure) yields a logged `BAD_FRAME`, on the
+  rate-limit path too (it runs in the transport's message callback, where nothing may throw); an
+  `encode` failure of a runtime frame (reply, `$error`) is logged and the frame is not sent.
+- A close frame MUST carry a code a server may send (`1000`–`1014` except `1004`–`1006`, or
+  `3000`–`4999`; `1011` replaces any other) and a reason of at most 123 UTF-8 bytes (cut on a code
+  point boundary): reasons come from exception messages, which may hold client input. The close
+  timer is armed before the transport sends the frame, and a transport that refuses it (`ws`
+  throws) terminates the socket. The in-memory transport refuses the same frames as `ws`.
+- Outbound frames: above the gateway's `backpressure.limit` (buffer plus frame), `1013` or a drop
+  (`onLimit`). A send the transport accepted returns `'queued'` when the transport says so or when
+  the buffer is above half of the gateway's limit (transports are configured with the largest limit
+  of the process), and `conn.drained()` resolves below a quarter of it.
 - A heartbeat timer (one per plugin, `unref()`ed) pings the connections of `node` transports and
-  terminates those silent since the previous tick (`initiator: 'heartbeat'`); Bun pings by itself
+  terminates those silent since the previous tick (`initiator: 'heartbeat'`), except while the
+  server paused their reading (`maxPendingMessages`: pongs cannot be read); Bun pings by itself
   (`idleTimeout`, `sendPings`).
 - `onHttpDrain()`, `onStop()` and `onDispose()` share one idempotent drain: refuse handshakes,
   close every connection with `shutdown.code` / `reason`, wait up to `shutdown.timeoutMs`, then

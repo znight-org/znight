@@ -238,11 +238,7 @@ export class WebSocketPlugin implements Plugin, PluginHttpUpgrades {
   httpUpgrades(context: PluginHttpUpgradesContext): PluginUpgrades {
     const plans = this.#prepare(context)
     if (plans.length === 0) return { routes: [] }
-    const extensions = this.#context().metadata.extensions
-    const groups = {
-      ...(extensions?.http as HttpMetadata | undefined)?.groups,
-      ...(extensions?.websocket as WebSocketMetadata | undefined)?.groups,
-    }
+    const groups = routeGroups(this.#context().metadata)
     const options = this.#resolve()
     const routes = plans.map(
       (plan): PluginUpgradeRoute => ({
@@ -379,6 +375,7 @@ export class WebSocketPlugin implements Plugin, PluginHttpUpgrades {
     transport.configure({ maxPayload, backpressureLimit, heartbeatMs: options.heartbeatMs })
     this.#transport = transport
     const refs = new Refs(ctx.container, ctx.metadata)
+    const groups = routeGroups(ctx.metadata)
     const globalGuards = options.messageGuards.map(ref => refs.guard(ref, 'global message guard'))
     const mappers = options.exceptionMappers.map(ref => refs.mapper(ref))
     const plans = definitions.map(definition => {
@@ -392,7 +389,7 @@ export class WebSocketPlugin implements Plugin, PluginHttpUpgrades {
           ...classGuards,
           ...handler.guards.map(token => refs.guard(token, `message guard of ${name}.${handler.method}`)),
         ],
-        meta: Object.freeze({ ...definition.meta, ...handler.meta }),
+        meta: effectiveMeta(definition.meta, handler.meta, groups),
       }))
       const requestScoped = ctx.metadata.providers[definition.token]?.scope === 'request'
       const instance = gatewayInstance(ctx.container, definition.token, requestScoped)
@@ -686,10 +683,39 @@ function joinPath(prefix: string, path: string): string {
 }
 
 /** Route decorator metadata as upgrade route entries, with the groups of `metadata.extensions.http`. */
-function metaEntries(
-  meta: Readonly<Record<string, unknown>>,
-  groups: NonNullable<HttpMetadata['groups']>,
-): RouteMetaEntry[] {
+type RouteGroupsRecord = NonNullable<HttpMetadata['groups']>
+
+/** The route decorator groups of `extensions.http` and `extensions.websocket`. */
+function routeGroups(metadata: ZnightMetadata): RouteGroupsRecord {
+  const extensions = metadata.extensions
+  return {
+    ...(extensions?.http as HttpMetadata | undefined)?.groups,
+    ...(extensions?.websocket as WebSocketMetadata | undefined)?.groups,
+  }
+}
+
+/** The group of a route decorator key: the group listing it, else its own. */
+function groupOf(key: string, groups: RouteGroupsRecord): string {
+  for (const [group, definition] of Object.entries(groups)) if (definition.keys.includes(key)) return group
+  return key
+}
+
+/**
+ * The metadata of a handler (the `ctx.route.meta` rule of HTTP routes): the gateway's entries whose
+ * group the handler does not decide, then the handler's. Frozen.
+ */
+function effectiveMeta(
+  gateway: Readonly<Record<string, unknown>>,
+  handler: Readonly<Record<string, unknown>>,
+  groups: RouteGroupsRecord,
+): Readonly<Record<string, unknown>> {
+  const decided = new Set(Object.keys(handler).map(key => groupOf(key, groups)))
+  const result: Record<string, unknown> = {}
+  for (const key of Object.keys(gateway)) if (!decided.has(groupOf(key, groups))) result[key] = gateway[key]
+  return Object.freeze(Object.assign(result, handler))
+}
+
+function metaEntries(meta: Readonly<Record<string, unknown>>, groups: RouteGroupsRecord): RouteMetaEntry[] {
   return Object.keys(meta)
     .sort()
     .map(key => {

@@ -6,6 +6,8 @@
 import type { BunUpgrade, MemoryUpgrade, NodeUpgrade } from '@znight/http'
 import type { AcceptInit, SendStatus, SocketEvents, TransportSocket, WebSocketTransport } from '../transport.ts'
 
+import { closeReason, isCloseCode, MAX_CLOSE_REASON_BYTES } from '../exceptions.ts'
+
 /** How a memory connection closed. */
 export interface MemoryCloseInfo {
   readonly code: number
@@ -110,7 +112,12 @@ class MemorySocket implements TransportSocket {
     while (!this.#paused && !this.#closed && this.#queue.length > 0) this.#dispatch(this.#queue.shift() as string)
   }
 
+  /** Refuses the close frames `ws` refuses, so that in-memory tests catch them. */
   close(code: number, reason: string): void {
+    if (!isCloseCode(code)) throw new TypeError(`Invalid close code: ${code}`)
+    if (closeReason(reason) !== reason) {
+      throw new RangeError(`A close reason must not be greater than ${MAX_CLOSE_REASON_BYTES} bytes`)
+    }
     this.#finish(code, reason)
   }
 

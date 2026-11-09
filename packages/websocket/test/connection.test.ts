@@ -205,6 +205,51 @@ describe('heartbeat', () => {
     expect(recorded.closes).toEqual([{ code: 1006, reason: '', initiator: 'heartbeat' }])
   })
 
+  it('keeps a connection whose reading the server paused: its pongs cannot be read', async () => {
+    const { impl, recorded } = driver()
+    const conn = new WsConnectionImpl({
+      id: 'c5',
+      gateway: '/chat',
+      handshake,
+      protocol: '',
+      limits: { ...LIMITS, maxPendingMessages: 2 },
+      rooms: new RoomRegistry<WsConnectionImpl>(),
+      driver: impl,
+    })
+    const events = conn.socketEvents()
+    const calls: string[] = []
+    conn.start({
+      bufferedAmount: 0,
+      extensions: '',
+      send: () => 'sent',
+      ping: () => calls.push('ping'),
+      pause: () => calls.push('pause') > 0,
+      resume: () => calls.push('resume'),
+      close: (code, reason) => events.close(code, reason),
+      terminate: () => {
+        calls.push('terminate')
+        events.close(1006, '')
+      },
+    })
+    await Bun.sleep(1)
+    events.message('slow', false) // a handler waiting on a slow downstream
+    events.message('a', false)
+    events.message('b', false) // the queue is full: reading pauses
+    expect(calls).toEqual(['pause'])
+    conn.heartbeat()
+    conn.heartbeat()
+    conn.heartbeat()
+    expect(calls).not.toContain('terminate')
+    expect(conn.readyState).toBe('open')
+    recorded.release()
+    await Bun.sleep(5)
+    expect(calls).toContain('resume')
+    conn.heartbeat() // alive: reading was paused by the server until now
+    expect(conn.readyState).toBe('open')
+    conn.close()
+    await conn.finished
+  })
+
   it('resolves drained() once the buffer falls below limit / 4, even when the transport reports no drain there', async () => {
     const { impl } = driver()
     const conn = new WsConnectionImpl({
@@ -250,5 +295,101 @@ describe('heartbeat', () => {
     expect(resolved).toBe(true)
     conn.close()
     await conn.finished
+  })
+})
+
+describe('send status', () => {
+  it("returns 'queued' above half the gateway's limit, whatever the transport's own threshold", async () => {
+    const conn = new WsConnectionImpl({
+      id: 'c4',
+      gateway: '/ticker',
+      handshake,
+      protocol: '',
+      limits: LIMITS,
+      rooms: new RoomRegistry<WsConnectionImpl>(),
+      driver: driver().impl,
+    })
+    let events: SocketEvents | undefined
+    // a transport configured with a larger, process-wide limit: it reports 'sent' up to it
+    const socket: TransportSocket & { buffered: number } = {
+      buffered: 0,
+      get bufferedAmount() {
+        return this.buffered
+      },
+      extensions: '',
+      send(frame) {
+        this.buffered += typeof frame === 'string' ? frame.length : frame.byteLength
+        return 'sent'
+      },
+      ping: () => undefined,
+      pause: () => true,
+      resume: () => undefined,
+      close: (code, reason) => events?.close(code, reason),
+      terminate: () => events?.close(1006, ''),
+    }
+    events = conn.socketEvents()
+    conn.start(socket)
+    expect(conn.send('x'.repeat(400))).toBe('sent')
+    expect(conn.send('x'.repeat(200))).toBe('queued')
+    expect(conn.readyState).toBe('open')
+    socket.buffered = 0
+    await conn.drained()
+    expect(conn.send('x'.repeat(10))).toBe('sent')
+    conn.close()
+    await conn.finished
+  })
+})
+
+describe('close frames', () => {
+  it('truncates a reason over 123 bytes on a code point boundary', async () => {
+    const { impl } = driver()
+    impl.connect = () => Promise.reject(new Error('no'))
+    impl.connectFailure = () => ({ code: 4404, reason: `Unknown symbol ${'é'.repeat(100)}` })
+    const { conn, client } = await open(impl)
+    const info = await conn.finished
+    expect(info.code).toBe(4404)
+    expect(info.reason).toBe(`Unknown symbol ${'é'.repeat(54)}`)
+    expect(client.closed).toEqual({ code: 4404, reason: info.reason })
+  })
+
+  it('replaces a close code a server may not send with 1011', async () => {
+    const { conn, client } = await open(driver().impl)
+    conn.close(1006, 'abnormal')
+    expect(await conn.finished).toEqual({ code: 1011, reason: 'abnormal', initiator: 'server' })
+    expect(client.closed?.code).toBe(1011)
+  })
+
+  it('terminates the socket when the transport refuses the close frame', async () => {
+    const conn = new WsConnectionImpl({
+      id: 'c3',
+      gateway: '/chat',
+      handshake,
+      protocol: '',
+      limits: LIMITS,
+      rooms: new RoomRegistry<WsConnectionImpl>(),
+      driver: driver().impl,
+    })
+    const events = conn.socketEvents()
+    const calls: string[] = []
+    conn.start({
+      bufferedAmount: 0,
+      extensions: '',
+      send: () => 'sent',
+      ping: () => undefined,
+      pause: () => true,
+      resume: () => undefined,
+      close: () => {
+        calls.push('close')
+        throw new RangeError('refused')
+      },
+      terminate: () => {
+        calls.push('terminate')
+        events.close(1006, '')
+      },
+    })
+    await Bun.sleep(1)
+    expect(() => conn.close(4000, 'bye')).not.toThrow()
+    expect(await conn.finished).toEqual({ code: 4000, reason: 'bye', initiator: 'server' })
+    expect(calls).toEqual(['close', 'terminate'])
   })
 })

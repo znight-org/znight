@@ -255,7 +255,8 @@ export class ModeratorGuard implements WsGuard {
 
 A `raw` gateway has no envelope: its single `@OnMessage()` handler receives every frame, and
 `conn.send()` sends frames as they are. A producer follows the client's pace: `send()` returns
-`'queued'` when the outbound buffer grows, and `await conn.drained()` waits for it to empty. Above
+`'queued'` once the outbound buffer is above half of `backpressure.limit`, and `await conn.drained()`
+waits for it to fall below a quarter. Above
 `backpressure.limit`, the connection is closed with `1013` (or frames are dropped with
 `onLimit: 'drop'`, for lossy feeds).
 
@@ -295,6 +296,9 @@ export class TickerGateway {
 | --------------- | ------------------------------------- | --------------------------- | --------------------------- |
 | a handler/guard | reply or `$error` with its code       | code from the status        | `INTERNAL` (logged)         |
 | `@OnConnect`    | closes with its `close` code (`1008`) | closes with `4000 + status` | closes with `1011` (logged) |
+
+A close reason is cut to the 123 bytes a close frame carries (exception messages often hold
+client input), and a close code a server may not send (`1005`, `1006`...) becomes `1011`.
 
 A refused handshake is an HTTP error (`401`, `403`, `429`...): browsers only see a `1006` close,
 so an application that must tell "unauthorized" from "network error" in a browser authenticates in

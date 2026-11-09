@@ -18,6 +18,8 @@ import type {
 
 import { ErrorCode, ZnightError } from '@znight/core'
 
+import { safeHeaders } from '../transport.ts'
+
 /** The part of Bun's `ServerWebSocket` the transport uses. */
 interface BunSocket {
   send(data: string | Uint8Array): number
@@ -145,7 +147,7 @@ export function bunTransport(): WebSocketTransport {
         pong: () => socket.onPong(),
       }
       const headers: Record<string, string> = {}
-      for (const [name, value] of Object.entries(init.headers)) {
+      for (const [name, value] of Object.entries(safeHeaders(init.headers))) {
         headers[name] = typeof value === 'string' ? value : value.join(', ')
       }
       if (init.protocol !== '') headers['sec-websocket-protocol'] = init.protocol
