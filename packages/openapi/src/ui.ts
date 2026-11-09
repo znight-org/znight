@@ -189,14 +189,21 @@ export function renderUiPage(input: UiPageInput): UiPage {
     '</html>',
     '',
   ].join('\n')
-  const cdn = local ? '' : ` ${CDN_ORIGIN}`
+  // the pinned CDN files only, never the CDN origin: jsDelivr serves any npm package
+  const cdn = (kind: UiAsset['kind']): string =>
+    local
+      ? ''
+      : pkg.assets
+          .filter(asset => asset.kind === kind)
+          .map(asset => ` ${cdnUrl(pkg, asset)}`)
+          .join('')
   const connect = ["'self'", ...input.connect].join(' ')
   const csp = [
     "default-src 'none'",
-    `script-src 'self'${cdn} ${hash}`,
-    `style-src 'self' 'unsafe-inline'${cdn}`,
+    `script-src 'self'${cdn('script')} ${hash}`,
+    `style-src 'self' 'unsafe-inline'${cdn('style')}`,
     "img-src 'self' data: https:",
-    `font-src 'self' data:${cdn}`,
+    "font-src 'self' data:",
     `connect-src ${connect}`,
     "frame-ancestors 'none'",
     "base-uri 'none'",

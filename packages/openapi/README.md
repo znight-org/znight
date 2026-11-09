@@ -379,7 +379,8 @@ included). The UI page has its own `content-security-policy` (`default-src 'none
 script allowed by hash, `connect-src` limited to the document's servers, in every build mode: the
 first request of the page builds the document with `build: 'first-request'`); Scalar runs without its
 fonts, telemetry nor proxy, Swagger UI without its validator. With local assets nothing is loaded
-from a third party; otherwise only the pinned jsDelivr files, with Subresource Integrity. The
+from a third party; otherwise only the pinned jsDelivr files, with Subresource Integrity, and the
+policy allows those exact files, not the jsDelivr origin (which serves any npm package). The
 installed UI package is found the same way on Node.js and Bun, even when its exports map does not
 export its `package.json` (`@scalar/api-reference`).
 

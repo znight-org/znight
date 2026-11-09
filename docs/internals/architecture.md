@@ -2823,7 +2823,8 @@ served document and the emitted file are byte-identical.
   ZNIGHT030): `path` (`/openapi.json`), `yaml` (optional peer `yaml`), the UI page at `uiPath`
   (`/docs`, Scalar or Swagger UI, local assets under `${uiPath}/_assets/` or a pinned CDN with
   Subresource Integrity, `assets: 'auto' | 'local' | 'cdn'`) with its own
-  `content-security-policy` (inline script allowed by hash, `connect-src` limited to the origins of
+  `content-security-policy` (inline script allowed by hash, CDN assets allowed by their exact URL,
+  never the CDN origin, `connect-src` limited to the origins of
   the served document's servers in every build mode: with `'first-request'` the first request of
   the page builds the document; when the build fails, the page allows the declared servers, static
   or from the `servers` option, and is not cached). The installed UI package is found from

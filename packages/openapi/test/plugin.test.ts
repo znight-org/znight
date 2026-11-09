@@ -103,7 +103,7 @@ describe('serving', () => {
       'Scalar.createApiReference(\'#app\', {"url":"/openapi.json","withDefaultFonts":false,"telemetry":false,"theme":"purple"})',
     )
     expect(csp).toContain(`'sha256-${createHash('sha256').update(inline).digest('base64')}'`)
-    expect(csp).toContain("script-src 'self' https://cdn.jsdelivr.net")
+    expect(csp).toContain("script-src 'self' https://cdn.jsdelivr.net/npm/@scalar/api-reference@")
     expect(csp).toContain("frame-ancestors 'none'")
     expect(page.body).toContain('integrity="sha384-')
     expect(page.body).toContain('<title>Bookshelf API — API reference</title>')

@@ -59,10 +59,10 @@ describe('renderUiPage', () => {
     expect(page.csp).toBe(
       [
         "default-src 'none'",
-        `script-src 'self' https://cdn.jsdelivr.net 'sha256-${createHash('sha256').update(inline).digest('base64')}'`,
-        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
+        `script-src 'self' https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.75.1/dist/browser/standalone.js 'sha256-${createHash('sha256').update(inline).digest('base64')}'`,
+        "style-src 'self' 'unsafe-inline'",
         "img-src 'self' data: https:",
-        "font-src 'self' data: https://cdn.jsdelivr.net",
+        "font-src 'self' data:",
         "connect-src 'self' https://api.example.com",
         "frame-ancestors 'none'",
         "base-uri 'none'",
@@ -85,6 +85,12 @@ describe('renderUiPage', () => {
         `${cdnUrl(UI_PACKAGES.swagger, asset)}" integrity="${asset.integrity}" crossorigin="anonymous"`,
       )
     }
+    // the policy allows the pinned files only, never the whole CDN (it serves any npm package)
+    const directives = new Map(cdn.csp.split('; ').map(directive => [directive.split(' ')[0], directive.split(' ')]))
+    const [css, bundle] = UI_PACKAGES.swagger.assets.map(asset => cdnUrl(UI_PACKAGES.swagger, asset))
+    expect(directives.get('script-src')).toContain(bundle as string)
+    expect(directives.get('style-src')).toContain(css as string)
+    for (const sources of directives.values()) expect(sources).not.toContain('https://cdn.jsdelivr.net')
     const local = renderUiPage({
       kind: 'scalar',
       documentUrl: '/o.json',
