@@ -67,7 +67,8 @@ export interface DatadogTransportOptions {
 export interface DatadogTransport extends LogTransport {
   /**
    * Sends every buffered entry and waits for in-flight requests (retries included). A batch that
-   * still fails after its retries drops the rest of the buffer (reported to `onError`).
+   * still fails after its retries is lost (reported to `onError`); when the intake did not answer
+   * it at all (network error, timeout), the rest of the buffer is dropped too.
    */
   flush(): Promise<void>
   /** Flushes and stops the timer. Entries written afterwards are still buffered and sent. */
@@ -140,6 +141,7 @@ class DatadogSender {
   #sending: Promise<void> | undefined
   #dropped = 0
   /** Number of `flush()` calls waiting for the buffer to empty. */
+  /** `flush()` / `close()` calls in progress: an unreachable intake then drops the rest of the buffer. */
   #flushing = 0
 
   constructor(settings: Settings) {
@@ -231,10 +233,11 @@ class DatadogSender {
   }
 
   /**
-   * Sends batches until the buffer is empty. Never rejects: failures go to `onError`. While a
-   * `flush()` / `close()` waits (the plugin flushes at shutdown), a batch that fails after its
-   * retries drops the rest of the buffer too: retrying every buffered batch against an unreachable
-   * intake would hold the process for minutes.
+   * Sends batches until the buffer is empty. Never rejects: failures go to `onError`, and only the
+   * failed batch is lost (an error status: the intake answers). While a `flush()` / `close()` waits
+   * (the plugin flushes at shutdown), a batch that finds the intake unreachable (network error or
+   * timeout) after its retries drops the rest of the buffer too: retrying every buffered batch
+   * against a dead intake would hold the process for minutes.
    */
   async #drain(): Promise<void> {
     while (this.#buffer.length > 0) {
@@ -244,7 +247,7 @@ class DatadogSender {
       } catch (error) {
         const failure = error instanceof Error ? error : new Error(errorMessage(error))
         this.#drop(failure, batch.length)
-        if (this.#flushing > 0 && this.#buffer.length > 0) {
+        if (this.#flushing > 0 && failure instanceof IntakeUnreachableError && this.#buffer.length > 0) {
           const rest = this.#buffer.length
           this.#buffer = []
           this.#bufferBytes = 0
@@ -296,7 +299,9 @@ class DatadogSender {
       let delay = backoff(settings.retryDelayMs, attempt)
       if (response === undefined) {
         if (attempt >= settings.maxRetries) {
-          throw new Error(`Datadog log intake unreachable: ${errorMessage(failure)}`, { cause: failure })
+          throw new IntakeUnreachableError(`Datadog log intake unreachable: ${errorMessage(failure)}`, {
+            cause: failure,
+          })
         }
       } else {
         if (!isRetryableStatus(response.status) || attempt >= settings.maxRetries) {
@@ -550,3 +555,6 @@ function defaultOnError(error: Error, dropped: number): void {
     `[znight] ${error.message} (${dropped} log entr${dropped === 1 ? 'y' : 'ies'} dropped)\n`,
   )
 }
+
+/** The intake did not answer (network error, timeout) after the retries of a batch. */
+class IntakeUnreachableError extends Error {}
