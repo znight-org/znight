@@ -1114,7 +1114,9 @@ export class Pipeline {
       return undefined
     }
     // files too: a file-backed Blob is read lazily, after the handler returned
-    const tracked = trackStream(body, run ?? captureContext(), () => ctx.abort('client'))
+    const tracked = trackStream(body, run ?? captureContext(), () => ctx.abort('client'), {
+      warn: message => this.#logger.warn(message, { requestId: x.requestId, path: ctx.path }),
+    })
     const session = serialized.sse
     const reply = adapterReply(serialized, tracked.stream, body instanceof Blob ? body : undefined)
     if (session !== undefined) {

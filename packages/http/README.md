@@ -804,8 +804,12 @@ logs() {
 
 - **Backpressure**: the source is read only as fast as the client receives the data (on every
   adapter); a slow client never makes the server buffer the whole stream.
-- **Cancellation**: when the client disconnects, the source is cancelled (`return()` of the
-  iterator — `finally` blocks run —, `destroy()` of a `Readable`, `cancel()` of a Web stream).
+- **Cancellation**: when the client disconnects, `ctx.signal` aborts and the source is cancelled
+  (`return()` of the iterator — `finally` blocks run —, `destroy()` of a `Readable`, `cancel()` of a
+  Web stream). The request scope closes once the source stopped, or after 5 s with a warning
+  (`The response stream source did not stop within 5000 ms after its signal was aborted: make it
+  honour ctx.signal`): an async generator blocked in an `await` that ignores the signal cannot be
+  stopped before that `await` settles.
 - **Request scope**: request-scoped instances live until the stream has been fully sent or
   cancelled, and the source runs in the request scope (`Lazy<HttpContext>`, request-scoped
   providers and tracing contexts keep working while it produces chunks).

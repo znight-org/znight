@@ -1959,7 +1959,9 @@ not call `next()` gets the same reply as in the general pipeline.
   (Web stream, Node.js `Readable` or async iterable; pull-based, cancelled when the client
   disconnects; chunked). A file (or any `Blob`) body is sent as a tracked stream like any other
   stream body: the request scope and the in-flight count last until it has been sent or the client
-  went away, so a request-scoped provider may own the file. Details:
+  went away, so a request-scoped provider may own the file. When the client went away, they last
+  until the cancelled source stopped, at most 5 s: past that bound a warning is logged (a source
+  blocked in an `await` that ignores `ctx.signal`) and the scope closes anyway. Details:
   [packages/http/README.md#files](../../packages/http/README.md#files).
 - Status precedence: `@HttpCode` > `HttpResponse.status` > default (201 for POST, 200 otherwise);
   `undefined` return → empty body (204 unless POST or `@HttpCode`). Objects → JSON, strings → text,
