@@ -155,7 +155,10 @@ can be the data argument.
   (`controller.list(user, 1)`).
 - `TestApp` runs the whole pipeline, resolvers included. Class resolvers can be replaced like any
   provider: `overrides: [override(CurrentUserResolver, createMock(CurrentUserResolver, { resolve: async () => alice }))]`.
-- Resolver functions are plain functions: `CurrentUser.resolvers.http` can be called from a test.
+- Resolver functions are plain functions. Narrow them with `ParamFunctionOf` from `@znight/core` to
+  call them from a test:
+  `const resolve = CurrentUser.resolvers.http as ParamFunctionOf<typeof CurrentUser, 'http'>`, then
+  `resolve(ctx, undefined)`.
 
 ## Performance
 
@@ -172,3 +175,7 @@ custom parameters.
 - Custom parameters are not documented by `@znight/openapi`: describe the header or cookie a
   decorator reads with `@ApiHeader` or `@ApiSecurity`.
 - Composing decorators (`applyDecorators`) is not supported: apply each decorator directly.
+- Only HTTP routes, GraphQL fields and message handlers accept custom parameters. WebSocket gateway
+  handlers, `@OnEvent` listeners and scheduled jobs reject them at build time with `ZNIGHT005` (plus
+  `ZNIGHT050` on a gateway handler and `ZNIGHT070` on a listener): read what they need from their own context (`@Ctx()`, the event,
+  `JobContext`).

@@ -214,10 +214,12 @@ runs `Application.create()` then `app.start()` (unless `start: false`), with sig
 disabled. It applies `overrides` last and by default instantiates only the dependency closure of the
 HTTP controllers (with their guards and interceptors), the message consumers, the hosts of
 [scheduled jobs](/packages/schedule#observability-and-testing), the GraphQL resolvers (with their
-guards and loaders), the overridden providers and the providers each plugin lists in its
-[`initRoots(context)`](/packages/core#plugins): the global guards, interceptors and exception
-mappers of `HttpPlugin.configure({ ... })`, the `guards` of `OpenApiPlugin`, the job hosts of
-`SchedulePlugin` (`only: 'all'` or a list of keys to choose;
+guards and loaders), the WebSocket gateways (with their guards), the overridden providers and the
+providers each plugin lists in its [`initRoots(context)`](/packages/core#plugins): the global
+guards, interceptors and exception mappers of `HttpPlugin.configure({ ... })`, the `guards` of
+`OpenApiPlugin`, the job hosts of `SchedulePlugin`, the gateways, `messageGuards` and
+`exceptionMappers` of `WebSocketPlugin`, and the `@OnEvent` listener hosts of `EventsPlugin`
+(`only: 'all'` or a list of keys to choose;
 overrides and those plugin roots are added to the list). The default logger only prints warnings and errors.
 `app.get(key)`, `app.container` and `app.app` give access to the running application;
 `await using app = await TestApp.create(...)` closes it automatically.
@@ -369,6 +371,18 @@ pending on purpose.
 Tests that do not exercise the schedule pass `SchedulePlugin.configure({ enabled: false })` and can
 still run a job on demand with `app.get(SchedulerRegistry).trigger(name)`. See
 [@znight/schedule](/packages/schedule#observability-and-testing).
+
+### WebSockets, GraphQL and events
+
+- **WebSockets**: `app.connect(path, { headers, query, protocols })` runs the real handshake in
+  memory and returns a client that buffers every frame (`request()`, `send()`, `next(event)`).
+  `connectWebSocket(url)` of `@znight/testing` connects over the network
+  ([WebSockets guide](/guide/websockets#testing)).
+- **GraphQL**: `executeOperation(app, { query, variables })` and `subscribeOperation(app, { query })`
+  of `@znight/graphql/testing` go through the HTTP pipeline, and `fakeLoader()` stands in for a
+  loader in `TestBed` tests ([GraphQL guide](/guide/graphql#testing)).
+- **Application events**: `recordEvents(app)` of `@znight/events/testing` records publications and
+  listener failures, and `idle()` waits for detached listeners ([Events guide](/guide/events#testing)).
 
 ## Testing interceptors and plugins
 

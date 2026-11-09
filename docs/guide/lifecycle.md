@@ -84,7 +84,10 @@ export class DatabaseFactory {
 
 The container calls the `dispose` method named with `@Provides({ dispose })`, otherwise
 `[Symbol.asyncDispose]()`, otherwise `[Symbol.dispose]()`. Values you register yourself
-(`providers`, `overrides`, `registerValue`) are never disposed by the container: you own them.
+(`providers`, `registerValue`, value `overrides`) are never disposed by the container: you own them.
+Instances the container creates from a provider definition (`container.register()`, an override
+given as `{ scope, deps, factory }`, `overrideFactory()` of `@znight/testing`) are disposed like
+compiled providers.
 
 ## Boot: `Application.create()`
 
@@ -172,7 +175,8 @@ const app = await Application.create({
 
 ### Signals
 
-After `start()`, `SIGINT` and `SIGTERM` trigger `app.stop()`:
+Once `start()` has been called (the handlers are installed when the start begins), `SIGINT` and
+`SIGTERM` trigger `app.stop()`:
 
 - the shutdown logs `Application stopped` once it completed (at `info` after a signal, at `debug`
   after an explicit `app.stop()`);

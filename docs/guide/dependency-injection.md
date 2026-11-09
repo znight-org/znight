@@ -31,7 +31,8 @@ export class PasswordHasher {
 | `name`    | —             | A qualifier, same as [`@Named()`](#qualifiers-named-and-inject)               |
 | `primary` | `false`       | Preferred candidate, same as [`@Primary()`](#several-implementations-primary) |
 
-Other decorators also declare providers: `@Controller()` ([HTTP](/packages/http)), `@Consumer()`
+Other decorators also declare providers: `@Controller()` ([HTTP](/packages/http)), `@Resolver()`
+([GraphQL](/packages/graphql)), `@Gateway()` ([WebSocket](/packages/websocket)), `@Consumer()`
 ([messaging](/packages/messaging)), `@Config()` ([config](/packages/config)), `@Factory()`
 ([below](#factories-factory-and-provides)).
 
@@ -128,7 +129,7 @@ export class AuditService {
 }
 ```
 
-::: tip The binding is structural only through declarations
+::: tip Binding follows declared heritage, not structure
 Znight matches on declared heritage (`implements`, `extends`), not on structural compatibility: a
 class that happens to have the right methods but no `implements PaymentGateway` clause is not a
 candidate. The `ZNIGHT001` message points it out when it finds such a near miss.
@@ -361,8 +362,8 @@ container.has(Cache)
 container.tokenOf(UserService) // 'src/users/user.service.ts#UserService'
 ```
 
-Providers can inject the container itself (`Container` from `@znight/core`), as well as the
-`Application`, `Hooks` and the core logger.
+Providers can inject the container itself (`Container` from `@znight/core`), as well as
+`Application`, `Hooks` and `CoreLogger` (the live application logger), all from `@znight/core`.
 
 ## How a dependency is bound
 

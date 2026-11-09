@@ -106,7 +106,8 @@ A few rules cover most of it:
   plain aliases exported by `@znight/graphql`, so values need no cast. Set the compiler option
   `number: 'Int'` if most of your numbers are counts.
 - **`Date` is `DateTime`**, `bigint` is `BigInt`. Other types with a wire format of their own are
-  [custom scalars](#scalars).
+  custom scalars, declared with `scalar<T>('Name', { serialize, parseValue })`
+  ([how types map](/packages/graphql#how-types-map)).
 - **Enums**: a TypeScript `enum` (the member names are the GraphQL values, resolvers see the member
   values) or a named union of string literals (`BookSort`).
 - **Generics** are named after their arguments: `Page<Book>` is `BookPage`. An alias names it
@@ -937,12 +938,11 @@ its IDE (`graphiql: true` serves it), its subscription transports and its keep-a
 | Apollo Server          | Once Apollo Server accepts graphql-js 17                         | Apollo plugins and usage reporting (planned, RFC 0009 M3)     |
 | Your own               | A `GraphQLDriver`: `name`, `routes()`, `start(engine)`, `stop()` | Another server; check it with `describeDriverConformance()`   |
 
-Drivers buy an ecosystem, the built-in transport buys throughput: in the in-process benchmark of the
-package (`{ hello }`, one synchronous resolver, the `HttpPlugin` pipeline without a socket), a
-request costs about 1.6 µs on Bun and 5.5 µs on Node.js with the built-in transport, and about
-13 to 18 µs on Bun and 27 to 45 µs on Node.js with the Yoga driver (Yoga's request parsing, its
-plugin chain and the Web `Request` and `Response` objects). Over a network, with real resolvers,
-the gap is a smaller share of each request; measure your own operations before choosing.
+Drivers buy an ecosystem, the built-in transport buys throughput: over a network, the Yoga driver
+serves about half the requests per second of the built-in transport for a one-object query (Yoga's
+request parsing, its plugin chain and the Web `Request` and `Response` objects), and the gap narrows
+as resolvers do real work ([benchmarks](/benchmarks#graphql)). Measure your own operations before
+choosing.
 
 The engine and the driver contract are described in the
 [package README](../../packages/graphql/README.md#drivers-and-the-engine), with a complete driver

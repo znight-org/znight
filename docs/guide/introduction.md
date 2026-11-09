@@ -33,8 +33,9 @@ JVM world, brought to TypeScript.
    from the source code, and the Vite plugin strips them from the bundle.
 3. **Flat DI.** One container, no modules. Providers are discovered by scanning your sources (and
    provider libraries).
-4. **Composable.** HTTP, OpenAPI, messaging, scheduling, configuration and observability are separate
-   packages, each made of marker decorators, a compiler extension and a runtime plugin.
+4. **Composable.** HTTP, OpenAPI, GraphQL, WebSocket, messaging, application events, scheduling,
+   configuration and observability are separate packages, made of marker decorators, a compiler
+   extension (or manifest entries) and a runtime plugin.
 5. **Runtime agnostic.** Runtime packages run on Node.js 24+ and Bun 1.3+ (ESM only), using standard
    APIs only.
 6. **Fast.** The compiler is built on [oxc](https://oxc.rs) with per-file caches; the runtime creates
@@ -73,9 +74,9 @@ plugins, guards and interceptors, testing utilities with auto-mocking.
 - [`@znight/compiler`](/packages/compiler) analyses the code and generates `__ZNIGHT_METADATA__`.
 - [`@znight/core`](/packages/core) executes it: container, scopes, lifecycle, plugins, hooks, AOP.
 - Feature packages ([HTTP](/packages/http), [OpenAPI](/packages/openapi),
-  [messaging](/packages/messaging), [scheduling](/packages/schedule), [config](/packages/config),
-  [observability](/packages/observability)) add decorators, a compiler extension and a runtime plugin
-  each.
+  [GraphQL](/packages/graphql), [WebSocket](/packages/websocket), [messaging](/packages/messaging),
+  [events](/packages/events), [scheduling](/packages/schedule), [config](/packages/config),
+  [observability](/packages/observability)) add decorators, compiler support and a runtime plugin.
 - [`@znight/testing`](/packages/testing) and [`@znight/cli`](/packages/cli) cover tests, scaffolding
   and the development loop.
 

@@ -152,6 +152,15 @@ the running [jobs](/packages/schedule) and waits for them up to its `drainTimeou
 `SchedulePlugin` before `HttpPlugin`: plugins stop in reverse order, so HTTP stops taking requests
 before the jobs drain.
 
+`WebSocketPlugin` closes every connection with `1001` and waits for the running handlers up to its
+`shutdown.timeoutMs` (3 s by default), and `EventsPlugin` waits for detached listeners up to its
+`drainTimeoutMs` (10 s by default). Each plugin's stop step is cut at `shutdown.hookTimeoutMs` and at
+what is left of the application's `shutdown.timeoutMs`, shared by all the stop steps. List `EventsPlugin` first so
+that it stops last; its drain must then fit in both: raise `hookTimeoutMs` and `timeoutMs`
+above `drainTimeoutMs`, or lower `drainTimeoutMs`, for example
+`EventsPlugin.configure({ drainTimeoutMs: 8_000 })` with the sample's
+`{ timeoutMs: 25_000, hookTimeoutMs: 10_000 }`.
+
 ### Event streams behind a proxy
 
 Server-Sent Events go through proxies without special configuration: the plugin flushes the headers

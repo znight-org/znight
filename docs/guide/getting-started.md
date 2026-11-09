@@ -338,8 +338,10 @@ During development, `npm run dev` (`znight dev`) rebuilds in watch mode and rest
 every successful build.
 
 ::: details Running on Bun
-The build output runs on Bun as is: `bun --no-env-file dist/main.js` (or `znight start --runtime
-bun`). Bun can also run your sources directly with the compiler's Bun preload, which regenerates the
+The build output runs on Bun as is: `bun --no-env-file dist/main.js`, or `znight start --runtime
+bun` with `env = false` in `bunfig.toml` (`znight start` does not pass `--no-env-file`; projects
+created by `znight new` with Bun as package manager and the config feature already have it, add it
+yourself otherwise). Bun can also run your sources directly with the compiler's Bun preload, which regenerates the
 container before the application starts and serves it from memory:
 `bun --preload @znight/compiler/bun --no-env-file src/main.ts` (also with `--watch`). For `bun test`,
 add it to `bunfig.toml`. See [Bun preload](./compiler#bun-preload).
@@ -363,7 +365,7 @@ It is plain TypeScript:
 ```ts
 export const __ZNIGHT_METADATA__: ZnightMetadata = {
   version: 1,
-  compiler: '0.1.0',
+  compiler: '0.6.1',
   providers: {
     ['src/users/in-memory-user.repository.ts#InMemoryUserRepository']: {
       scope: 'singleton',

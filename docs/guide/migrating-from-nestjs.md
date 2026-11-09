@@ -42,26 +42,26 @@ walks through a migration.
 
 ### HTTP
 
-| NestJS                                             | Znight (`@znight/http`)                                       | Notes                                                                                       |
-| -------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `@Controller('users')`                             | `@Controller('/users')`                                       | Also `{ path, scope }`.                                                                     |
-| `@Get() @Post() @Put() @Patch() @Delete()`         | Same                                                          | Plus `@Head()`, `@Options()`, `@All()`.                                                     |
-| `@Param('id', ParseIntPipe) id: number`            | `@Param('id') id: number`                                     | Coerced from the declared type; invalid → `400`.                                            |
-| `@Query()`, `@Body()`, `@Headers()`                | `@Query(name?, schema?)`, `@Body(schema?)`, `@Headers(name?)` | Schemas validate and transform.                                                             |
-| `@Req()`, `@Res()`                                 | `@Req()`, `@Res()`                                            | Adapter-specific escape hatches (warning). Prefer `@Ctx()` (`HttpContext`).                 |
-| `@HttpCode(204)`, `@Header('x', 'y')`              | Same                                                          |                                                                                             |
-| `@UseGuards(AuthGuard)`                            | `@UseGuard(AuthGuard)`                                        | Guards are providers implementing `CanActivate`, injected like any other.                   |
-| `@UseInterceptors(X)`                              | `@UseInterceptor(X)`                                          | Route-level. For any provider method: `@Intercept()` ([AOP](./aop)).                        |
-| `@UsePipes(ValidationPipe)`                        | Schemas on parameters, or `@Validate(schema)`                 | See [validation](#validationpipe-schemas).                                                  |
-| `@UseFilters()` / `ExceptionFilter`                | `exceptionMappers` option of `HttpPlugin`                     | `HttpException(status, message, details?)` for expected errors.                             |
-| `@SetMetadata('roles', [...])` + `Reflector`       | `createRouteDecorator<T>('roles')`                            | See [route metadata](#reflector-createroutedecorator).                                      |
-| `createParamDecorator((data, ctx) => ...)`         | `createParamDecorator<T, D>({ http, graphql, messaging })`    | One resolver per transport, checked at build time. See [below](#createparamdecorator).      |
-| `@UploadedFile()` + `FileInterceptor('file')`      | `@UploadedFile('file', { maxSize, mimeTypes })`               | No interceptor nor Multer: standard `File` objects, limits checked while reading.           |
-| `cookie-parser` + `@Req() req.cookies`             | `@Cookie('name')`, `@SignedCookie('name')`, `ctx.cookies`     | Coerced like headers; signed cookies with key rotation ([cookies](/packages/http#cookies)). |
-| `res.cookie()`                                     | `ctx.setCookie()` / `HttpResponse.withCookie()`               | Secure defaults: `Secure; HttpOnly; SameSite=Lax`.                                          |
-| `@Sse()` returning `Observable<MessageEvent>`      | `@Sse()` returning an `AsyncIterable<SseEvent>`               | No RxJS; `EventChannel` instead of a `Subject`.                                             |
-| `app.enableCors()`, `helmet()`                     | `cors` and `securityHeaders` options of `HttpPlugin`          | Handled by the plugin on every adapter ([Security](./security)).                            |
-| `@nestjs/swagger` (`@ApiProperty`, `@ApiResponse`) | [`@znight/openapi`](/packages/openapi)                        | Schemas from TypeScript types and JSDoc, checked at build time; no `@ApiProperty`.          |
+| NestJS                                             | Znight (`@znight/http`)                                       | Notes                                                                                                 |
+| -------------------------------------------------- | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `@Controller('users')`                             | `@Controller('/users')`                                       | Also `{ path, scope }`.                                                                               |
+| `@Get() @Post() @Put() @Patch() @Delete()`         | Same                                                          | Plus `@Head()`, `@Options()`, `@All()`.                                                               |
+| `@Param('id', ParseIntPipe) id: number`            | `@Param('id') id: number`                                     | Coerced from the declared type; invalid → `400`.                                                      |
+| `@Query()`, `@Body()`, `@Headers()`                | `@Query(name?, schema?)`, `@Body(schema?)`, `@Headers(name?)` | Schemas validate and transform.                                                                       |
+| `@Req()`, `@Res()`                                 | `@Req()`, `@Res()`                                            | Escape hatches; `@Res()` makes the route adapter-specific (warning). Prefer `@Ctx()` (`HttpContext`). |
+| `@HttpCode(204)`, `@Header('x', 'y')`              | Same                                                          |                                                                                                       |
+| `@UseGuards(AuthGuard)`                            | `@UseGuard(AuthGuard)`                                        | Guards are providers implementing `CanActivate`, injected like any other.                             |
+| `@UseInterceptors(X)`                              | `@UseInterceptor(X)`                                          | Route-level. For any provider method: `@Intercept()` ([AOP](./aop)).                                  |
+| `@UsePipes(ValidationPipe)`                        | Schemas on parameters, or `@Validate(schema)`                 | See [validation](#validationpipe-schemas).                                                            |
+| `@UseFilters()` / `ExceptionFilter`                | `exceptionMappers` option of `HttpPlugin`                     | `HttpException(status, message, details?)` for expected errors.                                       |
+| `@SetMetadata('roles', [...])` + `Reflector`       | `createRouteDecorator<T>('roles')`                            | See [route metadata](#reflector-createroutedecorator).                                                |
+| `createParamDecorator((data, ctx) => ...)`         | `createParamDecorator<T, D>({ http, graphql, messaging })`    | One resolver per transport, checked at build time. See [below](#createparamdecorator).                |
+| `@UploadedFile()` + `FileInterceptor('file')`      | `@UploadedFile('file', { maxSize, mimeTypes })`               | No interceptor nor Multer: standard `File` objects, limits checked while reading.                     |
+| `cookie-parser` + `@Req() req.cookies`             | `@Cookie('name')`, `@SignedCookie('name')`, `ctx.cookies`     | Coerced like headers; signed cookies with key rotation ([cookies](/packages/http#cookies)).           |
+| `res.cookie()`                                     | `ctx.setCookie()` / `HttpResponse.withCookie()`               | Secure defaults: `Secure; HttpOnly; SameSite=Lax`.                                                    |
+| `@Sse()` returning `Observable<MessageEvent>`      | `@Sse()` returning an `AsyncIterable<SseEvent>`               | No RxJS; `EventChannel` instead of a `Subject`.                                                       |
+| `app.enableCors()`, `helmet()`                     | `cors` and `securityHeaders` options of `HttpPlugin`          | Handled by the plugin on every adapter ([Security](./security)).                                      |
+| `@nestjs/swagger` (`@ApiProperty`, `@ApiResponse`) | [`@znight/openapi`](/packages/openapi)                        | Schemas from TypeScript types and JSDoc, checked at build time; no `@ApiProperty`.                    |
 
 ### Messaging, config, lifecycle, data
 
@@ -400,21 +400,21 @@ and lets a driver own the transport ([RFC 0009](https://github.com/znight-org/zn
 the built-in GraphQL-over-HTTP and SSE endpoint by default, GraphQL Yoga with
 [`yogaDriver()`](./graphql#yoga).
 
-| NestJS (`@nestjs/graphql`)                                        | Znight                                                                                     |
-| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `GraphQLModule.forRoot<YogaDriverConfig>({ driver: YogaDriver })` | `GraphQLPlugin.configure({ driver: yogaDriver() })` (`@znight/graphql/yoga`)               |
-| `driver: ApolloDriver`                                            | The built-in transport; an Apollo Server driver once Apollo Server accepts graphql-js 17   |
-| `driver: MercuriusDriver`                                         | The built-in transport on `fastifyAdapter()` (no Mercurius driver is planned)              |
-| `ApolloFederationDriver`, `YogaFederationDriver`                  | Not yet: federation is a planned engine feature, for every driver                          |
-| `ApolloGatewayDriver`                                             | Not planned: run Apollo Router or Hive Gateway in front of Znight subgraphs                |
-| `plugins: [...]` (Envelop plugins of Yoga)                        | `yogaDriver({ plugins: [...] })`                                                           |
-| `graphiql: true`, `playground`                                    | `graphiql: true` on `GraphQLPlugin` (the driver's IDE)                                     |
-| `context: ({ req }) => ({ user: req.user })`                      | Request-scoped providers; `GraphQLContext.http`; Yoga's context through `yogaContext(ctx)` |
-| `formatError`, `maskedErrors`                                     | `errorMappers` and `exposeErrors`: the engine masks once, Yoga's masking is off            |
-| `subscriptions: { 'graphql-ws': true }`                           | SSE (Yoga's or the built-in transport's); `graphql-ws` comes with `@znight/websocket`      |
-| `transformSchema`, `buildSchemaOptions`                           | Not supported: the engine owns the schema                                                  |
-| `path`, `useGlobalPrefix`                                         | `path`; the `HttpPlugin` prefix always applies                                             |
-| Mercurius `jit`, `loaders`                                        | No JIT (a Yoga plugin replacing the execution is refused); `@Loader()`                     |
+| NestJS (`@nestjs/graphql`)                                        | Znight                                                                                                            |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `GraphQLModule.forRoot<YogaDriverConfig>({ driver: YogaDriver })` | `GraphQLPlugin.configure({ driver: yogaDriver() })` (`@znight/graphql/yoga`)                                      |
+| `driver: ApolloDriver`                                            | The built-in transport; an Apollo Server driver once Apollo Server accepts graphql-js 17                          |
+| `driver: MercuriusDriver`                                         | The built-in transport on `fastifyAdapter()` (no Mercurius driver is planned)                                     |
+| `ApolloFederationDriver`, `YogaFederationDriver`                  | Not supported: federation is considered for the engine, for every driver ([roadmap](/roadmap#considered))         |
+| `ApolloGatewayDriver`                                             | Not planned: run Apollo Router or Hive Gateway in front of Znight subgraphs                                       |
+| `plugins: [...]` (Envelop plugins of Yoga)                        | `yogaDriver({ plugins: [...] })`                                                                                  |
+| `graphiql: true`, `playground`                                    | `graphiql: true` on `GraphQLPlugin` (the driver's IDE)                                                            |
+| `context: ({ req }) => ({ user: req.user })`                      | Request-scoped providers; `GraphQLContext.http`; Yoga's context through `yogaContext(ctx)`                        |
+| `formatError`, `maskedErrors`                                     | `errorMappers` and `exposeErrors`: the engine masks once, Yoga's masking is off                                   |
+| `subscriptions: { 'graphql-ws': true }`                           | SSE only (Yoga's or the built-in transport's); `graphql-ws` is not supported yet ([roadmap](/roadmap#considered)) |
+| `transformSchema`, `buildSchemaOptions`                           | Not supported: the engine owns the schema                                                                         |
+| `path`, `useGlobalPrefix`                                         | `path`; the `HttpPlugin` prefix always applies                                                                    |
+| Mercurius `jit`, `loaders`                                        | No JIT (a Yoga plugin replacing the execution is refused); `@Loader()`                                            |
 
 ## Application events {#application-events}
 

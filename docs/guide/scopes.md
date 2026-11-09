@@ -6,11 +6,11 @@ description: Singleton, request and transient scopes, the rules the compiler enf
 
 A provider's **scope** decides how long its instances live.
 
-| Scope                 | Instances                                                   | Typical use                                    |
-| --------------------- | ----------------------------------------------------------- | ---------------------------------------------- |
-| `singleton` (default) | One for the whole application, created during startup       | Services, repositories, clients, controllers   |
-| `request`             | One per request scope (HTTP request, message delivery)      | Current user, per-request caches, unit of work |
-| `transient`           | A new one for every injection (and every `container.get()`) | Stateful helpers owned by their consumer       |
+| Scope                 | Instances                                                                                   | Typical use                                    |
+| --------------------- | ------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| `singleton` (default) | One for the whole application, created during startup                                       | Services, repositories, clients, controllers   |
+| `request`             | One per request scope (HTTP request, WebSocket connection, message delivery, scheduled run) | Current user, per-request caches, unit of work |
+| `transient`           | A new one for every injection (and every `container.get()`)                                 | Stateful helpers owned by their consumer       |
 
 ![Provider scopes over the life of the application: one singleton instance from create() to stop(); one request-scoped instance per request scope (HTTP request or message delivery), concurrent scopes being isolated; a new transient instance for every injection, owned by the singleton or request-scoped instance it is injected into](/diagrams/scopes.svg)
 
@@ -43,10 +43,10 @@ A singleton is created once, at startup, outside of any request: it cannot hold 
 particular request. The compiler rejects it:
 
 ```txt
-✗ ZNIGHT003: Scope mismatch: AuditService (singleton) depends on CurrentUser (request)
+✗ ZNIGHT003: Scope mismatch: singleton AuditService depends on request-scoped CurrentUser (AuditService -> CurrentUser)
   --> src/audit/audit.service.ts:7:40
-   = hint: Inject Lazy<CurrentUser> and call get() while handling a request
-   = hint: Or make AuditService request-scoped
+   = hint: Inject Lazy<CurrentUser> and call .get() while a request is being handled
+   = hint: Or make AuditService request-scoped: @Injectable({ scope: 'request' })
 ```
 
 ## Using request data from a singleton: `Lazy<T>`
@@ -73,13 +73,17 @@ dependents then need to be request-scoped or use `Lazy` too).
 
 ## Request scopes
 
-Request scopes are opened by plugins: `@znight/http` opens one per HTTP request and
-`@znight/messaging` one per message delivery. Inside, request-scoped providers are created on first
-use and shared by everything resolved in the same scope; concurrent requests never share instances
-(scopes are isolated with `AsyncLocalStorage`).
+Request scopes are opened by plugins: `@znight/http` opens one per HTTP request (for a WebSocket
+upgrade, it lasts as long as the connection), `@znight/messaging` one per message delivery,
+`@znight/schedule` one per run, `@znight/graphql` one per operation run outside an HTTP request
+(otherwise the operation uses the request's), and `@znight/events` one per detached listener, and
+one for the inline listeners of a publication made outside any scope (always for `emit()`).
+Inside, request-scoped providers are created on first use and shared by everything resolved in the
+same scope; concurrent requests never share instances (scopes are isolated with
+`AsyncLocalStorage`).
 
-Plugins seed the scope with **request-scoped externals**, such as `HttpContext` or `InboundMessage`,
-that your request-scoped providers can inject.
+Plugins seed the scope with **request-scoped externals**, such as `HttpContext`, `InboundMessage`,
+`GraphQLContext`, `JobContext` or `WsConnection`, that your request-scoped providers can inject.
 
 You can open a scope yourself, for example in a script or a custom plugin:
 
@@ -96,6 +100,9 @@ const report = await app.container.runInScope(
 - Resolving a request-scoped provider outside of any scope throws
   [`ZNIGHT013`](/reference/error-codes#znight013). So does resolving it after the scope closed: await
   everything a request starts inside the `runInScope()` callback.
+- `container.openScope(values?)` is the callback-free form, for code that decides when the work
+  ends: `scope.run(fn, ...args)` runs code in it (as many times as needed), `await scope.close()`
+  (it must be called) disposes its instances, and `scope.context` is its `ScopeContext`.
 
 ## Transient providers
 
