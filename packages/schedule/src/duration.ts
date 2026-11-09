@@ -67,7 +67,7 @@ export function checkDuration(value: unknown): DurationResult {
     )
   }
   const match = /^(\d+(?:\.\d+)?)(ms|s|m|h|d)$/.exec(value)
-  if (match === null) return invalid(`'${value}' is not a duration: ${suggest(value)}`)
+  if (match === null) return invalid(`${quote(value)} is not a duration: ${suggest(value)}`)
   const amount = Number(match[1])
   const unit = DURATION_UNITS[match[2] as string] as number
   const ms = Math.round(amount * unit * 1000) / 1000
@@ -94,9 +94,20 @@ function bounded(ms: number, written: string): DurationResult {
   return { ok: true, ms }
 }
 
-/** "use '5m' (ms, s, m, h, d)" for `'5 min'`, `'5mins'`, `'5'`... */
+/** Longest input echoed in an error message (durations may come from user input). */
+const MAX_ECHO = 64
+
+/** `'value'`, cut after {@link MAX_ECHO} characters. */
+function quote(value: string): string {
+  return value.length > MAX_ECHO ? `'${value.slice(0, MAX_ECHO)}...' (${value.length} characters)` : `'${value}'`
+}
+
+/**
+ * "use '5m' (ms, s, m, h, d)" for `'5 min'`, `'5mins'`, `'5'`... Linear in the input: trimmed first, so
+ * a single `\s*` remains (spaces around an optional unit made the regex backtrack quadratically).
+ */
 function suggest(value: string): string {
-  const match = /^\s*(-?\d+(?:\.\d+)?)\s*([A-Za-z]*)\s*$/.exec(value)
+  const match = /^(-?\d+(?:\.\d+)?)\s*([A-Za-z]*)$/.exec(value.trim())
   if (match === null) return `use a number of milliseconds or a number with a unit ${UNITS_LIST}`
   const amount = match[1] as string
   const written = (match[2] as string).toLowerCase()
