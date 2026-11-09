@@ -390,7 +390,8 @@ unknown methods become `_OTHER`: label cardinality stays bounded. Durations star
 message type when a handler matched, `unmatched` otherwise (never the raw type of an unhandled
 delivery: producers choose it); a handler records at most `maxTypesPerHandler` (50) distinct types,
 later ones are labelled `_OTHER` (a pattern or default `@OnMessage()` handler receives whatever types
-producers send). Label cardinality stays bounded.
+producers send), and so is a type longer than 128 characters, without taking a slot. Label
+cardinality stays bounded.
 
 ### Application event metrics
 
@@ -442,8 +443,9 @@ One series per operation of `@znight/graphql` (`graphql:operation` hook):
 
 `type` is `query`, `mutation`, `subscription`, or `unknown` for a request rejected before an
 operation was selected (a parse error). `name` is the operation name, `anonymous` for an anonymous
-operation; clients choose operation names, so at most `maxOperationNames` (100) distinct names are
-labelled, later ones are `_OTHER`. `outcome` is `success`, `partial` (data with field errors),
+operation and when no operation was selected (the `operationName` the client sent is never used);
+clients choose operation names, so at most `maxOperationNames` (100) distinct names are labelled,
+later ones are `_OTHER`, and so is a name longer than 128 characters, without taking a slot. `outcome` is `success`, `partial` (data with field errors),
 `error` (no data, or the execution threw) or `rejected` (parse, validation, variables or limits). A
 subscription is timed over its whole life: filter on `type` before reading latencies.
 

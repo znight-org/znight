@@ -15,6 +15,7 @@ import type { Tracer } from '../tracing/tracer.ts'
 import { context as otelContext, SpanKind, SpanStatusCode, trace } from '@opentelemetry/api'
 
 import { invalidOption } from '../internal/errors.ts'
+import { MAX_LABEL_LENGTH } from '../internal/labels.ts'
 import { guard } from '../internal/safe.ts'
 import { elapsedMs, now, startOf } from '../internal/time.ts'
 import { parseEntryLevel } from '../logging/levels.ts'
@@ -95,7 +96,8 @@ export function traceGraphQLOperations(
     const driver = event.driver
     if (driver !== undefined && driver !== 'builtin') attributes[Attr.ZNIGHT_GRAPHQL_DRIVER] = driver
     if (event.operationType !== undefined) attributes[Attr.GRAPHQL_OPERATION_TYPE] = event.operationType
-    if (event.operationName !== undefined) attributes[Attr.GRAPHQL_OPERATION_NAME] = event.operationName
+    const operationName = selectedName(event)
+    if (operationName !== undefined) attributes[Attr.GRAPHQL_OPERATION_NAME] = operationName
     if (event.documentId !== undefined) attributes[Attr.ZNIGHT_GRAPHQL_DOCUMENT_ID] = event.documentId
     if (withDocument) {
       const text = documentText(event.context)
@@ -147,8 +149,9 @@ function finishSpan(span: Span, event: GraphQLOperationEvent, failed: boolean, t
  * | `graphql_operation_duration_seconds` | histogram | `type`, `name` |
  *
  * `type` is `query`, `mutation`, `subscription` or `unknown` (rejected before an operation was
- * selected); `name` is the operation name, `anonymous` for an anonymous operation, limited to
- * `maxOperationNames` distinct values (then `_OTHER`): clients choose operation names. A
+ * selected); `name` is the operation name, `anonymous` for an anonymous operation or when no
+ * operation was selected, limited to `maxOperationNames` distinct values (then `_OTHER`): clients
+ * choose operation names. A name longer than 128 characters is `_OTHER` and takes no slot. A
  * subscription is timed over its whole life.
  */
 export function measureGraphQLOperations(
@@ -174,7 +177,7 @@ export function measureGraphQLOperations(
       return await next()
     } finally {
       record(() => {
-        const labels = { type: event.operationType ?? UNKNOWN_OPERATION_TYPE, name: name(event.operationName) }
+        const labels = { type: event.operationType ?? UNKNOWN_OPERATION_TYPE, name: name(event) }
         total.inc({ ...labels, outcome: settledOutcome(event) })
         duration.observe(labels, (now() - startOf(event.startTime, started)) / 1000)
       })
@@ -259,7 +262,19 @@ function severityOf(outcome: GraphQLOperationOutcome, success: LogEntryLevel): L
 /** Span name of the OpenTelemetry GraphQL conventions. */
 function spanName(event: GraphQLOperationEvent): string {
   if (event.operationType === undefined) return 'GraphQL Operation'
-  return event.operationName === undefined ? event.operationType : `${event.operationType} ${event.operationName}`
+  const name = selectedName(event)
+  return name === undefined ? event.operationType : `${event.operationType} ${name}`
+}
+
+/**
+ * The name of the selected operation, truncated to {@link MAX_LABEL_LENGTH} characters. A request
+ * rejected before an operation was selected carries the `operationName` parameter the client sent,
+ * unchecked: it is never recorded.
+ */
+function selectedName(event: GraphQLOperationEvent): string | undefined {
+  const name = event.operationName
+  if (event.operationType === undefined || name === undefined) return undefined
+  return name.length > MAX_LABEL_LENGTH ? name.slice(0, MAX_LABEL_LENGTH) : name
 }
 
 /** Distinct error codes of the response, in order of appearance. */
@@ -282,16 +297,25 @@ function documentText(context: unknown): string | undefined {
   return typeof body === 'string' ? body : undefined
 }
 
-/** The `name` label: the operation name, limited to `max` distinct values (`_OTHER` beyond). */
-function boundedNameLabel(max: number = DEFAULT_MAX_OPERATION_NAMES): (name: string | undefined) => string {
+/** A GraphQL `Name` token. */
+const GRAPHQL_NAME = /^[_A-Za-z][_0-9A-Za-z]*$/
+
+/**
+ * The `name` label: the name of the selected operation, limited to `max` distinct values (`_OTHER`
+ * beyond). `anonymous` for an anonymous operation and for a request rejected before an operation was
+ * selected (its `operationName` is whatever the client sent). A name that is not a GraphQL name or
+ * is longer than {@link MAX_LABEL_LENGTH} is `_OTHER` and does not take a slot.
+ */
+function boundedNameLabel(max: number = DEFAULT_MAX_OPERATION_NAMES): (event: GraphQLOperationEvent) => string {
   if (!Number.isInteger(max) || max < 1) {
     throw invalidOption('metrics.graphql.maxOperationNames', `expected a positive integer, got ${String(max)}`)
   }
   const seen = new Set<string>()
-  return name => {
-    if (name === undefined) return ANONYMOUS_OPERATION
+  return event => {
+    const name = event.operationName
+    if (event.operationType === undefined || name === undefined) return ANONYMOUS_OPERATION
     if (seen.has(name)) return name
-    if (seen.size >= max) return OTHER_OPERATION_NAME
+    if (seen.size >= max || name.length > MAX_LABEL_LENGTH || !GRAPHQL_NAME.test(name)) return OTHER_OPERATION_NAME
     seen.add(name)
     return name
   }

@@ -2618,12 +2618,14 @@ entry per run, written inside its span), and listens to `schedule:run` for the o
 not execute (counters, `job skipped` / `job not acquired` entries), and wraps `graphql:operation`
 (RFC 0005 §8.10): one `INTERNAL` span per operation, child of the active (HTTP) span, named
 `<type> <name>` (`<type>` when anonymous, `GraphQL Operation` when no operation was selected) with
-the OpenTelemetry attributes `graphql.operation.type` and `graphql.operation.name`
+the OpenTelemetry attributes `graphql.operation.type` and `graphql.operation.name` (never the
+`operationName` a client sent when no operation was selected; truncated to 128 characters)
 (`graphql.document` only with `tracing.graphql.document: true`), status `ERROR` for the `error` and
 `rejected` outcomes; the metrics `graphql_operations_total{type, name, outcome}` and
 `graphql_operation_duration_seconds{type, name}`, `type` being `unknown` when no operation was
-selected and `name` being `anonymous` for an anonymous operation, capped at `maxOperationNames`
-(default 100) distinct names then `_OTHER`; one log entry per operation only with
+selected and `name` being `anonymous` for an anonymous operation or when no operation was
+selected, capped at `maxOperationNames` (default 100) distinct names then `_OTHER` (a name longer
+than 128 characters is `_OTHER` without taking a slot); one log entry per operation only with
 `logging.graphql` (off by default). It also wraps `websocket:message` and listens to
 `websocket:connection` (RFC 0003 §8.10, `tracing` / `metrics` / `logging.websocket`): one `SERVER`
 span `WS <path> <event>` per inbound message, the root of a new trace linked to the handshake's
@@ -2695,7 +2697,8 @@ the final `Application stopped` / `The application stopped with errors` entries 
   `metrics: false` runs `@Metric` methods unmeasured. HTTP labels use the route pattern (`unmatched`
   when none), never the raw path. The messaging `type` label is `unmatched` when no handler matched
   (never a raw type chosen by producers), otherwise the type, capped at `maxTypesPerHandler` (50)
-  distinct values per (queue, consumer, handler), then `_OTHER`. The default process metrics are
+  distinct values per (queue, consumer, handler), then `_OTHER` (a type longer than 128 characters
+  is `_OTHER` without taking a slot). The default process metrics are
   collected once per process and configuration (prom-client never releases their collectors) and
   shared by every `MetricsRegistry`, each with its own default labels, so registries of disposed
   applications are garbage collected. `MetricsRegistry` returns the existing metric for the same

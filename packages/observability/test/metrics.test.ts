@@ -251,6 +251,22 @@ describe('measureMessages type label', () => {
     expect(text.split('\n').filter(line => line.startsWith('messaging_messages_processed_total{'))).toHaveLength(5)
   })
 
+  it('labels oversized types _OTHER without using a slot of the cap', async () => {
+    const metrics = registry()
+    const hooks = new Hooks({ logger: silentLogger })
+    hooks.wrap('messaging:message', measureMessages(metrics, { maxTypesPerHandler: 1 }))
+    for (let index = 0; index < 5; index++) {
+      const type = `${index}-${'x'.repeat(10_000)}`
+      await hooks.run('messaging:message', messageEvent({ type, handler: 'onAny' }), async () => undefined)
+    }
+    await hooks.run('messaging:message', messageEvent({ type: 'a', handler: 'onAny' }), async () => undefined)
+    const text = await metrics.metrics()
+    expect(text).not.toContain('xxxx')
+    const total = (labels: string) => sample(metrics, `messaging_messages_processed_total{${base},${labels}}`)
+    expect(await total(`type="${OTHER_MESSAGE_TYPE}",outcome="ack"`)).toBe(5)
+    expect(await total('type="a",outcome="ack"')).toBe(1)
+  })
+
   it('validates maxTypesPerHandler', async () => {
     for (const maxTypesPerHandler of [0, 1.5, Number.NaN]) {
       const error = await caught(() => measureMessages(registry(), { maxTypesPerHandler }))

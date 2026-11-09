@@ -141,7 +141,9 @@ With [`@znight/graphql`](/packages/graphql), the plugin also wraps the `graphql:
   `tracing: { graphql: { document: true } }`.
 - **Metrics** `graphql_operations_total{type, name, outcome}` and
   `graphql_operation_duration_seconds{type, name}`. Clients choose operation names, so the `name`
-  label is capped (`maxOperationNames`, 100, then `_OTHER`); anonymous operations are `anonymous`.
+  label is capped (`maxOperationNames`, 100, then `_OTHER`; names longer than 128 characters are
+  `_OTHER` too); anonymous operations, and requests rejected before an operation was selected, are
+  `anonymous`.
 - **Logs**, off by default (the HTTP request is logged already): `logging: { graphql: true }` writes
   one entry per operation, `warn` for `partial` and `rejected`, `error` for `error`.
 

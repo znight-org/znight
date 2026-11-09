@@ -184,6 +184,20 @@ describe('tracing.graphql', () => {
     await app.stop()
   })
 
+  it('never records the operationName of a request rejected before selection, and caps its length', async () => {
+    const { app } = await create(tracingOnly)
+    await execute(app, operation({ operationType: undefined, operationName: 'Unknown' }), () => ({
+      outcome: 'rejected',
+    }))
+    await execute(app, operation({ operationName: 'Q'.repeat(10_000) }))
+    const [rejected, long] = exporter.getFinishedSpans()
+    expect(rejected?.name).toBe('GraphQL Operation')
+    expect(rejected?.attributes).not.toHaveProperty('graphql.operation.name')
+    expect(long?.attributes['graphql.operation.name']).toBe('Q'.repeat(128))
+    expect(long?.name).toBe(`query ${'Q'.repeat(128)}`)
+    await app.stop()
+  })
+
   it('sets the status from the outcome: partial keeps it unset, error and thrown errors set ERROR', async () => {
     const { app } = await create(tracingOnly)
     const fieldError = { message: 'Forbidden', code: 'FORBIDDEN', path: ['books', 0, 'secret'] }
@@ -312,6 +326,27 @@ describe('metrics.graphql', () => {
     expect(body).toContain('graphql_operations_total{type="query",name="anonymous",outcome="success"} 1')
     expect(body).not.toContain('name="C"')
     expect(body).toContain('graphql_operation_duration_seconds_bucket{le="0.1",type="query",name="_OTHER"} 2')
+    await app.stop()
+  })
+
+  it('never labels the operationName of a request rejected before selection, nor an oversized name', async () => {
+    const { app, plugin } = await create(metricsOnly({ maxOperationNames: 2 }))
+    // clients send any operationName parameter: a rejected request carries it unselected
+    for (let index = 0; index < 150; index++) {
+      const junk = `${index}-${'x'.repeat(10_000)}`
+      await execute(app, operation({ operationType: undefined, operationName: junk }), () => ({ outcome: 'rejected' }))
+    }
+    // a valid document may still declare a huge (or, from another driver, invalid) name
+    await execute(app, operation({ operationName: 'Q'.repeat(10_000) }))
+    await execute(app, operation({ operationName: 'not a name' }))
+    await execute(app, operation({ operationName: 'GetUser' }))
+    const body = (await plugin.metrics?.metrics()) ?? ''
+    const longest = Math.max(...[...body.matchAll(/="([^"]*)"/g)].map(match => match[1]?.length ?? 0))
+    expect(longest).toBeLessThanOrEqual(128)
+    expect(body).toContain('graphql_operations_total{type="unknown",name="anonymous",outcome="rejected"} 150')
+    expect(body).toContain('graphql_operations_total{type="query",name="_OTHER",outcome="success"} 2')
+    // none of them used a slot of the cap
+    expect(body).toContain('graphql_operations_total{type="query",name="GetUser",outcome="success"} 1')
     await app.stop()
   })
 
