@@ -11,7 +11,7 @@ import type { GatewayDefinition, WsHandlerDefinition } from './metadata.ts'
 
 import { HttpException } from '@znight/http'
 
-import { isFailure, jsonCodec } from './envelope.ts'
+import { isFailure, isInboundEvent, jsonCodec } from './envelope.ts'
 import { codeOfStatus, WsCloseCode, WsErrorCode, WsException, WsValidationException } from './exceptions.ts'
 
 /** A handler with its resolved guards and effective metadata. */
@@ -348,7 +348,12 @@ export class GatewayDispatcher implements ConnectionDriver {
    */
   #decode(conn: WsConnectionImpl, frame: string | Uint8Array, binary: boolean): InboundMessage | InboundFailure {
     try {
-      return this.#codec.decode(frame, binary)
+      const decoded = this.#codec.decode(frame, binary)
+      // whatever the codec: names reach hooks, spans, logs and replies
+      if (!isFailure(decoded) && !isInboundEvent(decoded.event)) {
+        return { error: WsErrorCode.BadFrame, message: 'Invalid event name', id: decoded.id }
+      }
+      return decoded
     } catch (error) {
       this.#options.logError('The codec failed to decode a frame', error, conn)
       return { error: WsErrorCode.BadFrame, message: 'The frame could not be decoded', id: undefined }

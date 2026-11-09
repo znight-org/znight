@@ -3577,7 +3577,10 @@ are ZNIGHT050):
   answered before the hook), handler selection (`UNKNOWN_EVENT`, outcome `unhandled`), message
   guards (plugin, class, method; `FORBIDDEN`, outcome `rejected`), `invoke` bounded by
   `handlerTimeoutMs` (`TIMEOUT`), reply `{ id, data }` or `{ id, error }` / `$error`; the plugin
-  `exceptionMappers` run first. Close codes and limits are those of RFC 0003 §5.8 and §8.6. A codec
+  `exceptionMappers` run first. Close codes and limits are those of RFC 0003 §5.8 and §8.6. An
+  inbound event name that does not match the event name grammar (other than `$ping`) is a
+  `BAD_FRAME` ("Invalid event name"), whatever the codec: it never reaches a handler, and the hook
+  event carries no `event`. A codec
   whose `decode` throws (instead of returning a failure) yields a logged `BAD_FRAME`, on the
   rate-limit path too (it runs in the transport's message callback, where nothing may throw); an
   `encode` failure of a runtime frame (reply, `$error`) is logged and the frame is not sent.

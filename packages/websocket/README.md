@@ -127,6 +127,9 @@ applies to handlers.
 | server → client | `{ "event": "$error", "data": { "event": ..., "code": ..., "message": ... } }` | failure of a message without `id`         |
 | client ↔ server | `{ "event": "$ping", "id": 1 }` → `{ "id": 1, "data": { "t": ... } }`          | application ping (never reaches handlers) |
 
+An inbound event name matches `^[A-Za-z][\w.:/-]{0,127}$` (or is `$ping`), whatever the codec:
+any other name is a `BAD_FRAME` and never reaches hooks, guards or a default handler.
+
 Error codes: `BAD_FRAME`, `UNSUPPORTED_FRAME`, `BAD_REQUEST` (validation, `details: [{ path,
 message }]`), `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `UNPROCESSABLE`, `RATE_LIMITED`,
 `UNKNOWN_EVENT`, `TIMEOUT`, `INTERNAL` (message hidden unless `exposeErrors`). A `WsException(code,

@@ -3,6 +3,7 @@ import type { ConnectionLimits } from '../src/connection.ts'
 import type { DispatcherOptions, HandlerPlan } from '../src/dispatcher.ts'
 import type { GatewayDefinition, WsHandlerDefinition } from '../src/metadata.ts'
 
+import { Hooks } from '@znight/core'
 import { ForbiddenException } from '@znight/http'
 
 import { WsConnectionImpl } from '../src/connection.ts'
@@ -225,5 +226,25 @@ describe('GatewayDispatcher', () => {
     )
     expect(errors).toEqual(['The codec failed to decode a frame', 'The codec failed to decode a frame'])
     expect(conn.readyState).toBe('open')
+  })
+
+  it('refuses invalid event names of any codec before the hooks and the default handler', async () => {
+    const hooks = new Hooks()
+    const seen: (string | undefined)[] = []
+    hooks.on('websocket:message', event => {
+      seen.push(event.event)
+    })
+    const codec = {
+      decode: (frame: string | Uint8Array) => ({ event: String(frame), data: undefined, id: 1 }),
+      encode: jsonCodec.encode,
+    }
+    const { client, received } = await connect([handler('any', undefined, (_g, m) => m.event)], { codec, hooks })
+    client.send(`bad\r\n${'x'.repeat(200)}`)
+    client.send('good')
+    expect(await received()).toEqual([
+      { id: 1, error: { code: 'BAD_FRAME', message: 'Invalid event name' } },
+      { id: 1, data: 'good' },
+    ])
+    expect(seen).toEqual([undefined, 'good'])
   })
 })
