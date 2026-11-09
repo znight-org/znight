@@ -65,7 +65,10 @@ export interface DatadogTransportOptions {
 
 /** The transport returned by {@link datadogTransport}. */
 export interface DatadogTransport extends LogTransport {
-  /** Sends every buffered entry and waits for in-flight requests (retries included). */
+  /**
+   * Sends every buffered entry and waits for in-flight requests (retries included). A batch that
+   * still fails after its retries drops the rest of the buffer (reported to `onError`).
+   */
   flush(): Promise<void>
   /** Flushes and stops the timer. Entries written afterwards are still buffered and sent. */
   close(): Promise<void>
@@ -136,6 +139,8 @@ class DatadogSender {
   #timer: ReturnType<typeof setTimeout> | undefined
   #sending: Promise<void> | undefined
   #dropped = 0
+  /** Number of `flush()` calls waiting for the buffer to empty. */
+  #flushing = 0
 
   constructor(settings: Settings) {
     this.#settings = settings
@@ -169,7 +174,12 @@ class DatadogSender {
 
   async flush(): Promise<void> {
     this.#disarm()
-    while (this.#sending !== undefined || this.#buffer.length > 0) await this.#startDrain()
+    this.#flushing++
+    try {
+      while (this.#sending !== undefined || this.#buffer.length > 0) await this.#startDrain()
+    } finally {
+      this.#flushing--
+    }
   }
 
   close(): Promise<void> {
@@ -220,14 +230,26 @@ class DatadogSender {
     return this.#sending
   }
 
-  /** Sends batches until the buffer is empty. Never rejects: failures go to `onError`. */
+  /**
+   * Sends batches until the buffer is empty. Never rejects: failures go to `onError`. While a
+   * `flush()` / `close()` waits (the plugin flushes at shutdown), a batch that fails after its
+   * retries drops the rest of the buffer too: retrying every buffered batch against an unreachable
+   * intake would hold the process for minutes.
+   */
   async #drain(): Promise<void> {
     while (this.#buffer.length > 0) {
       const batch = this.#takeBatch()
       try {
         await this.#send(batch)
       } catch (error) {
-        this.#drop(error instanceof Error ? error : new Error(errorMessage(error)), batch.length)
+        const failure = error instanceof Error ? error : new Error(errorMessage(error))
+        this.#drop(failure, batch.length)
+        if (this.#flushing > 0 && this.#buffer.length > 0) {
+          const rest = this.#buffer.length
+          this.#buffer = []
+          this.#bufferBytes = 0
+          this.#drop(failure, rest)
+        }
       }
     }
   }
