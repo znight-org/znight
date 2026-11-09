@@ -1,5 +1,15 @@
 # @znight/config
 
+## 0.6.3
+
+### Patch Changes
+
+- a5d31c5: `vault()` rejects a token or namespace that is not a valid header value without leaking it, `vault()` and `awsSecretsManager()` validate their numeric options (ZNIGHT012), cap the retry backoff and cancel the other reads once one fails, and `ConfigSource.keys()` no longer expands cyclic values.
+- Updated dependencies [0eeac37]
+- Updated dependencies [dede0c2]
+  - @znight/compiler@0.6.3
+  - @znight/core@0.6.3
+
 ## 0.6.2
 
 ### Patch Changes

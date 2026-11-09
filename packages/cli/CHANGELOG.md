@@ -1,5 +1,18 @@
 # @znight/cli
 
+## 0.6.3
+
+### Patch Changes
+
+- 345cd53: Cancel znight dev restarts already in flight, never restart while it shuts down, stop generate --watch cleanly on Ctrl+C, and let the application stop gracefully on Ctrl+C on Windows.
+- a962d75: `znight new`: Fastify is the default adapter, new `graphql` and `websocket` features, `--openapi-ui scalar|swagger`, a named logger with the `observability` feature, and a multi-stage `Dockerfile` (`--no-docker` to skip it).
+- Updated dependencies [345cd53]
+- Updated dependencies [0eeac37]
+- Updated dependencies [dede0c2]
+  - @znight/openapi@0.6.3
+  - @znight/compiler@0.6.3
+  - @znight/core@0.6.3
+
 ## 0.6.2
 
 ### Patch Changes

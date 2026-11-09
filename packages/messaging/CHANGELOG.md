@@ -1,5 +1,15 @@
 # @znight/messaging
 
+## 0.6.3
+
+### Patch Changes
+
+- 7c44484: Harden the drivers: Kafka bounds and scopes `x-znight-not-before`, RabbitMQ copies drop `user-id`, publications time out (`publishTimeoutMs`) and a late reconnection is closed, SQS dead-letter copies are always sendable and close waits for queued FIFO messages, and wildcard `@OnMessage` patterns match in linear time.
+- Updated dependencies [0eeac37]
+- Updated dependencies [dede0c2]
+  - @znight/compiler@0.6.3
+  - @znight/core@0.6.3
+
 ## 0.6.2
 
 ### Patch Changes

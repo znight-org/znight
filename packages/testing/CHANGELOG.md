@@ -1,5 +1,12 @@
 # @znight/testing
 
+## 0.6.3
+
+### Patch Changes
+
+- Updated dependencies [dede0c2]
+  - @znight/core@0.6.3
+
 ## 0.6.2
 
 ### Patch Changes

@@ -1,5 +1,15 @@
 # @znight/http
 
+## 0.6.3
+
+### Patch Changes
+
+- dc4be25: Fix audit findings: refuse adapters trusting every proxy hop, linear-time `Range` parsing, bounded stop of cancelled stream sources, route decorator aliases and wrappers, capped validation details, single-type upload media types, Hono late replies, handshake timeout abort, `injectStream()` listener cleanup and body headers on error replies.
+- Updated dependencies [0eeac37]
+- Updated dependencies [dede0c2]
+  - @znight/compiler@0.6.3
+  - @znight/core@0.6.3
+
 ## 0.6.2
 
 ### Patch Changes
