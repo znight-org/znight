@@ -111,6 +111,37 @@ describe('upgrade routes in memory', () => {
     }
   })
 
+  it('aborts ctx.signal (expired) when the handshake times out (408)', async () => {
+    let aborted: unknown
+    class WaitingGuard implements CanActivate {
+      canActivate(ctx: HttpContext): Promise<boolean> {
+        return new Promise(resolve =>
+          ctx.signal.addEventListener('abort', () => {
+            aborted = ctx.signal.reason
+            resolve(false)
+          }),
+        )
+      }
+    }
+    const accepted: Accepted[] = []
+    const { http, stop } = await createApp(
+      metadata({}, []),
+      {},
+      { plugins: [upgradePlugin(accepted, { timeoutMs: 30, guards: [new WaitingGuard()] })], start: false },
+    )
+    try {
+      const reply = await http.upgradeInMemory({ method: 'GET', url: '/ws/a' }, { kind: 'memory', peer: {} })
+      expect(reply?.status).toBe(408)
+      await Promise.resolve()
+      expect(aborted).toMatchObject({ name: 'AbortError', kind: 'expired' })
+      // the guard settled: the handshake left the pipeline
+      expect(http.inflight).toBe(0)
+      expect(accepted).toEqual([])
+    } finally {
+      await stop()
+    }
+  })
+
   it('refuses an unsupported version (426) and an invalid key (400)', async () => {
     const accepted: Accepted[] = []
     const { http, stop } = await createApp(metadata({}, []), {}, { plugins: [upgradePlugin(accepted)], start: false })

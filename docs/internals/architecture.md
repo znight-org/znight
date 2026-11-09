@@ -2111,8 +2111,9 @@ not call `next()` gets the same reply as in the general pipeline.
   with the supported version, a valid `sec-websocket-key` else `400`), then `precheck`, the guards
   and `accept(ctx, upgrade)`; `accept` MUST call `upgrade.hold(closed)` once the transport completed
   the handshake, which keeps the request scope and the in-flight count open until `closed` settles.
-  When `timeoutMs` elapses first, the handshake is answered `408` and `upgrade.expired` becomes
-  `true`: `accept` MUST NOT complete it (it checks the flag after every `await`, right before the
+  When `timeoutMs` elapses first, the handshake is answered `408`, `ctx.signal` aborts with the kind
+  `expired` (the guards still running can stop their work) and `upgrade.expired` becomes `true`:
+  `accept` MUST NOT complete it (it checks the flag after every `await`, right before the
   transport, and refuses with a `4xx`).
   A refusal (an exception) is written as an HTTP response on the raw socket. A plain `GET` of an
   upgrade path answers `426`. `HttpPlugin.upgradeInMemory(request, { kind: 'memory', peer })` runs

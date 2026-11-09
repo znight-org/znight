@@ -828,7 +828,9 @@ export class Pipeline {
           ? { kind: 'route', plan }
           : { kind: 'error', error: new BadRequestException(`Malformed URL parameter "${malformed}"`) }
       let pending: PendingUpgradeState | undefined
+      let context: RequestContext | undefined
       const replied = this.#serve(request, url, plan.info, params, target, startTime, plan.body, ctx => {
+        context = ctx
         pending = new PendingUpgradeState(native, () => this.#upgradeHeaders(ctx))
         UPGRADES.set(ctx, pending)
       })
@@ -839,6 +841,8 @@ export class Pipeline {
       const expired = new Promise<AdapterReply>(resolve => {
         timer = setTimeout(() => {
           if (pending !== undefined) pending.expired = true
+          // the guards still running stop their work (a call to an auth service honouring ctx.signal)
+          context?.abort('expired')
           const body = { statusCode: 408, error: 'Request Timeout', message: 'WebSocket handshake timed out' }
           resolve(adapterReply(serializeError(408, body, 'GET'), null))
         }, timeoutMs)

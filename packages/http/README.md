@@ -1682,7 +1682,8 @@ A plugin accepting WebSocket connections (`@znight/websocket`, RFC 0003) impleme
 optional `meta`, `guards`, `timeoutMs` and `precheck`, and an `accept(ctx, upgrade)` that completes
 the handshake on `upgrade.native` (a `node:http` socket, a `Bun.serve()` request or an in-memory
 peer) and calls `upgrade.hold(closed)`. Once `timeoutMs` answered `408`, `upgrade.expired` is
-`true` and `accept` must not complete the handshake. The handshake runs the request pipeline (hook, request scope,
+`true`, `ctx.signal` aborts (`kind: 'expired'`, so guards waiting on it stop) and `accept` must not
+complete the handshake. The handshake runs the request pipeline (hook, request scope,
 global and route guards); a refusal is an HTTP response, and a plain `GET` of an upgrade path answers
 `426`. Every built-in adapter supports upgrades; `HttpPlugin.upgradeInMemory()` runs a handshake
 without socket. Applications without upgrade routes pay nothing.

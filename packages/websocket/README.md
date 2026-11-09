@@ -172,7 +172,7 @@ each recipient applies its own backpressure policy. Rooms are per gateway and pe
 | `maxPendingMessages` | `32`                                                               | Inbound queue per connection before reading pauses                                                                |
 | `backpressure`       | `{ limit: '1mb', onLimit: 'close' }`                               | Outbound buffer per connection: close with `1013`, or `'drop'` frames                                             |
 | `heartbeat`          | `{ intervalMs: 30_000 }`                                           | `false` disables it; silent connections are terminated after two intervals (not while reading is paused)          |
-| `handshakeTimeoutMs` | `10_000`                                                           | `408` for handshakes whose guards did not answer                                                                  |
+| `handshakeTimeoutMs` | `10_000`                                                           | `408` for handshakes whose guards did not answer (`ctx.signal` aborts, `kind: 'expired'`)                         |
 | `handlerTimeoutMs`   | `30_000`                                                           | Per message and `@OnConnect`: `TIMEOUT`, `ctx.signal` aborted                                                     |
 | `closeTimeoutMs`     | `2_000`                                                            | Wait for the client's close frame before terminating                                                              |
 | `codec`              | `jsonCodec`                                                        | Codec of `events` gateways (`WsCodec`: `{ decode(frame, binary), encode(message) }`); JSON text frames by default |
