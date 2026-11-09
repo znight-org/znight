@@ -656,6 +656,12 @@ GraphQLPlugin.configure({
   A field resolver without one is covered by the root field it descends from: authorization
   happens at entry points, and plain properties never run guards.
 - `@UseGuard(Guard)` on a class or method adds guards after the global ones.
+- At boot, every decision of a group that a guard class of the application enforces (`static
+  enforces`, in a GraphQL chain or not) must be enforced by a guard of the field's chain
+  ([`ZNIGHT023`](/reference/error-codes#znight023)). Upgrading from 0.6, an application, or a
+  `TestApp` of resolver tests, whose GraphQL chain has no such guard now fails to boot: register
+  the guard in `GraphQLPlugin.configure({ guards })`, or pass `enforcement: 'warn'` where the
+  missing guard is intended (tests that check resolvers without authorization).
 - A guard returning `false` gives `FORBIDDEN` on that field only; other fields of the response
   still resolve. Guards run once per call (once per item of a list), so keep them cheap.
 - Subscription guards run once, when the subscription starts.
