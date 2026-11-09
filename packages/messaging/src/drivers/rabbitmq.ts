@@ -931,7 +931,7 @@ function definedProperties(properties: MessageProperties): Options.Publish {
   if (properties.type !== undefined) result.type = properties.type
   if (properties.appId !== undefined) result.appId = properties.appId
   if (properties.priority !== undefined) result.priority = properties.priority
-  if (properties.userId !== undefined) result.userId = properties.userId
+  // never `userId`: the broker closes the channel (406) when it is not the user of this connection
   return result
 }
 

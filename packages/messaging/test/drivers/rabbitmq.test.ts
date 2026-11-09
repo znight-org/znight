@@ -254,6 +254,23 @@ describe('republished copies', () => {
     expect(fakeBroker.publications.at(-1)?.options.headers).toEqual({ 'x-tenant': 'acme', 'x-znight-attempt': '3' })
     await driver.close()
   })
+  it('never copies the user-id property, which the broker validates against the publishing user', async () => {
+    const { driver, deliveries } = await received()
+    fakeBroker.deliver('q', { properties: { messageId: 'm1', userId: 'partner', appId: 'billing' } })
+    await waitFor(() => deliveries.length === 1)
+    await deliveries[0]?.retry({ attempt: 2, delayMs: 0, error: new Error('boom') })
+    const retried = fakeBroker.publications.at(-1)?.options
+    expect(retried?.appId).toBe('billing')
+    expect(retried !== undefined && 'userId' in retried).toBe(false)
+
+    fakeBroker.deliver('q', { properties: { messageId: 'm2', userId: 'partner' } })
+    await waitFor(() => deliveries.length === 2)
+    await deliveries[1]?.deadLetter({ queue: 'q.dlq', reason: 'rejected', error: new Error('boom'), attempt: 1 })
+    const dead = fakeBroker.publications.at(-1)
+    expect(dead?.routingKey).toBe('q.dlq')
+    expect(dead !== undefined && 'userId' in dead.options).toBe(false)
+    await driver.close()
+  })
 })
 
 describe('quorum queues delivery limit', () => {

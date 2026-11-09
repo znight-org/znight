@@ -376,7 +376,8 @@ at-least-once dead-lettering. Retry delays come from the `@Retry` policies, so t
 a bounded set declared at subscribe time. The type is read from the `type` property (then
 `x-znight-type`, then the routing key with `typeFromRoutingKey`), the id from `message-id`; retried
 and dead-lettered copies carry the type that selected the handler (a type read from the routing key
-included) but never the `CC` / `BCC` headers nor the broker's `x-death` headers.
+included) but never the `CC` / `BCC` headers, the broker's `x-death` headers nor the `user-id`
+property (the broker rejects a `user-id` other than the user of the publishing connection).
 
 Delayed publications (`publish(queue, payload, { delay })`, any delay up to 2^32 - 1 ms) do not create
 one queue per delay: they go through 32 **delay levels** shared by every queue of the virtual host,

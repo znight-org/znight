@@ -2509,8 +2509,9 @@ More on the drivers:
 - **RabbitMQ publications.** A returned (unroutable) message fails only its own `publish()`: it is
   matched with the oldest pending publication with the same exchange, routing key and message id.
   Retried and dead-lettered copies carry the type that selected the handler (a type read from the
-  routing key, `typeFromRoutingKey`, included) and never the `CC` / `BCC` headers nor the broker's
-  `x-death` headers.
+  routing key, `typeFromRoutingKey`, included) and never the `CC` / `BCC` headers, the broker's
+  `x-death` headers nor the `user-id` property (validated by the broker against the publishing user,
+  a mismatch closes the publisher channel).
 - **Kafka.** Each partition remembers the next offset it expects: after a rebalance, records a kept
   partition fetches again from the committed offset are skipped (commits never move back), and the
   buffered (or late) records of a revoked partition are dropped, its new owner handles them. The
