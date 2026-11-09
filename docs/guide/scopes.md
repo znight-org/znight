@@ -76,7 +76,8 @@ dependents then need to be request-scoped or use `Lazy` too).
 Request scopes are opened by plugins: `@znight/http` opens one per HTTP request (for a WebSocket
 upgrade, it lasts as long as the connection), `@znight/messaging` one per message delivery,
 `@znight/schedule` one per run, `@znight/graphql` one per operation run outside an HTTP request
-(otherwise the operation uses the request's), and `@znight/events` one per detached listener.
+(otherwise the operation uses the request's), and `@znight/events` one per detached listener, and
+one for the inline listeners of a publication made outside any scope (always for `emit()`).
 Inside, request-scoped providers are created on first use and shared by everything resolved in the
 same scope; concurrent requests never share instances (scopes are isolated with
 `AsyncLocalStorage`).

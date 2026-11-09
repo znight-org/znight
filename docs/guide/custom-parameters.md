@@ -176,6 +176,6 @@ custom parameters.
   decorator reads with `@ApiHeader` or `@ApiSecurity`.
 - Composing decorators (`applyDecorators`) is not supported: apply each decorator directly.
 - Only HTTP routes, GraphQL fields and message handlers accept custom parameters. WebSocket gateway
-  handlers, `@OnEvent` listeners and scheduled jobs reject them at build time (`ZNIGHT005`,
-  `ZNIGHT070` for a listener): read what they need from their own context (`@Ctx()`, the event,
+  handlers, `@OnEvent` listeners and scheduled jobs reject them at build time with `ZNIGHT005` (plus
+  `ZNIGHT050` on a gateway handler and `ZNIGHT070` on a listener): read what they need from their own context (`@Ctx()`, the event,
   `JobContext`).
