@@ -3,6 +3,8 @@
  * the coverage of the SDL by the resolvers (ZNIGHT068), each with its location (in the `.graphql`
  * file or the TypeScript source), its hint and its related location; the reused codes.
  */
+
+import { definesNothing } from '../../src/compiler/sdl-source.ts'
 import { analyzeFiles, analyzeSchemaFirst, cleanupApps, formatted, render, SCHEMA_FIRST_CODES } from './helpers.ts'
 import { afterAll, describe, expect, test as it } from 'bun:test'
 
@@ -446,6 +448,29 @@ schema {
       `error ZNIGHT067 - The GraphQL schema files matching 'src/**/*.graphql' define nothing (schema-first)
   = Declare the types of the schema, starting with type Query { ... }`,
     ])
+  })
+
+  it('compiles schema files that start with comment banners', async () => {
+    const banner = '#'.repeat(80)
+    expect(
+      await diagnostics({
+        'src/schema.graphql': `${banner}\n# Books\n${banner}\n${SDL}`,
+        'src/notes.graphql': `${banner}\n# a\n## b\n,\n${banner}\n`,
+        'src/book.resolver.ts': resolver(BOOK_QUERY),
+      }),
+    ).toEqual([])
+  })
+
+  it('tells a placeholder file in linear time, whatever its comment banners', () => {
+    const banner = '#'.repeat(40)
+    expect(definesNothing(`\uFEFF${banner}\n# a\n## b\n,\n${banner}\n`)).toBe(true)
+    expect(definesNothing('')).toBe(true)
+    expect(definesNothing('# todo\ntype Query { a: Int }\n')).toBe(false)
+    const started = performance.now()
+    for (let i = 0; i < 5; i++) {
+      expect(definesNothing(`${banner}\n# Books\n${banner}\ntype Query { a: Int }\n`)).toBe(false)
+    }
+    expect(performance.now() - started).toBeLessThan(100)
   })
 
   it('a missing query root type, with a hint', async () => {
