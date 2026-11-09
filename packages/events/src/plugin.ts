@@ -1,4 +1,4 @@
-import type { Plugin, PluginContext, PluginOptions, PluginRootsContext, ProviderKey } from '@znight/core'
+import type { Plugin, PluginContext, PluginOptions, PluginRootsContext, ProviderKey, TypedToken } from '@znight/core'
 import type { PublicationObserver } from './dispatcher.ts'
 import type { EventsPluginOptions } from './options.ts'
 
@@ -39,6 +39,13 @@ export interface EventsPluginInstance extends Plugin {
 export const EVENTS_PLUGIN_NAME = 'events'
 
 /**
+ * Internal provider registered by the plugin. It is the last provider of the resolution order, so
+ * the first one disposed: its disposal drains the detached listeners of an application whose
+ * `onStop` did not run (never started, or rolled back), before their providers are disposed.
+ */
+const SHUTDOWN_DRAIN: TypedToken<AsyncDisposable> = '@znight/events#EventsShutdownDrain'
+
+/**
  * In-process application events (RFC 0011).
  *
  * ```ts
@@ -52,7 +59,9 @@ export const EVENTS_PLUGIN_NAME = 'events'
  * - `onBootstrap`: builds the listener registry from `metadata.extensions.events` (ZNIGHT070,
  *   ZNIGHT001); from then on `publish()` works;
  * - `onStop`: publications from now on await their detached listeners; waits for the detached
- *   listeners and `emit()` work in flight, up to `drainTimeoutMs`, then logs those still running;
+ *   listeners and `emit()` work in flight, up to `drainTimeoutMs`, then logs those still running.
+ *   When the application never started (no `onStop`), the same drain runs before the first
+ *   provider is disposed;
  * - `onDispose`: waits for the work started after `onStop` (with a warning), then refuses
  *   publications (ZNIGHT021).
  *
@@ -125,6 +134,11 @@ class EventsPluginImpl implements EventsPluginInstance {
     this.#active = true
     this.publisher.reset()
     ctx.container.registerValue(EventsTokens.EventPublisher, this.publisher)
+    ctx.container.register(SHUTDOWN_DRAIN, {
+      scope: 'singleton',
+      deps: [],
+      factory: () => ({ [Symbol.asyncDispose]: () => this.#drainUnstarted(ctx) }),
+    })
   }
 
   onBootstrap(ctx: PluginContext): void {
@@ -137,12 +151,25 @@ class EventsPluginImpl implements EventsPluginInstance {
       logger: ctx.logger,
       onError: options.onError,
     })
+    // created at init, except in restricted boots (`init: { only }`)
+    ctx.container.get(SHUTDOWN_DRAIN)
     if (registry.size > 0) ctx.logger.debug(`Events: ${registry.size} listener(s)`, { listeners: registry.size })
   }
 
   async onStop(ctx: PluginContext): Promise<void> {
     const dispatcher = this.publisher.dispatcher
     if (dispatcher === undefined) return
+    await this.#drain(dispatcher, ctx)
+  }
+
+  /** Disposal of the {@link SHUTDOWN_DRAIN} provider: drains when `onStop` did not run. */
+  async #drainUnstarted(ctx: PluginContext): Promise<void> {
+    const dispatcher = this.publisher.dispatcher
+    if (dispatcher === undefined || dispatcher.state !== 'running') return
+    await this.#drain(dispatcher, ctx)
+  }
+
+  async #drain(dispatcher: Dispatcher, ctx: PluginContext): Promise<void> {
     const pending = await dispatcher.stop(this.#drainTimeoutMs)
     if (pending.length > 0) {
       ctx.logger.warn(`Events: ${pending.length} listener(s) still running after ${this.#drainTimeoutMs} ms`, {

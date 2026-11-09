@@ -23,9 +23,10 @@ export const gate: { release?: () => void } = {}
   constructor(readonly where: 'inline' | 'detached' | 'none') {}
 }
 export class Slow {}
+export class Late {}
 `,
   'src/listeners.ts': `import { OnEvent } from '@znight/events'
-import { Boom, Slow } from './events.ts'
+import { Boom, Late, Slow } from './events.ts'
 import { gate, log } from './log.ts'
 
 export class DomainError extends Error {}
@@ -68,6 +69,20 @@ export class Later {
     })
   }
 }
+
+export class Tracked {
+  disposed = false
+
+  @OnEvent({ detached: true })
+  async late(_event: Late): Promise<void> {
+    await new Promise(resolve => setTimeout(resolve, 20))
+    log.push(this.disposed ? 'late-after-dispose' : 'late-ran')
+  }
+
+  [Symbol.dispose](): void {
+    this.disposed = true
+  }
+}
 `,
 }
 
@@ -77,6 +92,7 @@ let mod: {
   gate: { release?: () => void }
   Boom: new (where: string) => object
   Slow: new () => object
+  Late: new () => object
   DomainError: new (message: string) => Error
 }
 
@@ -188,5 +204,21 @@ describe('lifecycle', () => {
       .catch((error: unknown) => error)
     expect(late).toBeInstanceOf(ZnightError)
     expect((late as ZnightError).code).toBe('ZNIGHT021')
+  })
+
+  it('drains detached listeners before disposing the providers of an application never started', async () => {
+    mod.log.length = 0
+    const errors: unknown[] = []
+    const app = await Application.create({
+      metadata,
+      plugins: [EventsPlugin.configure({ onError: error => errors.push(error) })],
+      logger: silentLogger,
+    })
+    const publisher = app.container.get(EventPublisher)
+    await publisher.publish(new mod.Late())
+    publisher.emit(new mod.Late())
+    await app.stop()
+    expect(errors).toEqual([])
+    expect(mod.log).toEqual(['late-ran', 'late-ran'])
   })
 })

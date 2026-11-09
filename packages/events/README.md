@@ -134,6 +134,8 @@ EventsPlugin.configure({
 
 Keep `drainTimeoutMs` below `shutdown.hookTimeoutMs` of `Application.create()` (5 000 by default):
 the application cuts each shutdown step at that budget, and the stop then fails with ZNIGHT021.
+The same drain runs before the providers are disposed when the application is stopped without having
+started (a script, `TestApp.create({ start: false })`).
 
 ## Testing
 

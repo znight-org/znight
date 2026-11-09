@@ -3471,7 +3471,10 @@ Runtime (`EventsPlugin`):
   `emit(event)` runs the whole publication on a macrotask in a fresh scope and reports every error.
 - **Shutdown.** `onStop` waits for detached listeners and `emit()` work in flight, bounded by
   `drainTimeoutMs` (default 4 000, below the default `shutdown.hookTimeoutMs`), and logs those still running; from then on `publish()` awaits its
-  detached listeners itself, so none outlives provider disposal. List `EventsPlugin` before
+  detached listeners itself, so none outlives provider disposal. An application stopped without having
+  started (or rolled back) runs no `onStop`: the plugin registers an internal singleton
+  (`@znight/events#EventsShutdownDrain`, last in the resolution order, so disposed first) whose
+  disposal runs the same drain before any other provider is disposed. List `EventsPlugin` before
   `HttpPlugin`, `MessagingPlugin` and `SchedulePlugin` (plugins stop in reverse order).
 - **Hooks.** `events:publish` wraps the inline phase of a publication with listeners
   (`failedListener` names the failing inline listener); `events:listener` wraps each invocation. The

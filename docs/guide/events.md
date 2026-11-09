@@ -172,6 +172,8 @@ default). Like every shutdown step, the wait is also cut at `shutdown.hookTimeou
 default, shared by all the stop steps): raise `hookTimeoutMs` and `timeoutMs` above
 `drainTimeoutMs`, or lower `drainTimeoutMs` below what they leave (see
 [Deployment](/guide/deployment#graceful-shutdown-in-orchestrators)).
+An application stopped without having started (a script, `TestApp.create({ start: false })`) gets
+the same drain before its providers are disposed.
 Listing the plugin first in `plugins` makes it stop last, once no request, message or job can
 publish any more.
 
