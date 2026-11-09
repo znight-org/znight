@@ -10,6 +10,8 @@ import type { ExecutionArgs } from 'graphql'
 import type { Plugin as YogaPlugin } from 'graphql-yoga'
 import type { GraphQLContext, GraphQLPluginOptions } from '../src/index.ts'
 
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { HttpPlugin } from '@znight/http'
 import { TestApp } from '@znight/testing'
 import { execute, GraphQLError } from 'graphql'
@@ -142,6 +144,18 @@ describe('yogaDriver()', () => {
     expect(driver.yoga).toBeUndefined()
     await using second = await create({ driver })
     expect((await executeOperation(second, { query: '{ hello }' })).data).toEqual({ hello: 'Hello world' })
+  })
+})
+
+describe('response cache examples', () => {
+  // a cache hit answers without the engine: guards, loaders and the hook do not run, so a global
+  // cache (`session: () => null`) next to guards would serve one user's data to another
+  it('never pair guards with a global response cache', () => {
+    const root = join(import.meta.dir, '../../..')
+    for (const file of ['packages/graphql/src/yoga.ts', 'packages/graphql/README.md', 'rfcs/0009-graphql-drivers.md']) {
+      const text = readFileSync(join(root, file), 'utf8')
+      expect({ file, global: /session:\s*\(\)\s*=>\s*null/.test(text) }).toEqual({ file, global: false })
+    }
   })
 })
 

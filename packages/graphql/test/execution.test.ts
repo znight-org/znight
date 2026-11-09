@@ -140,6 +140,28 @@ describe('execution', () => {
     expect(seen?.document).toBe(first as never)
   })
 
+  it('bounds the cache by size: long documents are not kept, and the kept text has a budget', async () => {
+    await using booted = await boot(metadata())
+    const executor = executorOf(booted.plugin)
+    // comments do not count toward maxTokens: a valid document can carry most of the body limit
+    for (let i = 0; i < 50; i++) {
+      const padded = await executor.execute({ query: `{ __typename } #${i}${'x'.repeat(90_000)}` })
+      expect(padded.status).toBe(200)
+    }
+    expect(executor.cachedDocuments).toBe(0)
+    // documents just under the per-document limit fill the budget, not 1000 entries
+    for (let i = 0; i < 600; i++) {
+      await executor.execute({ query: `{ __typename } #${String(i).padStart(4, '0')}${'x'.repeat(16_000)}` })
+    }
+    expect(executor.cachedCharacters).toBeLessThanOrEqual(8 * 1024 * 1024)
+    expect(executor.cachedDocuments).toBeLessThan(600)
+    // a short document is still cached and shared afterwards
+    await executor.execute({ query: '{ hot: hello }' })
+    const first = seen?.document
+    await executor.execute({ query: '{ hot: hello }' })
+    expect(seen?.document).toBe(first as never)
+  })
+
   it('enforces the limits before validation, without caching the document', async () => {
     await using booted = await boot(metadata(), {
       limits: { maxDepth: 3, maxAliases: 2, maxDirectives: 1, maxTokens: 60 },

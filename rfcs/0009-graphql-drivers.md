@@ -41,7 +41,10 @@ await Application.create({
     GraphQLPlugin.configure({
       guards: [AccessGuard],
       resultMappers: [Rejections],
-      driver: yogaDriver({ plugins: [useResponseCache({ session: () => null })] }),
+      // a cache hit skips the engine (and the guards): one cache per principal
+      driver: yogaDriver({
+        plugins: [useResponseCache({ session: request => request.headers.get('authorization') })],
+      }),
     }),
   ],
 })

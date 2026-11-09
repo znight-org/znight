@@ -215,7 +215,7 @@ guards. `false` is a `FORBIDDEN` error on that field. See the [guide](/guide/gra
 | `introspection` | `NODE_ENV !== 'production'`                                            | Off: introspection rejected and suggestions hidden                              |
 | `graphiql`      | `NODE_ENV === 'development'`                                           | GraphiQL on `GET path` with `accept: text/html`                                 |
 | `limits`        | `{ maxTokens: 2000, maxDepth: 12, maxAliases: 30, maxDirectives: 50 }` | Request limits, `false` disables one                                            |
-| `documentCache` | `1000`                                                                 | Parsed and validated documents kept (LRU)                                       |
+| `documentCache` | `1000`                                                                 | Parsed and validated documents kept (LRU, texts up to 16 KiB, 8 MiB in all)     |
 | `subscriptions` | `{ maxActive: 10_000, bufferSize: 100 }`                               | `false`, or caps, buffer, `heartbeat`, `maxDuration`                            |
 | `pubsub`        | a `MemoryPubSub`                                                       | The `PubSub` of the application                                                 |
 | `enforcement`   | `'error'`                                                              | Field decisions not enforced by a guard: fail the boot or `'warn'`              |

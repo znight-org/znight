@@ -629,7 +629,9 @@ GraphQLPlugin.configure({
   give it route metadata and guards, and with a required group it needs a decision like any route.
 - **Fields** follow RFC 0001: the decorators of a group are alternatives, the method's decision
   replaces the class's, a `required` group must be decided on every **root field** (ZNIGHT023 at
-  build time, the code HTTP routes use), and every decided group must be enforced by a guard of the
+  build time, the code HTTP routes use), and every decision of a required group, or of a group that
+  a guard class of the application enforces (a provider with `canResolve()` or `canActivate()`, in a
+  GraphQL chain or not, such as an HTTP-only `RateLimitGuard`), must be enforced by a guard of the
   field's chain (`static enforces`, checked at boot: ZNIGHT023, or a warning with
   `enforcement: 'warn'`).
 - `ResolverContext` satisfies `RouteMetaCarrier`, so `Roles.get(ctx)` works: `route: { meta,
@@ -817,7 +819,7 @@ ZNIGHT066.
 | `introspection` | `NODE_ENV !== 'production'`                                            | Off: graphql-js `NoSchemaIntrospectionCustomRule`, and suggestions are hidden                                                                                            |
 | `graphiql`      | `NODE_ENV === 'development'`                                           | `GET path` with `accept: text/html` serves GraphiQL; with a `driver`, the driver's IDE                                                                                   |
 | `limits`        | `{ maxTokens: 2000, maxDepth: 12, maxAliases: 30, maxDirectives: 50 }` | Request limits (introspection fields exempt from `maxDepth`); `false` disables one                                                                                       |
-| `documentCache` | `1000`                                                                 | Distinct documents kept parsed and validated (LRU); `0` disables                                                                                                         |
+| `documentCache` | `1000`                                                                 | Distinct documents kept parsed and validated (LRU); `0` disables. Texts over 16 KiB are not kept, and the kept text stays under 8 MiB                                    |
 | `subscriptions` | `{ maxActive: 10_000, bufferSize: 100 }`                               | `false` disables subscriptions over SSE. `heartbeat` (ms or `false`) and `maxDuration` (ms) are passed to `HttpResponse.sse()` (default: the `HttpPlugin` `sse` options) |
 | `pubsub`        | a `MemoryPubSub`                                                       | The `PubSub` provided to the container                                                                                                                                   |
 | `enforcement`   | `'error'`                                                              | How the boot check of field decisions reports a problem: `'error'` fails the boot (ZNIGHT023), `'warn'` logs                                                             |
@@ -1032,9 +1034,12 @@ GraphQLPlugin.configure({ driver: yogaDriver({ plugins: [usePersistedOperations(
   cache (Yoga's `parserAndValidationCache` is off), the engine's limits and introspection rule,
   rejected documents observed by the hook, one `graphql:operation` event per operation with
   `driver: 'yoga'` (`transport: 'sse'` for subscriptions). Plugins wrapping the execution
-  (`useResponseCache`) call the engine; an operation executed by a plugin that replaces it
-  (`useGraphQlJit`) fails with ZNIGHT066, logged once: its resolvers would not get the
-  `GraphQLContext`.
+  (`useResponseCache`) call the engine, but a response cache hit answers without it: guards,
+  loaders, error mappers, request-scoped providers and the hook do not run for that request, so
+  key the cache per principal (`session: request => request.headers.get('authorization')`),
+  never with one global session next to guards. An operation executed by a plugin that replaces
+  the execution (`useGraphQlJit`) fails with ZNIGHT066, logged once: its resolvers would not get
+  the `GraphQLContext`.
 - **Owned options**, refused with ZNIGHT066 (a type error first): `schema`, `context`,
   `graphqlEndpoint` (`path`), `maskedErrors` (the engine masks once, see below),
   `cors` (`HttpPlugin`'s), `maxRequestBodySize` (`http.bodyLimit`), `parserAndValidationCache`,
@@ -1438,7 +1443,7 @@ Build-time diagnostics carry a location, a hint and, for types, the path from th
 | ZNIGHT005 | Method shape (static, `#private`, non-public, accessor, generic, computed name), parameters without or with several GraphQL decorators, `@znight/http` look-alikes, `@Resolver` on a controller, `@UseGuard` outside a resolver, unexported scalars         |
 | ZNIGHT007 | The GraphQL path collides with an HTTP route (boot)                                                                                                                                                                                                         |
 | ZNIGHT023 | A root field without a decision of a required route decorator group (build); a decision no guard of the field's chain enforces (boot)                                                                                                                       |
-| ZNIGHT060 | A type without GraphQL mapping (`any`, `Map`, `Uint8Array`, `URL` without scalar, tuples, records, anonymous objects and unions, `Promise` or async iterables out of place), a missing return type                                                          |
+| ZNIGHT060 | A type without GraphQL mapping (`any`, `Map`, `Uint8Array`, `URL` without scalar, tuples, records, anonymous objects and unions, `Promise` or async iterables out of place, alias cycles), a missing return type                                            |
 | ZNIGHT061 | Two declarations or root fields with one name, reserved or invalid names, a field resolver changing the type of the property it replaces, two field resolvers adding one field, duplicate arguments                                                         |
 | ZNIGHT062 | `@ResolveField` without `@Parent()`, `@Parent()` on a root field, a subscription not returning an async iterable, no `@Query`, field methods outside a `@Resolver`, resolvers in compiled libraries; a field resolver whose parent is unreachable (warning) |
 | ZNIGHT063 | A declaration used as input and output (with the `extends` fix-it), getters, unions and sets in inputs, cycles of non-null input fields, defaults not matching their type                                                                                   |

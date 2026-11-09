@@ -1,8 +1,11 @@
 /**
  * The boot check of route decisions on GraphQL fields (RFC 0001 §5.2, RFC 0005 §5.9): every root
  * field decides every required group, and every decision of a required or enforced group is
- * enforced by a guard of the field's chain (`static enforces`). Problems are one ZNIGHT023 error
- * (`enforcement: 'error'`) or one warning per group.
+ * enforced by a guard of the field's chain (`static enforces`). A group is enforced when a guard of
+ * some chain, or a guard class of the application (in a chain or not, `canResolve()` or
+ * `canActivate()`), declares it: a guard registered nowhere in GraphQL (an HTTP-only guard) does not
+ * make the decisions of its groups inert. Problems are one ZNIGHT023 error (`enforcement: 'error'`)
+ * or one warning per group.
  *
  * A small re-implementation of `@znight/http`'s internal checker for fields instead of routes.
  */
@@ -65,12 +68,26 @@ function invalidEnforces(name: string, reason: string, cause?: unknown): ZnightE
   )
 }
 
-/** Runs the check. `groups`: `metadata.extensions.graphql.groups`. */
+/** A guard class of the application: a provider class with `canResolve()` or `canActivate()`. */
+export function isGuardClass(cls: unknown): boolean {
+  if (typeof cls !== 'function') return false
+  const prototype: unknown = (cls as { prototype?: unknown }).prototype
+  if (typeof prototype !== 'object' || prototype === null) return false
+  const methods = prototype as { canResolve?: unknown; canActivate?: unknown }
+  return typeof methods.canResolve === 'function' || typeof methods.canActivate === 'function'
+}
+
+/**
+ * Runs the check. `groups`: `metadata.extensions.graphql.groups`; `applicationGuards`: the guard
+ * classes of the application, whose groups only become known (they neither declare a group nor
+ * make it required).
+ */
 export function checkFieldDecisions(
   fields: readonly CheckedField[],
   groups: Readonly<Record<string, HttpRouteGroupDefinition>> | undefined,
   mode: 'error' | 'warn',
   logger: CoreLogger,
+  applicationGuards: readonly { readonly cls: unknown; readonly name: string }[] = [],
 ): void {
   const keys = new Map<string, GroupInfo>()
   const required = new Set<string>()
@@ -99,6 +116,19 @@ export function checkFieldDecisions(
   })
   const known = new Set<string>()
   for (const chain of chains) for (const group of chain) known.add(group)
+  const enforcers = new Map<string, Set<string>>()
+  for (const guard of applicationGuards) {
+    for (const info of enforcedBy(guard.cls, guard.name)) {
+      if (!keys.has(info.key)) keys.set(info.key, { group: info.group, required: info.required })
+      known.add(info.group)
+      let names = enforcers.get(info.group)
+      if (names === undefined) {
+        names = new Set()
+        enforcers.set(info.group, names)
+      }
+      names.add(guard.name)
+    }
+  }
   const groupOf = (key: string): string => keys.get(key)?.group ?? key
 
   const problems = new Map<string, { missing: string[]; unenforced: string[] }>()
@@ -146,6 +176,12 @@ export function checkFieldDecisions(
       hints.push(
         `Register a GraphQL guard declaring \`static enforces\` with the decorators of the "${group}" group: GraphQLPlugin.configure({ guards: [...] }) or @UseGuard(...)`,
       )
+      const guards = [...(enforcers.get(group) ?? [])].sort()
+      if (guards.length > 0) {
+        hints.push(
+          `Guards of the application enforcing the "${group}" group: ${guards.join(', ')} (a GraphQL guard needs canResolve())`,
+        )
+      }
     }
     const message = parts.join('; ')
     if (mode === 'warn') logger.warn(`GraphQLPlugin: ${message}`, { code: ErrorCode.MissingRouteDecision, group })

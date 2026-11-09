@@ -233,6 +233,45 @@ describe('resolver pipeline', () => {
     ])
   })
 
+  it('reports a decision only a guard outside every GraphQL chain enforces (ZNIGHT023)', async () => {
+    const RateLimit = createRouteDecorator<number>('rateLimit')
+    // an HTTP-only guard (HttpPlugin.configure({ guards })): in no GraphQL chain
+    class RateLimitGuard {
+      static readonly enforces = [RateLimit]
+      canActivate(): boolean {
+        return true
+      }
+    }
+    const metadata = graphqlMetadata({
+      providers: [Books, RateLimitGuard],
+      types: [
+        { kind: 'object', name: 'Query', fields: [field('book', 'String', bind(Books, 'secret'))] },
+        {
+          kind: 'object',
+          name: 'Mutation',
+          fields: [field('login', 'String', bind(Books, 'secret', { operation: 'mutation', meta: { rateLimit: 5 } }))],
+        },
+      ],
+    })
+    let error: unknown
+    try {
+      await boot(metadata)
+    } catch (caught) {
+      error = caught
+    }
+    expect(error).toMatchObject({ code: ErrorCode.MissingRouteDecision })
+    expect((error as Error).message).toBe(
+      'ZNIGHT023: GraphQLPlugin: No guard enforces the "rateLimit" group on 1 field: Mutation.login (Books.secret)',
+    )
+    expect((error as { hints?: readonly string[] }).hints).toContain(
+      'Guards of the application enforcing the "rateLimit" group: RateLimitGuard (a GraphQL guard needs canResolve())',
+    )
+    await using warned = await boot(metadata, { enforcement: 'warn' })
+    expect(warned.logs.messages('warn')).toEqual([
+      'GraphQLPlugin: no guard enforces the "rateLimit" group on 1 field: Mutation.login (Books.secret)',
+    ])
+  })
+
   it('rejects guards without canResolve() at boot', async () => {
     class NotAGuard {}
     const metadata = graphqlMetadata({

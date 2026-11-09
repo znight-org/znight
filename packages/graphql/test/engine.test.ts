@@ -8,6 +8,7 @@ import type { GraphQLOperationEvent } from '@znight/core'
 import type { ExecutionResult } from 'graphql'
 import type { GraphQLContext, GraphQLErrorMapper } from '../src/index.ts'
 
+import { getEventListeners } from 'node:events'
 import { HttpTokens } from '@znight/http'
 import {
   GraphQLError,
@@ -54,6 +55,9 @@ class Library {
   add(args: { n: number }): number {
     return args.n + 1
   }
+  later(): Promise<string> {
+    return Promise.resolve('later')
+  }
   async *ticks(_args: unknown, _parent: unknown, ctx: GraphQLContext): AsyncGenerator<number> {
     for (let n = 1; !ctx.signal.aborted; n++) {
       yield n
@@ -94,6 +98,7 @@ function metadata() {
           field('fail', 'String', bind(Library, 'fail')),
           field('domain', 'String', bind(Library, 'domain')),
           field('slow', 'String', bind(Library, 'slow')),
+          field('later', 'String', bind(Library, 'later')),
           field('instance', 'Int!', bind(Scoped, 'instance')),
         ],
       },
@@ -233,6 +238,20 @@ describe('execute', () => {
     expect(
       await engine.execute({ schema: engine.schema, document, operationName: 'M', variableValues: { n: 1 } }),
     ).toEqual({ data: { add: 2 } })
+  })
+
+  it('leaves no abort listener on the long-lived signal after asynchronous executions outside a request', async () => {
+    await using booted = await boot(metadata())
+    const engine = booted.plugin.engine
+    const document = engine.parse('{ context later }')
+    expect(await engine.execute({ schema: engine.schema, document })).toEqual({
+      data: { context: 'http', later: 'later' },
+    })
+    // outside a request scope, the operation's signal is the plugin's: it lives as long as the application
+    const signal = (seen as GraphQLContext).signal
+    const before = getEventListeners(signal, 'abort').length
+    for (let i = 0; i < 20; i++) await engine.execute({ schema: engine.schema, document })
+    expect(getEventListeners(signal, 'abort').length).toBe(before)
   })
 
   it('answers operation selection and variable errors as GraphQLErrors', async () => {

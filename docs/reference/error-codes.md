@@ -1198,6 +1198,7 @@ that reaches it. `Out.value` below stands for the schema coordinate of the field
 | A resolver without return type annotation (the compiler does not infer)   | `R.ping has no return type annotation (Query.ping)`                                      |
 | A field returning `void` (hint: a payload type or a boolean)              | `R.touch returns void: GraphQL fields must return a value (Mutation.touch)`              |
 | An async iterable outside a `@Subscription`                               | `R.ping returns an async iterable: only @Subscription fields stream values (Query.ping)` |
+| An alias cycle with no object type in between (`type Nested = Nested[]`)  | `'Nested' is a recursive type alias with no object type in between (Out.value)`          |
 
 ```ts
 export interface Book {

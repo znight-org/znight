@@ -113,6 +113,16 @@ const TYPE_KINDS: Readonly<Record<string, string>> = {
 type TypeNodeLike = Extract<DefinitionNode, { readonly name: NameNode }> & { readonly kind: string }
 
 /**
+ * Whether an SDL text holds only comments, commas and white space (a placeholder file), which
+ * graphql-js would reject as an empty document.
+ */
+export function definesNothing(text: string): boolean {
+  // comments are removed first: a single pattern alternating `#[^\n\r]*` with white space backtracks
+  // exponentially on a `#####` banner followed by a definition
+  return /^[\s,]*$/.test(text.replace(/#[^\n\r]*/g, ''))
+}
+
+/**
  * Reads, parses and validates the SDL; `undefined` after an error (reported). Warnings (custom
  * directives) do not stop the build.
  */
@@ -159,7 +169,7 @@ export function loadSdl(
   const documents: DocumentNode[] = []
   for (const file of files) {
     // a file with comments only (a placeholder) defines nothing: graphql-js would reject it
-    if (/^(?:\s|,|#[^\n\r]*)*$/.test(file.text.replace(/^\uFEFF/, ''))) continue
+    if (definesNothing(file.text)) continue
     try {
       documents.push(language.parse(new language.Source(file.text, file.file)))
     } catch (error) {
