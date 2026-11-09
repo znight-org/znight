@@ -55,7 +55,8 @@ The application itself runs on Node.js 24+ or Bun 1.3+ (`npm run dev` works too)
 README lists the endpoints with `curl` commands and the configuration variables.
 
 All examples except `realtime-chat` use `@znight/core`, `@znight/config` and
-`@znight/observability`; `realtime-chat` uses only `@znight/core`. Every example has
+`@znight/observability`; `realtime-chat` uses `@znight/core` without config or observability. Every
+example has
 `@znight/compiler`, `@znight/cli` and `@znight/testing` as development dependencies. The lists below
 name the other packages.
 

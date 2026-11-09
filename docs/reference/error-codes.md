@@ -349,9 +349,10 @@ export class UserController {
 - Type path and query parameters as `string`, `number`, `boolean`, literal unions or arrays of those,
   or use a schema to transform the value.
 
-At startup, `HttpPlugin` rejects malformed `extensions.http` metadata and invalid or colliding plugin
-routes with the same code. `@znight/websocket` reports invalid `@Gateway` paths, and a gateway path
-that collides with another gateway, with it too.
+At build time, the `@znight/websocket` compiler extension reports invalid `@Gateway` paths and
+gateways sharing a path shape with this code. At startup, `HttpPlugin` rejects malformed
+`extensions.http` metadata and invalid or colliding plugin routes, gateway upgrade routes included,
+with the same code.
 
 ## ZNIGHT008: Ambiguous injection {#znight008}
 
@@ -772,8 +773,10 @@ ZNIGHT023: HttpPlugin: No guard enforces the required "access" group on 9 routes
 Two decisions of one group on the same target, or decorators of a group disagreeing on `required`,
 are [`ZNIGHT005`](#znight005).
 
-WebSocket gateways need a decision too: on the gateway class (it decides the handshake and the
-messages), checked at build time like routes.
+WebSocket gateways need a decision too, on the gateway class: it is the access decision of the
+handshake, an HTTP request, enforced by the HTTP guards. Decisions on message handlers are enforced by
+message guards (`@UseMessageGuard`) and do not count for this check. Checked at build time like
+routes.
 
 ## ZNIGHT030: Invalid OpenAPI definition {#znight030}
 

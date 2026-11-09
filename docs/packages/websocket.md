@@ -36,8 +36,8 @@ Entries: `@znight/websocket/ws` (`wsTransport()`), `@znight/websocket/bun` (`bun
 `WebSocketPlugin.configure()` takes `transport` (`'auto'`), `origins` (`'same-origin'`), `maxPayload`
 (`'1mb'`), `maxConnections`, `maxPendingMessages` (32), `backpressure`
 (`{ limit: '1mb', onLimit: 'close' }`), `heartbeat` (30 s), `handshakeTimeoutMs`, `handlerTimeoutMs`,
-`closeTimeoutMs`, `messageGuards`, `exceptionMappers`, `exposeErrors` and `shutdown`: the package
-README describes each.
+`closeTimeoutMs`, `codec` (`jsonCodec`, the wire format of `events` gateways), `messageGuards`,
+`exceptionMappers`, `exposeErrors` and `shutdown`: the package README describes each.
 
 ## A gateway
 
