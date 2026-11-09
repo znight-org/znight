@@ -602,6 +602,8 @@ export class Container {
       try {
         applyInterceptors(instance as object, definition.interceptors, deps, slot.displayName)
       } catch (error) {
+        // the instance is never handed out nor tracked by a scope: release it now
+        disposeQuietly(instance, definition.dispose)
         throw new InstantiationError(slot.token, [slot.token], error, definition.source)
       }
     }
