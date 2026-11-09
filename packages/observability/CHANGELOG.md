@@ -1,5 +1,13 @@
 # @znight/observability
 
+## 0.6.4
+
+### Patch Changes
+
+- 74b6b04: Datadog transport: during `flush()` / `close()`, a batch that fails with an error status loses only itself; the rest of the buffer is dropped only when the intake is unreachable (network error, timeout).
+- Updated dependencies [74b6b04]
+  - @znight/core@0.6.4
+
 ## 0.6.3
 
 ### Patch Changes

@@ -1,5 +1,17 @@
 # @znight/messaging
 
+## 0.6.4
+
+### Patch Changes
+
+- 74b6b04: Kafka: the `maxRetryDelayMs` cap of a retry record runs from when it was fetched, so records queued behind far-future ones no longer wait `maxRetryDelayMs` each.
+- 74b6b04: RabbitMQ: retried and dead-lettered copies keep the `user-id` property when it is the user of the connection, and drop it otherwise.
+- 74b6b04: SQS: the degraded dead-letter copy (without `x-znight-error` and the headers) is sent only when SQS refuses the copy as invalid; throttling, KMS and permission failures release the message for a full copy later.
+- Updated dependencies [74b6b04]
+- Updated dependencies [74b6b04]
+  - @znight/compiler@0.6.4
+  - @znight/core@0.6.4
+
 ## 0.6.3
 
 ### Patch Changes

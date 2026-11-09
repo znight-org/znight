@@ -1,5 +1,13 @@
 # @znight/compiler
 
+## 0.6.4
+
+### Patch Changes
+
+- 74b6b04: Vite plugin: a dev server restart that fails no longer detaches the plugin from the server still running; the new server replaces the old one only when Vite closes it for the restart.
+- Updated dependencies [74b6b04]
+  - @znight/core@0.6.4
+
 ## 0.6.3
 
 ### Patch Changes

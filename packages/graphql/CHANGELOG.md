@@ -1,5 +1,22 @@
 # @znight/graphql
 
+## 0.6.4
+
+### Patch Changes
+
+- 74b6b04: Migration note for the ZNIGHT023 boot check shipped in 0.6.3: a field decision of a group that an application guard enforces (`static enforces`, even an HTTP-only guard) is reported at boot when no guard of the field's GraphQL chain enforces it. An application or a resolver `TestApp` that booted on 0.6.2 without that guard in `GraphQLPlugin.configure({ guards })` fails to boot: register the guard there, or set `enforcement: 'warn'` where it is intended.
+- 74b6b04: The document cache keeps query texts up to 128 KiB (1/64 of its 8 MiB budget) instead of 16 KiB, so large pretty-printed or fragment-heavy operations are cached again.
+- Updated dependencies [74b6b04]
+- Updated dependencies [74b6b04]
+- Updated dependencies [74b6b04]
+- Updated dependencies [74b6b04]
+- Updated dependencies [74b6b04]
+- Updated dependencies [74b6b04]
+  - @znight/compiler@0.6.4
+  - @znight/core@0.6.4
+  - @znight/http@0.6.4
+  - @znight/testing@0.6.4
+
 ## 0.6.3
 
 ### Patch Changes

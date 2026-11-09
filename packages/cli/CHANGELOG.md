@@ -1,5 +1,15 @@
 # @znight/cli
 
+## 0.6.4
+
+### Patch Changes
+
+- Updated dependencies [74b6b04]
+- Updated dependencies [74b6b04]
+  - @znight/compiler@0.6.4
+  - @znight/core@0.6.4
+  - @znight/openapi@0.6.4
+
 ## 0.6.3
 
 ### Patch Changes

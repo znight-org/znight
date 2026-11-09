@@ -1,5 +1,21 @@
 # @znight/websocket
 
+## 0.6.4
+
+### Patch Changes
+
+- 74b6b04: A codec throwing on a client frame is logged at `warn`, once per connection, instead of an error per frame.
+- 74b6b04: A connection whose reading the server paused is terminated by the heartbeat after three ticks without any handler progress, instead of being kept forever while its handlers wait on a client that stopped reading.
+- Updated dependencies [74b6b04]
+- Updated dependencies [74b6b04]
+- Updated dependencies [74b6b04]
+- Updated dependencies [74b6b04]
+- Updated dependencies [74b6b04]
+- Updated dependencies [74b6b04]
+  - @znight/compiler@0.6.4
+  - @znight/core@0.6.4
+  - @znight/http@0.6.4
+
 ## 0.6.3
 
 ### Patch Changes
