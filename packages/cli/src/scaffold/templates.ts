@@ -3,9 +3,9 @@
  * of options, `create.ts` writes them. The sample application uses the public APIs of the
  * `@znight/*` packages exactly as documented in their READMEs.
  */
-import type { Feature, HttpAdapterName, PackageManager, ProjectOptions } from './options.ts'
+import type { Feature, HttpAdapterName, OpenApiUiName, PackageManager, ProjectOptions } from './options.ts'
 
-import { execBinary, runScript } from './options.ts'
+import { DEFAULT_OPENAPI_UI, execBinary, OPENAPI_UI_LABELS, runScript } from './options.ts'
 import { versionOf } from './versions.ts'
 
 /** A file of the new project. */
@@ -16,11 +16,17 @@ export interface ProjectFile {
 }
 
 interface Flags {
+  /** npm package name of the project (the logger name). */
+  readonly name: string
   readonly config: boolean
   readonly observability: boolean
   readonly messaging: boolean
   readonly schedule: boolean
   readonly openapi: boolean
+  readonly openapiUi: OpenApiUiName
+  readonly graphql: boolean
+  readonly websocket: boolean
+  readonly docker: boolean
   readonly adapter: HttpAdapterName
   readonly pm: PackageManager
   readonly bun: boolean
@@ -29,11 +35,16 @@ interface Flags {
 function flagsOf(options: ProjectOptions): Flags {
   const has = (feature: Feature): boolean => options.features.includes(feature)
   return {
+    name: options.name,
     config: has('config'),
     observability: has('observability'),
     messaging: has('messaging'),
     schedule: has('schedule'),
     openapi: has('openapi'),
+    openapiUi: options.openapiUi ?? DEFAULT_OPENAPI_UI,
+    graphql: has('graphql'),
+    websocket: has('websocket'),
+    docker: options.docker ?? true,
     adapter: options.adapter,
     pm: options.packageManager,
     bun: options.packageManager === 'bun',
@@ -65,7 +76,19 @@ export function renderProject(options: ProjectOptions): ProjectFile[] {
     files.push({ path: 'test/heartbeat.jobs.test.ts', content: heartbeatJobsTest(flags) })
   }
   if (flags.openapi) files.push({ path: 'src/api.ts', content: apiDocument(options) })
+  if (flags.graphql) {
+    files.push({ path: 'src/app/greeting.resolver.ts', content: greetingResolver() })
+    files.push({ path: 'test/greeting.resolver.test.ts', content: greetingResolverTest(flags) })
+  }
+  if (flags.websocket) {
+    files.push({ path: 'src/app/greeting.gateway.ts', content: greetingGateway() })
+    files.push({ path: 'test/greeting.gateway.test.ts', content: greetingGatewayTest(flags) })
+  }
   if (flags.bun) files.push({ path: 'bunfig.toml', content: bunfig(flags) })
+  if (flags.docker) {
+    files.push({ path: 'Dockerfile', content: dockerfile(flags) })
+    files.push({ path: '.dockerignore', content: dockerignore() })
+  }
   if (flags.pm === 'yarn') files.push({ path: '.yarnrc.yml', content: 'nodeLinker: node-modules\n' })
   return files.sort((a, b) => (a.path < b.path ? -1 : 1))
 }
@@ -89,6 +112,15 @@ function packageJson(options: ProjectOptions, flags: Flags): string {
   if (flags.messaging) dependencies['@znight/messaging'] = znight
   if (flags.schedule) dependencies['@znight/schedule'] = znight
   if (flags.openapi) dependencies['@znight/openapi'] = znight
+  if (flags.graphql) {
+    dependencies['@znight/graphql'] = znight
+    dependencies['graphql'] = versionOf('graphql')
+  }
+  if (flags.websocket) {
+    dependencies['@znight/websocket'] = znight
+    // the transport of the node:http based servers (Bun provides its own ws module)
+    dependencies['ws'] = versionOf('ws')
+  }
   if (flags.adapter === 'fastify') dependencies['fastify'] = versionOf('fastify')
   if (flags.adapter === 'express') dependencies['express'] = versionOf('express')
   if (flags.adapter === 'hono') {
@@ -220,6 +252,139 @@ coverage
 }
 
 // ---------------------------------------------------------------------------------------------------
+// Docker
+
+/** How the image installs and builds with a package manager. */
+interface DockerSteps {
+  /** Files of the install layers (the lockfile is required: installs are frozen). */
+  readonly manifests: string
+  /** Package manager setup of the base stage. */
+  readonly setup: readonly string[]
+  /** Every dependency, for the build. */
+  readonly install: string
+  /** Production dependencies only, without the compiler, Vite, TypeScript... */
+  readonly production: string
+  readonly build: string
+}
+
+function dockerSteps(pm: PackageManager): DockerSteps {
+  // pnpm and yarn come from Corepack (bundled with Node.js 24); the packageManager field of
+  // package.json, when present, picks their version
+  const corepack = (tool: string): string[] => [
+    'ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0',
+    `RUN corepack enable && corepack install --global ${tool}`,
+  ]
+  switch (pm) {
+    case 'bun':
+      return {
+        manifests: 'package.json bun.lock',
+        setup: [],
+        install: 'bun install --frozen-lockfile',
+        // --omit=peer: Bun would also install the optional peers the dev dependencies satisfy (the
+        // @znight/* packages declare the compiler as one); required peers are direct dependencies
+        production: 'bun install --frozen-lockfile --production --omit=peer',
+        build: 'bun run build',
+      }
+    case 'pnpm':
+      return {
+        manifests: 'package.json pnpm-lock.yaml',
+        setup: corepack('pnpm@10'),
+        install: 'pnpm install --frozen-lockfile',
+        production: 'pnpm install --frozen-lockfile --prod',
+        build: 'pnpm run build',
+      }
+    case 'yarn':
+      return {
+        manifests: 'package.json yarn.lock .yarnrc.yml',
+        setup: corepack('yarn@4'),
+        install: 'yarn install --immutable',
+        production: 'yarn workspaces focus --all --production',
+        build: 'yarn build',
+      }
+    default:
+      return {
+        manifests: 'package.json package-lock.json',
+        setup: [],
+        install: 'npm ci',
+        // without the devDependencies in package.json, npm also leaves out the optional peers they
+        // satisfy (the @znight/* packages declare the compiler as one): `npm ci --omit=dev` keeps them
+        production: 'npm pkg delete devDependencies && npm ci --omit=dev',
+        build: 'npm run build',
+      }
+  }
+}
+
+/** A multi-stage image: build with every dependency, run the bundle with the production ones. */
+function dockerfile(flags: Flags): string {
+  const steps = dockerSteps(flags.pm)
+  const runtime = flags.bun ? 'bun' : 'node'
+  const [baseImage, runImage] = flags.bun ? ['oven/bun:1', 'oven/bun:1-slim'] : ['node:24-slim', 'node:24-slim']
+  // the images ship neither curl nor wget: the runtime itself probes GET /health
+  const probe =
+    "fetch('http://127.0.0.1:' + (process.env.PORT || 3000) + '/health').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+  const command = flags.bun
+    ? '["bun", "--no-env-file", "dist/main.js"]'
+    : '["node", "--enable-source-maps", "dist/main.js"]'
+  const envFiles = flags.bun
+    ? '\n# --no-env-file: Bun would load .env files into process.env by itself, with its own precedence'
+    : ''
+  return `# syntax=docker/dockerfile:1
+# Production image: docker build -t ${dockerTag(flags.name)} .
+# Installs are frozen: install the dependencies once (${flags.pm} install) so that the lockfile exists.
+
+FROM ${baseImage} AS base
+${steps.setup.map(line => `${line}\n`).join('')}WORKDIR /app
+
+# --- production dependencies only, at the versions of the lockfile ----------------------------------
+FROM base AS deps
+COPY ${steps.manifests} ./
+RUN ${steps.production}
+
+# --- build: every dependency, since the Znight compiler, Vite and TypeScript run here ---------------
+FROM base AS build
+COPY ${steps.manifests} ./
+RUN ${steps.install}
+COPY . .
+# generates the DI container (src/.znight), fails on any wiring error, bundles dist/main.js
+RUN ${steps.build}
+
+# --- runtime: the bundle and the production dependencies, as a non-root user ----------------------
+FROM ${runImage}
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=build /app/package.json ./
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
+USER ${runtime}
+EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \\
+  CMD ["${runtime}", "-e", "${probe}"]
+# exec form: the runtime is PID 1 and receives SIGTERM directly (graceful shutdown)${envFiles}
+CMD ${command}
+`
+}
+
+/** A Docker image name for an npm package name (`@acme/api` -> `acme-api`). */
+function dockerTag(name: string): string {
+  return name.replace(/^@/, '').replace('/', '-')
+}
+
+function dockerignore(): string {
+  return `# not part of the image: the build installs and generates everything itself
+node_modules
+dist
+coverage
+**/.znight
+*.log
+.git
+.env
+.env.*
+Dockerfile
+.dockerignore
+`
+}
+
+// ---------------------------------------------------------------------------------------------------
 // application
 
 function adapterImport(adapter: HttpAdapterName): string | undefined {
@@ -243,6 +408,7 @@ function mainTs(flags: Flags): string {
   const imports = [
     flags.config ? "import { ConfigPlugin } from '@znight/config'" : undefined,
     "import { Application } from '@znight/core'",
+    flags.graphql ? "import { GraphQLPlugin } from '@znight/graphql'" : undefined,
     "import { HttpPlugin } from '@znight/http'",
     adapterImport(flags.adapter),
     flags.messaging ? "import { MessagingPlugin } from '@znight/messaging'" : undefined,
@@ -250,6 +416,7 @@ function mainTs(flags: Flags): string {
     flags.observability ? "import { ObservabilityPlugin } from '@znight/observability'" : undefined,
     flags.openapi ? "import { OpenApiPlugin } from '@znight/openapi'" : undefined,
     flags.schedule ? "import { SchedulePlugin } from '@znight/schedule'" : undefined,
+    flags.websocket ? "import { WebSocketPlugin } from '@znight/websocket'" : undefined,
   ].filter(line => line !== undefined)
   const localImports = [
     "import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'",
@@ -260,7 +427,17 @@ function mainTs(flags: Flags): string {
   if (flags.observability) {
     plugins.push(
       '    // first, so that its hooks wrap everything: request logs, metrics (with prom-client), traces',
-      '    ObservabilityPlugin.configure(),',
+      '    ObservabilityPlugin.configure({',
+      '      logging: {',
+      `        name: ${quote(flags.name)},`,
+      '      },',
+      '      // metrics: {',
+      '      //   // options of the metrics registry',
+      '      // },',
+      '      // tracing: {',
+      '      //   // options of the tracer',
+      '      // },',
+      '    }),',
     )
   }
   if (flags.config) {
@@ -299,8 +476,20 @@ function mainTs(flags: Flags): string {
   }
   if (flags.openapi) {
     plugins.push(
-      '    // GET /openapi.json and the API reference at /docs (document options: src/api.ts)',
-      '    OpenApiPlugin.configure(),',
+      `    // GET /openapi.json and the API reference at /docs, with ${OPENAPI_UI_LABELS[flags.openapiUi]} (document options: src/api.ts)`,
+      `    OpenApiPlugin.configure({ ui: ${quote(flags.openapiUi)} }),`,
+    )
+  }
+  if (flags.graphql) {
+    plugins.push(
+      '    // POST /graphql, GET /graphql (GraphiQL in development): the schema is derived from the resolvers',
+      '    GraphQLPlugin.configure(),',
+    )
+  }
+  if (flags.websocket) {
+    plugins.push(
+      "    // WebSocket gateways on the HTTP server's port (ws on Node.js, Bun's own WebSocket on Bun)",
+      '    WebSocketPlugin.configure(),',
     )
   }
 
@@ -318,6 +507,20 @@ ${plugins.join('\n')}
 // SIGINT / SIGTERM stop the application gracefully (in-flight requests are drained)
 await app.start()
 `
+}
+
+/** A single-quoted TypeScript string literal of `value` (quotes, backslashes and line breaks escaped). */
+function quote(value: string): string {
+  let out = "'"
+  for (const char of value) {
+    const code = char.codePointAt(0) ?? 0
+    if (char === "'" || char === '\\') out += `\\${char}`
+    else if (char === '\n') out += '\\n'
+    else if (char === '\r') out += '\\r'
+    else if (code < 0x20 || code === 0x2028 || code === 0x2029) out += `\\u${code.toString(16).padStart(4, '0')}`
+    else out += char
+  }
+  return `${out}'`
 }
 
 function appConfig(): string {
@@ -519,6 +722,60 @@ export class Api {}
 `
 }
 
+function greetingResolver(): string {
+  return `import { Args, Query, Resolver } from '@znight/graphql'
+
+import { GreetingService } from './greeting.service.js'
+
+/** A greeting. */
+export interface Greeting {
+  readonly message: string
+}
+
+/**
+ * GraphQL resolver (code-first): the compiler derives the schema from the TypeScript types and the
+ * JSDoc, \`type Query { greeting(name: String!): Greeting! }\` here.
+ */
+@Resolver()
+export class GreetingResolver {
+  constructor(private readonly greetings: GreetingService) {}
+
+  /**
+   * Greets someone.
+   * @param name Who to greet.
+   */
+  @Query()
+  greeting(@Args('name') name: string): Greeting {
+    return { message: this.greetings.greet(name) }
+  }
+}
+`
+}
+
+function greetingGateway(): string {
+  return `import { Gateway, OnMessage, Payload } from '@znight/websocket'
+
+import { CreateGreeting } from './greeting.schemas.js'
+import { GreetingService } from './greeting.service.js'
+
+/**
+ * WebSocket gateway on ws://localhost:3000/ws, served by the HTTP server. Frames are JSON: the
+ * request {"event": "greet", "data": {"name": "Ada"}, "id": 1} is answered with
+ * {"id": 1, "data": {"message": "Hello, Ada."}}.
+ */
+@Gateway('/ws')
+export class GreetingGateway {
+  constructor(private readonly greetings: GreetingService) {}
+
+  /** The payload is validated by the schema (a BAD_REQUEST error reply otherwise). */
+  @OnMessage('greet')
+  greet(@Payload(CreateGreeting) input: CreateGreeting): { message: string } {
+    return { message: this.greetings.greet(input.name, input.excited) }
+  }
+}
+`
+}
+
 // ---------------------------------------------------------------------------------------------------
 // tests
 
@@ -596,29 +853,45 @@ describe('GreetingService', () => {
 `
 }
 
-function greetingControllerTest(flags: Flags): string {
-  const imports = [
-    testImports(flags, 'afterEach, beforeEach, describe, expect, test'),
-    "import { HttpPlugin } from '@znight/http'",
-  ]
+/** Imports and `plugins` array of a `TestApp` test, with the plugins the providers need. */
+function testAppPlugins(
+  flags: Flags,
+  names: string,
+  extra: { readonly graphql?: boolean; readonly websocket?: boolean } = {},
+): { imports: string; plugins: string } {
+  const imports = [testImports(flags, names)]
+  if (extra.graphql === true) {
+    imports.push("import { GraphQLPlugin } from '@znight/graphql'")
+    imports.push("import { executeOperation } from '@znight/graphql/testing'")
+  }
+  imports.push("import { HttpPlugin } from '@znight/http'")
   if (flags.messaging) {
     imports.push("import { MessagingPlugin } from '@znight/messaging'")
     imports.push("import { memory } from '@znight/messaging/memory'")
   }
   if (flags.observability) imports.push("import { ObservabilityPlugin } from '@znight/observability'")
   imports.push("import { TestApp } from '@znight/testing'")
+  if (extra.websocket === true) imports.push("import { WebSocketPlugin } from '@znight/websocket'")
   const plugins: string[] = []
-  // no metrics server (port 9464 once prom-client is installed): test files and `dev` run side by side
+  // metrics off: no metrics server colliding on :9464 with `dev` or other test files, and no need for
+  // prom-client (any metrics object requires it)
   if (flags.observability) {
-    plugins.push("ObservabilityPlugin.configure({ logging: { level: 'silent' }, metrics: { server: false } })")
+    plugins.push("ObservabilityPlugin.configure({ logging: { level: 'silent' }, metrics: false })")
   }
   if (flags.messaging) plugins.push('MessagingPlugin.configure({ driver: memory() })')
   // port 0: TestApp.inject() sends requests in memory, the server listens on a free port
   plugins.push('HttpPlugin.configure({ port: 0 })')
-  const pluginList =
+  if (extra.graphql === true) plugins.push('GraphQLPlugin.configure()')
+  if (extra.websocket === true) plugins.push('WebSocketPlugin.configure()')
+  const list =
     plugins.length === 1 ? `[${plugins[0]}]` : `[\n${plugins.map(plugin => `        ${plugin},`).join('\n')}\n      ]`
+  return { imports: imports.join('\n'), plugins: list }
+}
+
+function greetingControllerTest(flags: Flags): string {
+  const { imports, plugins: pluginList } = testAppPlugins(flags, 'afterEach, beforeEach, describe, expect, test')
   const greeting = 'Hello'
-  return `${imports.join('\n')}
+  return `${imports}
 
 import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
 
@@ -656,6 +929,60 @@ describe('GreetingController', () => {
 `
 }
 
+function greetingResolverTest(flags: Flags): string {
+  const { imports, plugins } = testAppPlugins(flags, 'describe, expect, test', { graphql: true })
+  return `${imports}
+
+import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+
+// executeOperation() sends the operation through the whole HTTP pipeline, in memory
+describe('GreetingResolver', () => {
+  test('query { greeting }', async () => {
+    const app = await TestApp.create({
+      metadata,
+      plugins: ${plugins},
+    })
+    try {
+      const response = await executeOperation(app, { query: '{ greeting(name: "Ada") { message } }' })
+
+      expect(response.status).toBe(200)
+      expect(response.errors).toBeUndefined()
+      expect(response.data).toEqual({ greeting: { message: 'Hello, Ada.' } })
+    } finally {
+      await app.close()
+    }
+  })
+})
+`
+}
+
+function greetingGatewayTest(flags: Flags): string {
+  const { imports, plugins } = testAppPlugins(flags, 'describe, expect, test', { websocket: true })
+  return `${imports}
+
+import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+
+// app.connect() opens an in-memory connection, through the real handshake
+describe('GreetingGateway', () => {
+  test('answers "greet" requests', async () => {
+    const app = await TestApp.create({
+      metadata,
+      plugins: ${plugins},
+    })
+    try {
+      const client = await app.connect('/ws')
+
+      expect(await client.request('greet', { name: 'Ada', excited: true })).toEqual({ message: 'Hello, Ada!' })
+      await expect(client.request('greet', { name: '' })).rejects.toMatchObject({ code: 'BAD_REQUEST' })
+      await client.close()
+    } finally {
+      await app.close()
+    }
+  })
+})
+`
+}
+
 // ---------------------------------------------------------------------------------------------------
 // README
 
@@ -671,8 +998,25 @@ function readme(options: ProjectOptions, flags: Flags): string {
     flags.messaging ? '- **Messaging** with `@znight/messaging` (in-memory broker in `src/main.ts`)' : undefined,
     flags.schedule ? '- **Scheduled jobs** with `@znight/schedule` (`src/app/heartbeat.jobs.ts`)' : undefined,
     flags.openapi
-      ? '- **OpenAPI** with `@znight/openapi` (`/openapi.json`, API reference at `/docs`, options in `src/api.ts`)'
+      ? `- **OpenAPI** with \`@znight/openapi\` (\`/openapi.json\`, ${OPENAPI_UI_LABELS[flags.openapiUi]} API reference at \`/docs\`, options in \`src/api.ts\`)`
       : undefined,
+    flags.graphql
+      ? '- **GraphQL** with `@znight/graphql` (code-first: the schema is derived from `src/app/greeting.resolver.ts`)'
+      : undefined,
+    flags.websocket
+      ? '- **WebSocket** with `@znight/websocket` (`src/app/greeting.gateway.ts`, on the HTTP port at `/ws`)'
+      : undefined,
+  ].filter(line => line !== undefined)
+  const app = [
+    flags.config ? 'app.config.ts            # @Config: settings read from the environment' : undefined,
+    flags.messaging ? 'greeting.consumer.ts     # @Consumer: handles the "greetings" queue' : undefined,
+    'greeting.controller.ts   # @Controller: /greetings routes',
+    flags.websocket ? 'greeting.gateway.ts      # @Gateway: the /ws WebSocket endpoint' : undefined,
+    flags.graphql ? 'greeting.resolver.ts     # @Resolver: the greeting GraphQL query' : undefined,
+    'greeting.schemas.ts      # Zod schemas',
+    'greeting.service.ts      # @Injectable',
+    'health.controller.ts     # GET /health',
+    flags.schedule ? 'heartbeat.jobs.ts        # @Cron: a job every minute' : undefined,
   ].filter(line => line !== undefined)
   const tree = [
     'src/',
@@ -682,16 +1026,11 @@ function readme(options: ProjectOptions, flags: Flags): string {
       : undefined,
     '├─ .znight/                   # generated DI container (git-ignored)',
     '└─ app/',
-    flags.config ? '   ├─ app.config.ts            # @Config: settings read from the environment' : undefined,
-    flags.messaging ? '   ├─ greeting.consumer.ts     # @Consumer: handles the "greetings" queue' : undefined,
-    '   ├─ greeting.controller.ts   # @Controller: /greetings routes',
-    '   ├─ greeting.schemas.ts      # Zod schemas',
-    '   ├─ greeting.service.ts      # @Injectable',
-    flags.schedule ? '   ├─ health.controller.ts     # GET /health' : '   └─ health.controller.ts     # GET /health',
-    flags.schedule ? '   └─ heartbeat.jobs.ts        # @Cron: a job every minute' : undefined,
+    ...app.map((line, index) => `   ${index === app.length - 1 ? '└─' : '├─'} ${line}`),
     'test/                          # TestBed (unit) and TestApp (HTTP) tests',
     'vite.config.ts                 # znight() plugin: generates the container, server build',
     'znight.config.ts               # compiler options',
+    flags.docker ? 'Dockerfile                     # production image (multi-stage, non-root)' : undefined,
   ].filter(line => line !== undefined)
   const configNote = flags.config
     ? `
@@ -707,6 +1046,22 @@ problem listed.${
 \`@znight/config\`, the same way on Node.js and Bun.`
           : ''
       }
+`
+    : ''
+  const image = dockerTag(options.name)
+  const dockerNote = flags.docker
+    ? `
+## Docker
+
+\`\`\`sh
+docker build -t ${image} .
+docker run --rm -p 3000:3000 ${image}
+\`\`\`
+
+The \`Dockerfile\` builds with every dependency (the Znight compiler runs during the build), then
+ships \`dist/\` with the production dependencies only, on ${flags.bun ? 'Bun' : 'Node.js'}, as a non-root user, with
+\`NODE_ENV=production\` and a health check on \`GET /health\`. Installs are frozen: the lockfile of
+\`${flags.pm} install\` must exist.
 `
     : ''
   const testNote = flags.bun
@@ -742,7 +1097,7 @@ ${
 ${run('dev')}
 curl localhost:3000/health
 curl localhost:3000/greetings/Ada?excited=true
-curl -X POST localhost:3000/greetings -H 'content-type: application/json' -d '{"name":"Grace"}'${flags.openapi ? '\ncurl localhost:3000/openapi.json        # the API reference is at http://localhost:3000/docs' : ''}
+curl -X POST localhost:3000/greetings -H 'content-type: application/json' -d '{"name":"Grace"}'${flags.openapi ? '\ncurl localhost:3000/openapi.json        # the API reference is at http://localhost:3000/docs' : ''}${flags.graphql ? `\ncurl localhost:3000/graphql -H 'content-type: application/json' -d '{"query":"{ greeting(name: \\"Ada\\") { message } }"}'` : ''}
 \`\`\`
 
 ## Project structure
@@ -759,7 +1114,7 @@ Add code with the generators:
 ${znight} g service users/user        # src/users/user.service.ts
 ${znight} g controller users/user     # src/users/user.controller.ts${flags.schedule ? `\n${znight} g job reports/digest        # src/reports/digest.jobs.ts` : ''}
 \`\`\`
-${configNote}
+${configNote}${dockerNote}
 ## Tests
 
 ${testNote}

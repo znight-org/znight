@@ -7,24 +7,44 @@ export type PackageManager = 'bun' | 'npm' | 'pnpm' | 'yarn'
 export type HttpAdapterName = 'node' | 'fastify' | 'express' | 'hono'
 
 /** Optional features of a new project. */
-export type Feature = 'config' | 'observability' | 'messaging' | 'schedule' | 'openapi'
+export type Feature = 'config' | 'observability' | 'messaging' | 'schedule' | 'openapi' | 'graphql' | 'websocket'
+
+/** API reference UIs of `@znight/openapi` (its `ui` option). */
+export type OpenApiUiName = 'scalar' | 'swagger'
 
 /** Every package manager, in display order. */
 export const PACKAGE_MANAGERS: readonly PackageManager[] = ['bun', 'npm', 'pnpm', 'yarn']
 
-/** Every HTTP adapter, in display order. */
-export const HTTP_ADAPTERS: readonly HttpAdapterName[] = ['node', 'fastify', 'express', 'hono']
+/** Every HTTP adapter, in display order (the default first). */
+export const HTTP_ADAPTERS: readonly HttpAdapterName[] = ['fastify', 'node', 'express', 'hono']
+
+/** HTTP adapter used when none is given. */
+export const DEFAULT_ADAPTER: HttpAdapterName = 'fastify'
 
 /** Every feature, in display (and canonical) order. */
-export const FEATURES: readonly Feature[] = ['config', 'observability', 'messaging', 'schedule', 'openapi']
+export const FEATURES: readonly Feature[] = [
+  'config',
+  'observability',
+  'messaging',
+  'schedule',
+  'openapi',
+  'graphql',
+  'websocket',
+]
+
+/** Every OpenAPI reference UI, in display order (the default first). */
+export const OPENAPI_UIS: readonly OpenApiUiName[] = ['scalar', 'swagger']
+
+/** OpenAPI reference UI used when none is given. */
+export const DEFAULT_OPENAPI_UI: OpenApiUiName = 'scalar'
 
 /** Features selected when none are given. */
 export const DEFAULT_FEATURES: readonly Feature[] = ['config', 'observability']
 
 /** Labels shown by the prompts and the help. */
 export const ADAPTER_LABELS: Readonly<Record<HttpAdapterName, string>> = {
-  node: 'node:http (built-in, zero dependency)',
   fastify: 'Fastify',
+  node: 'node:http (built-in, zero dependency)',
   express: 'Express',
   hono: 'Hono',
 }
@@ -36,6 +56,14 @@ export const FEATURE_LABELS: Readonly<Record<Feature, string>> = {
   messaging: 'Messaging: message consumers and publishing (@znight/messaging)',
   schedule: 'Schedule: cron, interval and timeout jobs (@znight/schedule)',
   openapi: 'OpenAPI: openapi.json and an API reference at /docs (@znight/openapi)',
+  graphql: 'GraphQL: code-first schema derived from the TypeScript types (@znight/graphql)',
+  websocket: 'WebSocket: gateways served on the HTTP port (@znight/websocket)',
+}
+
+/** Labels shown by the prompts. */
+export const OPENAPI_UI_LABELS: Readonly<Record<OpenApiUiName, string>> = {
+  scalar: 'Scalar',
+  swagger: 'Swagger UI',
 }
 
 /** Everything that determines the files of a new project. */
@@ -46,6 +74,10 @@ export interface ProjectOptions {
   readonly adapter: HttpAdapterName
   /** Selected features, in canonical order. */
   readonly features: readonly Feature[]
+  /** API reference UI served at `/docs` with the `openapi` feature. Default: `'scalar'`. */
+  readonly openapiUi?: OpenApiUiName
+  /** Generate a multi-stage `Dockerfile` and a `.dockerignore`. Default: `true`. */
+  readonly docker?: boolean
   /** Version range base of the `@znight/*` packages (the CLI version). */
   readonly znightVersion: string
 }

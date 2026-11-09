@@ -15,8 +15,10 @@ Arguments
 Options
   -y, --yes                              Do not ask questions: use the flags and the defaults
   --pm <bun|npm|pnpm|yarn>               Package manager (default: the one running the CLI, bun under Bun, else npm)
-  --adapter <node|fastify|express|hono>  HTTP adapter (default: node, the built-in node:http server)
-  --features <list>                      Comma-separated features: config, observability, messaging, schedule, openapi, or "all" / "none" (default: config,observability)
+  --adapter <fastify|node|express|hono>  HTTP adapter (default: fastify; node is the built-in node:http server)
+  --features <list>                      Comma-separated features: config, observability, messaging, schedule, openapi, graphql, websocket, or "all" / "none" (default: config,observability)
+  --openapi-ui <scalar|swagger>          API reference UI of the openapi feature, served at /docs (default: scalar)
+  --no-docker                            Do not generate a Dockerfile
   --no-install                           Do not install the dependencies
   --no-git                               Do not initialise a git repository
   --dir <path>                           Target directory (default: ./<name>)
@@ -25,7 +27,8 @@ Options
 
 Examples
   $ znight new my-service
-  $ znight new my-service --yes --pm pnpm --adapter fastify --features config,observability,messaging
+  $ znight new my-service --yes --pm pnpm --adapter hono --features config,observability,messaging
+  $ znight new my-api --yes --features config,observability,openapi,graphql,websocket --openapi-ui swagger
   $ znight new my-worker --yes --features config,schedule
   $ znight new . --yes --no-install
 "

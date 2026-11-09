@@ -2,6 +2,20 @@
 
 exports[`project templates default project (npm, node adapter, config + observability) 1`] = `
 {
+  ".dockerignore": 
+"# not part of the image: the build installs and generates everything itself
+node_modules
+dist
+coverage
+**/.znight
+*.log
+.git
+.env
+.env.*
+Dockerfile
+.dockerignore
+"
+,
   ".gitignore": 
 "node_modules
 dist
@@ -14,6 +28,42 @@ coverage
 # local environment
 .env.local
 .env.*.local
+"
+,
+  "Dockerfile": 
+"# syntax=docker/dockerfile:1
+# Production image: docker build -t my-service .
+# Installs are frozen: install the dependencies once (npm install) so that the lockfile exists.
+
+FROM node:24-slim AS base
+WORKDIR /app
+
+# --- production dependencies only, at the versions of the lockfile ----------------------------------
+FROM base AS deps
+COPY package.json package-lock.json ./
+RUN npm pkg delete devDependencies && npm ci --omit=dev
+
+# --- build: every dependency, since the Znight compiler, Vite and TypeScript run here ---------------
+FROM base AS build
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY . .
+# generates the DI container (src/.znight), fails on any wiring error, bundles dist/main.js
+RUN npm run build
+
+# --- runtime: the bundle and the production dependencies, as a non-root user ----------------------
+FROM node:24-slim
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=build /app/package.json ./
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
+USER node
+EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \\
+  CMD ["node", "-e", "fetch('http://127.0.0.1:' + (process.env.PORT || 3000) + '/health').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+# exec form: the runtime is PID 1 and receives SIGTERM directly (graceful shutdown)
+CMD ["node", "--enable-source-maps", "dist/main.js"]
 "
 ,
   "README.md": 
@@ -59,6 +109,7 @@ src/
 test/                          # TestBed (unit) and TestApp (HTTP) tests
 vite.config.ts                 # znight() plugin: generates the container, server build
 znight.config.ts               # compiler options
+Dockerfile                     # production image (multi-stage, non-root)
 \`\`\`
 
 Providers are discovered by the compiler from their decorators: there are no modules to declare.
@@ -75,6 +126,18 @@ npx znight g controller users/user     # src/users/user.controller.ts
 \`AppConfig\` (\`src/app/app.config.ts\`) reads \`PORT\` and \`APP_GREETING\` from the environment or from
 \`.env\` / \`.env.local\` files. Missing or invalid values stop the application at boot with every
 problem listed.
+
+## Docker
+
+\`\`\`sh
+docker build -t my-service .
+docker run --rm -p 3000:3000 my-service
+\`\`\`
+
+The \`Dockerfile\` builds with every dependency (the Znight compiler runs during the build), then
+ships \`dist/\` with the production dependencies only, on Node.js, as a non-root user, with
+\`NODE_ENV=production\` and a health check on \`GET /health\`. Installs are frozen: the lockfile of
+\`npm install\` must exist.
 
 ## Tests
 
@@ -223,7 +286,17 @@ const app = await Application.create({
   metadata: __ZNIGHT_METADATA__,
   plugins: [
     // first, so that its hooks wrap everything: request logs, metrics (with prom-client), traces
-    ObservabilityPlugin.configure(),
+    ObservabilityPlugin.configure({
+      logging: {
+        name: 'my-service',
+      },
+      // metrics: {
+      //   // options of the metrics registry
+      // },
+      // tracing: {
+      //   // options of the tracer
+      // },
+    }),
     // loads .env files and the environment, validates every @Config class before anything starts
     ConfigPlugin.configure(),
     HttpPlugin.configure(container => ({
@@ -252,7 +325,7 @@ describe('GreetingController', () => {
     app = await TestApp.create({
       metadata,
       plugins: [
-        ObservabilityPlugin.configure({ logging: { level: 'silent' }, metrics: { server: false } }),
+        ObservabilityPlugin.configure({ logging: { level: 'silent' }, metrics: false }),
         HttpPlugin.configure({ port: 0 }),
       ],
     })
@@ -366,6 +439,20 @@ export default {
 
 exports[`project templates bun, fastify, every feature 1`] = `
 {
+  ".dockerignore": 
+"# not part of the image: the build installs and generates everything itself
+node_modules
+dist
+coverage
+**/.znight
+*.log
+.git
+.env
+.env.*
+Dockerfile
+.dockerignore
+"
+,
   ".gitignore": 
 "node_modules
 dist
@@ -378,6 +465,43 @@ coverage
 # local environment
 .env.local
 .env.*.local
+"
+,
+  "Dockerfile": 
+"# syntax=docker/dockerfile:1
+# Production image: docker build -t my-service .
+# Installs are frozen: install the dependencies once (bun install) so that the lockfile exists.
+
+FROM oven/bun:1 AS base
+WORKDIR /app
+
+# --- production dependencies only, at the versions of the lockfile ----------------------------------
+FROM base AS deps
+COPY package.json bun.lock ./
+RUN bun install --frozen-lockfile --production --omit=peer
+
+# --- build: every dependency, since the Znight compiler, Vite and TypeScript run here ---------------
+FROM base AS build
+COPY package.json bun.lock ./
+RUN bun install --frozen-lockfile
+COPY . .
+# generates the DI container (src/.znight), fails on any wiring error, bundles dist/main.js
+RUN bun run build
+
+# --- runtime: the bundle and the production dependencies, as a non-root user ----------------------
+FROM oven/bun:1-slim
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=build /app/package.json ./
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
+USER bun
+EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \\
+  CMD ["bun", "-e", "fetch('http://127.0.0.1:' + (process.env.PORT || 3000) + '/health').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+# exec form: the runtime is PID 1 and receives SIGTERM directly (graceful shutdown)
+# --no-env-file: Bun would load .env files into process.env by itself, with its own precedence
+CMD ["bun", "--no-env-file", "dist/main.js"]
 "
 ,
   "README.md": 
@@ -425,6 +549,7 @@ src/
 test/                          # TestBed (unit) and TestApp (HTTP) tests
 vite.config.ts                 # znight() plugin: generates the container, server build
 znight.config.ts               # compiler options
+Dockerfile                     # production image (multi-stage, non-root)
 \`\`\`
 
 Providers are discovered by the compiler from their decorators: there are no modules to declare.
@@ -444,6 +569,18 @@ problem listed.
 
 \`bunfig.toml\` turns Bun's own \`.env\` loading off (\`env = false\`): the files are read by
 \`@znight/config\`, the same way on Node.js and Bun.
+
+## Docker
+
+\`\`\`sh
+docker build -t my-service .
+docker run --rm -p 3000:3000 my-service
+\`\`\`
+
+The \`Dockerfile\` builds with every dependency (the Znight compiler runs during the build), then
+ships \`dist/\` with the production dependencies only, on Bun, as a non-root user, with
+\`NODE_ENV=production\` and a health check on \`GET /health\`. Installs are frozen: the lockfile of
+\`bun install\` must exist.
 
 ## Tests
 
@@ -644,7 +781,17 @@ const app = await Application.create({
   metadata: __ZNIGHT_METADATA__,
   plugins: [
     // first, so that its hooks wrap everything: request logs, metrics (with prom-client), traces
-    ObservabilityPlugin.configure(),
+    ObservabilityPlugin.configure({
+      logging: {
+        name: 'my-service',
+      },
+      // metrics: {
+      //   // options of the metrics registry
+      // },
+      // tracing: {
+      //   // options of the tracer
+      // },
+    }),
     // loads .env files and the environment, validates every @Config class before anything starts
     ConfigPlugin.configure(),
     // in-memory broker for development: use rabbitmq(), sqs() or kafka() in production
@@ -678,7 +825,7 @@ describe('GreetingController', () => {
     app = await TestApp.create({
       metadata,
       plugins: [
-        ObservabilityPlugin.configure({ logging: { level: 'silent' }, metrics: { server: false } }),
+        ObservabilityPlugin.configure({ logging: { level: 'silent' }, metrics: false }),
         MessagingPlugin.configure({ driver: memory() }),
         HttpPlugin.configure({ port: 0 }),
       ],
@@ -793,6 +940,20 @@ export default {
 
 exports[`project templates yarn, express, no feature 1`] = `
 {
+  ".dockerignore": 
+"# not part of the image: the build installs and generates everything itself
+node_modules
+dist
+coverage
+**/.znight
+*.log
+.git
+.env
+.env.*
+Dockerfile
+.dockerignore
+"
+,
   ".gitignore": 
 "node_modules
 dist
@@ -809,6 +970,44 @@ coverage
 ,
   ".yarnrc.yml": 
 "nodeLinker: node-modules
+"
+,
+  "Dockerfile": 
+"# syntax=docker/dockerfile:1
+# Production image: docker build -t my-service .
+# Installs are frozen: install the dependencies once (yarn install) so that the lockfile exists.
+
+FROM node:24-slim AS base
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+RUN corepack enable && corepack install --global yarn@4
+WORKDIR /app
+
+# --- production dependencies only, at the versions of the lockfile ----------------------------------
+FROM base AS deps
+COPY package.json yarn.lock .yarnrc.yml ./
+RUN yarn workspaces focus --all --production
+
+# --- build: every dependency, since the Znight compiler, Vite and TypeScript run here ---------------
+FROM base AS build
+COPY package.json yarn.lock .yarnrc.yml ./
+RUN yarn install --immutable
+COPY . .
+# generates the DI container (src/.znight), fails on any wiring error, bundles dist/main.js
+RUN yarn build
+
+# --- runtime: the bundle and the production dependencies, as a non-root user ----------------------
+FROM node:24-slim
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=build /app/package.json ./
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
+USER node
+EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \\
+  CMD ["node", "-e", "fetch('http://127.0.0.1:' + (process.env.PORT || 3000) + '/health').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+# exec form: the runtime is PID 1 and receives SIGTERM directly (graceful shutdown)
+CMD ["node", "--enable-source-maps", "dist/main.js"]
 "
 ,
   "README.md": 
@@ -851,6 +1050,7 @@ src/
 test/                          # TestBed (unit) and TestApp (HTTP) tests
 vite.config.ts                 # znight() plugin: generates the container, server build
 znight.config.ts               # compiler options
+Dockerfile                     # production image (multi-stage, non-root)
 \`\`\`
 
 Providers are discovered by the compiler from their decorators: there are no modules to declare.
@@ -861,6 +1061,18 @@ Add code with the generators:
 yarn znight g service users/user        # src/users/user.service.ts
 yarn znight g controller users/user     # src/users/user.controller.ts
 \`\`\`
+
+## Docker
+
+\`\`\`sh
+docker build -t my-service .
+docker run --rm -p 3000:3000 my-service
+\`\`\`
+
+The \`Dockerfile\` builds with every dependency (the Znight compiler runs during the build), then
+ships \`dist/\` with the production dependencies only, on Node.js, as a non-root user, with
+\`NODE_ENV=production\` and a health check on \`GET /health\`. Installs are frozen: the lockfile of
+\`yarn install\` must exist.
 
 ## Tests
 
@@ -1100,6 +1312,20 @@ export default {
 
 exports[`project templates pnpm, hono, messaging only 1`] = `
 {
+  ".dockerignore": 
+"# not part of the image: the build installs and generates everything itself
+node_modules
+dist
+coverage
+**/.znight
+*.log
+.git
+.env
+.env.*
+Dockerfile
+.dockerignore
+"
+,
   ".gitignore": 
 "node_modules
 dist
@@ -1112,6 +1338,44 @@ coverage
 # local environment
 .env.local
 .env.*.local
+"
+,
+  "Dockerfile": 
+"# syntax=docker/dockerfile:1
+# Production image: docker build -t my-service .
+# Installs are frozen: install the dependencies once (pnpm install) so that the lockfile exists.
+
+FROM node:24-slim AS base
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+RUN corepack enable && corepack install --global pnpm@10
+WORKDIR /app
+
+# --- production dependencies only, at the versions of the lockfile ----------------------------------
+FROM base AS deps
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile --prod
+
+# --- build: every dependency, since the Znight compiler, Vite and TypeScript run here ---------------
+FROM base AS build
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+COPY . .
+# generates the DI container (src/.znight), fails on any wiring error, bundles dist/main.js
+RUN pnpm run build
+
+# --- runtime: the bundle and the production dependencies, as a non-root user ----------------------
+FROM node:24-slim
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=build /app/package.json ./
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
+USER node
+EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \\
+  CMD ["node", "-e", "fetch('http://127.0.0.1:' + (process.env.PORT || 3000) + '/health').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+# exec form: the runtime is PID 1 and receives SIGTERM directly (graceful shutdown)
+CMD ["node", "--enable-source-maps", "dist/main.js"]
 "
 ,
   "README.md": 
@@ -1156,6 +1420,7 @@ src/
 test/                          # TestBed (unit) and TestApp (HTTP) tests
 vite.config.ts                 # znight() plugin: generates the container, server build
 znight.config.ts               # compiler options
+Dockerfile                     # production image (multi-stage, non-root)
 \`\`\`
 
 Providers are discovered by the compiler from their decorators: there are no modules to declare.
@@ -1166,6 +1431,18 @@ Add code with the generators:
 pnpm znight g service users/user        # src/users/user.service.ts
 pnpm znight g controller users/user     # src/users/user.controller.ts
 \`\`\`
+
+## Docker
+
+\`\`\`sh
+docker build -t my-service .
+docker run --rm -p 3000:3000 my-service
+\`\`\`
+
+The \`Dockerfile\` builds with every dependency (the Znight compiler runs during the build), then
+ships \`dist/\` with the production dependencies only, on Node.js, as a non-root user, with
+\`NODE_ENV=production\` and a health check on \`GET /health\`. Installs are frozen: the lockfile of
+\`pnpm install\` must exist.
 
 ## Tests
 
@@ -1448,6 +1725,20 @@ export default {
 
 exports[`project templates npm, node, schedule + openapi 1`] = `
 {
+  ".dockerignore": 
+"# not part of the image: the build installs and generates everything itself
+node_modules
+dist
+coverage
+**/.znight
+*.log
+.git
+.env
+.env.*
+Dockerfile
+.dockerignore
+"
+,
   ".gitignore": 
 "node_modules
 dist
@@ -1462,6 +1753,42 @@ coverage
 .env.*.local
 "
 ,
+  "Dockerfile": 
+"# syntax=docker/dockerfile:1
+# Production image: docker build -t my-service .
+# Installs are frozen: install the dependencies once (npm install) so that the lockfile exists.
+
+FROM node:24-slim AS base
+WORKDIR /app
+
+# --- production dependencies only, at the versions of the lockfile ----------------------------------
+FROM base AS deps
+COPY package.json package-lock.json ./
+RUN npm pkg delete devDependencies && npm ci --omit=dev
+
+# --- build: every dependency, since the Znight compiler, Vite and TypeScript run here ---------------
+FROM base AS build
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY . .
+# generates the DI container (src/.znight), fails on any wiring error, bundles dist/main.js
+RUN npm run build
+
+# --- runtime: the bundle and the production dependencies, as a non-root user ----------------------
+FROM node:24-slim
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=build /app/package.json ./
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
+USER node
+EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \\
+  CMD ["node", "-e", "fetch('http://127.0.0.1:' + (process.env.PORT || 3000) + '/health').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+# exec form: the runtime is PID 1 and receives SIGTERM directly (graceful shutdown)
+CMD ["node", "--enable-source-maps", "dist/main.js"]
+"
+,
   "README.md": 
 "# my-service
 
@@ -1470,7 +1797,7 @@ time** — no \`reflect-metadata\`, errors reported by the compiler with their l
 
 - **HTTP** with \`@znight/http\` (built-in node:http server)
 - **Scheduled jobs** with \`@znight/schedule\` (\`src/app/heartbeat.jobs.ts\`)
-- **OpenAPI** with \`@znight/openapi\` (\`/openapi.json\`, API reference at \`/docs\`, options in \`src/api.ts\`)
+- **OpenAPI** with \`@znight/openapi\` (\`/openapi.json\`, Scalar API reference at \`/docs\`, options in \`src/api.ts\`)
 
 ## Scripts
 
@@ -1508,6 +1835,7 @@ src/
 test/                          # TestBed (unit) and TestApp (HTTP) tests
 vite.config.ts                 # znight() plugin: generates the container, server build
 znight.config.ts               # compiler options
+Dockerfile                     # production image (multi-stage, non-root)
 \`\`\`
 
 Providers are discovered by the compiler from their decorators: there are no modules to declare.
@@ -1519,6 +1847,18 @@ npx znight g service users/user        # src/users/user.service.ts
 npx znight g controller users/user     # src/users/user.controller.ts
 npx znight g job reports/digest        # src/reports/digest.jobs.ts
 \`\`\`
+
+## Docker
+
+\`\`\`sh
+docker build -t my-service .
+docker run --rm -p 3000:3000 my-service
+\`\`\`
+
+The \`Dockerfile\` builds with every dependency (the Znight compiler runs during the build), then
+ships \`dist/\` with the production dependencies only, on Node.js, as a non-root user, with
+\`NODE_ENV=production\` and a health check on \`GET /health\`. Installs are frozen: the lockfile of
+\`npm install\` must exist.
 
 ## Tests
 
@@ -1679,8 +2019,8 @@ const app = await Application.create({
     // before HttpPlugin: plugins stop in reverse order, so HTTP stops first, then running jobs drain
     SchedulePlugin.configure(),
     HttpPlugin.configure({ port: Number(process.env.PORT ?? 3000) }),
-    // GET /openapi.json and the API reference at /docs (document options: src/api.ts)
-    OpenApiPlugin.configure(),
+    // GET /openapi.json and the API reference at /docs, with Scalar (document options: src/api.ts)
+    OpenApiPlugin.configure({ ui: 'scalar' }),
   ],
 })
 
@@ -1833,9 +2173,570 @@ export default {
 }
 `;
 
+exports[`project templates npm, fastify, observability + openapi (swagger) + graphql + websocket 1`] = `
+{
+  ".dockerignore": 
+"# not part of the image: the build installs and generates everything itself
+node_modules
+dist
+coverage
+**/.znight
+*.log
+.git
+.env
+.env.*
+Dockerfile
+.dockerignore
+"
+,
+  ".gitignore": 
+"node_modules
+dist
+coverage
+*.log
+
+# generated by the Znight compiler (znight generate, vite build, bun test)
+.znight
+
+# local environment
+.env.local
+.env.*.local
+"
+,
+  "Dockerfile": 
+"# syntax=docker/dockerfile:1
+# Production image: docker build -t my-service .
+# Installs are frozen: install the dependencies once (npm install) so that the lockfile exists.
+
+FROM node:24-slim AS base
+WORKDIR /app
+
+# --- production dependencies only, at the versions of the lockfile ----------------------------------
+FROM base AS deps
+COPY package.json package-lock.json ./
+RUN npm pkg delete devDependencies && npm ci --omit=dev
+
+# --- build: every dependency, since the Znight compiler, Vite and TypeScript run here ---------------
+FROM base AS build
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY . .
+# generates the DI container (src/.znight), fails on any wiring error, bundles dist/main.js
+RUN npm run build
+
+# --- runtime: the bundle and the production dependencies, as a non-root user ----------------------
+FROM node:24-slim
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=build /app/package.json ./
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
+USER node
+EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \\
+  CMD ["node", "-e", "fetch('http://127.0.0.1:' + (process.env.PORT || 3000) + '/health').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+# exec form: the runtime is PID 1 and receives SIGTERM directly (graceful shutdown)
+CMD ["node", "--enable-source-maps", "dist/main.js"]
+"
+,
+  "README.md": 
+"# my-service
+
+A [Znight](https://github.com/znight-org/znight) application: dependency injection resolved at **build
+time** — no \`reflect-metadata\`, errors reported by the compiler with their location.
+
+- **HTTP** with \`@znight/http\` (fastify adapter)
+- **Observability** with \`@znight/observability\` (structured logs, metrics, traces)
+- **OpenAPI** with \`@znight/openapi\` (\`/openapi.json\`, Swagger UI API reference at \`/docs\`, options in \`src/api.ts\`)
+- **GraphQL** with \`@znight/graphql\` (code-first: the schema is derived from \`src/app/greeting.resolver.ts\`)
+- **WebSocket** with \`@znight/websocket\` (\`src/app/greeting.gateway.ts\`, on the HTTP port at \`/ws\`)
+
+## Scripts
+
+| Command | Description |
+| --- | --- |
+| \`npm run dev\` | Build in watch mode and restart the application on every change |
+| \`npm run build\` | Production build (\`dist/main.js\`) |
+| \`npm run start\` | Run the production build |
+| \`npm run test\` | Run the tests |
+| \`npm run typecheck\` | Generate the container, then type-check with \`tsc\` |
+| \`npm run generate\` | Generate \`src/.znight/container.generated.ts\` (\`znight generate --check\` in CI) |
+| \`npm run openapi\` | Write \`openapi.json\` (commit it; \`npm run openapi:check\` in CI) |
+
+\`\`\`sh
+npm run dev
+curl localhost:3000/health
+curl localhost:3000/greetings/Ada?excited=true
+curl -X POST localhost:3000/greetings -H 'content-type: application/json' -d '{"name":"Grace"}'
+curl localhost:3000/openapi.json        # the API reference is at http://localhost:3000/docs
+curl localhost:3000/graphql -H 'content-type: application/json' -d '{"query":"{ greeting(name: \\"Ada\\") { message } }"}'
+\`\`\`
+
+## Project structure
+
+\`\`\`txt
+src/
+├─ main.ts                    # Application.create() + plugins + start()
+├─ api.ts                     # @OpenApiDocument: title, tags, security of openapi.json
+├─ .znight/                   # generated DI container (git-ignored)
+└─ app/
+   ├─ greeting.controller.ts   # @Controller: /greetings routes
+   ├─ greeting.gateway.ts      # @Gateway: the /ws WebSocket endpoint
+   ├─ greeting.resolver.ts     # @Resolver: the greeting GraphQL query
+   ├─ greeting.schemas.ts      # Zod schemas
+   ├─ greeting.service.ts      # @Injectable
+   └─ health.controller.ts     # GET /health
+test/                          # TestBed (unit) and TestApp (HTTP) tests
+vite.config.ts                 # znight() plugin: generates the container, server build
+znight.config.ts               # compiler options
+Dockerfile                     # production image (multi-stage, non-root)
+\`\`\`
+
+Providers are discovered by the compiler from their decorators: there are no modules to declare.
+Its options live in \`znight.config.ts\`, read by the \`znight()\` Vite plugin (builds and Vitest) and \`znight generate\`.
+Add code with the generators:
+
+\`\`\`sh
+npx znight g service users/user        # src/users/user.service.ts
+npx znight g controller users/user     # src/users/user.controller.ts
+\`\`\`
+
+## Docker
+
+\`\`\`sh
+docker build -t my-service .
+docker run --rm -p 3000:3000 my-service
+\`\`\`
+
+The \`Dockerfile\` builds with every dependency (the Znight compiler runs during the build), then
+ships \`dist/\` with the production dependencies only, on Node.js, as a non-root user, with
+\`NODE_ENV=production\` and a health check on \`GET /health\`. Installs are frozen: the lockfile of
+\`npm install\` must exist.
+
+## Tests
+
+Vitest uses \`vite.config.ts\`, so the \`znight()\` plugin regenerates the container before the tests.
+
+## Learn more
+
+- [Znight documentation](https://github.com/znight-org/znight#readme)
+"
+,
+  "package.json": 
+"{
+  "name": "my-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "znight dev",
+    "build": "znight build",
+    "start": "znight start",
+    "generate": "znight generate",
+    "typecheck": "znight generate && tsc --noEmit",
+    "test": "vitest run",
+    "openapi": "znight openapi",
+    "openapi:check": "znight openapi --check"
+  },
+  "dependencies": {
+    "@znight/core": "^0.1.0",
+    "@znight/graphql": "^0.1.0",
+    "@znight/http": "^0.1.0",
+    "@znight/observability": "^0.1.0",
+    "@znight/openapi": "^0.1.0",
+    "@znight/websocket": "^0.1.0",
+    "fastify": "^5.12.7",
+    "graphql": "^17.0.2",
+    "ws": "^8.22.0",
+    "zod": "^4.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@znight/cli": "^0.1.0",
+    "@znight/compiler": "^0.1.0",
+    "@znight/testing": "^0.1.0",
+    "typescript": "^7.0.0",
+    "vite": "^8.0.0",
+    "vitest": "^4.1.0"
+  }
+}
+"
+,
+  "src/api.ts": 
+"import { OpenApiDocument } from '@znight/openapi'
+
+/**
+ * my-service
+ *
+ * The HTTP API of my-service. Title and description of the OpenAPI document come from this
+ * comment, the version from package.json.
+ */
+@OpenApiDocument({
+  tags: [{ name: 'Greeting', description: 'Greetings' }],
+})
+export class Api {}
+"
+,
+  "src/app/greeting.controller.ts": 
+"import { Body, Controller, Get, Param, Post, Query } from '@znight/http'
+
+import { CreateGreeting } from './greeting.schemas.js'
+import { GreetingService } from './greeting.service.js'
+
+@Controller('/greetings')
+export class GreetingController {
+  constructor(private readonly greetings: GreetingService) {}
+
+  /** GET /greetings/Ada?excited=true: route and query parameters are coerced to their types. */
+  @Get('/:name')
+  greet(@Param('name') name: string, @Query('excited') excited?: boolean): { message: string } {
+    return { message: this.greetings.greet(name, excited) }
+  }
+
+  /** POST /greetings {"name": "Ada"}: the body is validated by the schema (400 otherwise). */
+  @Post()
+  create(@Body(CreateGreeting) input: CreateGreeting): { message: string } {
+    return { message: this.greetings.greet(input.name, input.excited) }
+  }
+}
+"
+,
+  "src/app/greeting.gateway.ts": 
+"import { Gateway, OnMessage, Payload } from '@znight/websocket'
+
+import { CreateGreeting } from './greeting.schemas.js'
+import { GreetingService } from './greeting.service.js'
+
+/**
+ * WebSocket gateway on ws://localhost:3000/ws, served by the HTTP server. Frames are JSON: the
+ * request {"event": "greet", "data": {"name": "Ada"}, "id": 1} is answered with
+ * {"id": 1, "data": {"message": "Hello, Ada."}}.
+ */
+@Gateway('/ws')
+export class GreetingGateway {
+  constructor(private readonly greetings: GreetingService) {}
+
+  /** The payload is validated by the schema (a BAD_REQUEST error reply otherwise). */
+  @OnMessage('greet')
+  greet(@Payload(CreateGreeting) input: CreateGreeting): { message: string } {
+    return { message: this.greetings.greet(input.name, input.excited) }
+  }
+}
+"
+,
+  "src/app/greeting.resolver.ts": 
+"import { Args, Query, Resolver } from '@znight/graphql'
+
+import { GreetingService } from './greeting.service.js'
+
+/** A greeting. */
+export interface Greeting {
+  readonly message: string
+}
+
+/**
+ * GraphQL resolver (code-first): the compiler derives the schema from the TypeScript types and the
+ * JSDoc, \`type Query { greeting(name: String!): Greeting! }\` here.
+ */
+@Resolver()
+export class GreetingResolver {
+  constructor(private readonly greetings: GreetingService) {}
+
+  /**
+   * Greets someone.
+   * @param name Who to greet.
+   */
+  @Query()
+  greeting(@Args('name') name: string): Greeting {
+    return { message: this.greetings.greet(name) }
+  }
+}
+"
+,
+  "src/app/greeting.schemas.ts": 
+"import { z } from 'zod'
+
+/** Body of POST /greetings. */
+export const CreateGreeting = z.object({
+  name: z.string().trim().min(1).max(100),
+  excited: z.boolean().default(false),
+})
+export type CreateGreeting = z.output<typeof CreateGreeting>
+"
+,
+  "src/app/greeting.service.ts": 
+"import { Injectable } from '@znight/core'
+import { Logger } from '@znight/observability'
+
+@Injectable()
+export class GreetingService {
+  // dependencies are resolved at build time from the parameter types
+  constructor(
+    private readonly logger: Logger,
+  ) {}
+
+  greet(name: string, excited = false): string {
+    this.logger.debug('Greeting', { name, excited })
+    return \`\${'Hello'}, \${name}\${excited ? '!' : '.'}\`
+  }
+}
+"
+,
+  "src/app/health.controller.ts": 
+"import { Controller, Get } from '@znight/http'
+
+@Controller('/health')
+export class HealthController {
+  /** GET /health */
+  @Get()
+  check(): { status: 'ok'; uptime: number } {
+    return { status: 'ok', uptime: Math.round(process.uptime()) }
+  }
+}
+"
+,
+  "src/main.ts": 
+"import { Application } from '@znight/core'
+import { GraphQLPlugin } from '@znight/graphql'
+import { HttpPlugin } from '@znight/http'
+import { fastifyAdapter } from '@znight/http/fastify'
+import { ObservabilityPlugin } from '@znight/observability'
+import { OpenApiPlugin } from '@znight/openapi'
+import { WebSocketPlugin } from '@znight/websocket'
+
+import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
+
+const app = await Application.create({
+  metadata: __ZNIGHT_METADATA__,
+  plugins: [
+    // first, so that its hooks wrap everything: request logs, metrics (with prom-client), traces
+    ObservabilityPlugin.configure({
+      logging: {
+        name: 'my-service',
+      },
+      // metrics: {
+      //   // options of the metrics registry
+      // },
+      // tracing: {
+      //   // options of the tracer
+      // },
+    }),
+    HttpPlugin.configure({ adapter: fastifyAdapter(), port: Number(process.env.PORT ?? 3000) }),
+    // GET /openapi.json and the API reference at /docs, with Swagger UI (document options: src/api.ts)
+    OpenApiPlugin.configure({ ui: 'swagger' }),
+    // POST /graphql, GET /graphql (GraphiQL in development): the schema is derived from the resolvers
+    GraphQLPlugin.configure(),
+    // WebSocket gateways on the HTTP server's port (ws on Node.js, Bun's own WebSocket on Bun)
+    WebSocketPlugin.configure(),
+  ],
+})
+
+// SIGINT / SIGTERM stop the application gracefully (in-flight requests are drained)
+await app.start()
+"
+,
+  "test/greeting.controller.test.ts": 
+"import { afterEach, beforeEach, describe, expect, test } from 'vitest'
+import { HttpPlugin } from '@znight/http'
+import { ObservabilityPlugin } from '@znight/observability'
+import { TestApp } from '@znight/testing'
+
+import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+
+// TestApp starts the application (without signal handlers) and sends requests in memory
+describe('GreetingController', () => {
+  let app: TestApp
+
+  beforeEach(async () => {
+    app = await TestApp.create({
+      metadata,
+      plugins: [
+        ObservabilityPlugin.configure({ logging: { level: 'silent' }, metrics: false }),
+        HttpPlugin.configure({ port: 0 }),
+      ],
+    })
+  })
+
+  afterEach(async () => {
+    await app.close()
+  })
+
+  test('GET /greetings/:name', async () => {
+    const response = await app.inject({ method: 'GET', url: '/greetings/Ada?excited=true' })
+
+    expect(response.status).toBe(200)
+    expect(response.json()).toEqual({ message: 'Hello, Ada!' })
+  })
+
+  test('POST /greetings validates the body', async () => {
+    const created = await app.inject({ method: 'POST', url: '/greetings', body: { name: 'Grace' } })
+    expect(created.status).toBe(201)
+    expect(created.json()).toEqual({ message: 'Hello, Grace.' })
+
+    const invalid = await app.inject({ method: 'POST', url: '/greetings', body: { name: '' } })
+    expect(invalid.status).toBe(400)
+  })
+})
+"
+,
+  "test/greeting.gateway.test.ts": 
+"import { describe, expect, test } from 'vitest'
+import { HttpPlugin } from '@znight/http'
+import { ObservabilityPlugin } from '@znight/observability'
+import { TestApp } from '@znight/testing'
+import { WebSocketPlugin } from '@znight/websocket'
+
+import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+
+// app.connect() opens an in-memory connection, through the real handshake
+describe('GreetingGateway', () => {
+  test('answers "greet" requests', async () => {
+    const app = await TestApp.create({
+      metadata,
+      plugins: [
+        ObservabilityPlugin.configure({ logging: { level: 'silent' }, metrics: false }),
+        HttpPlugin.configure({ port: 0 }),
+        WebSocketPlugin.configure(),
+      ],
+    })
+    try {
+      const client = await app.connect('/ws')
+
+      expect(await client.request('greet', { name: 'Ada', excited: true })).toEqual({ message: 'Hello, Ada!' })
+      await expect(client.request('greet', { name: '' })).rejects.toMatchObject({ code: 'BAD_REQUEST' })
+      await client.close()
+    } finally {
+      await app.close()
+    }
+  })
+})
+"
+,
+  "test/greeting.resolver.test.ts": 
+"import { describe, expect, test } from 'vitest'
+import { GraphQLPlugin } from '@znight/graphql'
+import { executeOperation } from '@znight/graphql/testing'
+import { HttpPlugin } from '@znight/http'
+import { ObservabilityPlugin } from '@znight/observability'
+import { TestApp } from '@znight/testing'
+
+import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+
+// executeOperation() sends the operation through the whole HTTP pipeline, in memory
+describe('GreetingResolver', () => {
+  test('query { greeting }', async () => {
+    const app = await TestApp.create({
+      metadata,
+      plugins: [
+        ObservabilityPlugin.configure({ logging: { level: 'silent' }, metrics: false }),
+        HttpPlugin.configure({ port: 0 }),
+        GraphQLPlugin.configure(),
+      ],
+    })
+    try {
+      const response = await executeOperation(app, { query: '{ greeting(name: "Ada") { message } }' })
+
+      expect(response.status).toBe(200)
+      expect(response.errors).toBeUndefined()
+      expect(response.data).toEqual({ greeting: { message: 'Hello, Ada.' } })
+    } finally {
+      await app.close()
+    }
+  })
+})
+"
+,
+  "test/greeting.service.test.ts": 
+"import { describe, expect, test } from 'vitest'
+import { Logger } from '@znight/observability'
+import { TestBed } from '@znight/testing'
+
+import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { GreetingService } from '../src/app/greeting.service.js'
+
+// TestBed builds GreetingService with its generated factory and auto-mocks its dependencies
+describe('GreetingService', () => {
+  test('greets', async () => {
+    const { instance } = await TestBed.create(GreetingService, {
+      metadata,
+    })
+
+    expect(instance.greet('Ada')).toBe('Hello, Ada.')
+    expect(instance.greet('Ada', true)).toBe('Hello, Ada!')
+  })
+
+  test('logs every greeting', async () => {
+    const { instance, mocks } = await TestBed.create(GreetingService, { metadata })
+
+    instance.greet('Grace')
+
+    // Logger is provided by ObservabilityPlugin at runtime: TestBed injects an auto-mock
+    expect(mocks.get(Logger).debug).toHaveBeenCalledWith('Greeting', { name: 'Grace', excited: false })
+  })
+})
+"
+,
+  "tsconfig.json": 
+"{
+  "compilerOptions": {
+    "target": "ES2024",
+    "lib": ["ES2024", "ESNext.Disposable"],
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "moduleDetection": "force",
+    "types": ["node"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    // Znight decorators are TypeScript decorators: no emitDecoratorMetadata nor reflect-metadata
+    "experimentalDecorators": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    // vite.config.ts imports ./znight.config.ts (also loaded as is by Node.js and Bun)
+    "allowImportingTsExtensions": true
+  },
+  "include": ["src", "test", "vite.config.ts", "znight.config.ts"]
+}
+"
+,
+  "vite.config.ts": 
+"import { znight } from '@znight/compiler'
+import { defineConfig } from 'vite'
+
+import options from './znight.config.ts'
+
+// znight() generates the dependency injection container at build time and configures a server
+// build: src/main.ts -> dist/main.js (Node.js 24 target, source maps).
+export default defineConfig({
+  plugins: [znight(options)],
+})
+"
+,
+  "znight.config.ts": 
+"import type { ZnightOptions } from '@znight/compiler'
+
+// Options of the Znight compiler. The znight() Vite plugin (vite.config.ts, also used by Vitest)
+// and \`znight generate\` read them, so they all generate the same container.
+// https://github.com/znight-org/znight/tree/main/packages/compiler#options
+export default {
+  // reportUnused: true, // warn about providers nothing uses (ZNIGHT019)
+} satisfies ZnightOptions
+"
+,
+}
+`;
+
 exports[`znight new creates a project from flags 1`] = `
 [
+  ".dockerignore",
   ".gitignore",
+  "Dockerfile",
   "README.md",
   "bunfig.toml",
   "package.json",
@@ -1843,12 +2744,16 @@ exports[`znight new creates a project from flags 1`] = `
   "src/app/app.config.ts",
   "src/app/greeting.consumer.ts",
   "src/app/greeting.controller.ts",
+  "src/app/greeting.gateway.ts",
+  "src/app/greeting.resolver.ts",
   "src/app/greeting.schemas.ts",
   "src/app/greeting.service.ts",
   "src/app/health.controller.ts",
   "src/app/heartbeat.jobs.ts",
   "src/main.ts",
   "test/greeting.controller.test.ts",
+  "test/greeting.gateway.test.ts",
+  "test/greeting.resolver.test.ts",
   "test/greeting.service.test.ts",
   "test/heartbeat.jobs.test.ts",
   "tsconfig.json",

@@ -3,7 +3,7 @@
  *
  * znight new → znight g → znight generate (--check) → znight openapi (--check) → tsc --noEmit →
  * znight build --openapi (the `znight()` and `openapi()` Vite plugins) → znight start + HTTP requests
- * (and /openapi.json, /docs) → bun test (the `@znight/compiler/bun` preload, TestBed / TestApp, as
+ * (and /openapi.json, /docs, /graphql, the /ws gateway) → bun test (the `@znight/compiler/bun` preload, TestBed / TestApp, as
  * many passing tests as generated) → znight dev (restart on change, last good process kept on a
  * compile error).
  *
@@ -142,6 +142,24 @@ async function waitForOutput(process: LongRunning, needle: string, count = 1, ti
   }
 }
 
+/** Sends a "greet" request to the gateway of the application; resolves with the reply frame. */
+function greetOverWebSocket(url: string): Promise<unknown> {
+  return new Promise((resolvePromise, reject) => {
+    const socket = new WebSocket(url)
+    const timer = setTimeout(() => reject(new Error(`no reply from ${url}`)), 10_000)
+    socket.addEventListener('open', () => socket.send(JSON.stringify({ event: 'greet', data: { name: 'Ada' }, id: 1 })))
+    socket.addEventListener('message', event => {
+      clearTimeout(timer)
+      resolvePromise(JSON.parse(String(event.data)))
+      socket.close()
+    })
+    socket.addEventListener('error', () => {
+      clearTimeout(timer)
+      reject(new Error(`WebSocket error on ${url}`))
+    })
+  })
+}
+
 /** Links a package into the application's `node_modules`. */
 function link(name: string, target: string): void {
   const path = join(APP, 'node_modules', name)
@@ -180,12 +198,21 @@ const WORKSPACE_PACKAGES = [
   'compiler',
   'config',
   'core',
+  'graphql',
   'http',
   'messaging',
   'observability',
   'openapi',
   'schedule',
   'testing',
+  'websocket',
+]
+/** Third-party dependencies of the generated package.json, linked from the package that tests with them. */
+const THIRD_PARTY: readonly (readonly [name: string, from: string])[] = [
+  ['zod', 'http'],
+  ['fastify', 'http'],
+  ['graphql', 'graphql'],
+  ['ws', 'websocket'],
 ]
 
 describe.skipIf(!enabled)('scaffolded application (ZNIGHT_CLI_E2E=1)', () => {
@@ -215,7 +242,7 @@ describe.skipIf(!enabled)('scaffolded application (ZNIGHT_CLI_E2E=1)', () => {
     for (const name of WORKSPACE_PACKAGES) {
       link(`@znight/${name}`, join(REPO, 'packages', name))
     }
-    link('zod', packageDirectory('zod', join(REPO, 'packages/http')))
+    for (const [name, from] of THIRD_PARTY) link(name, packageDirectory(name, join(REPO, 'packages', from)))
     link('vite', packageDirectory('vite', CLI_ROOT))
     // tsc resolves the workspace packages to their sources, like the tests of the repository
     const tsconfig = readFileSync(join(APP, 'tsconfig.json'), 'utf8').replace(
@@ -224,7 +251,7 @@ describe.skipIf(!enabled)('scaffolded application (ZNIGHT_CLI_E2E=1)', () => {
     )
     writeFileSync(join(APP, 'tsconfig.json'), tsconfig)
     // the linked workspace packages stay external in the bundle (like dependencies installed from npm)
-    const external = `ssr: { external: ${JSON.stringify([...WORKSPACE_PACKAGES.map(name => `@znight/${name}`), 'zod'])} }`
+    const external = `ssr: { external: ${JSON.stringify([...WORKSPACE_PACKAGES.map(name => `@znight/${name}`), ...THIRD_PARTY.map(([name]) => name)])} }`
     writeFileSync(
       join(APP, VITE_CONFIG),
       `import { mergeConfig } from 'vite'\nimport base from './vite.config.ts'\n\nexport default mergeConfig(base, { ${external} })\n`,
@@ -317,6 +344,13 @@ describe.skipIf(!enabled)('scaffolded application (ZNIGHT_CLI_E2E=1)', () => {
         const docs = await fetch(`${base}/docs`)
         expect(docs.status).toBe(200)
         expect(docs.headers.get('content-type')).toContain('text/html')
+        const graphql = await post('/graphql', { query: '{ greeting(name: "Ada") { message } }' })
+        expect(graphql.status).toBe(200)
+        expect(await graphql.json()).toEqual({ data: { greeting: { message: 'Hello, Ada.' } } })
+        expect(await greetOverWebSocket(`ws://127.0.0.1:${port}/ws`)).toEqual({
+          id: 1,
+          data: { message: 'Hello, Ada.' },
+        })
       } catch (error) {
         throw new Error(`${String(error)}\n--- znight start output ---\n${app.output()}`)
       } finally {
