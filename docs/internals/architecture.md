@@ -3007,7 +3007,8 @@ interface ScheduleMetadata {
   their leases are neither released nor extended (a run whose job had not started yet, still
   waiting for its lease, is dropped at once, without waiting for the store, and releases a lease
   that comes later). A `stop()` called from inside a run does not wait for it. `onDispose` clears the timers and unbinds the registry; without a previous `onStop` (a
-  failed start), it also aborts the runs in flight (`shutdown`) and abandons them. List
+  failed start), it also aborts the runs in flight (`shutdown`): their lease is no longer extended
+  nor watched, and is released when the run settles. List
   `SchedulePlugin` before `HttpPlugin`: plugins stop in reverse order, so HTTP drains first.
 - `SchedulerRegistry`: `jobs()`, `get(name)`, `has(name)`, `addCron` / `addInterval` /
   `addTimeout(name, schedule, handler, options?)` (validated at once: ZNIGHT040, ZNIGHT041,
