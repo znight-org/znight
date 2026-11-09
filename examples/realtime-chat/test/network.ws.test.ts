@@ -5,7 +5,7 @@ import { connectWebSocket } from '@znight/testing'
 
 import { __ZNIGHT_METADATA__ } from '../src/.znight/container.generated.js'
 import { plugins } from '../src/plugins.js'
-import { BOB_KEY } from './support/app.js'
+import { BOB_KEY, TEST_CONFIG } from './support/app.js'
 import { describe, expect, test as it } from 'bun:test'
 
 describe('over the network', () => {
@@ -14,7 +14,7 @@ describe('over the network', () => {
       metadata: __ZNIGHT_METADATA__,
       logger: silentLogger,
       shutdown: { signals: false },
-      plugins: plugins({ port: 0 }),
+      plugins: plugins({ port: 0, config: TEST_CONFIG }),
     })
     await app.start()
     try {

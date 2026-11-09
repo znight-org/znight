@@ -55,9 +55,8 @@ The application itself runs on Node.js 24+ or Bun 1.3+ (`npm run dev` works too)
 README lists the endpoints with `curl` commands and the configuration variables.
 
 All examples except `realtime-chat` use `@znight/core`, `@znight/config` and
-`@znight/observability`; `realtime-chat` uses `@znight/core` without config or observability. Every
-example has
-`@znight/compiler`, `@znight/cli` and `@znight/testing` as development dependencies. The lists below
+`@znight/observability`; `realtime-chat` uses `@znight/core` and `@znight/config` without
+observability. Every example has `@znight/compiler`, `@znight/cli` and `@znight/testing` as development dependencies. The lists below
 name the other packages.
 
 ## rest-api
@@ -149,8 +148,8 @@ Libraries: Hono, PGlite, Zod; Testcontainers for `bun run test:integration` (Doc
 `HttpPlugin` server on one port, plus a binary price ticker.
 
 - Gateways with Zod payloads, replies, rooms and broadcasts encoded once.
-- The handshake is an HTTP request: the global `AuthGuard` checks an API key, or a single-use
-  ticket for browsers; the request scope is the connection.
+- The handshake is an HTTP request: the global `AuthGuard` checks an API key (from a required
+  `CHAT_KEYS` secret), or a single-use ticket for browsers; the request scope is the connection.
 - A handshake guard (five tabs per user), a message guard reading `@Roles` on one event, access
   decisions checked at build time.
 - A raw gateway sending binary frames at the client's pace, with a `4404` close for unknown symbols.

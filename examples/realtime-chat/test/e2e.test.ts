@@ -67,7 +67,14 @@ describe.skipIf(!ENABLED)('end to end (production build)', () => {
       const port = await freePort()
       const child = spawn(runtime, ['dist/main.js'], {
         cwd: ROOT,
-        env: { ...process.env, NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(port), NO_COLOR: '1' },
+        env: {
+          ...process.env,
+          NODE_ENV: 'production',
+          HOST: '127.0.0.1',
+          PORT: String(port),
+          NO_COLOR: '1',
+          CHAT_KEYS: 'alice:alice-key:moderator,bob:bob-key',
+        },
         stdio: ['ignore', 'pipe', 'pipe'],
       })
       running.push(child)

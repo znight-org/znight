@@ -40,7 +40,15 @@ bun run --cwd examples/realtime-chat dev        # http://localhost:3000, ws://lo
 bun run --cwd examples/realtime-chat test
 ```
 
-API keys come from `CHAT_KEYS` (default `alice:alice-key:moderator,bob:bob-key`).
+API keys come from `CHAT_KEYS` (`name:key[:role...]`, comma-separated), read and validated by
+`ConfigPlugin` (`src/config/chat.config.ts`): without it the application refuses to start
+(`ZNIGHT006`). `bun run dev` reads `alice:alice-key:moderator,bob:bob-key` from `.env.development`;
+elsewhere, set it in the environment:
+
+```sh
+bun run build
+CHAT_KEYS=alice:change-me:moderator,bob:change-me-too NODE_ENV=production node dist/main.js
+```
 
 ```sh
 curl -X POST localhost:3000/ws/tickets -H 'x-api-key: bob-key'      # { "ticket": "..." }
