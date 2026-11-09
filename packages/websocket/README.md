@@ -163,23 +163,23 @@ each recipient applies its own backpressure policy. Rooms are per gateway and pe
 
 `WebSocketPlugin.configure(options | (container) => options)` (name `websocket`):
 
-| Option               | Default                                                            | Description                                                                                                       |
-| -------------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
-| `transport`          | `'auto'`                                                           | `wsTransport()` (`@znight/websocket/ws`) or `bunTransport()` (`@znight/websocket/bun`)                            |
-| `origins`            | `'same-origin'`                                                    | `'*'`, exact origins and anchored `RegExp`s, or `(origin, ctx) => boolean`; checked first (`403`)                 |
-| `maxPayload`         | `'1mb'`                                                            | Largest inbound message (`1009`); a gateway's own `maxPayload` overrides it                                       |
-| `maxConnections`     | `Infinity`                                                         | Open connections per process (handshakes in flight count); above, `503` with `retry-after: 1`                     |
-| `maxPendingMessages` | `32`                                                               | Inbound queue per connection before reading pauses                                                                |
-| `backpressure`       | `{ limit: '1mb', onLimit: 'close' }`                               | Outbound buffer per connection: close with `1013`, or `'drop'` frames                                             |
-| `heartbeat`          | `{ intervalMs: 30_000 }`                                           | `false` disables it; silent connections are terminated after two intervals (not while reading is paused)          |
-| `handshakeTimeoutMs` | `10_000`                                                           | `408` for handshakes whose guards did not answer (`ctx.signal` aborts, `kind: 'expired'`)                         |
-| `handlerTimeoutMs`   | `30_000`                                                           | Per message and `@OnConnect`: `TIMEOUT`, `ctx.signal` aborted                                                     |
-| `closeTimeoutMs`     | `2_000`                                                            | Wait for the client's close frame before terminating                                                              |
-| `codec`              | `jsonCodec`                                                        | Codec of `events` gateways (`WsCodec`: `{ decode(frame, binary), encode(message) }`); JSON text frames by default |
-| `messageGuards`      | `[]`                                                               | Global `WsGuard`s (classes or instances)                                                                          |
-| `exceptionMappers`   | `[]`                                                               | `WsExceptionMapper`s: `map(error, ctx) → WsException \| undefined`                                                |
-| `exposeErrors`       | `false`                                                            | Send the message of unexpected errors                                                                             |
-| `shutdown`           | `{ code: 1001, reason: 'Server shutting down', timeoutMs: 3_000 }` | Graceful shutdown: close frames, then terminate                                                                   |
+| Option               | Default                                                            | Description                                                                                                               |
+| -------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
+| `transport`          | `'auto'`                                                           | `wsTransport()` (`@znight/websocket/ws`) or `bunTransport()` (`@znight/websocket/bun`)                                    |
+| `origins`            | `'same-origin'`                                                    | `'*'`, exact origins and anchored `RegExp`s, or `(origin, ctx) => boolean`; checked first (`403`)                         |
+| `maxPayload`         | `'1mb'`                                                            | Largest inbound message (`1009`); a gateway's own `maxPayload` overrides it                                               |
+| `maxConnections`     | `Infinity`                                                         | Open connections per process (handshakes in flight count); above, `503` with `retry-after: 1`                             |
+| `maxPendingMessages` | `32`                                                               | Inbound queue per connection before reading pauses                                                                        |
+| `backpressure`       | `{ limit: '1mb', onLimit: 'close' }`                               | Outbound buffer per connection: close with `1013`, or `'drop'` frames                                                     |
+| `heartbeat`          | `{ intervalMs: 30_000 }`                                           | `false` disables it; silent connections are terminated after two intervals (paused reading: after three without progress) |
+| `handshakeTimeoutMs` | `10_000`                                                           | `408` for handshakes whose guards did not answer (`ctx.signal` aborts, `kind: 'expired'`)                                 |
+| `handlerTimeoutMs`   | `30_000`                                                           | Per message and `@OnConnect`: `TIMEOUT`, `ctx.signal` aborted                                                             |
+| `closeTimeoutMs`     | `2_000`                                                            | Wait for the client's close frame before terminating                                                                      |
+| `codec`              | `jsonCodec`                                                        | Codec of `events` gateways (`WsCodec`: `{ decode(frame, binary), encode(message) }`); JSON text frames by default         |
+| `messageGuards`      | `[]`                                                               | Global `WsGuard`s (classes or instances)                                                                                  |
+| `exceptionMappers`   | `[]`                                                               | `WsExceptionMapper`s: `map(error, ctx) → WsException \| undefined`                                                        |
+| `exposeErrors`       | `false`                                                            | Send the message of unexpected errors                                                                                     |
+| `shutdown`           | `{ code: 1001, reason: 'Server shutting down', timeoutMs: 3_000 }` | Graceful shutdown: close frames, then terminate                                                                           |
 
 A codec's `decode` returns a failure (`{ error: 'BAD_FRAME', message, id }`) for a frame it cannot
 read. One that throws instead is tolerated: the frame is answered with `BAD_FRAME` and the error is

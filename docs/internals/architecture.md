@@ -3673,7 +3673,9 @@ are ZNIGHT050):
   of the process), and `conn.drained()` resolves below a quarter of it.
 - A heartbeat timer (one per plugin, `unref()`ed) pings the connections of `node` transports and
   terminates those silent since the previous tick (`initiator: 'heartbeat'`), except while the
-  server paused their reading (`maxPendingMessages`: pongs cannot be read); Bun pings by itself
+  server paused their reading (`maxPendingMessages`: pongs cannot be read) and their handlers make
+  progress: paused for more than two ticks in a row without a message dispatched or a handler
+  settled, a connection is terminated too (`initiator: 'heartbeat'`); Bun pings by itself
   (`idleTimeout`, `sendPings`).
 - `onHttpDrain()`, `onStop()` and `onDispose()` share one idempotent drain: refuse handshakes,
   close every connection with `shutdown.code` / `reason`, wait up to `shutdown.timeoutMs`, then

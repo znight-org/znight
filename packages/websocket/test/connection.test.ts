@@ -250,6 +250,51 @@ describe('heartbeat', () => {
     await conn.finished
   })
 
+  it('terminates a paused connection whose handlers make no progress for more than two ticks', async () => {
+    const { impl, recorded } = driver()
+    const conn = new WsConnectionImpl({
+      id: 'c6',
+      gateway: '/chat',
+      handshake,
+      protocol: '',
+      limits: { ...LIMITS, maxPendingMessages: 2 },
+      rooms: new RoomRegistry<WsConnectionImpl>(),
+      driver: impl,
+    })
+    const events = conn.socketEvents()
+    const calls: string[] = []
+    conn.start({
+      bufferedAmount: 0,
+      extensions: '',
+      send: () => 'sent',
+      ping: () => calls.push('ping'),
+      pause: () => calls.push('pause') > 0,
+      resume: () => calls.push('resume'),
+      close: (code, reason) => events.close(code, reason),
+      terminate: () => {
+        calls.push('terminate')
+        events.close(1006, '')
+      },
+    })
+    await Bun.sleep(1)
+    // a handler stuck forever (e.g. on drained() for a client that stopped reading), the queue full
+    events.message('slow', false)
+    events.message('a', false)
+    events.message('b', false)
+    expect(calls).toEqual(['pause'])
+    conn.heartbeat() // progress: 'slow' was dispatched since the previous tick
+    conn.heartbeat() // stalled 1
+    conn.heartbeat() // stalled 2
+    expect(conn.readyState).toBe('open')
+    conn.heartbeat() // stalled 3: the slot is reclaimed
+    expect(calls).toContain('terminate')
+    expect(conn.readyState).not.toBe('open')
+    expect(conn.signal.aborted).toBe(true) // the stuck handler is told to stop
+    recorded.release()
+    await conn.finished
+    expect(recorded.closes).toEqual([{ code: 1006, reason: '', initiator: 'heartbeat' }])
+  })
+
   it('resolves drained() once the buffer falls below limit / 4, even when the transport reports no drain there', async () => {
     const { impl } = driver()
     const conn = new WsConnectionImpl({
