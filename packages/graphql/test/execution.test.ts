@@ -144,17 +144,27 @@ describe('execution', () => {
     await using booted = await boot(metadata())
     const executor = executorOf(booted.plugin)
     // comments do not count toward maxTokens: a valid document can carry most of the body limit
-    for (let i = 0; i < 50; i++) {
-      const padded = await executor.execute({ query: `{ __typename } #${i}${'x'.repeat(90_000)}` })
+    for (let i = 0; i < 20; i++) {
+      const padded = await executor.execute({ query: `{ __typename } #${i}${'x'.repeat(140_000)}` })
       expect(padded.status).toBe(200)
     }
     expect(executor.cachedDocuments).toBe(0)
+    // a large pretty-printed operation (about 20 KB, within the limits) is still cached
+    const fields = Array.from(
+      { length: 25 },
+      (_, i) =>
+        `${' '.repeat(40)}# field ${i}: ${'documented at length '.repeat(36)}\n${' '.repeat(40)}f${i}: __typename`,
+    )
+    const pretty = `query Large {\n${fields.join('\n')}\n}`
+    expect(pretty.length).toBeGreaterThan(20_000)
+    expect((await executor.execute({ query: pretty })).status).toBe(200)
+    expect(executor.cachedDocuments).toBe(1)
     // documents just under the per-document limit fill the budget, not 1000 entries
-    for (let i = 0; i < 600; i++) {
-      await executor.execute({ query: `{ __typename } #${String(i).padStart(4, '0')}${'x'.repeat(16_000)}` })
+    for (let i = 0; i < 100; i++) {
+      await executor.execute({ query: `{ __typename } #${String(i).padStart(4, '0')}${'x'.repeat(130_000)}` })
     }
     expect(executor.cachedCharacters).toBeLessThanOrEqual(8 * 1024 * 1024)
-    expect(executor.cachedDocuments).toBeLessThan(600)
+    expect(executor.cachedDocuments).toBeLessThan(100)
     // a short document is still cached and shared afterwards
     await executor.execute({ query: '{ hot: hello }' })
     const first = seen?.document
