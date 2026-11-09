@@ -3239,7 +3239,10 @@ below; absent: the built-in transport); unknown keys and invalid values are ZNIG
   do not count toward `maxTokens`: a text longer than 16 KiB characters is not kept (it is parsed
   and validated on every request), and the oldest entries go when the kept text would exceed
   8 MiB characters. The `GraphQLContext` is seeded in the scope and passed as
-  `contextValue`, with the request's `ctx.signal` as `abortSignal`. Subscriptions use
+  `contextValue`, with the request's `ctx.signal` as `abortSignal` (Impl.: through a stand-in that
+  follows `ctx.signal` only while graphql-js listens to it, from the moment the execution is pending,
+  or from its start when an asynchronous `graphql:operation` wrapper delayed it, until it settles).
+  Subscriptions use
   `createSourceEventStream` and `executeSubscriptionEvent` with fresh loaders per event; past
   `subscriptions.maxActive`, a subscription is rejected with 503. The source event stream MUST be
   started before the SSE response starts or `plugin.subscribe()` resolves (its first `next()` is
@@ -3358,8 +3361,9 @@ interface GraphQLDriver {
   route-mounted driver), else in a scope of its own (for a subscription, its whole life); the
   `GraphQLContext` is seeded in it and passed as `contextValue`; `args.contextValue` is
   `GraphQLContext.serverContext`; `transport` defaults to `'http'`; the signal is
-  `options.signal`, else `args.abortSignal`, else the HTTP request's (followed by an execution only
-  once it is pending, like the built-in transport). Resolver pipelines, loaders (renewed per
+  `options.signal`, else `args.abortSignal`, else the HTTP request's, or the plugin's outside a
+  request (followed by an execution only while it is pending, like the built-in transport: no
+  listener stays on the signal once the execution settles). Resolver pipelines, loaders (renewed per
   subscription event), error mappers, result mappers and masking are those of the built-in
   transport; errors are returned as `GraphQLError` instances with the formatted message,
   `locations`, `path` and `extensions` and no `originalError`; variable errors give a result

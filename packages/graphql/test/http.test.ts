@@ -220,6 +220,35 @@ describe('POST', () => {
     })
     expect(await res.json()).toEqual({ data: { slow: 'slow' } })
   })
+
+  it('stops an asynchronous query delayed by an asynchronous graphql:operation wrapper', async () => {
+    await using app = await startLibrary()
+    const outcomes: string[] = []
+    app.app.hooks.wrap('graphql:operation', async (_event, next) => {
+      // a quota check, an audit write: graphql-js starts after follow() was called
+      await Promise.resolve()
+      try {
+        await next()
+        outcomes.push('completed')
+      } catch (error) {
+        outcomes.push('aborted')
+        throw error
+      }
+    })
+    const abort = new AbortController()
+    const pending = fetch(app.url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ query: '{ slow(ms: 5000) }' }),
+      signal: abort.signal,
+    }).catch(() => undefined)
+    for (let attempt = 0; attempt < 100 && app.http.inflight === 0; attempt++) await Bun.sleep(5)
+    abort.abort()
+    await pending
+    for (let attempt = 0; attempt < 200 && outcomes.length === 0; attempt++) await Bun.sleep(5)
+    // graphql-js was cancelled, instead of completing with the resolver's error for nobody
+    expect(outcomes).toEqual(['aborted'])
+  })
 })
 
 describe('GET', () => {
