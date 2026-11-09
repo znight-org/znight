@@ -62,9 +62,10 @@ The CLI asks for the HTTP adapter and the features, then creates a small API wit
 [getting started guide](./docs/guide/getting-started.md) walks through every file.
 
 > [!NOTE]
-> Znight `0.1.0` is its first public release, on npm under the `@znight` scope. Every package is
-> documented and tested on Node.js 24 and Bun, with runnable [example applications](#examples).
-> Before 1.0, minor versions may still change APIs.
+> Znight is published on npm under the `@znight` scope, every package under one version (the
+> [roadmap](./docs/roadmap.md) describes what each release brought). Every package is documented and
+> tested on Node.js 24 and Bun, with runnable [example applications](#examples). Before 1.0, minor
+> versions may still change APIs.
 
 ## Why compile-time DI?
 
@@ -209,7 +210,8 @@ cron expressions: every diagnostic has a stable `ZNIGHTxxx` code, explained in t
   (`@Named`, `@Inject`), `@Primary`, `@Optional`, `Lazy<T>` and multi (`T[]`) dependencies;
   `@Factory`/`@Provides` for third-party objects, with async singletons started concurrently and
   disposed on shutdown; `singleton`, `request` and `transient` scopes; lifecycle hooks; method
-  interceptors (AOP).
+  interceptors (AOP); custom parameter decorators (`createParamDecorator`) for routes, GraphQL fields
+  and message handlers, checked at build time.
 - **The compiler.** One analysis for every workflow: the Vite plugin (`vite build`, Vitest), the Bun
   preload (`bun test`, `bun --watch`) and the CLI (`znight generate --check` in CI). Provider
   libraries shared across a monorepo, optional pruning of unused providers, deterministic output.
@@ -238,6 +240,14 @@ cron expressions: every diagnostic has a stable `ZNIGHTxxx` code, explained in t
 - **Scheduling.** `@Cron`, `@Interval` and `@Timeout` jobs validated at build time, time zones,
   overlap control, dynamic jobs, a lock store for one runner across instances and a virtual clock
   for tests.
+- **GraphQL.** Code-first (the schema derived from your TypeScript types) or schema-first (resolvers
+  checked against your `.graphql` files), validated at build time; loaders against N+1, subscriptions
+  over Server-Sent Events, the HTTP access decorators and guards on fields; the built-in transport or
+  GraphQL Yoga.
+- **WebSockets.** Gateways served by the HTTP server: handshakes through the HTTP guards, validated
+  events, replies, rooms and broadcasts, backpressure, on `ws` or natively on Bun.
+- **Application events.** `@OnEvent` listeners wired at build time, published through the injectable
+  `EventPublisher`, handled inline in the publisher's scope or detached.
 - **Testing.** `TestBed` builds one provider and auto-mocks its dependencies; `TestApp` runs the real
   application with in-memory HTTP requests and event streams. Works with `bun:test`, Vitest and Jest.
 - **CLI.** `znight new`, code generators (`znight g service`, `controller`, `consumer`, `job`...),
@@ -404,28 +414,30 @@ with `bun run docs:dev`.
 - **Concepts**: [Dependency injection](./docs/guide/dependency-injection.md) ·
   [Scopes](./docs/guide/scopes.md) · [Lifecycle](./docs/guide/lifecycle.md) ·
   [The compiler](./docs/guide/compiler.md) · [Plugins](./docs/guide/plugins.md) ·
-  [Method interceptors](./docs/guide/aop.md)
+  [Method interceptors](./docs/guide/aop.md) ·
+  [Custom parameter decorators](./docs/guide/custom-parameters.md)
 - **Guides**: [Security](./docs/guide/security.md) · [Data access](./docs/guide/data-access.md) ·
-  [Scheduling](./docs/guide/scheduling.md) · [Testing](./docs/guide/testing.md) ·
-  [Deployment](./docs/guide/deployment.md)
+  [Scheduling](./docs/guide/scheduling.md) · [GraphQL](./docs/guide/graphql.md) ·
+  [WebSockets](./docs/guide/websockets.md) · [Application events](./docs/guide/events.md) ·
+  [Testing](./docs/guide/testing.md) · [Deployment](./docs/guide/deployment.md)
 - **Reference**: [Packages](./docs/packages/index.md) · [Decorators](./docs/reference/decorators.md) ·
   [Error codes](./docs/reference/error-codes.md), and the README of each package in
   [`packages/`](./packages)
 - **Specification**: [Architecture](./docs/internals/architecture.md), the contract between the
   compiler and the runtime packages
+- **Project**: [Examples](./docs/examples.md) · [Benchmarks](./docs/benchmarks.md) ·
+  [Roadmap](./docs/roadmap.md)
 
 ## Roadmap
 
-`0.2`, with the design documents in [`rfcs/`](./rfcs/README.md) (details on the
-[roadmap page](./docs/roadmap.md)):
-
-- **GraphQL**, code-first, with the schema derived from TypeScript types at build time
-  ([RFC 0005](./rfcs/0005-graphql.md)), or schema-first, with resolvers checked against the SDL
-  ([RFC 0007](./rfcs/0007-graphql-schema-first.md)): implemented in
-  [`@znight/graphql`](./packages/graphql), see the [GraphQL guide](./docs/guide/graphql.md).
-
-**WebSocket** gateways served by the HTTP server ([RFC 0003](./rfcs/0003-websocket.md)) are implemented
-in [`@znight/websocket`](./packages/websocket): see the [WebSockets guide](./docs/guide/websockets.md).
+Each release is described on the [roadmap page](./docs/roadmap.md), with the design documents in
+[`rfcs/`](./rfcs/README.md): 0.1 the first ten packages; 0.2 [`@znight/graphql`](./packages/graphql),
+code-first ([RFC 0005](./rfcs/0005-graphql.md)) and schema-first
+([RFC 0007](./rfcs/0007-graphql-schema-first.md)); 0.3 the GraphQL drivers
+([RFC 0009](./rfcs/0009-graphql-drivers.md)); 0.4 custom parameter decorators
+([RFC 0010](./rfcs/0010-custom-parameter-decorators.md)); 0.5 [`@znight/events`](./packages/events)
+([RFC 0011](./rfcs/0011-application-events.md)); 0.6 [`@znight/websocket`](./packages/websocket)
+([RFC 0003](./rfcs/0003-websocket.md)).
 
 Planned, without a date yet: a dedicated **cache** package. Today, caching
 is a method interceptor: see the [recipe](./docs/guide/aop.md#cache).

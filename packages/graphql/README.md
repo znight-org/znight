@@ -1055,9 +1055,13 @@ GraphQLPlugin.configure({ driver: yogaDriver({ plugins: [usePersistedOperations(
   one: `Unexpected error.` with code `INTERNAL_SERVER_ERROR` (its message with `exposeErrors`), a
   500 for a request error.
 - **The Fetch bridge.** On `honoAdapter()` the native Web `Request` is handed to Yoga as is (a `GET`,
-  or a body with a `content-length` within the limit); otherwise a `Request` is built from
-  `HttpContext` with the body read by `ctx.rawBody()`, so a body past `http.bodyLimit` is
-  `HttpPlugin`'s 413 on every adapter. Yoga's `Response` is sent as is by `HttpPlugin`.
+  or a body with a `content-length` within the limit); otherwise a `Request` of Yoga's own Fetch API
+  (`yoga.fetchAPI.Request`) is built from `HttpContext` with the body read by `ctx.rawBody()`, so
+  a body past `http.bodyLimit` is `HttpPlugin`'s 413 on every adapter. Yoga's `Response` is
+  converted for `HttpPlugin`: an identity-encoded UTF-8 JSON, HTML or plain text body is sent as
+  text with its `content-length`; any other body (SSE, compressed or non-UTF-8 bytes) is streamed
+  as a native `ReadableStream`, cancelled when the client leaves; the status, the headers and every
+  `set-cookie` line are kept.
 - **Subscriptions** use Yoga's SSE; the engine caps them (`subscriptions.maxActive`) and ends them
   when `HttpPlugin` starts draining, whatever the plugin order, when Yoga sends `complete` (not the
   built-in transport's `retry` hint); a subscription sent during the drain gets a

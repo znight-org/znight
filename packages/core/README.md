@@ -368,13 +368,17 @@ return what is known (`[]`).
 declared in core, so producers and observers (`@znight/observability`, your plugins) share them
 without depending on each other:
 
-| Hook                | Event                   | Produced by                                                                  |
-| ------------------- | ----------------------- | ---------------------------------------------------------------------------- |
-| `http:request`      | `HttpRequestEvent`      | `@znight/http`, one request                                                  |
-| `messaging:message` | `MessageDeliveryEvent`  | `@znight/messaging`, one delivery                                            |
-| `messaging:publish` | `MessagePublishEvent`   | `@znight/messaging`, one `MessageBroker` publication                         |
-| `schedule:run`      | `ScheduledRunEvent`     | `@znight/schedule`, one occurrence of a job (executed or not, see `outcome`) |
-| `graphql:operation` | `GraphQLOperationEvent` | `@znight/graphql` (RFC 0005), one GraphQL operation                          |
+| Hook                   | Event                      | Produced by                                                                  |
+| ---------------------- | -------------------------- | ---------------------------------------------------------------------------- |
+| `http:request`         | `HttpRequestEvent`         | `@znight/http`, one request                                                  |
+| `messaging:message`    | `MessageDeliveryEvent`     | `@znight/messaging`, one delivery                                            |
+| `messaging:publish`    | `MessagePublishEvent`      | `@znight/messaging`, one `MessageBroker` publication                         |
+| `schedule:run`         | `ScheduledRunEvent`        | `@znight/schedule`, one occurrence of a job (executed or not, see `outcome`) |
+| `graphql:operation`    | `GraphQLOperationEvent`    | `@znight/graphql` (RFC 0005), one GraphQL operation                          |
+| `websocket:message`    | `WebSocketMessageEvent`    | `@znight/websocket` (RFC 0003), one inbound message (`$ping` excluded)       |
+| `websocket:connection` | `WebSocketConnectionEvent` | `@znight/websocket`, a connection opened or closed (emitted only)            |
+| `events:publish`       | `EventPublishEvent`        | `@znight/events` (RFC 0011), one publication with at least one listener      |
+| `events:listener`      | `EventListenerEvent`       | `@znight/events`, one listener invocation, inline or detached                |
 
 `ScheduledRunEvent` carries `job`, `kind` (`cron` / `interval` / `timeout`), `host`, `method`,
 `runId`, `trigger` (`schedule` / `start` / `manual` / `queued`), `scheduledAt` (epoch ms),
@@ -461,6 +465,7 @@ the [architecture specification](../../docs/internals/architecture.md#48-validat
 The catalogue is shared by the compiler and every first-party package. `ZNIGHT001`–`ZNIGHT029`
 belong to the core, the compiler and the features of the first release (`ZNIGHT023`, a missing
 route decision, is reported by `@znight/http`). From `ZNIGHT030`, each package owns a block of ten:
-`ZNIGHT030`–`039` `@znight/openapi`, `ZNIGHT040`–`049` `@znight/schedule`, `ZNIGHT060`–`069`
-`@znight/graphql` (RFC 0005; `050`–`059` are reserved for `@znight/websocket`, RFC 0003).
+`ZNIGHT030`–`039` `@znight/openapi`, `ZNIGHT040`–`049` `@znight/schedule`, `ZNIGHT050`–`059`
+`@znight/websocket` (RFC 0003), `ZNIGHT060`–`069` `@znight/graphql` (RFC 0005, RFC 0007),
+`ZNIGHT070`–`079` `@znight/events` (RFC 0011).
 Inside a block, codes are allocated in order; third-party packages get no `ZNIGHT` code.

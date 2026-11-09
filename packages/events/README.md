@@ -6,8 +6,16 @@ of its base classes) run. Listeners are found and checked by the compiler, not r
 (RFC 0011).
 
 ```sh
-npm install @znight/events
+# bun
+bun add @znight/core @znight/events
+bun add -d @znight/compiler vite
+
+# npm
+npm install @znight/core @znight/events
+npm install -D @znight/compiler vite
 ```
+
+Runs on Node.js >= 24 and Bun >= 1.3 (ESM only), with no third-party dependency.
 
 ## Usage
 
@@ -105,8 +113,8 @@ form) are build errors (ZNIGHT070).
 | `publish(event)` | Runs inline listeners, then schedules detached ones; resolves when the inline phase is done                |
 | `emit(event)`    | Fire and forget: the whole publication runs on a macrotask in a fresh scope, every error goes to `onError` |
 
-Both throw a `TypeError` for a value that is not a class instance, and reject with ZNIGHT021 before
-`EventsPlugin` is bootstrapped (in a constructor) and once it is disposed.
+`publish()` rejects and `emit()` throws: with a `TypeError` for a value that is not a class instance,
+and with ZNIGHT021 before `EventsPlugin` is bootstrapped (in a constructor) and once it is disposed.
 
 ## Plugin options
 

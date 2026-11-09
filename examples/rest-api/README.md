@@ -175,6 +175,8 @@ src/
 │  ├─ book.repository.ts            # interface BookRepository
 │  ├─ drizzle-book.repository.ts    # @Injectable implements BookRepository
 │  ├─ book.service.ts               # use cases (@Logged, @Metric)
+│  ├─ book.events.ts                # BookAdded event
+│  ├─ book.listeners.ts             # @OnEvent listeners (inline and detached)
 │  ├─ book.controller.ts            # /books routes
 │  └─ image-type.ts                 # cover content sniffing
 ├─ health/health.controller.ts      # GET /health
@@ -194,6 +196,7 @@ export class BookService {
   constructor(
     private readonly books: BookRepository, // an interface
     private readonly logger: Logger, // provided at runtime by ObservabilityPlugin
+    private readonly events: EventPublisher, // provided at runtime by EventsPlugin
   ) {}
 }
 ```
@@ -207,11 +210,12 @@ From these types alone, the compiler generates (excerpt of `src/.znight/containe
   deps: [
     'src/books/drizzle-book.repository.ts#DrizzleBookRepository', // the only class implementing BookRepository
     '@znight/observability#Logger',
+    '@znight/events#EventPublisher',
     '@znight/observability#LoggedInterceptor', // @Logged
     '@znight/observability#MetricInterceptor', // @Metric
   ],
-  factory: d => new BookService(d[0], d[1]),
-  interceptors: { ['add']: { async: true, chain: [{ dep: 2, options: { ... } }, { dep: 3, options: { ... } }] } },
+  factory: d => new BookService(d[0], d[1], d[2]),
+  interceptors: { ['add']: { async: true, chain: [{ dep: 3, options: { ... } }, { dep: 4, options: { ... } }] } },
 },
 ```
 
@@ -447,5 +451,5 @@ framework from its sources; a project created with `znight new` does not need th
 - `vite.config.ts`: `ssr.external` keeps the linked `@znight/*` packages out of the bundle (packages
   installed from npm are external anyway);
 - `test` scripts pass `--conditions=@znight/source` to `bun test`;
-- the `dev` script sets `NODE_ENV=development` explicitly: `znight dev` should do it, but currently
-  starts the application with the `NODE_ENV=production` set by Vite during the build.
+- the `dev` script sets `NODE_ENV=development` explicitly; `znight dev` already defaults it to
+  `development`, and a project created with `znight new` runs it without the prefix.

@@ -374,5 +374,5 @@ framework from its sources; a project created with `znight new` does not need th
 - `test` scripts pass `--conditions=@znight/source` to `bun test`;
 - `app.inject()` on the built-in node adapter uses `light-my-request`, resolved here from the
   `@znight/http` workspace: add it to your `devDependencies` (`bun add -d light-my-request`);
-- the `dev` script sets `NODE_ENV=development` explicitly: `znight dev` should do it, but currently
-  starts the application with the `NODE_ENV=production` set by Vite during the build.
+- the `dev` script sets `NODE_ENV=development` explicitly; `znight dev` already defaults it to
+  `development`, and a project created with `znight new` runs it without the prefix.

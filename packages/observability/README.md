@@ -290,7 +290,7 @@ final `Application stopped` or `The application stopped with errors`) is flushed
 written: the pending request keeps the process alive until it is delivered. Standalone, call
 `await logger.close()` (or `transport.close()`) before exiting.
 
-### Request, message, job and GraphQL logs
+### Request, message, job, GraphQL, WebSocket and event logs
 
 The plugin writes one entry per HTTP request (`request completed` / `request failed`), per message
 delivery (`message processed`, `message failed, will be retried`, `message dead-lettered`) and per
@@ -306,6 +306,7 @@ operation failed`):
 | `jobs`              | `true`  | `false`, or `{ level?, ignore?(event) }`. Failed runs are `error` (with `err`), skipped `warn`, not acquired (another instance holds the lock) `debug`.               |
 | `graphql`           | `false` | `true`, or `{ level?, ignore?(event) }`. `partial` and `rejected` operations are `warn`, `error` is `error`.                                                          |
 | `websocket`         | `true`  | `false`, or `{ level?, messages?, ignore?(event) }`: one entry per closed connection, `error` entries for failed messages, `debug` per message with `messages: true`. |
+| `events`            | `true`  | `false`, or `{ ignore?(event) }` (the event's class name): one `debug` entry `event published` per publication of `@znight/events`.                                   |
 | `replaceCoreLogger` | `true`  | Route the framework's own logs (core, plugins) through the logger, with `component: 'znight'`.                                                                        |
 
 ```ts
@@ -427,7 +428,7 @@ after the plugin). Dynamic job names can be unbounded
 ```yaml
 # Prometheus alert: the daily digest has not succeeded for 26 hours
 - alert: DigestStale
-  expr: time() - znight_schedule_last_success_timestamp_seconds{job="digest.daily"} > 26 * 3600
+  expr: time() - max(schedule_last_success_timestamp_seconds{job="digest.daily"}) > 26 * 3600
 ```
 
 ### GraphQL metrics
@@ -475,6 +476,7 @@ guard refused it), `unhandled` or `timeout`; `initiator` is `client`, `server`, 
 | `schedule`       | `true`         | `false`, or `{ buckets?, latenessBuckets?, ignore?(event), maxJobs? }`                                                    |
 | `graphql`        | `true`         | `false`, or `{ buckets?, ignore?(event), maxOperationNames? }`                                                            |
 | `websocket`      | `true`         | `false`, or `{ buckets?, ignore?(event), maxEvents? }`                                                                    |
+| `events`         | `true`         | `false`, or `{ ignore?(event) }` (the event's class name)                                                                 |
 | `registry`       | a new registry | An existing `prom-client` registry (e.g. `client.register`, the global one)                                               |
 | `client`         | loaded lazily  | The `prom-client` module, for exotic bundling setups                                                                      |
 
@@ -603,16 +605,18 @@ export class PaymentService {
 
 ### Tracing options
 
-| Option           | Default                   | Description                                       |
-| ---------------- | ------------------------- | ------------------------------------------------- |
-| `tracerProvider` | the global one            | A specific `TracerProvider`                       |
-| `propagator`     | global, else built-in W3C | `TextMapPropagator` used for `inject` / `extract` |
-| `name`/`version` | `@znight/observability`   | Instrumentation scope                             |
-| `http`           | `true`                    | `false`, or `{ ignore?(event), responseHeader? }` |
-| `messaging`      | `true`                    | `false`, or `{ ignore?(event), system? }`         |
-| `publish`        | `true`                    | `false`, or `{ ignore?(event), system? }`         |
-| `schedule`       | `true`                    | `false`, or `{ ignore?(event) }`                  |
-| `graphql`        | `true`                    | `false`, or `{ ignore?(event), document? }`       |
+| Option           | Default                   | Description                                                                                   |
+| ---------------- | ------------------------- | --------------------------------------------------------------------------------------------- |
+| `tracerProvider` | the global one            | A specific `TracerProvider`                                                                   |
+| `propagator`     | global, else built-in W3C | `TextMapPropagator` used for `inject` / `extract`                                             |
+| `name`/`version` | `@znight/observability`   | Instrumentation scope                                                                         |
+| `http`           | `true`                    | `false`, or `{ ignore?(event), responseHeader? }`                                             |
+| `messaging`      | `true`                    | `false`, or `{ ignore?(event), system? }`                                                     |
+| `publish`        | `true`                    | `false`, or `{ ignore?(event), system? }`                                                     |
+| `schedule`       | `true`                    | `false`, or `{ ignore?(event) }`                                                              |
+| `graphql`        | `true`                    | `false`, or `{ ignore?(event), document? }`                                                   |
+| `websocket`      | `true`                    | `false`, or `{ ignore?(event) }`: a `SERVER` span per inbound WebSocket message               |
+| `events`         | `true`                    | `false`, or `{ ignore?(event) }` (the event's class name): spans per publication and listener |
 
 `tracing: false` disables the automatic spans; the injectable `Tracer` and `@Traced()` keep working.
 

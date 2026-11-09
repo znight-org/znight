@@ -1662,9 +1662,7 @@ export class StatusPlugin implements Plugin, PluginHttpRoutes {
 
 ### Upgrade routes
 
-<!-- TODO(api): verify against implementation -->
-
-A plugin accepting WebSocket connections (`@znight/websocket`, RFC 0003, in progress) implements
+A plugin accepting WebSocket connections (`@znight/websocket`, RFC 0003) implements
 `PluginHttpUpgrades`: `httpUpgrades(context)` returns `{ routes, bunWebSocket? }`, called once in
 `HttpPlugin.onBootstrap` after `httpRoutes()`. Each `PluginUpgradeRoute` has a `path`, a `name`,
 optional `meta`, `guards`, `timeoutMs` and `precheck`, and an `accept(ctx, upgrade)` that completes
@@ -1929,13 +1927,13 @@ for await (const item of parseSseStream(response.body!)) {
 
 ## Lifecycle and graceful shutdown
 
-| Plugin hook   | What happens                                                                                                                                                                                                          |
-| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `register`    | Declares the request-scoped externals `HttpContext` and `RequestId`, registers the plugin                                                                                                                             |
-| `onBootstrap` | Resolves options, controllers, guards, interceptors and mappers; collects plugin routes; checks route decisions (ZNIGHT023); validates and registers routes                                                           |
-| `onStart`     | Listens (logs the address)                                                                                                                                                                                            |
-| `onStop`      | Closes the event streams gracefully (see below), stops accepting connections, closes idle ones, waits for in-flight requests and streamed or file responses (`drainTimeoutMs`), then closes the remaining connections |
-| `onDispose`   | Closes the server and the adapter                                                                                                                                                                                     |
+| Plugin hook   | What happens                                                                                                                                                                                                           |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `register`    | Declares the request-scoped externals `HttpContext` and `RequestId`, registers the plugin                                                                                                                              |
+| `onBootstrap` | Resolves options, controllers, guards, interceptors and mappers; collects plugin routes and upgrade routes (`httpRoutes()`, then `httpUpgrades()`); checks route decisions (ZNIGHT023); validates and registers routes |
+| `onStart`     | Listens (logs the address)                                                                                                                                                                                             |
+| `onStop`      | Closes the event streams gracefully (see below), stops accepting connections, closes idle ones, waits for in-flight requests and streamed or file responses (`drainTimeoutMs`), then closes the remaining connections  |
+| `onDispose`   | Closes the server and the adapter                                                                                                                                                                                      |
 
 While draining, responses carry `connection: close`. Event streams never end by themselves, so
 `onStop` closes them first: their `ctx.signal` aborts (`'shutdown'`), their sources get

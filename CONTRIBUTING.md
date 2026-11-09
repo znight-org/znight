@@ -74,13 +74,13 @@ The examples that need development settings (credentials, sample data) read them
 
 ```txt
 packages/   the published packages: core, compiler, http, openapi, messaging, schedule, graphql,
-            config, observability, testing, cli (sources in src/, tests in test/)
+            websocket, events, config, observability, testing, cli (sources in src/, tests in test/)
 examples/   runnable example applications, with their tests
 benchmarks/ performance benchmarks against NestJS and others, run by hand (not in CI)
-tests/      repository-wide tests: package boundaries, golden test of the examples
+tests/      repository-wide tests: package boundaries, golden test of the examples, release scripts
 docs/       the documentation site (VitePress); docs/internals/architecture.md is the specification
 rfcs/       design documents for significant changes
-scripts/    repository tooling (brand assets, documentation diagrams)
+scripts/    repository tooling (brand assets, documentation diagrams, release scripts)
 ```
 
 The [full contributing guide](./docs/contributing/index.md#repository-layout) describes each package.

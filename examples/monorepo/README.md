@@ -351,10 +351,13 @@ scopes, qualifiers, `@Primary`, injection points). Library mode records it:
    {
      "name": "@znight-examples/shared",
      "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
-     "dependencies": { "@znight/core": "^0.1.0" },
+     "dependencies": { "@znight/core": "^0.6.1" },
      "znight": { "apiVersion": 1, "providers": "./dist/znight.providers.json" }
    }
    ```
+
+   Before 1.0 a caret range only accepts patch releases of the same minor version: bump it with each
+   Znight minor release.
 
 3. **Consume it**: nothing changes in the application. The compiler finds the providers in the
    declarations (`dist/*.d.ts`), merges the metadata, and binds the library's dependencies against
