@@ -4,12 +4,14 @@ import DefaultTheme from 'vitepress/theme'
 import { h } from 'vue'
 
 import { BenchmarkHighlights } from './benchmark-highlights.ts'
+import { ExampleGrid, HowItWorks, PackageGrid } from './home.ts'
 import { QuickStart } from './quick-start.ts'
 import './custom.css'
 
 /**
  * The default VitePress theme with the Znight brand colors, the create command in the home hero and
- * the benchmark highlights under the home features (`<BenchmarkHighlights />` in pages).
+ * the benchmark highlights under the home features (`<BenchmarkHighlights />` in pages). The home
+ * page sections use `<HowItWorks />`, `<PackageGrid />` and `<ExampleGrid />` (home.ts).
  */
 const theme: Theme = {
   extends: DefaultTheme,
@@ -20,6 +22,9 @@ const theme: Theme = {
     }),
   enhanceApp({ app }) {
     app.component('BenchmarkHighlights', BenchmarkHighlights)
+    app.component('HowItWorks', HowItWorks)
+    app.component('PackageGrid', PackageGrid)
+    app.component('ExampleGrid', ExampleGrid)
   },
 }
 
