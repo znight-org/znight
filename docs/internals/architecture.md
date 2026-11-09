@@ -2931,7 +2931,9 @@ interface ScheduleMetadata {
   `acquire(key, { owner, occurrence, ttlMs })` MUST grant a lease only when no lease is live **and**
   no later-or-equal occurrence of the key was claimed (occurrence fencing: clock skew between
   instances never runs an occurrence twice); a refusal is the outcome `not-acquired`. The lease is
-  extended every `ttl / 3`, one extension at a time; it is lost when `extend()` answers `false`, or
+  extended every `ttl / 3`, one extension at a time, the first one at most halfway between the
+  start of the run and `ttl` after the claim call (so a slow `acquire()` does not lose a healthy
+  lease); it is lost when `extend()` answers `false`, or
   `ttl` after the call of the last successful extension, even while an extension hangs (a
   partitioned client queuing commands): the run is then aborted (`lock-lost`). A store failure
   fails closed (outcome `failed`, no run), and so does an `acquire()` that does not answer within

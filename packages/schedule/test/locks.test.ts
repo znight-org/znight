@@ -146,6 +146,52 @@ describe('leases', () => {
     expect(booted.registry.get('job')?.lastRun).toMatchObject({ outcome: 'completed', aborted: 'lock-lost' })
   })
 
+  it('extends a lease acquired late before it expires (slow acquire)', async () => {
+    const clock = testClock()
+    const inner = memoryLockStore({ clock })
+    const extensions: number[] = []
+    const store: ScheduleLockStore = {
+      name: 'slow',
+      // the store answers 21 s after the claim, within the 30 s ttl
+      acquire: async (key, claim) => {
+        await new Promise(resolve => clock.setTimer(resolve, 21_000))
+        const lease = await inner.acquire(key, claim)
+        return (
+          lease && {
+            extend: ttl => {
+              extensions.push(clock.now())
+              return lease.extend(ttl)
+            },
+            release: () => lease.release(),
+          }
+        )
+      },
+    }
+    let reason: unknown
+    await using booted = await boot({
+      clock,
+      schedule: { lock: { store, ttl: '30s' } },
+      metadata: metadataWith([
+        {
+          name: 'job',
+          kind: 'interval',
+          every: 600_000,
+          run: async ctx => {
+            await new Promise(resolve => clock.setTimer(resolve, 60_000))
+            reason = ctx.signal.aborted ? ctx.signal.reason : undefined
+          },
+        },
+      ]),
+    })
+    await clock.advance('12m')
+    const claimedAt = Date.parse('2026-01-01T00:10:00Z')
+    expect(reason).toBeUndefined()
+    expect(booted.registry.get('job')?.lastRun).toMatchObject({ outcome: 'completed' })
+    expect(booted.registry.get('job')?.lastRun?.aborted).toBeUndefined()
+    expect(extensions[0]).toBeLessThan(claimedAt + 30_000)
+    expect(booted.logs.messages('warn').filter(message => message.includes('lost its lock'))).toEqual([])
+  })
+
   it('retries failed extensions, and gives up once ttl elapsed since the last success', async () => {
     let reason: unknown
     const store: ScheduleLockStore = {

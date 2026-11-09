@@ -993,7 +993,8 @@ export class ScheduleRuntime {
    * answers `false`, or `ttl` elapsed since the last successful extension (counted from the call).
    * The deadline is a timer of its own, so an `extend()` that never answers (a partitioned store
    * client queuing commands) still loses the lease on time. A beat skips the store while the
-   * previous extension is pending.
+   * previous extension is pending. The first beat comes at most halfway to the deadline of the claim,
+   * so a lease acquired late (a slow store) is extended before it expires.
    */
   #heartbeat(run: RunRecord, lease: LockLease, lock: ResolvedLock, claimedAt: number): void {
     const { logger } = this.#services
@@ -1043,19 +1044,17 @@ export class ScheduleRuntime {
       if (extended === true) deadline(calledAt)
       else if (extended === false) lose()
     }
-    const beat = (): void => {
-      run.heartbeat = this.clock.setTimer(
-        () => {
-          run.heartbeat = undefined
-          if (!live()) return
-          beat() // the next beat never waits for this extension
-          if (!extending) void extend()
-        },
-        Math.max(1, Math.floor(ttl / 3)),
-      )
+    const period = Math.max(1, Math.floor(ttl / 3))
+    const beat = (delay: number): void => {
+      run.heartbeat = this.clock.setTimer(() => {
+        run.heartbeat = undefined
+        if (!live()) return
+        beat(period) // the next beat never waits for this extension
+        if (!extending) void extend()
+      }, delay)
     }
     deadline(claimedAt)
-    beat()
+    beat(Math.min(period, Math.max(0, Math.floor((claimedAt + ttl - this.clock.now()) / 2))))
   }
 
   #stopLease(run: RunRecord): void {

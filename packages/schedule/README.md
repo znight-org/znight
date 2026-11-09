@@ -412,7 +412,8 @@ claims occurrence 09:00, runs and releases. The second arrives late, finds 09:00
 is refused (outcome `not-acquired`): no `lockAtLeastFor` guesswork. `ctx.scheduledAt.getTime()` is a
 free fencing token for the job's writes.
 
-- The lease (`ttl`, default 30 s) is extended every `ttl / 3` while the run lasts. It is lost when
+- The lease (`ttl`, default 30 s) is extended every `ttl / 3` while the run lasts (the first time
+  sooner when `acquire()` was slow: at most halfway to the expiry of the claim). It is lost when
   `extend()` answers `false`, or `ttl` after the last successful extension, even while an extension
   hangs (a partitioned client queuing commands): the run's signal is aborted (`'lock-lost'`) when
   another instance may take the lease over.
