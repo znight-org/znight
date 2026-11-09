@@ -177,19 +177,6 @@
   vertical-align: middle;
 }
 
-/* Home call to action */
-.vp-doc .zn-home-cta {
-  margin-top: 48px;
-  padding: 20px 24px;
-  border: 1px solid var(--vp-c-divider);
-  border-radius: 12px;
-  background-color: var(--vp-c-bg-soft);
-}
-
-.vp-doc .zn-home-cta p {
-  margin: 0;
-}
-
 /* Home: the command that creates an application, under the hero actions */
 .zn-quick-start {
   width: 100%;
@@ -475,5 +462,548 @@
 
   .zn-bench-home .zn-bench-value {
     font-size: 84px;
+  }
+}
+
+/*
+ * Home page sections (docs/index.md, pageClass zn-home): section heads, the three steps of "How it
+ * works" (HowItWorks), the package tiles (PackageGrid), the comparison, the terminal, the example
+ * cards (ExampleGrid) and the call to action. Mobile first.
+ */
+.zn-home {
+  --zn-card-radius: 14px;
+  --zn-card-hover-shadow: 0 10px 30px rgba(62, 123, 250, 0.12);
+}
+
+.dark .zn-home {
+  --zn-card-hover-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+/* Section heads: an eyebrow, a centered title and a lead */
+.zn-home .vp-doc .zn-section-head {
+  max-width: 760px;
+  margin: 96px auto 40px;
+  text-align: center;
+}
+
+.zn-home .vp-doc .zn-section-head:first-child {
+  margin-top: 88px;
+}
+
+.zn-home .vp-doc .zn-eyebrow {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--vp-c-brand-1);
+}
+
+.zn-home .vp-doc .zn-section-head h2,
+.zn-home .vp-doc .zn-cta h2 {
+  margin: 10px 0 0;
+  padding: 0;
+  border: none;
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+/* the anchors of centered titles would float at the left edge of the column */
+.zn-home .vp-doc .zn-section-head .header-anchor,
+.zn-home .vp-doc .zn-cta .header-anchor {
+  display: none;
+}
+
+.zn-home .vp-doc .zn-section-head p:not(.zn-eyebrow) {
+  margin: 16px 0 0;
+  font-size: 17px;
+  line-height: 1.6;
+  color: var(--vp-c-text-2);
+}
+
+@media (min-width: 768px) {
+  .zn-home .vp-doc .zn-section-head h2,
+  .zn-home .vp-doc .zn-cta h2 {
+    font-size: 36px;
+  }
+}
+
+/* Lists rendered by the home components: no bullets, no doc spacing */
+.zn-home .vp-doc .zn-steps,
+.zn-home .vp-doc .zn-tiles,
+.zn-home .vp-doc .zn-packages-base-list,
+.zn-home .vp-doc .zn-examples,
+.zn-home .vp-doc .zn-tags {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.zn-home .vp-doc .zn-steps > li,
+.zn-home .vp-doc .zn-tile-item,
+.zn-home .vp-doc .zn-tags > li {
+  margin: 0;
+}
+
+.zn-icon {
+  width: 22px;
+  height: 22px;
+}
+
+/* Cards shared by the steps, the package tiles and the example cards */
+.zn-home .vp-doc .zn-step,
+.zn-home .vp-doc .zn-tile,
+.zn-home .vp-doc .zn-example {
+  border: 1px solid var(--vp-c-divider);
+  border-radius: var(--zn-card-radius);
+  background-color: var(--vp-c-bg-soft);
+}
+
+.zn-home .vp-doc a.zn-tile,
+.zn-home .vp-doc a.zn-example {
+  display: flex;
+  height: 100%;
+  font-weight: 400;
+  color: inherit;
+  text-decoration: none;
+  transition:
+    border-color 0.25s,
+    box-shadow 0.25s,
+    transform 0.25s;
+}
+
+.zn-home .vp-doc a.zn-tile:hover,
+.zn-home .vp-doc a.zn-example:hover {
+  border-color: var(--vp-c-brand-2);
+  box-shadow: var(--zn-card-hover-shadow);
+  transform: translateY(-2px);
+}
+
+.zn-home .vp-doc a.zn-tile:focus-visible,
+.zn-home .vp-doc a.zn-example:focus-visible,
+.zn-home .vp-doc .zn-step-link:focus-visible {
+  outline: 2px solid var(--vp-c-brand-1);
+  outline-offset: 3px;
+}
+
+/* Tags: small chips at the bottom of a card */
+.zn-home .vp-doc .zn-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: auto;
+  padding-top: 14px;
+}
+
+.zn-home .vp-doc .zn-tags > li {
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 20px;
+  color: var(--vp-c-text-2);
+  background-color: var(--vp-c-default-soft);
+}
+
+/* How it works: three numbered steps, side by side from 768px */
+.zn-home .vp-doc .zn-steps {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  margin-bottom: 32px;
+}
+
+.zn-home .vp-doc .zn-step {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 24px;
+}
+
+.zn-step-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.zn-step-number {
+  font-family: var(--vp-font-family-mono);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--vp-c-text-2);
+}
+
+.zn-step-icon,
+.zn-tile-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  color: var(--vp-c-brand-1);
+  background-color: var(--vp-c-brand-soft);
+}
+
+.zn-home .vp-doc .zn-step-title {
+  margin: 20px 0 0;
+  font-size: 18px;
+  line-height: 1.4;
+}
+
+.zn-home .vp-doc .zn-step-text {
+  flex-grow: 1;
+  margin: 8px 0 0;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--vp-c-text-2);
+}
+
+.zn-home .vp-doc .zn-step-link {
+  margin-top: 16px;
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.zn-home .vp-doc .zn-step-link:hover {
+  text-decoration: underline;
+}
+
+@media (min-width: 768px) {
+  .zn-home .vp-doc .zn-steps {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 24px;
+  }
+
+  /* a chevron between two steps */
+  .zn-home .vp-doc .zn-step:not(:last-child)::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    right: -17px;
+    z-index: 1;
+    width: 10px;
+    height: 10px;
+    border-top: 2px solid var(--vp-c-brand-2);
+    border-right: 2px solid var(--vp-c-brand-2);
+    transform: translateY(-50%) rotate(45deg);
+  }
+}
+
+/* Packages: the base on a row framed by the accent gradient, then 1, 2, 3 or 4 tiles per row */
+.zn-home .vp-doc .zn-packages-base {
+  margin-bottom: 16px;
+  padding: 16px;
+  border: 1px solid transparent;
+  border-radius: calc(var(--zn-card-radius) + 6px);
+  background:
+    linear-gradient(var(--vp-c-bg), var(--vp-c-bg)) padding-box,
+    var(--zn-gradient) border-box;
+}
+
+.zn-home .vp-doc .zn-packages-base-label {
+  margin: 0 0 12px 4px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--vp-c-text-2);
+}
+
+.zn-home .vp-doc .zn-packages-base-list,
+.zn-home .vp-doc .zn-tiles,
+.zn-home .vp-doc .zn-examples {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+}
+
+.zn-home .vp-doc a.zn-tile {
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px;
+}
+
+.zn-home .vp-doc a.zn-tile-base {
+  flex-direction: row;
+  align-items: center;
+}
+
+.zn-tile-body {
+  display: flex;
+  flex-grow: 1;
+  flex-direction: column;
+}
+
+.zn-tile-title {
+  font-family: var(--vp-font-family-mono);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--vp-c-text-1);
+}
+
+.zn-tile-scope {
+  font-weight: 500;
+  color: var(--vp-c-text-2);
+}
+
+.zn-tile-text {
+  margin-top: 6px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--vp-c-text-2);
+}
+
+.zn-home .vp-doc a.zn-tile-more {
+  justify-content: center;
+  gap: 8px;
+  border-style: dashed;
+  background-color: transparent;
+}
+
+.zn-home .vp-doc a.zn-tile-more .zn-tile-title {
+  font-family: var(--vp-font-family-base);
+  font-size: 17px;
+}
+
+.zn-tile-more .zn-tile-text {
+  margin-top: 0;
+}
+
+.zn-tile-cta {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--vp-c-brand-1);
+}
+
+@media (min-width: 640px) {
+  .zn-home .vp-doc .zn-packages-base-list,
+  .zn-home .vp-doc .zn-tiles,
+  .zn-home .vp-doc .zn-examples {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 960px) {
+  .zn-home .vp-doc .zn-tiles,
+  .zn-home .vp-doc .zn-examples {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1200px) {
+  .zn-home .vp-doc .zn-tiles {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+/* Why Znight: the comparison spans the column on wide screens (it scrolls on small ones) */
+@media (min-width: 960px) {
+  .zn-home .vp-doc table {
+    display: table;
+    width: 100%;
+  }
+}
+
+.zn-home .vp-doc td:first-child {
+  font-weight: 600;
+  color: var(--vp-c-text-1);
+}
+
+.zn-home .vp-doc th:last-child {
+  color: var(--vp-c-brand-1);
+}
+
+/* The terminal and the data layer: stacked, side by side on wide screens */
+.zn-home .vp-doc .zn-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 48px;
+  margin-top: 96px;
+}
+
+.zn-home .vp-doc .zn-split-item > h3 {
+  margin: 0 0 12px;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.zn-home .vp-doc .zn-split-item > p {
+  color: var(--vp-c-text-2);
+}
+
+@media (min-width: 1280px) {
+  .zn-home .vp-doc .zn-split {
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  }
+}
+
+/* The terminal: a night window in both color schemes */
+.zn-home .vp-doc .zn-terminal {
+  margin-top: 20px;
+  overflow: hidden;
+  border: 1px solid #222c55;
+  border-radius: var(--zn-card-radius);
+  background-color: var(--zn-night-1);
+  box-shadow: 0 18px 50px rgba(11, 16, 32, 0.25);
+}
+
+.zn-home .vp-doc .zn-terminal::before {
+  content: "";
+  display: block;
+  height: 36px;
+  border-bottom: 1px solid #1a2246;
+  background:
+    radial-gradient(circle at 18px 18px, #ff5f57 5px, transparent 6px),
+    radial-gradient(circle at 38px 18px, #febc2e 5px, transparent 6px),
+    radial-gradient(circle at 58px 18px, #28c840 5px, transparent 6px), #10173a;
+}
+
+.zn-home .vp-doc .zn-terminal div[class*="language-"] {
+  --vp-code-copy-code-bg: #172045;
+  --vp-code-copy-code-hover-bg: #1d2853;
+  --vp-code-copy-code-border-color: #2c3660;
+  --vp-code-copy-code-hover-border-color: #3a4572;
+  margin: 0;
+  border-radius: 0;
+  background-color: transparent;
+}
+
+.zn-home .vp-doc .zn-terminal div[class*="language-"] > span.lang {
+  display: none;
+}
+
+.zn-home .vp-doc .zn-terminal .vp-code span {
+  color: #dfe5f7;
+}
+
+.zn-home .vp-doc .zn-terminal pre {
+  font-size: 13px;
+}
+
+/* Example applications: 1, 2 or 3 cards per row */
+.zn-home .vp-doc a.zn-example {
+  flex-direction: column;
+  padding: 20px;
+}
+
+.zn-example-title {
+  font-family: var(--vp-font-family-mono);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--vp-c-brand-1);
+}
+
+.zn-example-text {
+  margin-top: 8px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--vp-c-text-2);
+}
+
+/* Call to action: a night band with the accent glow, the same in both color schemes */
+.zn-home .vp-doc .zn-cta {
+  margin-top: 112px;
+  padding: 56px 24px;
+  /* the edge stays visible on the night background of the dark scheme */
+  border: 1px solid #222c55;
+  border-radius: 24px;
+  text-align: center;
+  color: var(--zn-silver-1);
+  background:
+    radial-gradient(60% 90% at 10% 0%, rgba(62, 123, 250, 0.3), transparent 70%),
+    radial-gradient(55% 80% at 95% 100%, rgba(139, 92, 246, 0.28), transparent 70%),
+    linear-gradient(180deg, var(--zn-night-2) 0%, var(--zn-night-1) 100%);
+}
+
+.zn-home .vp-doc .zn-cta .zn-eyebrow {
+  color: #8aaeff;
+}
+
+.zn-home .vp-doc .zn-cta h2 {
+  color: var(--zn-silver-1);
+}
+
+.zn-home .vp-doc .zn-cta > p:not(.zn-eyebrow) {
+  max-width: 560px;
+  margin: 14px auto 0;
+  font-size: 17px;
+  line-height: 1.6;
+  color: var(--zn-silver-2);
+}
+
+.zn-home .vp-doc .zn-cta-actions p {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+  margin: 32px 0 0;
+}
+
+.zn-home .vp-doc .zn-cta-button {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 22px;
+  border: 1px solid rgba(169, 180, 214, 0.35);
+  border-radius: 999px;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 44px;
+  color: var(--zn-silver-1);
+  text-decoration: none;
+  background-color: rgba(244, 246, 252, 0.06);
+  transition:
+    border-color 0.25s,
+    background-color 0.25s;
+}
+
+.zn-home .vp-doc .zn-cta-button:hover {
+  border-color: rgba(169, 180, 214, 0.7);
+  background-color: rgba(244, 246, 252, 0.12);
+}
+
+.zn-home .vp-doc .zn-cta-button:focus-visible {
+  outline: 2px solid #8aaeff;
+  outline-offset: 3px;
+}
+
+.zn-home .vp-doc .zn-cta-brand {
+  border-color: transparent;
+  color: #fff;
+  background-image: var(--zn-gradient-strong);
+}
+
+.zn-home .vp-doc .zn-cta-brand:hover {
+  border-color: transparent;
+  background-image: linear-gradient(135deg, #3e7bfa 0%, #8b5cf6 100%);
+}
+
+@media (min-width: 768px) {
+  .zn-home .vp-doc .zn-cta {
+    padding: 72px 48px;
+  }
+}
+
+/* No motion for those who asked for less */
+@media (prefers-reduced-motion: reduce) {
+  .VPFeatures .item .VPFeature,
+  .zn-home .vp-doc a.zn-tile,
+  .zn-home .vp-doc a.zn-example,
+  .zn-home .vp-doc .zn-cta-button {
+    transition: none;
+  }
+
+  .zn-home .vp-doc a.zn-tile:hover,
+  .zn-home .vp-doc a.zn-example:hover {
+    transform: none;
   }
 }
