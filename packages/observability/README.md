@@ -299,15 +299,15 @@ acquired`), and, when asked, per GraphQL operation of `@znight/graphql` (`graphq
 completed`, `graphql operation completed with errors`, `graphql operation rejected`, `graphql
 operation failed`):
 
-| Option              | Default | Description                                                                                                                                                           |
-| ------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `requests`          | `true`  | `false`, or `{ level?, ignore?(event) }`. 4xx are `warn`, 5xx `error` (with `err`).                                                                                   |
-| `messages`          | `true`  | `false`, or `{ level?, ignore?(event) }`. Retries are `warn`, dead letters `error`.                                                                                   |
-| `jobs`              | `true`  | `false`, or `{ level?, ignore?(event) }`. Failed runs are `error` (with `err`), skipped `warn`, not acquired (another instance holds the lock) `debug`.               |
-| `graphql`           | `false` | `true`, or `{ level?, ignore?(event) }`. `partial` and `rejected` operations are `warn`, `error` is `error`.                                                          |
-| `websocket`         | `true`  | `false`, or `{ level?, messages?, ignore?(event) }`: one entry per closed connection, `error` entries for failed messages, `debug` per message with `messages: true`. |
-| `events`            | `true`  | `false`, or `{ ignore?(event) }` (the event's class name): one `debug` entry `event published` per publication of `@znight/events`.                                   |
-| `replaceCoreLogger` | `true`  | Route the framework's own logs (core, plugins) through the logger, with `component: 'znight'`.                                                                        |
+| Option              | Default | Description                                                                                                                                                                                                                           |
+| ------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `requests`          | `true`  | `false`, or `{ level?, ignore?(event) }`. 4xx are `warn`, 5xx `error` (with `err`).                                                                                                                                                   |
+| `messages`          | `true`  | `false`, or `{ level?, ignore?(event) }`. Retries are `warn`, dead letters `error`.                                                                                                                                                   |
+| `jobs`              | `true`  | `false`, or `{ level?, ignore?(event) }`. Failed runs are `error` (with `err`), skipped `warn`, not acquired (another instance holds the lock) `debug`.                                                                               |
+| `graphql`           | `false` | `true`, or `{ level?, ignore?(event) }`. `partial` and `rejected` operations are `warn`, `error` is `error`.                                                                                                                          |
+| `websocket`         | `true`  | `false`, or `{ level?, messages?, ignore?(event) }`: one entry per closed connection, `error` entries for failed messages, `debug` per message with `messages: true`.                                                                 |
+| `events`            | `true`  | `false`, or `{ ignore?(event) }` (the event's class name): one `debug` entry `event published` per publication that reaches at least one listener (inline phase duration, `failedListener` and `err` when an inline listener failed). |
+| `replaceCoreLogger` | `true`  | Route the framework's own logs (core, plugins) through the logger, with `component: 'znight'`.                                                                                                                                        |
 
 ```ts
 ObservabilityPlugin.configure({
@@ -404,8 +404,8 @@ them):
 
 Spans: `publish <Event>` around the inline phase and `<Event> → <Class.method>` per listener; detached
 listeners start inside the publication span, so their spans are its children (`tracing.events`).
-Logs: one `debug` entry `event published` per publication (`logging.events`). `traceEvents`,
-`measureEvents` and `logEvents` are exported for custom wiring.
+Logs: one `debug` entry `event published` per publication with at least one listener
+(`logging.events`). `traceEvents`, `measureEvents` and `logEvents` are exported for custom wiring.
 
 ### Scheduled job metrics
 
