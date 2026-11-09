@@ -1,4 +1,5 @@
 import { MAX_TICKETS_PER_USER, TicketStore } from '../src/auth/tickets.js'
+import { BOB_KEY, createApp, ticket } from './support/app.js'
 import { afterEach, describe, expect, test as it, setSystemTime } from 'bun:test'
 
 const BOB = { name: 'bob', roles: [] }
@@ -41,5 +42,19 @@ describe('TicketStore', () => {
     expect(store.consume(tickets[0] ?? '')).toBeUndefined()
     expect(store.consume(tickets.at(-1) ?? '')).toEqual(BOB)
     expect(store.size).toBe(MAX_TICKETS_PER_USER - 1)
+  })
+})
+
+describe('tickets over HTTP', () => {
+  it('work on WebSocket handshakes only, even with an `upgrade` header elsewhere', async () => {
+    await using app = await createApp()
+    const once = await ticket(app, BOB_KEY)
+    const upgrade = { upgrade: 'websocket' }
+    const renew = await app.inject({ method: 'POST', url: `/ws/tickets?ticket=${once}`, headers: upgrade })
+    expect(renew.status).toBe(401)
+    const rooms = await app.inject({ url: `/rooms?ticket=${once}`, headers: upgrade })
+    expect(rooms.status).toBe(401)
+    // the refused requests did not consume it: the handshake still accepts it
+    await (await app.connect('/chat', { query: { ticket: once }, protocols: ['chat.v1'] })).close()
   })
 })

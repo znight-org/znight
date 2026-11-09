@@ -3,7 +3,7 @@ import type { RequestUser } from '../auth/request-user.js'
 import { Gateway, OnConnect, OnMessage, Payload, type WsConnection } from '@znight/websocket'
 import { z } from 'zod'
 
-import { Authenticated } from '../auth/access.js'
+import { Authenticated, TicketAuth } from '../auth/access.js'
 
 export const CursorMove = z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) })
 export type CursorMove = z.output<typeof CursorMove>
@@ -20,6 +20,7 @@ export interface CursorEvents {
  */
 @Gateway({ path: '/rooms/:room/cursor', scope: 'request', backpressure: { limit: '64kb', onLimit: 'drop' } })
 @Authenticated()
+@TicketAuth()
 export class CursorGateway {
   #moves = 0
 

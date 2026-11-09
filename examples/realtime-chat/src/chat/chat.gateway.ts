@@ -16,7 +16,7 @@ import {
   type WsServer,
 } from '@znight/websocket'
 
-import { Authenticated, Roles } from '../auth/access.js'
+import { Authenticated, Roles, TicketAuth } from '../auth/access.js'
 import {
   type ChatConnection,
   type ChatEvents,
@@ -33,6 +33,7 @@ export const MAX_ROOMS_PER_CONNECTION = 20
 
 @Gateway({ path: '/chat', protocols: ['chat.v1'], rateLimit: { messages: 30, intervalMs: 1_000 } })
 @Authenticated() // the handshake's access decision, enforced by the global AuthGuard
+@TicketAuth() // browsers connect with a ticket (`/chat?ticket=...`)
 @UseHandshakeGuard(ConnectionQuotaGuard) // after the global guards: at most 5 tabs per user
 export class ChatGateway {
   readonly #chat: GatewayChannel<ChatEvents>

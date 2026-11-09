@@ -57,7 +57,7 @@ import {
   type WsServer,
 } from '@znight/websocket'
 
-import { Authenticated, Roles } from '../auth/access.js'
+import { Authenticated, Roles, TicketAuth } from '../auth/access.js'
 import {
   type ChatConnection,
   type ChatEvents,
@@ -74,6 +74,7 @@ export const MAX_ROOMS_PER_CONNECTION = 20
 
 @Gateway({ path: '/chat', protocols: ['chat.v1'], rateLimit: { messages: 30, intervalMs: 1_000 } })
 @Authenticated() // the handshake's access decision, enforced by the global AuthGuard
+@TicketAuth() // browsers connect with a ticket (`/chat?ticket=...`)
 @UseHandshakeGuard(ConnectionQuotaGuard) // after the global guards: at most 5 tabs per user
 export class ChatGateway {
   readonly #chat: GatewayChannel<ChatEvents>
@@ -188,8 +189,12 @@ The global `AuthGuard` protects routes **and** handshakes. Browsers cannot set h
 WebSocket, so they ask an authenticated `POST /ws/tickets` for a single-use ticket valid 30 s and
 connect to `/chat?ticket=...`. The ticket store must stay bounded, since clients may never present
 a ticket: [`TicketStore`](../../examples/realtime-chat/src/auth/tickets.ts) drops expired tickets
-and keeps at most ten outstanding tickets per user. The guard accepts tickets on upgrade requests only, so that a ticket
-never works as a URL credential elsewhere.
+and keeps at most ten outstanding tickets per user.
+
+The guard accepts a ticket only on the handshake of a gateway marked `@TicketAuth()`, a route
+decorator read from the matched route, so that a ticket never works as a URL credential elsewhere.
+Do not decide it from the `upgrade` header: the client sets it, and a request to an ordinary route
+carrying `upgrade: websocket` is still served by that route.
 
 ```ts [src/auth/auth.guard.ts]
 import type { ApiKeys } from './api-keys.js'
@@ -199,11 +204,11 @@ import type { TicketStore } from './tickets.js'
 import { Injectable, type Lazy } from '@znight/core'
 import { type CanActivate, type HttpContext, UnauthorizedException } from '@znight/http'
 
-import { Authenticated, Public } from './access.js'
+import { Authenticated, Public, TicketAuth } from './access.js'
 
 /**
  * The global guard of `HttpPlugin`: it protects routes **and** WebSocket handshakes, which are HTTP
- * requests. An API key (`x-api-key`), or a ticket on upgrade requests only.
+ * requests. An API key (`x-api-key`), or a ticket on the handshakes of `@TicketAuth()` gateways only.
  */
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -226,10 +231,10 @@ export class AuthGuard implements CanActivate {
   #identify(ctx: HttpContext) {
     const key = ctx.header('x-api-key')
     if (key !== undefined) return this.keys.identify(key)
-    // tickets are for WebSocket handshakes only: they end up in URLs, never accept them elsewhere
+    // tickets end up in URLs: accept them on the handshakes of @TicketAuth() gateways only, decided by
+    // the matched route (an `upgrade` header is client-controlled and also reaches ordinary routes)
     const ticket = ctx.query['ticket']
-    const upgrade = ctx.header('upgrade')?.toLowerCase() === 'websocket'
-    return upgrade && typeof ticket === 'string' ? this.tickets.consume(ticket) : undefined
+    return TicketAuth.get(ctx) === true && typeof ticket === 'string' ? this.tickets.consume(ticket) : undefined
   }
 }
 ```

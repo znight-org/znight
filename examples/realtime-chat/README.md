@@ -13,8 +13,9 @@ ticker. Data stays in memory.
   rooms.
 - **The handshake is an HTTP request**: the global `AuthGuard` (`src/auth/auth.guard.ts`) protects
   routes and handshakes alike, with an API key (`x-api-key`) or, for browsers, a single-use ticket
-  (`POST /ws/tickets`, then `/chat?ticket=...`). The `TicketStore` stays bounded: expired tickets
-  are dropped and a user holds at most ten outstanding tickets. The request scope is the connection: the
+  (`POST /ws/tickets`, then `/chat?ticket=...`), accepted on the handshakes of `@TicketAuth()`
+  gateways only. The `TicketStore` stays bounded: expired tickets are dropped and a user holds at
+  most ten outstanding tickets. The request scope is the connection: the
   `RequestUser` it fills is there for every message.
 - **Access decisions** (RFC 0001): `@Authenticated()` on the gateway, `@Public()` on the ticker,
   checked at build time.
