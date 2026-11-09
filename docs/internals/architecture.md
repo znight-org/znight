@@ -966,7 +966,9 @@ interface Diagnostic {
   so every tool (`znight generate`, `vite build`, the Bun preload under any `NODE_ENV`, `--check`
   after a build) writes and expects the same files.
   `createCompiler()` keeps the parse cache and the loaded extensions between compiles; changes to
-  `outFile` are ignored.
+  `outFile` are ignored. An incremental compile re-reads the changed files and every cached file
+  that was not an input of the previous compile (it was not watched, so its cache entry is not
+  trusted); unchanged contents keep their parse.
 - `watchFiles` lists every file the result depends on: the scanned sources and every other file the
   analysis read outside `node_modules` (a constant imported from `shared/`, a type of
   `src/types.d.ts`, a workspace package, the input files of the extensions, §6.5), package

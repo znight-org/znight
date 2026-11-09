@@ -151,8 +151,9 @@ export class Project implements ProjectHost {
   /**
    * Brings the project up to date. Without `changes` (or on the first call) everything is
    * re-scanned and every cached file re-read (unchanged contents keep their parse). With `changes`
-   * only the given files are re-read; created/deleted files and config files (package.json,
-   * tsconfig, lockfiles) re-run the scan and clear the resolution caches.
+   * only the given files, and the cached files that were not inputs of the previous compile (no
+   * watcher reports their changes), are re-read; created/deleted files and config files
+   * (package.json, tsconfig, lockfiles) re-run the scan and clear the resolution caches.
    *
    * Per-compile services (symbols, identities, types, evaluation, routes) are always rebuilt.
    */
@@ -166,6 +167,9 @@ export class Project implements ProjectHost {
       clearResolution = this.#initialized
       this.#files.invalidateAll()
     } else {
+      // Watchers only report the inputs of the previous compile: any other cached file (an import
+      // removed then restored, a package declaration no longer used...) may have changed unnoticed.
+      this.#files.invalidateExcept(new Set([...this.#scannedSet, ...this.#loaded]))
       for (const path of changes.changed ?? []) {
         const resolved = this.#normalizePath(path)
         if (isResolutionConfigPath(resolved)) {

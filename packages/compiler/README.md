@@ -538,6 +538,7 @@ parse cache and the loaded compiler extensions between compiles.
 const compiler = createCompiler({ root, mode: 'serve' })
 await compiler.compile() // full
 await compiler.compile({ changed: [file] }) // only `file` is re-read (re-parsed if its content changed)
+// (and cached files the previous compile did not read: no watcher reports their changes)
 await compiler.compile({ added: [file] }) // created / deleted files re-run the globs
 await compiler.generate({ removed: [file] }) // compile + write when changed
 compiler.isOutFile(path) // watchers must ignore the generated module

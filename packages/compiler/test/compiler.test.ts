@@ -415,6 +415,35 @@ export class Named {}
   })
 })
 
+describe('createCompiler() and unwatched files', () => {
+  it('re-reads a file that left the inputs and changed while unwatched', async () => {
+    const NAMED = `import { Injectable } from '@znight/core'
+import { NAME } from '../shared/names.ts'
+@Injectable({ name: NAME })
+export class Named {}
+`
+    const app = tempApp({ 'shared/names.ts': "export const NAME = 'alpha'\n", 'src/named.ts': NAMED })
+    try {
+      const compiler = createCompiler({ root: app.root })
+      const names = `${app.root}/shared/names.ts`
+      const named = `${app.root}/src/named.ts`
+      expect((await compiler.compile()).code).toContain("name: 'alpha'")
+      app.write('src/named.ts', SERVICE)
+      const without = await compiler.compile({ changed: [named] })
+      expect(without.watchFiles).not.toContain(names)
+      // the change is not reported: the file is no longer watched
+      app.write('shared/names.ts', "export const NAME = 'beta'\n")
+      expect(isRelevantChange(compiler, 'changed', names, new Set(without.watchFiles), includeRoots(compiler))).toBe(
+        false,
+      )
+      app.write('src/named.ts', NAMED)
+      expect((await compiler.compile({ changed: [named] })).code).toContain("name: 'beta'")
+    } finally {
+      app.cleanup()
+    }
+  })
+})
+
 describe('disk copy', () => {
   const app = tempApp({ 'src/service.ts': SERVICE })
   afterAll(() => app.cleanup())
