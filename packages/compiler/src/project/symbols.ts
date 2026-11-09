@@ -228,10 +228,7 @@ export class SymbolResolver {
       return target
     }
     if (binding.kind === 'namespace' || binding.kind === 'require') {
-      const assignment = target.file.facts.exportAssignment
-      return assignment
-        ? this.resolveEntity({ file: target.file }, assignment.expression, meaning, track)
-        : { kind: 'module', file: target.file.path }
+      return this.#moduleObject(target.file, meaning, track)
     }
     return this.resolveExport(target.file.path, binding.imported, meaning, track)
   }
@@ -337,11 +334,25 @@ export class SymbolResolver {
       addAll(track, memo.files)
       return memo.names
     }
+    const progressKey = `names\0${path}`
+    if (this.#inProgress.has(progressKey)) {
+      this.#cycleHits++
+      return []
+    }
     const names = new Set<string>()
     const files = new Set<string>()
-    this.#collectExportNames(path, names, new Set(), files)
+    const hitsBefore = this.#cycleHits
+    this.#inProgress.add(progressKey)
+    try {
+      this.#collectExportNames(path, names, new Set(), files)
+    } finally {
+      this.#inProgress.delete(progressKey)
+    }
     const sorted = [...names].sort(compareStrings)
-    this.#exportNamesMemo.set(path, { names: sorted, files: [...files] })
+    // Names collected while a cycle was cut may be incomplete: only memoize cycle-free lookups.
+    if (this.#cycleHits === hitsBefore) {
+      this.#exportNamesMemo.set(path, { names: sorted, files: [...files] })
+    }
     addAll(track, files)
     return sorted
   }
@@ -362,7 +373,7 @@ export class SymbolResolver {
     }
     if (facts.exportAssignment) {
       names.add('default')
-      const target = this.resolveEntity({ file }, facts.exportAssignment.expression, 'any', track)
+      const target = this.#resolveAssignment(file, 'any', track)
       for (const member of this.#memberNames(target, track)) {
         names.add(member)
       }
@@ -410,8 +421,8 @@ export class SymbolResolver {
       return this.#resolveEntry(file, undefined, entry, meaning, track)
     }
     if (facts.exportAssignment) {
-      const target = this.resolveEntity({ file }, facts.exportAssignment.expression, 'any', track)
-      if (name === 'default') {
+      const target = this.#resolveAssignment(file, 'any', track)
+      if (name === 'default' || (target.kind === 'unresolved' && target.reason === 'circular')) {
         return target
       }
       const member = this.resolveMember(target, name, meaning, track)
@@ -471,11 +482,38 @@ export class SymbolResolver {
         if (target.kind !== 'file') {
           return target
         }
-        const assignment = target.file.facts.exportAssignment
-        return assignment
-          ? this.resolveEntity({ file: target.file }, assignment.expression, meaning, track)
-          : { kind: 'module', file: target.file.path }
+        return this.#moduleObject(target.file, meaning, track)
       }
+    }
+  }
+
+  /** What the module object of `file` is: its `export =` target, or the module itself. */
+  #moduleObject(file: SourceFile, meaning: Meaning, track: Set<string> | undefined): SymbolResolution {
+    return file.facts.exportAssignment
+      ? this.#resolveAssignment(file, meaning, track)
+      : { kind: 'module', file: file.path }
+  }
+
+  /**
+   * Resolves the `export =` expression of `file`. `export = x` where `x` is (directly or through other
+   * modules) an import of `file` itself is a cycle that never reaches {@link resolveExport}: it is cut
+   * here, like circular re-exports.
+   */
+  #resolveAssignment(file: SourceFile, meaning: Meaning, track: Set<string> | undefined): SymbolResolution {
+    const assignment = file.facts.exportAssignment
+    if (!assignment) {
+      return unresolved('export-not-found', `Module ${file.path} has no 'export =' assignment`)
+    }
+    const progressKey = `assign\0${file.path}`
+    if (this.#inProgress.has(progressKey)) {
+      this.#cycleHits++
+      return unresolved('circular', `Circular 'export =' assignment of ${file.path}`)
+    }
+    this.#inProgress.add(progressKey)
+    try {
+      return this.resolveEntity({ file }, assignment.expression, meaning, track)
+    } finally {
+      this.#inProgress.delete(progressKey)
     }
   }
 

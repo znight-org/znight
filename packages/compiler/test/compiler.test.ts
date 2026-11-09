@@ -257,6 +257,27 @@ export class Service {
       app.cleanup()
     }
   })
+
+  it('reports an unresolvable dependency instead of looping on an `export =` cycle', async () => {
+    const app = tempApp({
+      'src/a.ts': "import b = require('./b')\nexport = b\n",
+      'src/b.ts': "import a = require('./a')\nexport = a\n",
+      'src/bar.ts': `import { Injectable } from '@znight/core'
+import { Foo } from './a'
+@Injectable()
+export class Bar {
+  constructor(readonly foo: Foo) {}
+}
+`,
+    })
+    try {
+      const result = await compile({ root: app.root })
+      expect(result.ok).toBe(false)
+      expect(codesOf(app.root, result.diagnostics)).toEqual(['ZNIGHT010 src/bar.ts:5'])
+    } finally {
+      app.cleanup()
+    }
+  })
 })
 
 describe('error module', () => {
