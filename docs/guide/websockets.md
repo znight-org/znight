@@ -177,7 +177,9 @@ export type ChatConnection = WsConnection<ChatData, ChatEvents>
 
 The global `AuthGuard` protects routes **and** handshakes. Browsers cannot set headers on a
 WebSocket, so they ask an authenticated `POST /ws/tickets` for a single-use ticket valid 30 s and
-connect to `/chat?ticket=...`; the guard accepts tickets on upgrade requests only, so that a ticket
+connect to `/chat?ticket=...`. The ticket store must stay bounded, since clients may never present
+a ticket: [`TicketStore`](../../examples/realtime-chat/src/auth/tickets.ts) drops expired tickets
+and keeps at most ten outstanding tickets per user. The guard accepts tickets on upgrade requests only, so that a ticket
 never works as a URL credential elsewhere.
 
 ```ts [src/auth/auth.guard.ts]
