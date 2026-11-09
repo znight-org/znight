@@ -339,11 +339,12 @@ export class Application {
   }
 
   /**
-   * Stops the application (idempotent; waits for an in-progress `start()`):
-   * plugins' `onStop` (reverse) → providers' `onStop` + disposal (reverse resolution order) →
-   * plugins' `onDispose` (reverse). Every step is attempted, each within `hookTimeoutMs` and all
-   * within `timeoutMs`; failures are collected into a ZnightAggregateError (ZNIGHT021). Signal
-   * handlers are removed.
+   * Stops the application (idempotent; waits for an in-progress `start()`, as a step bounded like
+   * the others: past it, the remaining start hooks are skipped and what completed its `onStart` is
+   * stopped): plugins' `onStop` (reverse) → providers' `onStop` + disposal (reverse resolution
+   * order) → plugins' `onDispose` (reverse). Every step is attempted, each within `hookTimeoutMs`
+   * and all within `timeoutMs`; failures are collected into a ZnightAggregateError (ZNIGHT021).
+   * Signal handlers are removed.
    *
    * Called from a start hook (`onStart`/`onReady` of a provider or plugin, or work it awaits), it
    * does not wait for the start, which waits for that hook: the shutdown runs right away, stopping
@@ -359,13 +360,23 @@ export class Application {
   }
 
   async #runStop(): Promise<void> {
-    if (this.#state === 'starting' && !this.#startAborted) await this.#waitForStart()
+    const errors: unknown[] = []
+    const step = this.#stepRunner(errors)
+    if (this.#state === 'starting' && !this.#startAborted) {
+      // a start hook may never settle: waiting for the start is a step of the shutdown
+      await step('Waiting for start()', () => this.#waitForStart())
+      if (this.#state === 'starting') {
+        // timed out: the remaining start hooks are skipped, what completed its onStart is stopped
+        this.#startAborted = true
+        this.#releaseStopWait = undefined
+      }
+    }
     if (this.#state === 'failed' || this.#state === 'stopped') {
       this.#removeSignals()
       return
     }
     this.#state = 'stopping'
-    const errors = await this.#shutdown()
+    await this.#shutdown(errors, step)
     this.#removeSignals()
     this.#state = 'stopped'
     if (errors.length > 0) {
@@ -395,11 +406,9 @@ export class Application {
 
   /**
    * The three shutdown phases (also used to roll back a failed create/start: only what was started
-   * is stopped). Never throws: returns the errors of the failed steps.
+   * is stopped). Never throws: returns the errors of the failed steps (appended to `errors`).
    */
-  async #shutdown(): Promise<unknown[]> {
-    const errors: unknown[] = []
-    const step = this.#stepRunner(errors)
+  async #shutdown(errors: unknown[] = [], step = this.#stepRunner(errors)): Promise<unknown[]> {
     for (const plugin of [...this.#startedPlugins].reverse()) {
       if (typeof plugin.onStop === 'function') {
         await step(`Plugin "${plugin.name}" onStop()`, () => plugin.onStop?.(this.#context))

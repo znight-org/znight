@@ -1556,7 +1556,9 @@ Sequence:
    providers `onStart` (resolution order) → plugins `onStart` → providers `onReady` → plugins
    `onReady`. `state = 'ready'`. A failure stops what was started, disposes, and rethrows.
 3. `stop()` (idempotent; waits for an in-progress `start()`, except when called from a start hook,
-   below): `state = 'stopping'` → plugins `onStop` (reverse) → providers `onStop` (only those whose
+   below; that wait is a step bounded like the others, labelled `Waiting for start()`: when it
+   times out, the remaining start hooks are skipped and the shutdown goes on with the rest of the
+   deadline, stopping what completed its `onStart`): `state = 'stopping'` → plugins `onStop` (reverse) → providers `onStop` (only those whose
    `onStart` ran) + disposal (always, reverse resolution order) → plugins `onDispose` (reverse) →
    `state = 'stopped'` (also when `stop()` rejects). Every step is attempted with `hookTimeoutMs`
    inside the global `timeoutMs` deadline (both MUST be non-negative numbers, ZNIGHT005 otherwise;

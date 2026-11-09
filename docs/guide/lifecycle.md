@@ -155,6 +155,9 @@ three phases:
 
 Every step is attempted even if a previous one failed. Each step has its own timeout
 (`hookTimeoutMs`, 5 s by default) and the whole shutdown a global deadline (`timeoutMs`, 10 s).
+Waiting for an in-progress start is such a step: a start hook that never settles (a broker that
+never answers) does not block the shutdown, the remaining start hooks are skipped and what completed
+its `onStart()` is stopped.
 `Infinity` disables a budget (so does any value above 2^31 − 1 ms, about 24.8 days, the longest
 delay a timer accepts); negative and `NaN` values are rejected
 ([`ZNIGHT005`](/reference/error-codes#znight005)).

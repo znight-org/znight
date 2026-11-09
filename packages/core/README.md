@@ -153,7 +153,10 @@ token; keys may be tokens or classes. Override values that look like a provider 
 (start listening), then providers' and plugins' `onReady`. Signal handlers are installed when the start
 begins. If a step fails, what was started is stopped, everything is disposed and the error is rethrown.
 
-**`app.stop()`** is idempotent and waits for an in-progress start. It runs three phases:
+**`app.stop()`** is idempotent and waits for an in-progress start, at most `hookTimeoutMs` (a start
+hook that never settles cannot block the shutdown: past that budget, a `Waiting for start() timed out`
+failure is recorded, the remaining start hooks are skipped and what completed its `onStart` is
+stopped). It runs three phases:
 
 1. plugins' `onStop`, in reverse order (stop ingress, drain in-flight work);
 2. for each provider in reverse resolution order: `onStop` (if it was started), then disposal;
