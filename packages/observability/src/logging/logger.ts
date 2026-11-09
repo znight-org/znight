@@ -223,7 +223,8 @@ export class Logger {
 
   /** Writes out what the transports buffered (Datadog batches, async stdout writes). Never rejects. */
   async flush(): Promise<void> {
-    await Promise.allSettled(this.#shared.transports.map(transport => transport.flush?.()))
+    // async: a transport throwing synchronously settles as a rejection instead of escaping
+    await Promise.allSettled(this.#shared.transports.map(async transport => transport.flush?.()))
   }
 
   /**
@@ -234,7 +235,7 @@ export class Logger {
   async close(): Promise<void> {
     this.#shared.flushEachEntry = true
     await this.flush()
-    await Promise.allSettled(this.#shared.transports.map(transport => transport.close?.()))
+    await Promise.allSettled(this.#shared.transports.map(async transport => transport.close?.()))
   }
 
   #write(level: LogEntryLevel, first: unknown, second: unknown): void {

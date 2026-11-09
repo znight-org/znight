@@ -281,6 +281,30 @@ describe('Logger', () => {
       }
     }
 
+    it('never rejects flush() or close() when a transport throws synchronously', async () => {
+      const lines: string[] = []
+      const fails = (): Promise<void> => {
+        throw new Error('boom')
+      }
+      const log = new Logger({
+        transport: { name: 'bad', stream: { write: line => lines.push(line) }, flush: fails, close: fails },
+      })
+      await expect(log.flush()).resolves.toBeUndefined()
+      await expect(log.close()).resolves.toBeUndefined()
+      // after close, each entry is flushed from a microtask: it must not become an unhandled rejection
+      const unhandled: unknown[] = []
+      const onUnhandled = (reason: unknown) => unhandled.push(reason)
+      process.on('unhandledRejection', onUnhandled)
+      try {
+        log.info('after close')
+        await new Promise(resolve => setTimeout(resolve, 10))
+      } finally {
+        process.off('unhandledRejection', onUnhandled)
+      }
+      expect(unhandled).toEqual([])
+      expect(lines).toHaveLength(1)
+    })
+
     it('fans out to several transports with their own levels', () => {
       const all = recording('all')
       const errors = recording('errors', 'error')
