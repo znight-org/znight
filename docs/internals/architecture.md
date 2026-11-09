@@ -3577,7 +3577,10 @@ are ZNIGHT050):
   answered before the hook), handler selection (`UNKNOWN_EVENT`, outcome `unhandled`), message
   guards (plugin, class, method; `FORBIDDEN`, outcome `rejected`), `invoke` bounded by
   `handlerTimeoutMs` (`TIMEOUT`), reply `{ id, data }` or `{ id, error }` / `$error`; the plugin
-  `exceptionMappers` run first. Close codes and limits are those of RFC 0003 §5.8 and §8.6.
+  `exceptionMappers` run first. Close codes and limits are those of RFC 0003 §5.8 and §8.6. A codec
+  whose `decode` throws (instead of returning a failure) yields a logged `BAD_FRAME`, on the
+  rate-limit path too (it runs in the transport's message callback, where nothing may throw); an
+  `encode` failure of a runtime frame (reply, `$error`) is logged and the frame is not sent.
 - A close frame MUST carry a code a server may send (`1000`–`1014` except `1004`–`1006`, or
   `3000`–`4999`; `1011` replaces any other) and a reason of at most 123 UTF-8 bytes (cut on a code
   point boundary): reasons come from exception messages, which may hold client input. The close

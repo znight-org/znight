@@ -7,7 +7,9 @@ import { ForbiddenException } from '@znight/http'
 
 import { WsConnectionImpl } from '../src/connection.ts'
 import { connectFailureCode, GatewayDispatcher } from '../src/dispatcher.ts'
+import { jsonCodec } from '../src/envelope.ts'
 import { WsException, WsValidationException } from '../src/exceptions.ts'
+import { TokenBucket } from '../src/rate-limit.ts'
 import { RoomRegistry } from '../src/rooms.ts'
 import { MemoryClient, memoryTransport } from '../src/transports/memory.ts'
 import { describe, expect, it } from 'bun:test'
@@ -38,6 +40,7 @@ async function connect(
   extra: Partial<DispatcherOptions> & {
     readonly protocol?: 'events' | 'raw'
     readonly guards?: HandlerPlan['guards']
+    readonly limits?: ConnectionLimits
   } = {},
 ) {
   const gateway = new Gateway()
@@ -70,7 +73,7 @@ async function connect(
     gateway: '/api/chat',
     handshake: { requestId: 'r1', params: {} } as unknown as HttpContext,
     protocol: '',
-    limits: LIMITS,
+    limits: extra.limits ?? LIMITS,
     rooms: new RoomRegistry(),
     driver: dispatcher,
   })
@@ -192,5 +195,35 @@ describe('GatewayDispatcher', () => {
     expect(connectFailureCode(new ForbiddenException('no')).code).toBe(4403)
     expect(connectFailureCode(new WsValidationException([])).code).toBe(4400)
     expect(connectFailureCode(new Error('x')).code).toBe(1011)
+  })
+
+  it('answers BAD_FRAME and logs when a custom codec throws, rate limited or not', async () => {
+    const codec = {
+      decode: (frame: string | Uint8Array) => {
+        if (frame === 'garbage') throw new Error('malformed')
+        return jsonCodec.decode(frame, false)
+      },
+      encode: jsonCodec.encode,
+    }
+    const { client, received, errors, conn } = await connect([handler('echo', 'echo', (_g, m) => m.data)], {
+      codec,
+      limits: { ...LIMITS, rateLimit: { bucket: new TokenBucket(2, 60_000), onLimit: 'reject' } },
+    })
+    await Bun.sleep(1)
+    client.send('garbage')
+    client.send('{"event":"echo","data":1,"id":1}')
+    expect(() => client.send('garbage')).not.toThrow() // over the rate limit
+    // the rate-limited frame is answered at once, the others in their queue: any order
+    const frames = await received()
+    expect(frames).toHaveLength(3)
+    expect(frames).toEqual(
+      expect.arrayContaining([
+        { event: '$error', data: { code: 'BAD_FRAME', message: 'The frame could not be decoded' } },
+        { id: 1, data: 1 },
+        { event: '$error', data: { code: 'RATE_LIMITED', message: 'Too many messages' } },
+      ]),
+    )
+    expect(errors).toEqual(['The codec failed to decode a frame', 'The codec failed to decode a frame'])
+    expect(conn.readyState).toBe('open')
   })
 })

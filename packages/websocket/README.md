@@ -178,6 +178,10 @@ each recipient applies its own backpressure policy. Rooms are per gateway and pe
 | `exposeErrors`       | `false`                                                            | Send the message of unexpected errors                                                                             |
 | `shutdown`           | `{ code: 1001, reason: 'Server shutting down', timeoutMs: 3_000 }` | Graceful shutdown: close frames, then terminate                                                                   |
 
+A codec's `decode` returns a failure (`{ error: 'BAD_FRAME', message, id }`) for a frame it cannot
+read. One that throws instead is tolerated: the frame is answered with `BAD_FRAME` and the error is
+logged, as is an `encode` failure of a reply (the reply is then not sent).
+
 The instance exposes `server` (`WsServer`), `transport`, `gateways`, `connections`, `stats()`
 (`{ connections, opened, closed, messagesIn, messagesOut, bytesIn, bytesOut, dropped,
 slowConsumerCloses }`), `connect(path, options?)` and `initRoots()`.
