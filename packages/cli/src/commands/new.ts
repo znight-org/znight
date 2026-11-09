@@ -2,7 +2,7 @@
 import type { Command } from '../command.ts'
 import type { CliContext } from '../context.ts'
 import type { Prompts } from '../integrations/prompts.ts'
-import type { Feature, HttpAdapterName, PackageManager } from '../scaffold/options.ts'
+import type { Feature, HttpAdapterName, OpenApiUiName, PackageManager } from '../scaffold/options.ts'
 
 import { basename, resolve } from 'node:path'
 
@@ -12,12 +12,16 @@ import { toPackageName, unscopedName, validatePackageName } from '../names.ts'
 import { initGit, installDependencies, targetState, writeProject } from '../scaffold/create.ts'
 import {
   ADAPTER_LABELS,
+  DEFAULT_ADAPTER,
   DEFAULT_FEATURES,
+  DEFAULT_OPENAPI_UI,
   detectPackageManager,
   FEATURE_LABELS,
   FEATURES,
   HTTP_ADAPTERS,
   installCommand,
+  OPENAPI_UI_LABELS,
+  OPENAPI_UIS,
   PACKAGE_MANAGERS,
   parseFeatures,
   runScript,
@@ -34,7 +38,8 @@ export const newCommand: Command = defineCommand({
     aliases: ['create', 'init'],
     examples: [
       'znight new my-service',
-      'znight new my-service --yes --pm pnpm --adapter fastify --features config,observability,messaging',
+      'znight new my-service --yes --pm pnpm --adapter hono --features config,observability,messaging',
+      'znight new my-api --yes --features config,observability,openapi,graphql,websocket --openapi-ui swagger',
       'znight new my-worker --yes --features config,schedule',
       'znight new . --yes --no-install',
     ],
@@ -53,15 +58,21 @@ export const newCommand: Command = defineCommand({
     },
     adapter: {
       type: 'enum',
-      options: ['node', 'fastify', 'express', 'hono'],
-      description: 'HTTP adapter (default: node, the built-in node:http server)',
+      options: ['fastify', 'node', 'express', 'hono'],
+      description: 'HTTP adapter (default: fastify; node is the built-in node:http server)',
     },
     features: {
       type: 'string',
       valueHint: 'list',
       description:
-        'Comma-separated features: config, observability, messaging, schedule, openapi, or "all" / "none" (default: config,observability)',
+        'Comma-separated features: config, observability, messaging, schedule, openapi, graphql, websocket, or "all" / "none" (default: config,observability)',
     },
+    'openapi-ui': {
+      type: 'enum',
+      options: ['scalar', 'swagger'],
+      description: 'API reference UI of the openapi feature, served at /docs (default: scalar)',
+    },
+    docker: { type: 'boolean', default: true, description: 'Do not generate a Dockerfile' },
     install: { type: 'boolean', default: true, description: 'Do not install the dependencies' },
     git: { type: 'boolean', default: true, description: 'Do not initialise a git repository' },
     dir: { type: 'string', valueHint: 'path', description: 'Target directory (default: ./<name>)' },
@@ -112,10 +123,24 @@ export const newCommand: Command = defineCommand({
       (await prompts?.select({
         message: 'HTTP adapter?',
         choices: HTTP_ADAPTERS.map(value => ({ value, label: ADAPTER_LABELS[value] })),
-        initialValue: 'node',
+        initialValue: DEFAULT_ADAPTER,
       })) ??
-      'node'
+      DEFAULT_ADAPTER
     const features = await chooseFeatures(options.features, prompts)
+    const openapiUi: OpenApiUiName =
+      options['openapi-ui'] ??
+      (features.includes('openapi')
+        ? await prompts?.select({
+            message: 'OpenAPI reference UI (served at /docs)?',
+            choices: OPENAPI_UIS.map(value => ({ value, label: OPENAPI_UI_LABELS[value] })),
+            initialValue: DEFAULT_OPENAPI_UI,
+          })
+        : undefined) ??
+      DEFAULT_OPENAPI_UI
+    const docker =
+      prompts === undefined || hasFlag(rawArgs, 'docker')
+        ? options.docker !== false
+        : await prompts.confirm({ message: 'Add a Dockerfile (production image)?', initialValue: true })
     const install =
       prompts === undefined || hasFlag(rawArgs, 'install')
         ? options.install !== false
@@ -126,7 +151,15 @@ export const newCommand: Command = defineCommand({
         : await prompts.confirm({ message: 'Initialise a git repository?', initialValue: true })
 
     // files
-    const files = renderProject({ name, packageManager, adapter, features, znightVersion: cli.version })
+    const files = renderProject({
+      name,
+      packageManager,
+      adapter,
+      features,
+      openapiUi,
+      docker,
+      znightVersion: cli.version,
+    })
     writeProject(directory, files)
     const where = displayPath(directory, cli.cwd)
     const summary = `${cli.colors.bold(name)} (${packageManager}, ${adapter}${features.length > 0 ? `, ${features.join(', ')}` : ''})`

@@ -9,11 +9,13 @@ export const DEPENDENCY_VERSIONS: Readonly<Record<string, string>> = {
   '@types/node': '^24.0.0',
   express: '^5.3.0',
   fastify: '^5.12.7',
+  graphql: '^17.0.2',
   hono: '^4.13.14',
   'light-my-request': '^6.8.0',
   typescript: '^7.0.0',
   vite: '^8.0.0',
   vitest: '^4.1.0',
+  ws: '^8.22.0',
   zod: '^4.6.0',
 }
 

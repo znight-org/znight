@@ -67,49 +67,85 @@ NODE_ENV=production bun --no-env-file dist/main.js
 ## Docker
 
 A multi-stage image that builds with the full toolchain and ships only the bundle and production
-dependencies:
+dependencies. `znight new` generates it (with a `.dockerignore` leaving out `node_modules`, `dist`,
+`.znight`, `.env` files and `.git`) for the package manager of the project; `--no-docker` skips it.
 
 ::: code-group
 
 ```dockerfile [Node.js]
-FROM node:24-slim AS build
+FROM node:24-slim AS base
 WORKDIR /app
+
+# production dependencies only, at the versions of the lockfile
+FROM base AS deps
+COPY package.json package-lock.json ./
+RUN npm pkg delete devDependencies && npm ci --omit=dev
+
+# every dependency: the Znight compiler, Vite and TypeScript run in the build
+FROM base AS build
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
-RUN npm run build && npm prune --omit=dev
+RUN npm run build
 
 FROM node:24-slim
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=build /app/package.json ./
-COPY --from=build /app/node_modules ./node_modules
+COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 USER node
 EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD ["node", "-e", "fetch('http://127.0.0.1:' + (process.env.PORT || 3000) + '/health').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
 CMD ["node", "--enable-source-maps", "dist/main.js"]
 ```
 
 ```dockerfile [Bun]
-FROM oven/bun:1.3 AS build
+FROM oven/bun:1 AS base
 WORKDIR /app
+
+FROM base AS deps
+COPY package.json bun.lock ./
+RUN bun install --frozen-lockfile --production --omit=peer
+
+FROM base AS build
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 COPY . .
-RUN bun run build && rm -rf node_modules && bun install --frozen-lockfile --production
+RUN bun run build
 
-FROM oven/bun:1.3-slim
+FROM oven/bun:1-slim
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=build /app/package.json ./
-COPY --from=build /app/node_modules ./node_modules
+COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 USER bun
 EXPOSE 3000
-CMD ["bun", "dist/main.js"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD ["bun", "-e", "fetch('http://127.0.0.1:' + (process.env.PORT || 3000) + '/health').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+CMD ["bun", "--no-env-file", "dist/main.js"]
 ```
 
 :::
+
+- The build stage runs the compiler: it needs the dev dependencies (`@znight/compiler`, Vite,
+  TypeScript), so the production install happens in its own stage, never before the build.
+- The `@znight/*` packages declare the compiler as an optional peer dependency. Installed as a dev
+  dependency, it would satisfy that peer and survive `npm prune --omit=dev` (npm marks it
+  `devOptional`) or `bun install --production`: hence `npm pkg delete devDependencies` before
+  `npm ci --omit=dev`, and `--omit=peer` for Bun (keep the required peers of your dependencies in
+  `dependencies`).
+- Installs are frozen (`npm ci`, `--frozen-lockfile`): commit the lockfile. With pnpm or Yarn, enable
+  Corepack in the base stage (`RUN corepack enable && corepack install --global pnpm@10`) and use
+  `pnpm install --frozen-lockfile --prod` or `yarn workspaces focus --all --production` (Yarn 4,
+  with `.yarnrc.yml` copied next to `yarn.lock`). pnpm keeps the compiler in its store as the
+  optional peer its lockfile resolved for the `@znight/*` packages: the image works, it is only
+  larger.
+- The official images ship neither `curl` nor `wget`: the runtime itself probes `GET /health`.
+- `bun --no-env-file`: the image has no `.env` file, and the environment of the container is the
+  configuration.
 
 Use the **exec form** of `CMD` (a JSON array) so the runtime is PID 1 and receives `SIGTERM`
 directly. With the shell form, the signal goes to `/bin/sh` and your application is killed without a

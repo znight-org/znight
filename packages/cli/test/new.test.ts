@@ -74,6 +74,18 @@ describe('project templates', () => {
     expect(Object.fromEntries(files({ features: ['schedule', 'openapi'] }))).toMatchSnapshot()
   })
 
+  it('npm, fastify, observability + openapi (swagger) + graphql + websocket', () => {
+    expect(
+      Object.fromEntries(
+        files({
+          adapter: 'fastify',
+          features: ['observability', 'openapi', 'graphql', 'websocket'],
+          openapiUi: 'swagger',
+        }),
+      ),
+    ).toMatchSnapshot()
+  })
+
   it('schedule: the plugin before HttpPlugin, a sample job and its test-clock test', () => {
     const project = files({ packageManager: 'bun', features: ['config', 'schedule'] })
     expect(packageJson(project).dependencies['@znight/schedule']).toBe('^0.1.0')
@@ -96,10 +108,146 @@ describe('project templates', () => {
     expect(manifest.scripts['openapi']).toBe('znight openapi')
     expect(manifest.scripts['openapi:check']).toBe('znight openapi --check')
     const main = file(project, 'src/main.ts')
-    expect(main.indexOf('OpenApiPlugin.configure()')).toBeGreaterThan(main.indexOf('HttpPlugin.configure('))
+    expect(main.indexOf("OpenApiPlugin.configure({ ui: 'scalar' })")).toBeGreaterThan(
+      main.indexOf('HttpPlugin.configure('),
+    )
     expect(file(project, 'src/api.ts')).toContain('@OpenApiDocument({')
     expect(file(project, 'README.md')).toContain('| `npm run openapi` | Write `openapi.json`')
     expect(project.has('src/app/heartbeat.jobs.ts')).toBe(false)
+  })
+
+  it('observability: ObservabilityPlugin is named after the service, metrics and tracing options commented out', () => {
+    const main = file(files({ name: 'my-service' }), 'src/main.ts')
+    expect(main).toContain(`    ObservabilityPlugin.configure({
+      logging: {
+        name: 'my-service',
+      },
+      // metrics: {
+      //   // options of the metrics registry
+      // },
+      // tracing: {
+      //   // options of the tracer
+      // },
+    }),
+`)
+    expect(main.indexOf('ObservabilityPlugin.configure(')).toBeLessThan(main.indexOf('HttpPlugin.configure('))
+    expect(file(files({ name: '@acme/orders' }), 'src/main.ts')).toContain("        name: '@acme/orders',\n")
+    // renderProject() is public: any name is quoted safely
+    expect(file(files({ name: "it's\\a\nname" }), 'src/main.ts')).toContain("        name: 'it\\'s\\\\a\\nname',\n")
+    expect(file(files({ features: [] }), 'src/main.ts')).not.toContain('ObservabilityPlugin')
+  })
+
+  it.each([
+    [undefined, 'scalar', 'Scalar'],
+    ['scalar', 'scalar', 'Scalar'],
+    ['swagger', 'swagger', 'Swagger UI'],
+  ] as const)('openapi: the %s UI option configures the %s UI', (openapiUi, ui, label) => {
+    const project = files({ features: ['openapi'], ...(openapiUi === undefined ? {} : { openapiUi }) })
+    const main = file(project, 'src/main.ts')
+    expect(main).toContain(`    OpenApiPlugin.configure({ ui: '${ui}' }),`)
+    expect(main).toContain(`the API reference at /docs, with ${label}`)
+    expect(file(project, 'README.md')).toContain(`${label} API reference at \`/docs\``)
+  })
+
+  it('graphql: @znight/graphql and graphql, GraphQLPlugin after HttpPlugin, a code-first resolver and its test', () => {
+    const project = files({ packageManager: 'bun', features: ['config', 'observability', 'graphql'] })
+    const manifest = packageJson(project)
+    expect(manifest.dependencies['@znight/graphql']).toBe('^0.1.0')
+    expect(manifest.dependencies['graphql']).toStartWith('^17')
+    const main = file(project, 'src/main.ts')
+    expect(main).toContain("import { GraphQLPlugin } from '@znight/graphql'")
+    expect(main.indexOf('GraphQLPlugin.configure()')).toBeGreaterThan(main.indexOf('HttpPlugin.configure('))
+    const resolver = file(project, 'src/app/greeting.resolver.ts')
+    expect(resolver).toContain("import { Args, Query, Resolver } from '@znight/graphql'")
+    expect(resolver).toContain('@Resolver()')
+    expect(resolver).toContain("greeting(@Args('name') name: string): Greeting {")
+    const test = file(project, 'test/greeting.resolver.test.ts')
+    expect(test).toContain("import { executeOperation } from '@znight/graphql/testing'")
+    expect(test).toContain('        GraphQLPlugin.configure(),')
+    expect(test).toContain('{ greeting(name: "Ada") { message } }')
+    expect(file(project, 'README.md')).toContain('curl localhost:3000/graphql')
+    const without = files()
+    expect(without.has('src/app/greeting.resolver.ts')).toBe(false)
+    expect(packageJson(without).dependencies['graphql']).toBeUndefined()
+    expect(file(without, 'src/main.ts')).not.toContain('GraphQLPlugin')
+  })
+
+  it('websocket: @znight/websocket and ws, WebSocketPlugin after HttpPlugin, a gateway and its test', () => {
+    const project = files({ features: ['websocket'] })
+    const manifest = packageJson(project)
+    expect(manifest.dependencies['@znight/websocket']).toBe('^0.1.0')
+    expect(manifest.dependencies['ws']).toStartWith('^8')
+    const main = file(project, 'src/main.ts')
+    expect(main).toContain("import { WebSocketPlugin } from '@znight/websocket'")
+    expect(main.indexOf('WebSocketPlugin.configure()')).toBeGreaterThan(main.indexOf('HttpPlugin.configure('))
+    const gateway = file(project, 'src/app/greeting.gateway.ts')
+    expect(gateway).toContain("@Gateway('/ws')")
+    expect(gateway).toContain("@OnMessage('greet')")
+    expect(gateway).toContain('@Payload(CreateGreeting) input: CreateGreeting')
+    const test = file(project, 'test/greeting.gateway.test.ts')
+    expect(test).toContain("from 'vitest'")
+    expect(test).toContain("const client = await app.connect('/ws')")
+    expect(test).toContain("rejects.toMatchObject({ code: 'BAD_REQUEST' })")
+    expect(files().has('src/app/greeting.gateway.ts')).toBe(false)
+    expect(packageJson(files()).dependencies['ws']).toBeUndefined()
+  })
+
+  it('docker: a multi-stage Dockerfile on Node.js (npm), production dependencies only, non-root', () => {
+    const project = files()
+    const dockerfile = file(project, 'Dockerfile')
+    expect(dockerfile).toContain('FROM node:24-slim AS base')
+    expect(dockerfile).toContain('FROM base AS deps\nCOPY package.json package-lock.json ./\n')
+    // npm keeps the optional peers that dev dependencies satisfy (the compiler) unless they are gone
+    expect(dockerfile).toContain('RUN npm pkg delete devDependencies && npm ci --omit=dev')
+    expect(dockerfile).toContain('FROM base AS build\nCOPY package.json package-lock.json ./\nRUN npm ci\nCOPY . .\n')
+    expect(dockerfile).toContain('RUN npm run build')
+    const runtime = dockerfile.slice(dockerfile.lastIndexOf('FROM '))
+    expect(runtime).toStartWith('FROM node:24-slim\n')
+    expect(runtime).toContain('ENV NODE_ENV=production')
+    expect(runtime).toContain('COPY --from=deps /app/node_modules ./node_modules')
+    expect(runtime).toContain('COPY --from=build /app/dist ./dist')
+    expect(runtime).toContain('USER node')
+    expect(runtime).toContain('EXPOSE 3000')
+    expect(runtime).toContain('HEALTHCHECK ')
+    expect(runtime).toContain("/health').then(r => process.exit(r.ok ? 0 : 1)")
+    expect(runtime).toContain('CMD ["node", "--enable-source-maps", "dist/main.js"]')
+    expect(dockerfile).toContain('docker build -t my-service .')
+    const ignored = file(project, '.dockerignore').split('\n')
+    for (const entry of ['node_modules', 'dist', '**/.znight', '.env', '.env.*', '.git'])
+      expect(ignored).toContain(entry)
+    expect(file(project, 'README.md')).toContain('docker run --rm -p 3000:3000 my-service')
+  })
+
+  it('docker: Bun images run the bundle on Bun without its own .env loading', () => {
+    const dockerfile = file(files({ packageManager: 'bun', name: '@acme/api' }), 'Dockerfile')
+    expect(dockerfile).toContain('FROM oven/bun:1 AS base')
+    expect(dockerfile).toContain('RUN bun install --frozen-lockfile --production --omit=peer')
+    expect(dockerfile).toContain('RUN bun install --frozen-lockfile\n')
+    expect(dockerfile).toContain('RUN bun run build')
+    expect(dockerfile).toContain('FROM oven/bun:1-slim\n')
+    expect(dockerfile).toContain('USER bun')
+    expect(dockerfile).toContain('CMD ["bun", "--no-env-file", "dist/main.js"]')
+    expect(dockerfile).toContain('CMD ["bun", "-e", ')
+    expect(dockerfile).toContain('docker build -t acme-api .')
+  })
+
+  it.each([
+    ['pnpm', 'pnpm@10', 'package.json pnpm-lock.yaml', 'pnpm install --frozen-lockfile --prod', 'pnpm run build'],
+    ['yarn', 'yarn@4', 'package.json yarn.lock .yarnrc.yml', 'yarn workspaces focus --all --production', 'yarn build'],
+  ] as const)('docker: %s through Corepack', (packageManager, tool, manifests, production, build) => {
+    const dockerfile = file(files({ packageManager }), 'Dockerfile')
+    expect(dockerfile).toContain(`RUN corepack enable && corepack install --global ${tool}`)
+    expect(dockerfile).toContain(`COPY ${manifests} ./`)
+    expect(dockerfile).toContain(`RUN ${production}`)
+    expect(dockerfile).toContain(`RUN ${build}`)
+    expect(dockerfile).toContain('USER node')
+  })
+
+  it('docker: no Dockerfile with docker: false', () => {
+    const project = files({ docker: false })
+    expect(project.has('Dockerfile')).toBe(false)
+    expect(project.has('.dockerignore')).toBe(false)
+    expect(file(project, 'README.md')).not.toContain('## Docker')
   })
 
   it('package.json: ESM, scripts, @znight/* in lockstep with the CLI', () => {
@@ -172,11 +320,9 @@ describe('project templates', () => {
     expect(file(files({ packageManager: 'bun', features: [] }), 'bunfig.toml')).not.toContain('env = false')
   })
 
-  it('the TestApp test starts no metrics server (it would collide on :9464 with dev or other test files)', () => {
+  it('the TestApp test turns metrics off (no server colliding on :9464, no prom-client needed)', () => {
     const test = file(files(), 'test/greeting.controller.test.ts')
-    expect(test).toContain(
-      "ObservabilityPlugin.configure({ logging: { level: 'silent' }, metrics: { server: false } })",
-    )
+    expect(test).toContain("ObservabilityPlugin.configure({ logging: { level: 'silent' }, metrics: false })")
     expect(file(files({ features: [] }), 'test/greeting.controller.test.ts')).not.toContain('ObservabilityPlugin')
   })
 
@@ -235,9 +381,13 @@ describe('options', () => {
     expect(parseFeatures(' Messaging , config ')).toEqual({ features: ['config', 'messaging'] })
     expect(parseFeatures('none')).toEqual({ features: [] })
     expect(parseFeatures('')).toEqual({ features: [] })
-    expect(parseFeatures('all')).toEqual({ features: ['config', 'observability', 'messaging', 'schedule', 'openapi'] })
+    expect(parseFeatures('all')).toEqual({
+      features: ['config', 'observability', 'messaging', 'schedule', 'openapi', 'graphql', 'websocket'],
+    })
     expect(parseFeatures('openapi,schedule')).toEqual({ features: ['schedule', 'openapi'] })
-    expect(parseFeatures('config,graphql')).toEqual({ unknown: ['graphql'] })
+    expect(parseFeatures('websocket,graphql')).toEqual({ features: ['graphql', 'websocket'] })
+    // application events are not a scaffold feature
+    expect(parseFeatures('config,events')).toEqual({ unknown: ['events'] })
   })
 
   it('detects the package manager', () => {
@@ -286,7 +436,7 @@ describe('znight new', () => {
     expect(run.code).toBe(0)
     expect(run.stderr).toBe('')
     expect(run.stdout).toContain(
-      '✓ Created my-api (bun, fastify, config, observability, messaging, schedule, openapi) in my-api',
+      '✓ Created my-api (bun, fastify, config, observability, messaging, schedule, openapi, graphql, websocket) in my-api',
     )
     expect(run.stdout).toContain('cd my-api')
     expect(run.stdout).toContain('bun install')
@@ -309,6 +459,41 @@ describe('znight new', () => {
     expect(manifest.dependencies['@znight/config']).toBeDefined()
     expect(manifest.dependencies['@znight/observability']).toBeDefined()
     expect(manifest.dependencies['@znight/messaging']).toBeUndefined()
+    // Fastify by default, a Dockerfile, the Scalar UI when openapi is selected
+    expect(manifest.dependencies.fastify).toBeDefined()
+    expect(readFileSync(join(workspace.path, 'svc/src/main.ts'), 'utf8')).toContain('adapter: fastifyAdapter(),')
+    expect(existsSync(join(workspace.path, 'svc/Dockerfile'))).toBe(true)
+    expect(existsSync(join(workspace.path, 'svc/.dockerignore'))).toBe(true)
+  })
+
+  it('--openapi-ui, --no-docker and --adapter node answer their questions', async () => {
+    const run = await runCli(
+      [
+        'new',
+        'ui',
+        '--features',
+        'openapi',
+        '--openapi-ui',
+        'swagger',
+        '--adapter',
+        'node',
+        '--no-docker',
+        '--no-install',
+        '--no-git',
+      ],
+      { cwd: workspace.path },
+    )
+    expect(run.code).toBe(0)
+    const main = readFileSync(join(workspace.path, 'ui/src/main.ts'), 'utf8')
+    expect(main).toContain("OpenApiPlugin.configure({ ui: 'swagger' })")
+    expect(main).not.toContain('Adapter')
+    expect(existsSync(join(workspace.path, 'ui/Dockerfile'))).toBe(false)
+
+    const invalid = await runCli(['new', 'bad-ui', '--openapi-ui', 'redoc', '--no-install', '--no-git'], {
+      cwd: workspace.path,
+    })
+    expect(invalid.code).toBe(2)
+    expect(invalid.stderr).toContain('redoc')
   })
 
   it('initialises git and installs the dependencies', async () => {
@@ -410,10 +595,12 @@ describe('znight new', () => {
     expect(missing.code).toBe(2)
     expect(missing.stderr).toContain('Missing project name')
 
-    const features = await runCli(['new', 'x', '--features', 'config,graphql,grpc'], { cwd: workspace.path })
+    const features = await runCli(['new', 'x', '--features', 'config,events,grpc'], { cwd: workspace.path })
     expect(features.code).toBe(2)
-    expect(features.stderr).toContain('Unknown features: graphql, grpc')
-    expect(features.stderr).toContain('available features: config, observability, messaging')
+    expect(features.stderr).toContain('Unknown features: events, grpc')
+    expect(features.stderr).toContain(
+      'available features: config, observability, messaging, schedule, openapi, graphql, websocket',
+    )
     expect(existsSync(join(workspace.path, 'x'))).toBe(false)
   })
 
@@ -454,6 +641,7 @@ describe('znight new', () => {
       'Package manager?',
       'HTTP adapter?',
       'Features? (space to toggle)',
+      'Add a Dockerfile (production image)?',
       'Install the dependencies with yarn?',
       'Initialise a git repository?',
     ])
@@ -463,6 +651,61 @@ describe('znight new', () => {
     expect(manifest.dependencies.hono).toBeDefined()
     expect(manifest.dependencies['@znight/messaging']).toBeDefined()
     expect(manifest.dependencies['@znight/config']).toBeUndefined()
+    expect(existsSync(join(workspace.path, 'asked-app/Dockerfile'))).toBe(false) // confirm answered no
+  })
+
+  it('offers Fastify first and by default, every feature but events, and the OpenAPI UI when openapi is chosen', async () => {
+    const selects: { message: string; values: string[]; initialValue: unknown }[] = []
+    let featureChoices: string[] = []
+    const prompts: Prompts = {
+      intro: () => undefined,
+      outro: () => undefined,
+      note: () => undefined,
+      text: () => Promise.resolve('ui-app'),
+      select: options => {
+        selects.push({
+          message: options.message,
+          values: options.choices.map(choice => choice.value),
+          initialValue: options.initialValue,
+        })
+        return Promise.resolve(
+          options.message.startsWith('OpenAPI') ? ('swagger' as never) : (options.initialValue as never),
+        )
+      },
+      multiselect: options => {
+        featureChoices = options.choices.map(choice => choice.value)
+        return Promise.resolve(['observability', 'openapi', 'graphql', 'websocket'] as never)
+      },
+      confirm: options => Promise.resolve(options.message.startsWith('Add a Dockerfile')),
+      spinner: () => ({ start: () => undefined, stop: () => undefined }),
+    }
+    const run = await runCli(['new', '--pm', 'npm'], {
+      cwd: workspace.path,
+      interactive: true,
+      services: { processes: new FakeProcesses(), loadPrompts: () => Promise.resolve(prompts) },
+    })
+    expect(run.code).toBe(0)
+    expect(selects).toEqual([
+      { message: 'HTTP adapter?', values: ['fastify', 'node', 'express', 'hono'], initialValue: 'fastify' },
+      { message: 'OpenAPI reference UI (served at /docs)?', values: ['scalar', 'swagger'], initialValue: 'scalar' },
+    ])
+    expect(featureChoices).toEqual([
+      'config',
+      'observability',
+      'messaging',
+      'schedule',
+      'openapi',
+      'graphql',
+      'websocket',
+    ])
+    const root = join(workspace.path, 'ui-app')
+    const main = readFileSync(join(root, 'src/main.ts'), 'utf8')
+    expect(main).toContain('adapter: fastifyAdapter()')
+    expect(main).toContain("OpenApiPlugin.configure({ ui: 'swagger' })")
+    expect(main).toContain("        name: 'ui-app',")
+    expect(main).toContain('GraphQLPlugin.configure()')
+    expect(main).toContain('WebSocketPlugin.configure()')
+    expect(existsSync(join(root, 'Dockerfile'))).toBe(true)
   })
 
   it('does not ask what the flags answer, and --yes disables the prompts', async () => {
@@ -477,7 +720,7 @@ describe('znight new', () => {
       },
     } as unknown as Prompts
     const run = await runCli(
-      ['new', 'flags', '--pm', 'npm', '--adapter', 'node', '--features', 'none', '--no-install', '--git'],
+      ['new', 'flags', '--pm', 'npm', '--adapter', 'node', '--features', 'none', '--docker', '--no-install', '--git'],
       { cwd: workspace.path, interactive: true, services: { loadPrompts: () => Promise.resolve(prompts) } },
     )
     expect(run.code).toBe(0)

@@ -32,23 +32,27 @@ bunx @znight/cli new my-service
 
 :::
 
-In a terminal, the CLI asks for the project name, the package manager, the HTTP adapter (the built-in
-`node:http` server, Fastify, Express or Hono), the features and whether to install the dependencies
-and initialise git. `--yes` takes the defaults (`node` adapter, configuration and observability);
-flags answer the questions up front:
+In a terminal, the CLI asks for the project name, the package manager, the HTTP adapter (Fastify, the
+default, the built-in `node:http` server, Express or Hono), the features, the OpenAPI reference UI
+(Scalar or Swagger UI, when `openapi` is selected), whether to add a Dockerfile and whether to install
+the dependencies and initialise git. `--yes` takes the defaults (Fastify, configuration and
+observability, a Dockerfile); flags answer the questions up front:
 
 ```sh
-npx @znight/cli new my-service --yes --adapter fastify --features all
-npx @znight/cli new my-service --yes --features config,observability,schedule,openapi
+npx @znight/cli new my-service --yes --adapter node --features all
+npx @znight/cli new my-service --yes --features config,observability,openapi,graphql --openapi-ui swagger
+npx @znight/cli new my-service --yes --features config,observability,schedule --no-docker
 ```
 
-| Feature         | Adds                                                                                                           |
-| --------------- | -------------------------------------------------------------------------------------------------------------- |
-| `config`        | [`@znight/config`](/packages/config): a typed `@Config` class read from the environment                        |
-| `observability` | [`@znight/observability`](/packages/observability): JSON request logs; metrics once `prom-client` is installed |
-| `messaging`     | [`@znight/messaging`](/packages/messaging): a consumer and an in-memory broker                                 |
-| `schedule`      | [`@znight/schedule`](/packages/schedule): a cron job and its test on a virtual clock                           |
-| `openapi`       | [`@znight/openapi`](/packages/openapi): `/openapi.json`, the API reference on `/docs`                          |
+| Feature         | Adds                                                                                                            |
+| --------------- | --------------------------------------------------------------------------------------------------------------- |
+| `config`        | [`@znight/config`](/packages/config): a typed `@Config` class read from the environment                         |
+| `observability` | [`@znight/observability`](/packages/observability): JSON request logs; metrics once `prom-client` is installed  |
+| `messaging`     | [`@znight/messaging`](/packages/messaging): a consumer and an in-memory broker                                  |
+| `schedule`      | [`@znight/schedule`](/packages/schedule): a cron job and its test on a virtual clock                            |
+| `openapi`       | [`@znight/openapi`](/packages/openapi): `/openapi.json`, the API reference on `/docs` (Scalar or Swagger UI)    |
+| `graphql`       | [`@znight/graphql`](/packages/graphql): `/graphql` and a code-first resolver, its schema derived from its types |
+| `websocket`     | [`@znight/websocket`](/packages/websocket): a gateway on `/ws` (with `ws` for Node.js) and its test             |
 
 It creates a small greeting API with its tests:
 
@@ -63,18 +67,23 @@ my-service/
 │     ├─ greeting.service.ts     # @Injectable
 │     ├─ greeting.controller.ts  # GET /greetings/:name, POST /greetings (validated body)
 │     ├─ greeting.consumer.ts    # @Consumer('greetings')                             (messaging)
+│     ├─ greeting.gateway.ts     # @Gateway('/ws'): a "greet" event and its reply     (websocket)
+│     ├─ greeting.resolver.ts    # @Resolver: query { greeting(name) }               (graphql)
 │     ├─ health.controller.ts    # GET /health
 │     └─ heartbeat.jobs.ts       # @Cron('* * * * *'): a job every minute             (schedule)
 ├─ test/                         # TestBed (unit), TestApp (in-memory HTTP), jobs on a virtual clock
 ├─ vite.config.ts                # plugins: [znight(options)]
 ├─ znight.config.ts              # compiler options, shared with the Bun preload and znight generate
 ├─ bunfig.toml                   # Bun projects: preloads @znight/compiler/bun for bun test
+├─ Dockerfile                    # multi-stage production image, and its .dockerignore
 ├─ tsconfig.json
 └─ package.json                  # scripts: dev, build, start, generate, typecheck, test (openapi)
 ```
 
 Bun projects test with `bun test` (the preload regenerates the container), the others with Vitest
-(the Vite plugin does). Start it in development mode:
+(the Vite plugin does). `ObservabilityPlugin` names its logger after the project, and the
+`Dockerfile` builds a production image (see [Deployment](/guide/deployment#docker)). Start it in
+development mode:
 
 ```sh
 cd my-service

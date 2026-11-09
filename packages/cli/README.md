@@ -63,26 +63,30 @@ writes its committed `openapi.json` with `znight openapi` and checks it with `--
 ```sh
 znight new my-service                       # asks the questions below
 znight new my-service --yes                 # defaults, no question
-znight new my-service --pm pnpm --adapter fastify --features config,observability,messaging
-znight new my-worker --yes --features config,schedule,openapi
+znight new my-service --pm pnpm --adapter hono --features config,observability,messaging
+znight new my-api --yes --features config,observability,openapi,graphql,websocket --openapi-ui swagger
+znight new my-worker --yes --features config,schedule,openapi --no-docker
 znight new . --yes --no-install             # in the current (empty) directory
 ```
 
-In a terminal, the CLI asks for the name, the package manager, the HTTP adapter, the features,
-and whether to install the dependencies and initialise git. Flags answer the questions up front; with
-`--yes` (or without a terminal, e.g. in CI) the defaults are used.
+In a terminal, the CLI asks for the name, the package manager, the HTTP adapter (Fastify first, and
+the default), the features, the OpenAPI reference UI (when `openapi` is selected), whether to add a
+Dockerfile, and whether to install the dependencies and initialise git. Flags answer the questions up
+front; with `--yes` (or without a terminal, e.g. in CI) the defaults are used.
 
-| Option                                     | Default                                       | Description                                                                      |
-| ------------------------------------------ | --------------------------------------------- | -------------------------------------------------------------------------------- |
-| `[name]`                                   | (asked)                                       | npm package name (`my-service`, `@acme/api`), or `.`                             |
-| `-y, --yes`                                | `false`                                       | Do not ask questions                                                             |
-| `--pm <bun\|npm\|pnpm\|yarn>`              | the one running the CLI, else bun on Bun, npm | Package manager                                                                  |
-| `--adapter <node\|fastify\|express\|hono>` | `node`                                        | HTTP adapter (`node`: the built-in `node:http` server)                           |
-| `--features <list>`                        | `config,observability`                        | `config`, `observability`, `messaging`, `schedule`, `openapi`, or `all` / `none` |
-| `--no-install`                             | install                                       | Do not install the dependencies                                                  |
-| `--no-git`                                 | init                                          | Do not run `git init` (skipped anyway inside a git repository)                   |
-| `--dir <path>`                             | `./<name>` (unscoped)                         | Target directory                                                                 |
-| `--force`                                  | `false`                                       | Write into a non-empty directory (existing files are overwritten)                |
+| Option                                     | Default                                       | Description                                                                                              |
+| ------------------------------------------ | --------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `[name]`                                   | (asked)                                       | npm package name (`my-service`, `@acme/api`), or `.`                                                     |
+| `-y, --yes`                                | `false`                                       | Do not ask questions                                                                                     |
+| `--pm <bun\|npm\|pnpm\|yarn>`              | the one running the CLI, else bun on Bun, npm | Package manager                                                                                          |
+| `--adapter <fastify\|node\|express\|hono>` | `fastify`                                     | HTTP adapter (`node`: the built-in `node:http` server)                                                   |
+| `--features <list>`                        | `config,observability`                        | `config`, `observability`, `messaging`, `schedule`, `openapi`, `graphql`, `websocket`, or `all` / `none` |
+| `--openapi-ui <scalar\|swagger>`           | `scalar`                                      | API reference UI served at `/docs` by the `openapi` feature (Scalar or Swagger UI)                       |
+| `--no-docker`                              | Dockerfile                                    | Do not generate the `Dockerfile` and `.dockerignore`                                                     |
+| `--no-install`                             | install                                       | Do not install the dependencies                                                                          |
+| `--no-git`                                 | init                                          | Do not run `git init` (skipped anyway inside a git repository)                                           |
+| `--dir <path>`                             | `./<name>` (unscoped)                         | Target directory                                                                                         |
+| `--force`                                  | `false`                                       | Write into a non-empty directory (existing files are overwritten)                                        |
 
 The package manager defaults to the one that launched the CLI (`npx`, `pnpm dlx`, `yarn dlx`,
 `bunx`). The target directory must be empty (`.git`, `.DS_Store` and editor folders are fine).
@@ -100,17 +104,23 @@ my-service/
 │     ├─ greeting.service.ts     # @Injectable, uses AppConfig and Logger
 │     ├─ greeting.controller.ts  # GET /greetings/:name?excited, POST /greetings (validated body)
 │     ├─ greeting.consumer.ts    # @Consumer('greetings'), POST /greetings/async  (messaging)
+│     ├─ greeting.gateway.ts     # @Gateway('/ws'): a "greet" WebSocket event      (websocket)
+│     ├─ greeting.resolver.ts    # @Resolver: query { greeting(name) }            (graphql)
 │     ├─ health.controller.ts    # GET /health
 │     └─ heartbeat.jobs.ts       # @Cron('* * * * *'): a job every minute          (schedule)
 ├─ test/
 │  ├─ greeting.service.test.ts     # TestBed: real factory, auto-mocked dependencies
 │  ├─ greeting.controller.test.ts  # TestApp: in-memory HTTP requests
+│  ├─ greeting.gateway.test.ts     # TestApp.connect(): in-memory WebSocket         (websocket)
+│  ├─ greeting.resolver.test.ts    # executeOperation(): GraphQL over HTTP          (graphql)
 │  └─ heartbeat.jobs.test.ts       # TestApp + createTestClock(): virtual time      (schedule)
 ├─ vite.config.ts                # plugins: [znight(options)]
 ├─ znight.config.ts              # compiler options, shared by znight(), the Bun preload and znight generate
 ├─ tsconfig.json                 # strict, experimentalDecorators, moduleResolution bundler, noEmit
 ├─ bunfig.toml                   # bun only: preloads @znight/compiler/bun before the tests
 ├─ package.json                  # type module; scripts dev, build, start, generate, typecheck, test
+├─ Dockerfile                    # multi-stage production image                    (docker)
+├─ .dockerignore
 └─ .gitignore                    # node_modules, dist, .znight
 ```
 
@@ -127,12 +137,32 @@ my-service/
 - `schedule` adds `@znight/schedule`, `SchedulePlugin.configure()` **before** `HttpPlugin` (plugins
   stop in reverse order: HTTP stops taking requests first, then running jobs drain), a sample job
   and its test on a virtual clock (`createTestClock()` of `@znight/schedule/testing`).
-- `openapi` adds `@znight/openapi`, `OpenApiPlugin.configure()` after `HttpPlugin` (`/openapi.json`
-  and the API reference at `/docs`), `src/api.ts` (`@OpenApiDocument`) and the `openapi` /
-  `openapi:check` scripts (commit `openapi.json`, check it in CI).
-- The `TestApp` test configures `ObservabilityPlugin` with `metrics: { server: false }`: with
-  `prom-client` installed, the metrics server (`:9464`) would collide with `znight dev` or with other
-  test files running in parallel.
+- `observability` adds `@znight/observability` and `ObservabilityPlugin.configure()` first, its
+  logger named after the project (`logging: { name: '<name>' }`), with the `metrics` and `tracing`
+  options as commented-out placeholders.
+- `openapi` adds `@znight/openapi`, `OpenApiPlugin.configure({ ui })` after `HttpPlugin`
+  (`/openapi.json` and the API reference at `/docs`, `ui: 'scalar'` or `'swagger'` from
+  `--openapi-ui`), `src/api.ts` (`@OpenApiDocument`) and the `openapi` / `openapi:check` scripts
+  (commit `openapi.json`, check it in CI).
+- `graphql` adds `@znight/graphql` and `graphql`, `GraphQLPlugin.configure()` after `HttpPlugin`
+  (`POST /graphql`, GraphiQL on `GET /graphql` in development), a code-first resolver
+  (`src/app/greeting.resolver.ts`: the schema is derived from its types) and its test
+  (`executeOperation()` of `@znight/graphql/testing`).
+- `websocket` adds `@znight/websocket` and `ws` (the transport of the `node:http` based servers; Bun
+  provides its own), `WebSocketPlugin.configure()` after `HttpPlugin`, a gateway on `/ws`
+  (`src/app/greeting.gateway.ts`, a validated `greet` event with a reply) and its test
+  (`TestApp.connect()`).
+- The `TestApp` tests configure `ObservabilityPlugin` with `metrics: false`: with `prom-client`
+  installed, the metrics server (`:9464`) would collide with `znight dev` or with other test files
+  running in parallel, and any metrics option object requires `prom-client`.
+- The `Dockerfile` (unless `--no-docker`) is multi-stage: a `deps` stage installs the production
+  dependencies only from the lockfile, a `build` stage installs everything and runs the build (the
+  compiler runs there), and the runtime stage (`node:24-slim`, or `oven/bun:1-slim` for Bun projects)
+  copies `dist/` and the production `node_modules`, sets `NODE_ENV=production`, runs as the image's
+  non-root user, exposes port 3000, probes `GET /health` in its `HEALTHCHECK` and starts the bundle in
+  exec form (`node --enable-source-maps dist/main.js`, `bun --no-env-file dist/main.js`). Installs are
+  frozen, so the lockfile must exist (install the dependencies first); pnpm and yarn come from
+  Corepack. `.dockerignore` leaves out `node_modules`, `dist`, `.znight`, `.env` files and `.git`.
 
 ## `znight generate`
 
