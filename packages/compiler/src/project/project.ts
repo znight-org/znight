@@ -149,10 +149,12 @@ export class Project implements ProjectHost {
   }
 
   /**
-   * Brings the project up to date. Without `changes` (or on the first call) everything is
-   * re-scanned and every cached file re-read (unchanged contents keep their parse). With `changes`
-   * only the given files are re-read; created/deleted files and config files (package.json,
-   * tsconfig, lockfiles) re-run the scan and clear the resolution caches.
+   * Brings the project up to date. The parse cache first drops the files that were not inputs of
+   * the previous compile (no watcher reports their changes): they are read again when needed.
+   * Without `changes` (or on the first call) everything is re-scanned and every cached file re-read
+   * (unchanged contents keep their parse). With `changes` only the given files are re-read;
+   * created/deleted files and config files (package.json, tsconfig, lockfiles) re-run the scan and
+   * clear the resolution caches.
    *
    * Per-compile services (symbols, identities, types, evaluation, routes) are always rebuilt.
    */
@@ -161,6 +163,12 @@ export class Project implements ProjectHost {
     this.#files.resetStats()
     let rescan = false
     let clearResolution = false
+    if (this.#initialized) {
+      // Watchers only report the inputs of the previous compile: any other cached file (an import
+      // removed then restored, a renamed file, the declarations of an upgraded package) may have
+      // changed unnoticed, and keeping its parse would only hold memory. Drop it.
+      this.#files.retain(new Set([...this.#scannedSet, ...this.#loaded]))
+    }
     if (!this.#initialized || changes === undefined) {
       rescan = true
       clearResolution = this.#initialized
@@ -349,6 +357,11 @@ export class Project implements ProjectHost {
    */
   loadedFiles(): string[] {
     return [...this.#loaded].sort()
+  }
+
+  /** Paths held by the parse cache (the inputs of the previous and the current compile). Sorted. */
+  cachedFiles(): string[] {
+    return [...this.#files.paths()].sort()
   }
 
   // ----------------------------------------------------------- resolution

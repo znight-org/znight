@@ -1,6 +1,8 @@
 import type { SymbolResolution } from '../../src/project/index.ts'
 
-import { APP, appProject, fileOf } from './helpers.ts'
+import { normalizeOptions } from '../../src/options.ts'
+import { Project } from '../../src/project/index.ts'
+import { APP, appProject, fileOf, tempDir } from './helpers.ts'
 import { describe, expect, test as it } from 'bun:test'
 
 const project = appProject({ conditions: ['@znight/source'] })
@@ -160,6 +162,60 @@ describe('re-export graphs', () => {
     expect(project.resolveIdentifier(types, 'Missing').symbol).toMatchObject({
       kind: 'unresolved',
       reason: 'module-not-found',
+    })
+  })
+})
+
+describe('`export =` cycles', () => {
+  function cyclic(files: Record<string, string>): (check: (project: Project) => void) => void {
+    return check => {
+      const dir = tempDir({
+        'package.json': JSON.stringify({ name: 'temp-app' }),
+        'src/main.ts': "import { Foo } from './a'\nexport class Bar { constructor(foo: Foo) {} }",
+        ...files,
+      })
+      try {
+        const created = new Project(normalizeOptions({ root: dir.root }))
+        created.refresh()
+        check(created)
+      } finally {
+        dir.cleanup()
+      }
+    }
+  }
+
+  it('a module assigning itself (`import self = require(...)`, `export = self`) is reported as circular', () => {
+    cyclic({ 'src/a.ts': "import self = require('./a')\nexport = self" })(created => {
+      expect(created.resolveIdentifier('src/main.ts', 'Foo').symbol).toMatchObject({
+        kind: 'unresolved',
+        reason: 'circular',
+      })
+      expect(created.exportNames(`${created.options.root}/src/a.ts`)).toEqual(['default'])
+    })
+  })
+
+  it('two modules assigning each other are reported as circular', () => {
+    cyclic({
+      'src/a.ts': "import b = require('./b')\nexport = b",
+      'src/b.ts': "import a = require('./a')\nexport = a",
+    })(created => {
+      expect(created.resolveIdentifier('src/main.ts', 'Foo').symbol).toMatchObject({
+        kind: 'unresolved',
+        reason: 'circular',
+      })
+      expect(created.exportNames(`${created.options.root}/src/a.ts`)).toEqual(['default'])
+    })
+  })
+
+  it('a namespace re-export of a self-assigning module terminates', () => {
+    cyclic({
+      'src/a.ts': "export * as Foo from './b'",
+      'src/b.ts': "import * as self from './b'\nexport = self",
+    })(created => {
+      expect(created.resolveIdentifier('src/main.ts', 'Foo').symbol).toMatchObject({
+        kind: 'unresolved',
+        reason: 'circular',
+      })
     })
   })
 })

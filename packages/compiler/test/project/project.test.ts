@@ -127,6 +127,54 @@ describe('Project.refresh', () => {
     expect(created.isScanned('src/a.ts')).toBe(true)
   })
 
+  it('incremental refresh: files that were not inputs of the previous compile are re-read', () => {
+    const { project: created, dir } = project({
+      'src/a.ts': "import { V } from '../shared/c.ts'\nexport const A = V",
+      'shared/c.ts': 'export const V = 1',
+    })
+    const value = (): string | undefined => {
+      const symbol = created.resolveIdentifier(fileOf(created, 'src/a.ts'), 'V').symbol
+      return symbol.kind === 'declaration' ? created.getFile(symbol.declaration.file)?.text : symbol.kind
+    }
+    created.refresh()
+    expect(value()).toBe('export const V = 1')
+    expect(created.loadedFiles()).toContain(`${dir.root}/shared/c.ts`)
+    // the import goes away: shared/c.ts is no longer an input, so no watcher reports its changes
+    dir.write('src/a.ts', 'export const A = 1')
+    created.refresh({ changed: ['src/a.ts'] })
+    expect(created.resolveIdentifier(fileOf(created, 'src/a.ts'), 'A').symbol.kind).toBe('declaration')
+    expect(created.loadedFiles()).not.toContain(`${dir.root}/shared/c.ts`)
+    dir.write('shared/c.ts', 'export const V = 2')
+    // the import comes back: the unwatched file is read again, not served from the cache
+    dir.write('src/a.ts', "import { V } from '../shared/c.ts'\nexport const A = V")
+    created.refresh({ changed: ['src/a.ts'] })
+    expect(value()).toBe('export const V = 2')
+  })
+
+  it('drops the parses of files that were not inputs of the previous compile', () => {
+    const { project: created, dir } = project({
+      'src/a.ts': "import { V } from '../shared/c.ts'\nexport const A = V",
+      'src/b.ts': 'export const B = 1',
+      'shared/c.ts': 'export const V = 1',
+    })
+    const c = `${dir.root}/shared/c.ts`
+    created.refresh()
+    created.resolveIdentifier(fileOf(created, 'src/a.ts'), 'V')
+    expect(created.cachedFiles()).toContain(c)
+    // a file no compile reads any more (an import removed, a package upgraded) leaves the cache
+    dir.write('src/a.ts', 'export const A = 1')
+    created.refresh({ changed: ['src/a.ts'] })
+    expect(created.cachedFiles()).toContain(c)
+    created.refresh({ changed: ['src/a.ts'] })
+    expect(created.cachedFiles()).not.toContain(c)
+    // a source renamed behind a full refresh
+    dir.remove('src/b.ts')
+    dir.write('src/renamed.ts', 'export const B = 1')
+    created.refresh()
+    created.refresh()
+    expect(created.cachedFiles()).toEqual([`${dir.root}/src/a.ts`, `${dir.root}/src/renamed.ts`])
+  })
+
   it('reports syntax errors of scanned files', () => {
     const { project: created, dir } = project({ 'src/a.ts': 'export class {', 'src/b.ts': 'export {}' })
     created.refresh()

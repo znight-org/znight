@@ -6,6 +6,7 @@
 import type { ViteDevServer } from 'vite'
 import type { ZnightPluginApi } from '../../src/vite.ts'
 
+import { EventEmitter } from 'node:events'
 import fs from 'node:fs'
 import { createServer } from 'vite'
 
@@ -200,4 +201,47 @@ describe('dev server (Vitest-like)', () => {
     },
     TIMEOUT,
   )
+
+  it(
+    'keeps following source changes after a server restart (same plugin instance)',
+    async () => {
+      await server.restart()
+      runner = (server.environments['ssr'] as unknown as { runner: ModuleRunner }).runner
+      await eventually(module => module.tokens.length === 4, 'the module after the restart')
+      const before = api.result
+      app.write('src/later.ts', "import { Injectable } from '@znight/core'\n@Injectable()\nexport class Later {}\n")
+      await waitFor(() => api.result !== before && (api.result?.stats.providers ?? 0) === 5, 'the recompile')
+      await eventually(module => module.tokens.includes('src/later.ts#Later'), 'the reloaded module')
+    },
+    TIMEOUT,
+  )
+})
+
+describe('dev server restarts', () => {
+  type Hook = (...args: unknown[]) => void
+
+  function fakeServer(): { server: ViteDevServer; watcher: EventEmitter } {
+    const watcher = new EventEmitter()
+    return { server: { watcher } as unknown as ViteDevServer, watcher }
+  }
+
+  const listeners = (watcher: EventEmitter): number =>
+    ['add', 'change', 'unlink'].reduce((count, event) => count + watcher.listeners(event).length, 0)
+
+  it('a server created before the previous one closes keeps its listeners', () => {
+    const plugin = znight()
+    const configureServer = plugin.configureServer as Hook
+    const closeServer = plugin.closeServer as Hook
+    const first = fakeServer()
+    const second = fakeServer()
+    configureServer(first.server)
+    expect(listeners(first.watcher)).toBe(3)
+    // Vite's restart: the new server is configured, then the old one is closed
+    configureServer(second.server)
+    expect(listeners(first.watcher)).toBe(0)
+    closeServer({ reason: 'restart' })
+    expect(listeners(second.watcher)).toBe(3)
+    closeServer({ reason: 'close' })
+    expect(listeners(second.watcher)).toBe(0)
+  })
 })

@@ -199,7 +199,10 @@ class PluginState {
   #scheduled: PromiseWithResolvers<CompileResult> | undefined
   #lastDiagnostics = ''
   readonly #serverWatched = new Set<string>()
-  readonly #listeners: [event: string, listener: (file: string) => void][] = []
+  /** Watcher listeners of {@link #server}. */
+  #listeners: [event: string, listener: (file: string) => void][] = []
+  /** Servers replaced by a restart whose `closeServer` hook has not run yet (it must not detach the new one). */
+  #superseded = 0
   /** Environments waiting for the generated module (`load`): they will get the next result. */
   readonly #loading = new Map<string, number>()
 
@@ -467,7 +470,14 @@ class PluginState {
    * module importing the generated one, the change is already recorded and the load waits for it.
    */
   attachServer(server: ViteDevServer): void {
+    if (this.#server !== undefined && this.#server !== server) {
+      // a restart of a server sharing this plugin instance creates the new server, then closes the
+      // old one: stop listening to the old watcher now, and ignore its `closeServer`
+      this.#unlisten()
+      this.#superseded++
+    }
     this.#server = server
+    this.#serverWatched.clear()
     this.#kind = 'dev'
     for (const event of SERVER_EVENTS.keys()) {
       const listener = (file: string): void => this.#onServerEvent(event, file)
@@ -477,13 +487,25 @@ class PluginState {
   }
 
   detachServer(): void {
+    if (this.#superseded > 0) {
+      this.#superseded--
+      return
+    }
     if (this.#timer !== undefined) {
       clearTimeout(this.#timer)
       this.#timer = undefined
     }
-    for (const [event, listener] of this.#listeners.splice(0)) {
-      this.#server?.watcher.off(event, listener)
+    this.#unlisten()
+    this.#server = undefined
+    this.#serverWatched.clear()
+  }
+
+  #unlisten(): void {
+    const watcher = this.#server?.watcher
+    for (const [event, listener] of this.#listeners) {
+      watcher?.off(event, listener)
     }
+    this.#listeners = []
   }
 
   #onServerEvent(event: string, file: string): void {

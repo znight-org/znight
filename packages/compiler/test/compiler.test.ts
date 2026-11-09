@@ -257,6 +257,27 @@ export class Service {
       app.cleanup()
     }
   })
+
+  it('reports an unresolvable dependency instead of looping on an `export =` cycle', async () => {
+    const app = tempApp({
+      'src/a.ts': "import b = require('./b')\nexport = b\n",
+      'src/b.ts': "import a = require('./a')\nexport = a\n",
+      'src/bar.ts': `import { Injectable } from '@znight/core'
+import { Foo } from './a'
+@Injectable()
+export class Bar {
+  constructor(readonly foo: Foo) {}
+}
+`,
+    })
+    try {
+      const result = await compile({ root: app.root })
+      expect(result.ok).toBe(false)
+      expect(codesOf(app.root, result.diagnostics)).toEqual(['ZNIGHT010 src/bar.ts:5'])
+    } finally {
+      app.cleanup()
+    }
+  })
 })
 
 describe('error module', () => {
@@ -390,6 +411,69 @@ export class Named {}
       expect(fixed.code).toContain("name: 'later'")
     } finally {
       outside.cleanup()
+    }
+  })
+})
+
+describe('createCompiler() and compiler extensions', () => {
+  it('retries an extension that failed to load on the next compile', async () => {
+    const app = tempApp({
+      'node_modules/@znight/late-ext/package.json': JSON.stringify({
+        name: '@znight/late-ext',
+        version: '1.0.0',
+        type: 'module',
+        exports: { '.': './index.js', './compiler': { default: './dist/compiler.mjs' } },
+        znight: { apiVersion: 1, compiler: '@znight/late-ext/compiler' },
+      }),
+      'node_modules/@znight/late-ext/index.js': 'export {}\n',
+      'src/service.ts': `import '@znight/late-ext'\n${SERVICE}`,
+    })
+    try {
+      const compiler = createCompiler({ root: app.root })
+      const failed = await compiler.compile()
+      expect(failed.ok).toBe(false)
+      expect(failed.diagnostics.map(diagnostic => diagnostic.message)).toEqual([
+        "Cannot resolve the compiler extension '@znight/late-ext/compiler' of @znight/late-ext",
+      ])
+      // the package is built while the watcher runs
+      app.write(
+        'node_modules/@znight/late-ext/dist/compiler.mjs',
+        "export default { apiVersion: 1, name: 'late', decorators: {} }\n",
+      )
+      const fixed = await compiler.compile({ changed: [`${app.root}/src/service.ts`] })
+      expect(fixed.diagnostics).toEqual([])
+      expect(fixed.ok).toBe(true)
+    } finally {
+      app.cleanup()
+    }
+  })
+})
+
+describe('createCompiler() and unwatched files', () => {
+  it('re-reads a file that left the inputs and changed while unwatched', async () => {
+    const NAMED = `import { Injectable } from '@znight/core'
+import { NAME } from '../shared/names.ts'
+@Injectable({ name: NAME })
+export class Named {}
+`
+    const app = tempApp({ 'shared/names.ts': "export const NAME = 'alpha'\n", 'src/named.ts': NAMED })
+    try {
+      const compiler = createCompiler({ root: app.root })
+      const names = `${app.root}/shared/names.ts`
+      const named = `${app.root}/src/named.ts`
+      expect((await compiler.compile()).code).toContain("name: 'alpha'")
+      app.write('src/named.ts', SERVICE)
+      const without = await compiler.compile({ changed: [named] })
+      expect(without.watchFiles).not.toContain(names)
+      // the change is not reported: the file is no longer watched
+      app.write('shared/names.ts', "export const NAME = 'beta'\n")
+      expect(isRelevantChange(compiler, 'changed', names, new Set(without.watchFiles), includeRoots(compiler))).toBe(
+        false,
+      )
+      app.write('src/named.ts', NAMED)
+      expect((await compiler.compile({ changed: [named] })).code).toContain("name: 'beta'")
+    } finally {
+      app.cleanup()
     }
   })
 })

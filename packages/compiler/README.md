@@ -532,12 +532,14 @@ The same, without writing anything: returns
 ### `createCompiler(options)`
 
 An incremental compiler, used by the Vite plugin, the Bun preload and `znight dev`: it keeps the
-parse cache and the loaded compiler extensions between compiles.
+parse cache and the loaded compiler extensions between compiles (an extension that failed to load,
+for example a package not built yet, is loaded again by the next compile).
 
 ```ts
 const compiler = createCompiler({ root, mode: 'serve' })
 await compiler.compile() // full
 await compiler.compile({ changed: [file] }) // only `file` is re-read (re-parsed if its content changed)
+// (the parses of files the previous compile did not read are dropped: no watcher reports their changes)
 await compiler.compile({ added: [file] }) // created / deleted files re-run the globs
 await compiler.generate({ removed: [file] }) // compile + write when changed
 compiler.isOutFile(path) // watchers must ignore the generated module

@@ -64,6 +64,15 @@ export class FileCache {
     }
   }
 
+  /** Drops every cached file that is not in `keep` (the next {@link get} reads it again). */
+  retain(keep: ReadonlySet<string>): void {
+    for (const path of [...this.#entries.keys()]) {
+      if (!keep.has(path)) {
+        this.#entries.delete(path)
+      }
+    }
+  }
+
   delete(path: string): void {
     this.#entries.delete(path)
   }

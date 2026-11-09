@@ -373,10 +373,14 @@ class IncrementalCompiler implements ZnightCompiler {
     const key = discoverExtensionModules(this.project)
       .map(module => `${module.packageName}\0${module.specifier}\0${module.package.dir}\0${module.trusted}`)
       .join('\n')
-    if (this.#extensions?.key !== key) {
-      this.#extensions = { key, result: await loadExtensions(this.project) }
+    if (this.#extensions?.key === key) {
+      return this.#extensions.result
     }
-    return this.#extensions.result
+    const result = await loadExtensions(this.project)
+    // a failure (an extension module not built yet...) is retried by the next compile
+    const failed = result.diagnostics.some(diagnostic => diagnostic.severity === 'error')
+    this.#extensions = failed ? undefined : { key, result }
+    return result
   }
 
   /**

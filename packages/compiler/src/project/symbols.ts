@@ -176,11 +176,39 @@ export class SymbolResolver {
     string,
     { readonly names: readonly string[]; readonly files: readonly string[] }
   >()
-  readonly #inProgress = new Set<string>()
-  #cycleHits = 0
+  /** Guarded lookups in progress (re-exports, `export =` assignments, export names), with their depth. */
+  readonly #inProgress = new Map<string, number>()
+  /** Shallowest in-progress lookup a cycle was cut back to, since the innermost guarded lookup started. */
+  #cutDepth = Number.POSITIVE_INFINITY
 
   constructor(host: ProjectHost) {
     this.#host = host
+  }
+
+  /**
+   * Runs a lookup that can be re-entered through a cycle. Re-entering a lookup in progress returns
+   * `cut()`. `complete` is `true` when no cycle was cut back to a lookup started before this one:
+   * a cycle cut back to the lookup itself does not change its result (re-entering it again cannot
+   * find anything new), so the head of a cycle can be memoized, only the lookups inside the cycle
+   * cannot.
+   */
+  #guarded<T>(key: string, cut: () => T, run: () => T): { readonly value: T; readonly complete: boolean } {
+    const inProgress = this.#inProgress.get(key)
+    if (inProgress !== undefined) {
+      this.#cutDepth = Math.min(this.#cutDepth, inProgress)
+      return { value: cut(), complete: false }
+    }
+    const depth = this.#inProgress.size
+    const outer = this.#cutDepth
+    this.#cutDepth = Number.POSITIVE_INFINITY
+    this.#inProgress.set(key, depth)
+    try {
+      const value = run()
+      return { value, complete: this.#cutDepth >= depth }
+    } finally {
+      this.#inProgress.delete(key)
+      this.#cutDepth = Math.min(outer, this.#cutDepth)
+    }
   }
 
   /** Resolves a top-level name of `file` (local declaration, import or global). */
@@ -228,10 +256,7 @@ export class SymbolResolver {
       return target
     }
     if (binding.kind === 'namespace' || binding.kind === 'require') {
-      const assignment = target.file.facts.exportAssignment
-      return assignment
-        ? this.resolveEntity({ file: target.file }, assignment.expression, meaning, track)
-        : { kind: 'module', file: target.file.path }
+      return this.#moduleObject(target.file, meaning, track)
     }
     return this.resolveExport(target.file.path, binding.imported, meaning, track)
   }
@@ -244,22 +269,14 @@ export class SymbolResolver {
       addAll(track, memo.files)
       return memo.result
     }
-    const progressKey = `${path}\0${name}`
-    if (this.#inProgress.has(progressKey)) {
-      this.#cycleHits++
-      return unresolved('circular', `Circular re-export of '${name}'`)
-    }
     const files = new Set<string>()
-    const hitsBefore = this.#cycleHits
-    this.#inProgress.add(progressKey)
-    let result: SymbolResolution
-    try {
-      result = this.#resolveExport(path, name, meaning, files)
-    } finally {
-      this.#inProgress.delete(progressKey)
-    }
-    // A result computed while a cycle was cut may be incomplete: only memoize cycle-free lookups.
-    if (this.#cycleHits === hitsBefore) {
+    const { value: result, complete } = this.#guarded(
+      `${path}\0${name}`,
+      () => unresolved('circular', `Circular re-export of '${name}'`),
+      () => this.#resolveExport(path, name, meaning, files),
+    )
+    // A lookup inside a cycle cut further up may be incomplete: memoize only complete results.
+    if (complete) {
       this.#exportMemo.set(key, { result, files: [...files] })
     }
     addAll(track, files)
@@ -337,11 +354,20 @@ export class SymbolResolver {
       addAll(track, memo.files)
       return memo.names
     }
-    const names = new Set<string>()
     const files = new Set<string>()
-    this.#collectExportNames(path, names, new Set(), files)
-    const sorted = [...names].sort(compareStrings)
-    this.#exportNamesMemo.set(path, { names: sorted, files: [...files] })
+    const { value: sorted, complete } = this.#guarded(
+      `names\0${path}`,
+      (): readonly string[] => [],
+      () => {
+        const names = new Set<string>()
+        this.#collectExportNames(path, names, new Set(), files)
+        return [...names].sort(compareStrings)
+      },
+    )
+    // Names collected inside a cycle cut further up may be incomplete: memoize only complete results.
+    if (complete) {
+      this.#exportNamesMemo.set(path, { names: sorted, files: [...files] })
+    }
     addAll(track, files)
     return sorted
   }
@@ -362,7 +388,7 @@ export class SymbolResolver {
     }
     if (facts.exportAssignment) {
       names.add('default')
-      const target = this.resolveEntity({ file }, facts.exportAssignment.expression, 'any', track)
+      const target = this.#resolveAssignment(file, 'any', track)
       for (const member of this.#memberNames(target, track)) {
         names.add(member)
       }
@@ -403,37 +429,12 @@ export class SymbolResolver {
     if (!file) {
       return unresolved('unsupported-module', `Cannot analyse module ${path}`)
     }
-    track.add(path)
-    const facts = file.facts
-    const entry = facts.exports.get(name)
-    if (entry) {
-      return this.#resolveEntry(file, undefined, entry, meaning, track)
-    }
-    if (facts.exportAssignment) {
-      const target = this.resolveEntity({ file }, facts.exportAssignment.expression, 'any', track)
-      if (name === 'default') {
-        return target
-      }
-      const member = this.resolveMember(target, name, meaning, track)
-      if (member.kind !== 'unresolved') {
-        return member
-      }
+    const own = this.#ownExport(file, name, meaning, track)
+    if (own) {
+      return own
     }
     if (name !== 'default') {
-      const matches: SymbolResolution[] = []
-      for (const star of facts.starExports) {
-        const target = this.#moduleTarget(file, star.specifier, star.specifierSpan, track)
-        if (target.kind !== 'file') {
-          continue
-        }
-        const result = this.resolveExport(target.file.path, name, meaning, track)
-        if (result.kind === 'unresolved' && (result.reason === 'export-not-found' || result.reason === 'circular')) {
-          continue
-        }
-        if (!matches.some(match => symbolKey(match) === symbolKey(result))) {
-          matches.push(result)
-        }
-      }
+      const matches = this.#starExports(file, name, meaning, track)
       if (matches.length === 1) {
         return matches[0] as SymbolResolution
       }
@@ -442,6 +443,62 @@ export class SymbolResolver {
       }
     }
     return unresolved('export-not-found', `Module ${path} has no exported member '${name}'`)
+  }
+
+  /**
+   * The export `name` of `file` itself (an export entry, or a member of its `export =` target), or
+   * `undefined` when it is only looked up in its `export *`.
+   */
+  #ownExport(file: SourceFile, name: string, meaning: Meaning, track: Set<string>): SymbolResolution | undefined {
+    track.add(file.path)
+    const facts = file.facts
+    const entry = facts.exports.get(name)
+    if (entry) {
+      return this.#resolveEntry(file, undefined, entry, meaning, track)
+    }
+    if (facts.exportAssignment) {
+      const target = this.#resolveAssignment(file, 'any', track)
+      if (name === 'default' || (target.kind === 'unresolved' && target.reason === 'circular')) {
+        return target
+      }
+      const member = this.resolveMember(target, name, meaning, track)
+      if (member.kind !== 'unresolved') {
+        return member
+      }
+    }
+    return undefined
+  }
+
+  /**
+   * The distinct exports `name` reached through the `export *` of `file`: a breadth-first walk of
+   * the star-export graph that stops at the modules exporting `name` themselves. Each module is
+   * visited once, so `export *` cycles and diamonds cost one visit per module (a depth-first walk
+   * enumerates every path).
+   */
+  #starExports(file: SourceFile, name: string, meaning: Meaning, track: Set<string>): SymbolResolution[] {
+    const matches: SymbolResolution[] = []
+    const visited = new Set([file.path])
+    const queue = [file]
+    for (let index = 0; index < queue.length; index++) {
+      const current = queue[index] as SourceFile
+      for (const star of current.facts.starExports) {
+        const target = this.#moduleTarget(current, star.specifier, star.specifierSpan, track)
+        if (target.kind !== 'file' || visited.has(target.file.path)) {
+          continue
+        }
+        visited.add(target.file.path)
+        const result = this.#ownExport(target.file, name, meaning, track)
+        if (!result) {
+          queue.push(target.file)
+        } else if (
+          !(result.kind === 'unresolved' && (result.reason === 'export-not-found' || result.reason === 'circular')) &&
+          !matches.some(match => symbolKey(match) === symbolKey(result))
+        ) {
+          matches.push(result)
+        }
+      }
+    }
+    return matches
   }
 
   #resolveEntry(
@@ -471,12 +528,33 @@ export class SymbolResolver {
         if (target.kind !== 'file') {
           return target
         }
-        const assignment = target.file.facts.exportAssignment
-        return assignment
-          ? this.resolveEntity({ file: target.file }, assignment.expression, meaning, track)
-          : { kind: 'module', file: target.file.path }
+        return this.#moduleObject(target.file, meaning, track)
       }
     }
+  }
+
+  /** What the module object of `file` is: its `export =` target, or the module itself. */
+  #moduleObject(file: SourceFile, meaning: Meaning, track: Set<string> | undefined): SymbolResolution {
+    return file.facts.exportAssignment
+      ? this.#resolveAssignment(file, meaning, track)
+      : { kind: 'module', file: file.path }
+  }
+
+  /**
+   * Resolves the `export =` expression of `file`. `export = x` where `x` is (directly or through other
+   * modules) an import of `file` itself is a cycle that never reaches {@link resolveExport}: it is cut
+   * here, like circular re-exports.
+   */
+  #resolveAssignment(file: SourceFile, meaning: Meaning, track: Set<string> | undefined): SymbolResolution {
+    const assignment = file.facts.exportAssignment
+    if (!assignment) {
+      return unresolved('export-not-found', `Module ${file.path} has no 'export =' assignment`)
+    }
+    return this.#guarded(
+      `assign\0${file.path}`,
+      () => unresolved('circular', `Circular 'export =' assignment of ${file.path}`),
+      () => this.resolveEntity({ file }, assignment.expression, meaning, track),
+    ).value
   }
 
   #resolveDotted(scope: ScopeRef, node: Dotted, meaning: Meaning, track: Set<string> | undefined): SymbolResolution {
