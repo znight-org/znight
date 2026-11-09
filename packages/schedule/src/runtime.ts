@@ -380,8 +380,9 @@ export class ScheduleRuntime {
     if (job.state !== 'scheduled') return
     job.state = 'paused'
     this.#disarm(job)
-    // a queued occurrence has not started: it is dropped like the next ones
-    this.#dropPending(job)
+    // a queued occurrence has not started: it is dropped like the next ones, unless a manual
+    // `trigger()` waits for it (manual runs of a paused job still run)
+    if (job.pending?.manual !== true) this.#dropPending(job)
   }
 
   resume(job: JobRecord): void {
@@ -629,11 +630,20 @@ export class ScheduleRuntime {
     return this.#notExecuted(job, runId, scheduledAt, trigger, 'skipped', performance.now())
   }
 
+  /** A queued occurrence that will not run: outcome `skipped` (logged at `debug`, emitted). */
   #dropPending(job: JobRecord): void {
     const pending = job.pending
     if (pending === undefined) return
     job.pending = undefined
-    const result = this.#result(job, randomUUID(), pending.scheduledAt, 'queued', 'skipped', undefined, undefined)
+    const runId = randomUUID()
+    let why = 'the scheduler is stopping'
+    if (job.state === 'removed') why = 'it was removed'
+    else if (job.state === 'paused') why = 'it was paused'
+    this.#services.logger.debug(`Schedule: job '${job.name}' did not run: its queued occurrence was dropped (${why})`, {
+      job: job.name,
+      runId,
+    })
+    const result = this.#notExecuted(job, runId, pending.scheduledAt, 'queued', 'skipped', performance.now())
     for (const waiter of pending.waiters) waiter(result)
   }
 

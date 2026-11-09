@@ -329,7 +329,9 @@ Each `ScheduledJob` exposes `name`, `kind`, `origin`, `schedule` (`'0 8 * * MON-
   at `debug`. A run still waiting for its lease when its signal is aborted (the application stops,
   `remove(name, { abort: true })`) is dropped at once, without waiting for the lock store, and a
   lease granted later is released. `pause()` also drops the queued occurrence of an
-  `overlap: 'queue'` job. A running run goes on. Manual runs (`trigger()`) of a paused job still run.
+  `overlap: 'queue'` job, unless a `trigger()` waits for it. A dropped queued occurrence is emitted
+  (`skipped`, trigger `queued`) and logged at `debug`. A running run goes on. Manual runs
+  (`trigger()`) of a paused job still run.
 - `reschedule()` arms a timeout again, `delay` from now, also from its own run (a retry):
   `registry.get('retry')?.reschedule('10s')`.
 

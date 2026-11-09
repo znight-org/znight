@@ -2926,7 +2926,9 @@ interface ScheduleMetadata {
   scheduler is stopping or disposed, the job was removed, or it was paused (manual runs excepted):
   outcome `skipped` (with `aborted` when its signal was aborted), logged at `debug`, its lease
   released (its job never started), and no timer is armed after the dispose. `pause()` also drops
-  the queued occurrence of an `overlap: 'queue'` job; a queued `trigger()` still runs.
+  the queued occurrence of an `overlap: 'queue'` job, unless a queued `trigger()` waits for it (it
+  then runs). A dropped queued occurrence (pause, remove, stop) is emitted with outcome `skipped`
+  and trigger `queued`, recorded as `lastRun` and logged at `debug`.
 - **Locks** (normative): with a store, jobs are locked unless `lock: false` or `overlap: 'allow'`.
   `acquire(key, { owner, occurrence, ttlMs })` MUST grant a lease only when no lease is live **and**
   no later-or-equal occurrence of the key was claimed (occurrence fencing: clock skew between

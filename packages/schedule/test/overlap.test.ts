@@ -107,6 +107,48 @@ describe('overlap', () => {
     expect(runs).toEqual(['schedule@00:01', 'manual@00:02', 'queued@00:02'])
   })
 
+  it('queue: a manual run queued before pause() still runs; a dropped occurrence is emitted', async () => {
+    let release = deferred()
+    const runs: string[] = []
+    const events: ScheduledRunEvent[] = []
+    await using booted = await boot({
+      metadata: metadataWith([
+        {
+          name: 'queued',
+          kind: 'interval',
+          every: 60_000,
+          overlap: 'queue',
+          run: async ctx => {
+            runs.push(`${ctx.trigger}@${ctx.scheduledAt.toISOString().slice(11, 16)}`)
+            await release.promise
+          },
+        },
+      ]),
+    })
+    booted.app.hooks.on('schedule:run', event => {
+      events.push(event)
+    })
+    await booted.clock.advance('2m') // 00:01 runs, 00:02 is queued
+    const job = booted.registry.get('queued')
+    job?.pause()
+    expect(events.map(event => [event.trigger, event.outcome])).toEqual([['queued', 'skipped']])
+    expect(job?.lastRun).toMatchObject({ trigger: 'queued', outcome: 'skipped' })
+    expect(booted.logs.messages('debug')).toContain(
+      "Schedule: job 'queued' did not run: its queued occurrence was dropped (it was paused)",
+    )
+    // a manual run queued behind the running run, then pause(): it still runs
+    job?.resume()
+    const manual = job?.trigger()
+    job?.pause()
+    const first = release
+    release = deferred()
+    first.resolve()
+    await booted.clock.settle()
+    release.resolve()
+    expect(await manual).toMatchObject({ trigger: 'queued', outcome: 'completed' })
+    expect(runs).toEqual(['schedule@00:01', 'queued@00:02'])
+  })
+
   it('allow: runs concurrently and implies lock: false', async () => {
     const release = deferred()
     await using booted = await boot({
