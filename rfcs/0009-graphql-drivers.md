@@ -34,6 +34,10 @@ import { GraphQLPlugin } from '@znight/graphql'
 import { yogaDriver } from '@znight/graphql/yoga'
 import { useResponseCache } from '@graphql-yoga/plugin-response-cache'
 
+// the credential the guards authenticate: a null session would be one cache shared by every client
+const principal = (request: Request): string | null =>
+  request.headers.get('x-api-key') ?? request.headers.get('authorization')
+
 await Application.create({
   metadata: __ZNIGHT_METADATA__,
   plugins: [
@@ -41,9 +45,9 @@ await Application.create({
     GraphQLPlugin.configure({
       guards: [AccessGuard],
       resultMappers: [Rejections],
-      // a cache hit skips the engine (and the guards): one cache per principal
+      // a cache hit skips the engine (and the guards): one cache per principal, none without one
       driver: yogaDriver({
-        plugins: [useResponseCache({ session: request => request.headers.get('authorization') })],
+        plugins: [useResponseCache({ session: principal, enabled: request => principal(request) !== null })],
       }),
     }),
   ],

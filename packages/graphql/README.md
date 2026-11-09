@@ -1036,8 +1036,11 @@ GraphQLPlugin.configure({ driver: yogaDriver({ plugins: [usePersistedOperations(
   `driver: 'yoga'` (`transport: 'sse'` for subscriptions). Plugins wrapping the execution
   (`useResponseCache`) call the engine, but a response cache hit answers without it: guards,
   loaders, error mappers, request-scoped providers and the hook do not run for that request, so
-  key the cache per principal (`session: request => request.headers.get('authorization')`),
-  never with one global session next to guards. An operation executed by a plugin that replaces
+  key the cache by the credential the guards authenticate and turn it off without one, since a
+  `null` session is one cache shared by every client:
+  `const principal = (request: Request) => request.headers.get('x-api-key') ?? request.headers.get('authorization')`,
+  then `useResponseCache({ session: principal, enabled: request => principal(request) !== null })`
+  (read the cookie of a cookie session the same way). An operation executed by a plugin that replaces
   the execution (`useGraphQlJit`) fails with ZNIGHT066, logged once: its resolvers would not get
   the `GraphQLContext`.
 - **Owned options**, refused with ZNIGHT066 (a type error first): `schema`, `context`,
