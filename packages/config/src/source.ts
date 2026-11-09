@@ -72,14 +72,19 @@ function walk(node: unknown, segments: readonly string[], start: number): unknow
   return undefined
 }
 
-function collectKeys(values: RecordLike, prefix: string, out: Set<string>, depth: number): void {
+/**
+ * Adds the key paths of `values` to `out`. A value already on the current path (a cycle supplied by
+ * a custom loader) is listed but not walked again; the depth is bounded as well.
+ */
+function collectKeys(values: RecordLike, prefix: string, out: Set<string>, ancestors: Set<object>): void {
+  ancestors.add(values)
   for (const [name, value] of Object.entries(values)) {
     if (value === undefined) continue
     const path = prefix === '' ? name : `${prefix}.${name}`
     out.add(path)
-    // bounded depth: guards against cyclic structures supplied by custom loaders
-    if (isRecord(value) && depth < 32) collectKeys(value, path, out, depth + 1)
+    if (isRecord(value) && !ancestors.has(value) && ancestors.size < 32) collectKeys(value, path, out, ancestors)
   }
+  ancestors.delete(values)
 }
 
 /**
@@ -129,7 +134,7 @@ class LayeredConfigSource implements ConfigSource {
 
   keys(): readonly string[] {
     const keys = new Set<string>()
-    for (const layer of this.#layers) collectKeys(layer.values, '', keys, 0)
+    for (const layer of this.#layers) collectKeys(layer.values, '', keys, new Set())
     return [...keys]
   }
 
