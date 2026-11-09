@@ -269,6 +269,7 @@
       "name": "@znight-examples/realtime-chat",
       "version": "0.0.0",
       "dependencies": {
+        "@znight/config": "workspace:*",
         "@znight/core": "workspace:*",
         "@znight/http": "workspace:*",
         "@znight/websocket": "workspace:*",

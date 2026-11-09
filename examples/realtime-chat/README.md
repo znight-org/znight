@@ -8,14 +8,19 @@ ticker. Data stays in memory.
 - **Gateways** (`src/chat/chat.gateway.ts`): `@Gateway({ path: '/chat', protocols: ['chat.v1'], rateLimit })`,
   `@OnConnect`, `@OnMessage` handlers with Zod payloads (`@Payload(SendMessage)`), replies,
   `@OnDisconnect`, rooms (`conn.join`, a `user:<name>` room per user) and broadcasts
-  (`WsServer.of(ChatGateway).to(room).emit(...)`, encoded once).
+  (`WsServer.of(ChatGateway).to(room).emit(...)`, encoded once). Memory stays bounded: a
+  connection joins at most 20 rooms, and the history is kept for the 1,000 most recently active
+  rooms.
 - **The handshake is an HTTP request**: the global `AuthGuard` (`src/auth/auth.guard.ts`) protects
   routes and handshakes alike, with an API key (`x-api-key`) or, for browsers, a single-use ticket
-  (`POST /ws/tickets`, then `/chat?ticket=...`). The request scope is the connection: the
+  (`POST /ws/tickets`, then `/chat?ticket=...`), accepted on the handshakes of `@TicketAuth()`
+  gateways only. The `TicketStore` stays bounded: expired tickets are dropped and a user holds at
+  most ten outstanding tickets. The request scope is the connection: the
   `RequestUser` it fills is there for every message.
 - **Access decisions** (RFC 0001): `@Authenticated()` on the gateway, `@Public()` on the ticker,
   checked at build time.
-- **Handshake guards** (`ConnectionQuotaGuard`: at most five tabs per user, `429`) and **message
+- **Handshake guards** (`ConnectionQuotaGuard`: at most five tabs per user, `429`; `@OnConnect`
+  counts again and closes the extra tabs of concurrent handshakes with `4429`) and **message
   guards** (`ModeratorGuard` reading `@Roles(['moderator'])` on `room.kick`).
 - **A raw gateway** (`src/ticker/ticker.gateway.ts`): `/ticker/:symbol`, binary frames sent at the
   client's pace (`conn.send(...) === 'queued'` → `await conn.drained()`), a `4404` close from
@@ -37,7 +42,15 @@ bun run --cwd examples/realtime-chat dev        # http://localhost:3000, ws://lo
 bun run --cwd examples/realtime-chat test
 ```
 
-API keys come from `CHAT_KEYS` (default `alice:alice-key:moderator,bob:bob-key`).
+API keys come from `CHAT_KEYS` (`name:key[:role...]`, comma-separated), read and validated by
+`ConfigPlugin` (`src/config/chat.config.ts`): without it the application refuses to start
+(`ZNIGHT006`). `bun run dev` reads `alice:alice-key:moderator,bob:bob-key` from `.env.development`;
+elsewhere, set it in the environment:
+
+```sh
+bun run build
+CHAT_KEYS=alice:change-me:moderator,bob:change-me-too NODE_ENV=production node dist/main.js
+```
 
 ```sh
 curl -X POST localhost:3000/ws/tickets -H 'x-api-key: bob-key'      # { "ticket": "..." }

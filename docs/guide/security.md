@@ -686,6 +686,7 @@ passwords with scrypt from `node:crypto`, with the parameters recommended by OWA
 ```ts [src/security/password-hasher.ts]
 import { randomBytes, scrypt, timingSafeEqual } from 'node:crypto'
 import { Injectable } from '@znight/core'
+import { ServiceUnavailableException } from '@znight/http'
 
 interface Params {
   readonly ln: number // log2 of the cost N
@@ -696,7 +697,8 @@ interface Params {
 const CURRENT: Params = { ln: 17, r: 8, p: 1 } // N = 2^17: 128 MiB and ~100-300 ms per hash
 const KEY_LENGTH = 32
 const MAX_MEMORY = 256 * 1024 * 1024 // stored parameters asking for more (128 * N * r bytes) are refused
-const MAX_CONCURRENT = 4 // the libuv thread pool size: 4 hashes at once use 512 MiB
+export const MAX_CONCURRENT = 4 // the libuv thread pool size: 4 hashes at once use 512 MiB
+export const MAX_WAITING = 16 // beyond, a flood of sign-ins gets 503 at once instead of minutes of queue
 const PHC = /^\$scrypt\$ln=(\d{1,2}),r=(\d{1,2}),p=(\d{1,2})\$([A-Za-z0-9+/]+)\$([A-Za-z0-9+/]+)$/
 
 const b64 = (bytes: Uint8Array): string => Buffer.from(bytes).toString('base64').replace(/=+$/, '')
@@ -706,17 +708,20 @@ export class PasswordHasher {
   #running = 0
   readonly #waiting: (() => void)[] = []
 
-  /** `$scrypt$ln=17,r=8,p=1$<salt>$<hash>` (PHC string format, base64 without padding). */
-  async hash(password: string): Promise<string> {
+  /**
+   * `$scrypt$ln=17,r=8,p=1$<salt>$<hash>` (PHC string format, base64 without padding). `signal`: the
+   * caller gave up (`ctx.signal`), drop the hash if it still waits for a slot.
+   */
+  async hash(password: string, signal?: AbortSignal): Promise<string> {
     const salt = randomBytes(16)
-    const key = await this.#derive(password, salt, CURRENT)
+    const key = await this.#derive(password, salt, CURRENT, signal)
     return `$scrypt$ln=${CURRENT.ln},r=${CURRENT.r},p=${CURRENT.p}$${b64(salt)}$${b64(key)}`
   }
 
-  async verify(password: string, stored: string): Promise<boolean> {
+  async verify(password: string, stored: string, signal?: AbortSignal): Promise<boolean> {
     const parsed = parse(stored)
     if (parsed === undefined) return false
-    const key = await this.#derive(password, parsed.salt, parsed.params)
+    const key = await this.#derive(password, parsed.salt, parsed.params, signal)
     return timingSafeEqual(key, parsed.hash)
   }
 
@@ -731,8 +736,9 @@ export class PasswordHasher {
     return { running: this.#running, waiting: this.#waiting.length }
   }
 
-  #derive(password: string, salt: Uint8Array, { ln, r, p }: Params): Promise<Buffer> {
+  #derive(password: string, salt: Uint8Array, { ln, r, p }: Params, signal?: AbortSignal): Promise<Buffer> {
     return this.#limit(
+      signal,
       () =>
         new Promise<Buffer>((resolve, reject) => {
           const N = 2 ** ln
@@ -745,10 +751,14 @@ export class PasswordHasher {
     )
   }
 
-  /** Bounds the hashes running at once: each one holds 128 MiB and a thread of the pool. */
-  async #limit<T>(task: () => Promise<T>): Promise<T> {
+  /**
+   * Bounds the hashes running at once (each one holds 128 MiB and a thread of the pool) and the
+   * hashes waiting for a slot; a waiting hash whose caller gave up leaves the queue.
+   */
+  async #limit<T>(signal: AbortSignal | undefined, task: () => Promise<T>): Promise<T> {
+    signal?.throwIfAborted()
     if (this.#running < MAX_CONCURRENT) this.#running++
-    else await new Promise<void>(resolve => this.#waiting.push(resolve)) // the slot is handed over
+    else await this.#wait(signal) // the slot is handed over
     try {
       return await task()
     } finally {
@@ -756,6 +766,26 @@ export class PasswordHasher {
       if (next === undefined) this.#running--
       else next()
     }
+  }
+
+  #wait(signal: AbortSignal | undefined): Promise<void> {
+    if (this.#waiting.length >= MAX_WAITING) {
+      throw new ServiceUnavailableException('Too many sign-ins in progress', undefined, {
+        headers: { 'retry-after': '1' },
+      })
+    }
+    return new Promise<void>((resolve, reject) => {
+      const granted = (): void => {
+        signal?.removeEventListener('abort', abandoned)
+        resolve()
+      }
+      const abandoned = (): void => {
+        this.#waiting.splice(this.#waiting.indexOf(granted), 1)
+        reject(signal?.reason)
+      }
+      signal?.addEventListener('abort', abandoned, { once: true })
+      this.#waiting.push(granted)
+    })
   }
 }
 
@@ -778,6 +808,10 @@ function parse(stored: string): { params: Params; salt: Buffer; hash: Buffer } |
   memory or passes are refused instead of being run.
 - Limit the password length in the sign-in schema (`z.string().min(1).max(1024)`) and rate limit
   the sign-in route: each attempt costs 128 MiB of memory and a few hundred milliseconds of CPU.
+- Bound the queue as well as the hashes running at once: past `MAX_WAITING` waiting hashes, a
+  sign-in gets `503` with `retry-after` at once, instead of queuing for minutes behind a flood of
+  attempts from many addresses. The controller passes `ctx.signal`, so a hash still waiting when
+  its client leaves is dropped and never run.
 - Lower-memory alternatives with the same strength (OWASP): N = 2^16 with r = 8 and p = 2, or
   N = 2^15 with p = 3. Argon2id works too: `Bun.password` on Bun, the `argon2` package on Node.js.
 
@@ -785,12 +819,12 @@ The example signs the accounts of its web front-end in with it (`LOCAL_ACCOUNTS`
 printed by `scripts/hash-password.ts`):
 
 ```ts [src/session/accounts.ts (excerpt)]
-  /** The account matching the credentials, or `undefined`. */
-  async signIn(username: string, password: string): Promise<Principal | undefined> {
+  /** The account matching the credentials, or `undefined`. `signal`: the client left (`ctx.signal`). */
+  async signIn(username: string, password: string, signal?: AbortSignal): Promise<Principal | undefined> {
     const account = this.#byUsername.get(username)
     // an unknown name costs a hash too: the response time does not tell which names exist
     const stored = account?.passwordHash ?? (await this.#decoyHash())
-    const valid = await this.hasher.verify(password, stored)
+    const valid = await this.hasher.verify(password, stored, signal)
     if (account === undefined || !valid) return undefined
 
     if (this.hasher.needsRehash(account.passwordHash)) {
@@ -803,7 +837,10 @@ printed by `scripts/hash-password.ts`):
   // ...
   /** A hash of a random password, made once: what unknown names are compared with. */
   #decoyHash(): Promise<string> {
-    this.#decoy ??= this.hasher.hash(randomBytes(32).toString('base64'))
+    this.#decoy ??= this.hasher.hash(randomBytes(32).toString('base64')).catch((error: unknown) => {
+      this.#decoy = undefined // refused (503) while the hasher was busy: try again on the next sign-in
+      throw error
+    })
     return this.#decoy
   }
 ```
@@ -821,6 +858,7 @@ decorator and a guard give per-route limits keyed by caller, with
 import type { Lazy } from '@znight/core'
 import type { RequestUser } from '../auth/request-user.js'
 
+import { isIPv6 } from 'node:net'
 import { Injectable } from '@znight/core'
 import { type CanActivate, createRouteDecorator, type HttpContext, TooManyRequestsException } from '@znight/http'
 import { type RateLimiterAbstract, RateLimiterMemory, RateLimiterRes } from 'rate-limiter-flexible'
@@ -848,7 +886,7 @@ export class RateLimitGuard implements CanActivate {
     if (policy === undefined || ctx.route === undefined) return true // no limit on this route
     const user = this.user.get()
     // the caller when known, else the client address (correct behind a proxy only with trustProxy)
-    const key = user.isAuthenticated ? `user:${user.principal.id}` : `ip:${ctx.ip ?? 'unknown'}`
+    const key = user.isAuthenticated ? `user:${user.principal.id}` : addressKey(ctx.ip)
     try {
       await this.#limiter(`${ctx.route.method} ${ctx.route.path}`, policy).consume(key)
       return true
@@ -870,6 +908,25 @@ export class RateLimitGuard implements CanActivate {
     return limiter
   }
 }
+
+/**
+ * The budget key of a client address. An IPv6 client usually holds a whole /64 (2^64 addresses):
+ * keyed by address, it would get a fresh budget per request. IPv6 addresses are keyed by /64 prefix.
+ */
+export function addressKey(ip: string | undefined): string {
+  if (ip === undefined || !isIPv6(ip)) return `ip:${ip ?? 'unknown'}`
+  const [head = '', tail] = ip.split('::')
+  const groups = (part: string): string[] => (part === '' ? [] : part.split(':'))
+  // an embedded IPv4 address (`::ffff:192.0.2.1`) counts as two groups
+  const size = (parts: string[]): number => parts.reduce((total, part) => total + (part.includes('.') ? 2 : 1), 0)
+  const first = groups(head)
+  const last = tail === undefined ? [] : groups(tail)
+  const all = [...first, ...Array<string>(8 - size(first) - size(last)).fill('0'), ...last].map(group =>
+    group.includes('.') ? group : Number.parseInt(group, 16).toString(16),
+  )
+  if (all.slice(0, 6).join(':') === '0:0:0:0:0:ffff') return `ip:${all[6]}` // IPv4-mapped: an IPv4 client
+  return `ip:${all.slice(0, 4).join(':')}::/64`
+}
 ```
 
 - `RateLimit` is a decision group of its own (not required): routes without it are not limited.
@@ -878,6 +935,10 @@ export class RateLimitGuard implements CanActivate {
 - The guard runs after `AuthGuard`: refused requests never consume a budget, and authenticated
   callers are counted by principal. The example limits note creation (30 per minute and user), the
   password sign-in (5 attempts per minute and address) and the webhook.
+- Anonymous callers are keyed by address, IPv6 ones by `/64` prefix (`addressKey`): a client
+  usually holds a whole `/64`, and keyed by full address it would get a fresh budget per address.
+  A per-address limit still lets a botnet spread its guesses against one account; add a
+  per-account budget (with the lockout trade-off it brings) when that matters.
 - The memory store is per process. With several instances, use `RateLimiterRedis` (or another
   shared store of the library) so that the limit holds across the fleet.
 - Behind a load balancer, `ctx.ip` is the load balancer unless `trustProxy` is set: every anonymous

@@ -62,10 +62,15 @@ The production bundle runs on both runtimes, configured by environment variables
 
 ```sh
 bun run build
-API_KEY=change-me node --enable-source-maps dist/main.js   # Node.js
-API_KEY=change-me bun dist/main.js                          # Bun
-API_KEY=change-me bun run start                             # znight start (same PID, signals forwarded)
+export NODE_ENV=production API_KEY=change-me
+node --enable-source-maps dist/main.js   # Node.js
+bun --no-env-file dist/main.js           # Bun
+bun run start                            # znight start (same PID, signals forwarded)
 ```
+
+`--no-env-file` (and `env = false` in `bunfig.toml`) stops Bun from loading `.env.development` into
+`process.env` by itself when `NODE_ENV` is unset: the development keys of that file never apply to a
+production run.
 
 Without `API_KEY` the application refuses to start, listing every configuration problem at once:
 

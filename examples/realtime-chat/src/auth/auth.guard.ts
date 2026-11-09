@@ -5,11 +5,11 @@ import type { TicketStore } from './tickets.js'
 import { Injectable, type Lazy } from '@znight/core'
 import { type CanActivate, type HttpContext, UnauthorizedException } from '@znight/http'
 
-import { Authenticated, Public } from './access.js'
+import { Authenticated, Public, TicketAuth } from './access.js'
 
 /**
  * The global guard of `HttpPlugin`: it protects routes **and** WebSocket handshakes, which are HTTP
- * requests. An API key (`x-api-key`), or a ticket on upgrade requests only.
+ * requests. An API key (`x-api-key`), or a ticket on the handshakes of `@TicketAuth()` gateways only.
  */
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -32,9 +32,9 @@ export class AuthGuard implements CanActivate {
   #identify(ctx: HttpContext) {
     const key = ctx.header('x-api-key')
     if (key !== undefined) return this.keys.identify(key)
-    // tickets are for WebSocket handshakes only: they end up in URLs, never accept them elsewhere
+    // tickets end up in URLs: accept them on the handshakes of @TicketAuth() gateways only, decided by
+    // the matched route (an `upgrade` header is client-controlled and also reaches ordinary routes)
     const ticket = ctx.query['ticket']
-    const upgrade = ctx.header('upgrade')?.toLowerCase() === 'websocket'
-    return upgrade && typeof ticket === 'string' ? this.tickets.consume(ticket) : undefined
+    return TicketAuth.get(ctx) === true && typeof ticket === 'string' ? this.tickets.consume(ticket) : undefined
   }
 }

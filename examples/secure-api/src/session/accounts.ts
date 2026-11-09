@@ -57,12 +57,12 @@ export class Accounts {
     return account === undefined ? undefined : { id: account.id, roles: account.roles, via: 'session' }
   }
 
-  /** The account matching the credentials, or `undefined`. */
-  async signIn(username: string, password: string): Promise<Principal | undefined> {
+  /** The account matching the credentials, or `undefined`. `signal`: the client left (`ctx.signal`). */
+  async signIn(username: string, password: string, signal?: AbortSignal): Promise<Principal | undefined> {
     const account = this.#byUsername.get(username)
     // an unknown name costs a hash too: the response time does not tell which names exist
     const stored = account?.passwordHash ?? (await this.#decoyHash())
-    const valid = await this.hasher.verify(password, stored)
+    const valid = await this.hasher.verify(password, stored, signal)
     if (account === undefined || !valid) return undefined
 
     if (this.hasher.needsRehash(account.passwordHash)) {
@@ -75,7 +75,10 @@ export class Accounts {
 
   /** A hash of a random password, made once: what unknown names are compared with. */
   #decoyHash(): Promise<string> {
-    this.#decoy ??= this.hasher.hash(randomBytes(32).toString('base64'))
+    this.#decoy ??= this.hasher.hash(randomBytes(32).toString('base64')).catch((error: unknown) => {
+      this.#decoy = undefined // refused (503) while the hasher was busy: try again on the next sign-in
+      throw error
+    })
     return this.#decoy
   }
 }
