@@ -3575,6 +3575,11 @@ are ZNIGHT050):
   guards (plugin, class, method; `FORBIDDEN`, outcome `rejected`), `invoke` bounded by
   `handlerTimeoutMs` (`TIMEOUT`), reply `{ id, data }` or `{ id, error }` / `$error`; the plugin
   `exceptionMappers` run first. Close codes and limits are those of RFC 0003 §5.8 and §8.6.
+- A close frame MUST carry a code a server may send (`1000`–`1014` except `1004`–`1006`, or
+  `3000`–`4999`; `1011` replaces any other) and a reason of at most 123 UTF-8 bytes (cut on a code
+  point boundary): reasons come from exception messages, which may hold client input. The close
+  timer is armed before the transport sends the frame, and a transport that refuses it (`ws`
+  throws) terminates the socket. The in-memory transport refuses the same frames as `ws`.
 - A heartbeat timer (one per plugin, `unref()`ed) pings the connections of `node` transports and
   terminates those silent since the previous tick (`initiator: 'heartbeat'`); Bun pings by itself
   (`idleTimeout`, `sendPings`).

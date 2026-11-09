@@ -8,7 +8,7 @@ import type { TokenBucket } from './rate-limit.ts'
 import type { Broadcast, ChannelMember, RoomRegistry } from './rooms.ts'
 import type { SendStatus, SocketEvents, TransportSocket } from './transport.ts'
 
-import { WsCloseCode } from './exceptions.ts'
+import { closeReason, isCloseCode, WsCloseCode } from './exceptions.ts'
 
 /** Who closed a connection. */
 export type WsCloseInitiator = 'client' | 'server' | 'shutdown' | 'heartbeat' | 'backpressure' | 'error'
@@ -420,16 +420,28 @@ export class WsConnectionImpl implements WsConnection, ChannelMember {
     this.#drainPoll = undefined
   }
 
+  /**
+   * Starts closing. A close frame carries a code a server may send (`1011` otherwise) and a reason
+   * of at most 123 bytes (cut otherwise): reasons often come from exception messages, which may
+   * hold client input. A transport refusing the frame terminates the socket.
+   */
   #beginClose(code: number, reason: string, initiator: WsCloseInitiator, frame: boolean): void {
     if (this.#state !== 'open') return
+    const info: WsCloseInfo = frame
+      ? { code: isCloseCode(code) ? code : WsCloseCode.InternalError, reason: closeReason(reason), initiator }
+      : { code, reason, initiator }
     this.#state = 'closing'
-    this.#closing = { code, reason, initiator }
+    this.#closing = info
     this.#abort.abort(new WsClosedError())
     this.#queue.length = 0
     if (!frame) return
-    this.#socket?.close(code, reason)
     this.#closeTimer = setTimeout(() => this.#socket?.terminate(), this.#limits.closeTimeoutMs)
     this.#closeTimer.unref?.()
+    try {
+      this.#socket?.close(info.code, info.reason)
+    } catch {
+      this.#socket?.terminate()
+    }
   }
 
   #socketClosed(code: number, reason: string): void {

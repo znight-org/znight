@@ -296,6 +296,9 @@ export class TickerGateway {
 | a handler/guard | reply or `$error` with its code       | code from the status        | `INTERNAL` (logged)         |
 | `@OnConnect`    | closes with its `close` code (`1008`) | closes with `4000 + status` | closes with `1011` (logged) |
 
+A close reason is cut to the 123 bytes a close frame carries (exception messages often hold
+client input), and a close code a server may not send (`1005`, `1006`...) becomes `1011`.
+
 A refused handshake is an HTTP error (`401`, `403`, `429`...): browsers only see a `1006` close,
 so an application that must tell "unauthorized" from "network error" in a browser authenticates in
 `@OnConnect` and closes with `4401`. On shutdown, every connection is closed with `1001` after its

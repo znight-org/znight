@@ -131,6 +131,11 @@ message?, details?, { close? })` answers its code; an `HttpException` thrown by 
 from its status. In `@OnConnect`, a `WsException` closes with its `close` code (default `1008`), an
 `HttpException` with `4000 + status`, anything else with `1011`.
 
+Every close frame the server sends carries a code a server may send (`1000`–`1014` except `1004`,
+`1005` and `1006`, or `3000`–`4999`; `1011` replaces any other code) and a reason of at most 123
+UTF-8 bytes (a longer one, such as an exception message holding client input, is cut on a code
+point boundary). A transport that still refuses the close frame terminates the socket.
+
 `raw` gateways have no envelope: the default handler receives each frame (`string` or
 `Uint8Array`), `conn.send()` sends frames as they are.
 

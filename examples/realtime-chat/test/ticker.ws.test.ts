@@ -19,4 +19,10 @@ describe('/ticker/:symbol (raw)', () => {
     const client = await app.connect('/ticker/NOPE')
     expect(await client.closed).toEqual({ code: 4404, reason: 'Unknown symbol NOPE' })
   })
+
+  it('cuts the close reason to 123 bytes for a long symbol', async () => {
+    await using app = await createApp()
+    const client = await app.connect(`/ticker/${'X'.repeat(200)}`)
+    expect(await client.closed).toEqual({ code: 4404, reason: `Unknown symbol ${'X'.repeat(108)}` })
+  })
 })

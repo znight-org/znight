@@ -26,6 +26,26 @@ export const WsCloseCode = {
   TryAgainLater: 1013,
 } as const
 
+/** The largest reason a close frame carries, in UTF-8 bytes (RFC 6455 §5.5). */
+export const MAX_CLOSE_REASON_BYTES = 123
+
+/** Whether a close code may be sent by a server (RFC 6455 §7.4). */
+export function isCloseCode(code: unknown): code is number {
+  if (typeof code !== 'number' || !Number.isInteger(code)) return false
+  if (code >= 3000 && code <= 4999) return true
+  return code >= 1000 && code <= 1014 && code !== 1004 && code !== 1005 && code !== 1006
+}
+
+/** `reason` cut to {@link MAX_CLOSE_REASON_BYTES} UTF-8 bytes, on a code point boundary. */
+export function closeReason(reason: string): string {
+  if (Buffer.byteLength(reason) <= MAX_CLOSE_REASON_BYTES) return reason
+  const bytes = Buffer.from(reason)
+  let end = MAX_CLOSE_REASON_BYTES
+  // the first excluded byte continues a code point: drop that code point entirely
+  while (end > 0 && ((bytes[end] ?? 0) & 0xc0) === 0x80) end--
+  return bytes.subarray(0, end).toString('utf8')
+}
+
 /** Options of {@link WsException}. */
 export interface WsExceptionOptions {
   /** Close the connection with this code after replying. */

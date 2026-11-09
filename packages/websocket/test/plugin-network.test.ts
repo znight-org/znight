@@ -12,22 +12,26 @@ import { HttpPlugin } from '@znight/http'
 import { honoAdapter } from '@znight/http/hono'
 import { nodeAdapter } from '@znight/http/node'
 
-import { WebSocketPlugin } from '../src/index.ts'
+import { WebSocketPlugin, WsException } from '../src/index.ts'
 import { describe, expect, it } from 'bun:test'
 
 const ECHO = 'src/echo.gateway.ts#EchoGateway'
+const TICKER = 'src/ticker.gateway.ts#TickerGateway'
 
 class EchoGateway {
   readonly closed: number[] = []
 }
+
+class TickerGateway {}
 
 const metadata: ZnightMetadata = {
   version: 1,
   compiler: '0.1.0',
   providers: {
     [ECHO]: { scope: 'singleton', class: EchoGateway as never, deps: [], factory: () => new EchoGateway() },
+    [TICKER]: { scope: 'singleton', class: TickerGateway as never, deps: [], factory: () => new TickerGateway() },
   },
-  resolutionOrder: [ECHO],
+  resolutionOrder: [ECHO, TICKER],
   externals: [
     { token: '@znight/http#HttpContext', scope: 'request', providedBy: 'HttpPlugin' },
     { token: '@znight/http#RequestId', scope: 'request', providedBy: 'HttpPlugin' },
@@ -58,6 +62,22 @@ const metadata: ZnightMetadata = {
               invoke: (_g: EchoGateway, m: WsMessageContext) => m.data,
             },
           ],
+        },
+        {
+          token: TICKER,
+          path: '/ticker/:symbol',
+          protocol: 'events',
+          meta: {},
+          handshakeGuards: [],
+          messageGuards: [],
+          onConnect: {
+            method: 'open',
+            invoke: (_g: TickerGateway, c: WsConnection) => {
+              // a reason built from client input, longer than the 123 bytes a close frame carries
+              throw new WsException('NOT_FOUND', `Unknown symbol ${c.params['symbol']}`, undefined, { close: 4404 })
+            },
+          },
+          handlers: [],
         },
       ],
     },
@@ -115,6 +135,32 @@ describe.each(adapters)('WebSocketPlugin on %s', (_name, adapter, transport) => 
       expect(websocket.stats()).toMatchObject({ connections: 0, opened: 1, closed: 1, messagesIn: 1 })
     } finally {
       if (!stopped) await app.stop()
+    }
+  })
+
+  it('closes with a reason cut to 123 bytes when the exception message is longer', async () => {
+    const http = HttpPlugin.configure({ port: 0, host: '127.0.0.1', adapter: adapter() })
+    const websocket = WebSocketPlugin.configure({ closeTimeoutMs: 200 })
+    const app = await Application.create({
+      metadata,
+      logger: silentLogger,
+      shutdown: { signals: false },
+      plugins: [http, websocket],
+    })
+    await app.start()
+    try {
+      const ws = await open(`ws://127.0.0.1:${http.address?.port}/ticker/${'x'.repeat(200)}`, [])
+      const closed = await Promise.race([
+        new Promise<{ code: number; reason: string }>(resolve => {
+          ws.onclose = event => resolve({ code: event.code, reason: event.reason })
+        }),
+        Bun.sleep(1000).then(() => undefined),
+      ])
+      expect(closed).toEqual({ code: 4404, reason: `Unknown symbol ${'x'.repeat(108)}` })
+      await Bun.sleep(20)
+      expect(websocket.connections).toBe(0)
+    } finally {
+      await app.stop()
     }
   })
 

@@ -58,4 +58,14 @@ describe('memory transport', () => {
     expect(events.log).toEqual(['close:1006:'])
     expect(() => transport.accept({ kind: 'memory', peer: {} }, init, recorder())).toThrow('MemoryClient')
   })
+
+  it('refuses the close frames ws refuses: a code a server may not send, a reason over 123 bytes', async () => {
+    const client = new MemoryClient()
+    const socket = await memoryTransport().accept({ kind: 'memory', peer: client }, init, recorder())
+    expect(() => socket.close(1006, '')).toThrow(TypeError)
+    expect(() => socket.close(4000, 'x'.repeat(124))).toThrow(RangeError)
+    expect(client.open).toBe(true)
+    socket.close(4000, 'x'.repeat(123))
+    expect(client.closed).toEqual({ code: 4000, reason: 'x'.repeat(123) })
+  })
 })
