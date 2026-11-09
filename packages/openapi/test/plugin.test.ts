@@ -130,6 +130,27 @@ describe('serving', () => {
     }
   })
 
+  it('allows the origins of templated servers, their variables expanded, in the CSP of the UI', async () => {
+    await using app = await create(
+      OpenApiPlugin.configure({
+        assets: 'cdn',
+        servers: [
+          { url: 'https://{region}.api.example.com', variables: { region: { default: 'eu', enum: ['eu', 'us'] } } },
+          {
+            url: '{scheme}://admin.example.com:{port}',
+            variables: { scheme: { default: 'https' }, port: { default: '8443' } },
+          },
+          { url: 'https://{undeclared}.example.com' },
+        ],
+      }),
+    )
+    const csp = String((await app.inject({ method: 'GET', url: '/docs' })).headers['content-security-policy'])
+    expect(csp).toContain(
+      "connect-src 'self' https://admin.example.com:8443 https://eu.api.example.com https://us.api.example.com;",
+    )
+    expect(csp).not.toContain('{')
+  })
+
   it('does not serve anything with enabled: false, and the OpenApi external still works', async () => {
     await using app = await create(OpenApiPlugin.configure({ enabled: false }))
     expect((await app.inject({ method: 'GET', url: '/openapi.json' })).status).toBe(404)

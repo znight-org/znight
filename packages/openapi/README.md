@@ -376,7 +376,8 @@ controllers (`http:request` hook, request scope, global guards, then `guards`), 
 `HttpPlugin.routes` with `source: 'openapi'`, and a collision with a controller route is ZNIGHT007.
 The document is served from precomputed bytes with a strong ETag (`if-none-match` → 304, `HEAD`
 included). The UI page has its own `content-security-policy` (`default-src 'none'`, the inline
-script allowed by hash, `connect-src` limited to the document's servers, in every build mode: the
+script allowed by hash, `connect-src` limited to the document's servers, their variables expanded
+with their `default` and `enum` values, in every build mode: the
 first request of the page builds the document with `build: 'first-request'`); Scalar runs without its
 fonts, telemetry nor proxy, Swagger UI without its validator. With local assets nothing is loaded
 from a third party; otherwise only the pinned jsDelivr files, with Subresource Integrity, and the

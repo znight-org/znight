@@ -24,7 +24,7 @@ import type {
 } from '@znight/http'
 import type { BuildOpenApiOptions, OpenApiOperationView } from './build.ts'
 import type { SchemaConverter } from './converters.ts'
-import type { InfoObject, JsonValue, OpenApiObject, ServerObject } from './types.ts'
+import type { InfoObject, JsonValue, OpenApiObject, ServerObject, ServerVariableObject } from './types.ts'
 import type { LocalPackage, UiKind } from './ui.ts'
 
 import { createHash } from 'node:crypto'
@@ -591,18 +591,45 @@ function matches(header: string | undefined, etag: string): boolean {
   })
 }
 
-/** Origins of the absolute server URLs (`connect-src` of the UI). */
+/**
+ * Origins of the absolute server URLs (`connect-src` of the UI), server variables expanded with their
+ * default and enum values. A URL still templated after expansion (an undeclared variable) is left out.
+ */
 function serverOrigins(servers: readonly ServerObject[]): string[] {
   const origins = new Set<string>()
   for (const server of servers) {
-    try {
-      const url = new URL(server.url)
-      if (url.protocol === 'http:' || url.protocol === 'https:') origins.add(url.origin)
-    } catch {
-      // relative server: 'self'
+    for (const expanded of expandServerUrl(server)) {
+      if (expanded.includes('{') || expanded.includes('}')) continue
+      try {
+        const url = new URL(expanded)
+        if (url.protocol === 'http:' || url.protocol === 'https:') origins.add(url.origin)
+      } catch {
+        // relative server: 'self'
+      }
     }
   }
   return [...origins].sort()
+}
+
+/** Expansions of a server URL beyond which a variable only takes its default value. */
+const MAX_SERVER_EXPANSIONS = 64
+
+/** The URLs a templated server URL stands for: each `{variable}` replaced by its default and enum values. */
+function expandServerUrl(server: ServerObject): string[] {
+  let urls = [server.url]
+  const variables: unknown = server.variables
+  if (typeof variables !== 'object' || variables === null) return urls
+  for (const [name, variable] of Object.entries(variables as Record<string, Partial<ServerVariableObject>>)) {
+    const token = `{${name}}`
+    const fallback = variable?.default
+    if (!server.url.includes(token) || typeof fallback !== 'string') continue
+    const values = new Set([fallback])
+    if (Array.isArray(variable.enum))
+      for (const value of variable.enum) if (typeof value === 'string') values.add(value)
+    const expanded = urls.flatMap(url => [...values].map(value => url.replaceAll(token, value)))
+    urls = expanded.length > MAX_SERVER_EXPANSIONS ? urls.map(url => url.replaceAll(token, fallback)) : expanded
+  }
+  return urls
 }
 
 function parseDocumentFile(text: string, file: string): OpenApiObject {

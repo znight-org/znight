@@ -2825,7 +2825,8 @@ served document and the emitted file are byte-identical.
   Subresource Integrity, `assets: 'auto' | 'local' | 'cdn'`) with its own
   `content-security-policy` (inline script allowed by hash, CDN assets allowed by their exact URL,
   never the CDN origin, `connect-src` limited to the origins of
-  the served document's servers in every build mode: with `'first-request'` the first request of
+  the served document's servers, their variables expanded with their `default` and `enum` values
+  (a URL still templated is left out), in every build mode: with `'first-request'` the first request of
   the page builds the document; when the build fails, the page allows the declared servers, static
   or from the `servers` option, and is not cached). The installed UI package is found from
   `@znight/openapi`, then from the working directory, through `<package>/package.json` when it
