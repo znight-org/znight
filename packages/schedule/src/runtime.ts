@@ -314,12 +314,21 @@ export class ScheduleRuntime {
     this.#state = 'stopped'
   }
 
-  /** `onDispose`: clears every timer (lock store calls in flight go on unbounded). */
+  /**
+   * `onDispose`: clears every timer (lock store calls in flight go on unbounded). Without a previous
+   * `stop()` (a failed start), the runs in flight are aborted (`shutdown`) and abandoned: their lease
+   * is neither extended nor watched any more.
+   */
   dispose(): void {
     this.#disposed = true
     this.#state = 'stopped'
     this.#deactivate()
+    for (const job of this.#jobs.values()) this.#dropPending(job)
     for (const run of this.#inflight) {
+      if (!run.settled) {
+        run.abort('shutdown')
+        run.abandoned = true
+      }
       this.#stopTimers(run)
       if (run.storeTimer !== undefined) this.clock.clearTimer(run.storeTimer)
       run.storeTimer = undefined

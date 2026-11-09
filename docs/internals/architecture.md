@@ -2946,7 +2946,8 @@ interface ScheduleMetadata {
   once (`shutdown`) and waits up to `drainTimeoutMs`; runs still in flight are abandoned (logged):
   their leases are neither released nor extended (a run whose job had not started yet, still
   waiting for its lease, is dropped and releases it). A `stop()` called from inside a run does not wait
-  for it. `onDispose` clears the timers and unbinds the registry. List `SchedulePlugin` before
+  for it. `onDispose` clears the timers and unbinds the registry; without a previous `onStop` (a
+  failed start), it also aborts the runs in flight (`shutdown`) and abandons them. List `SchedulePlugin` before
   `HttpPlugin`: plugins stop in reverse order, so HTTP drains first.
 - `SchedulerRegistry`: `jobs()`, `get(name)`, `has(name)`, `addCron` / `addInterval` /
   `addTimeout(name, schedule, handler, options?)` (validated at once: ZNIGHT040, ZNIGHT041,

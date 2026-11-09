@@ -216,7 +216,7 @@ serves one running application at a time (ZNIGHT004 otherwise).
 | `onBootstrap` | Validates the options and the metadata, applies the overrides, checks locks, resolves singleton hosts, binds the registry |
 | `onReady`     | Arms the scheduler (when `enabled`), runs `runOnStart` jobs, logs `Schedule: N job(s), next: <job> at <date>`             |
 | `onStop`      | Stops arming, drops queued runs, aborts running runs (`shutdown`), waits up to `drainTimeoutMs`                           |
-| `onDispose`   | Clears the timers, unbinds the registry                                                                                   |
+| `onDispose`   | Clears the timers, unbinds the registry; after a failed start (no `onStop`), aborts the runs in flight (`shutdown`)       |
 
 Jobs start in `onReady`, once every provider started and every plugin listens: a job never runs
 against a half-started application. While the scheduler runs, its timer keeps the process alive (a
