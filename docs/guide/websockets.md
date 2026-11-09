@@ -255,7 +255,8 @@ export class ModeratorGuard implements WsGuard {
 
 A `raw` gateway has no envelope: its single `@OnMessage()` handler receives every frame, and
 `conn.send()` sends frames as they are. A producer follows the client's pace: `send()` returns
-`'queued'` when the outbound buffer grows, and `await conn.drained()` waits for it to empty. Above
+`'queued'` once the outbound buffer is above half of `backpressure.limit`, and `await conn.drained()`
+waits for it to fall below a quarter. Above
 `backpressure.limit`, the connection is closed with `1013` (or frames are dropped with
 `onLimit: 'drop'`, for lossy feeds).
 

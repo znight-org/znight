@@ -3580,6 +3580,10 @@ are ZNIGHT050):
   point boundary): reasons come from exception messages, which may hold client input. The close
   timer is armed before the transport sends the frame, and a transport that refuses it (`ws`
   throws) terminates the socket. The in-memory transport refuses the same frames as `ws`.
+- Outbound frames: above the gateway's `backpressure.limit` (buffer plus frame), `1013` or a drop
+  (`onLimit`). A send the transport accepted returns `'queued'` when the transport says so or when
+  the buffer is above half of the gateway's limit (transports are configured with the largest limit
+  of the process), and `conn.drained()` resolves below a quarter of it.
 - A heartbeat timer (one per plugin, `unref()`ed) pings the connections of `node` transports and
   terminates those silent since the previous tick (`initiator: 'heartbeat'`); Bun pings by itself
   (`idleTimeout`, `sendPings`).

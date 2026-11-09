@@ -145,7 +145,8 @@ point boundary). A transport that still refuses the close frame terminates the s
 `params`, `protocol`, `data` (per-connection state), `rooms`, `readyState`, `bufferedAmount`,
 `signal`, `closeInfo` (set before `@OnDisconnect`), `emit(event, data)`, `send(frame)`,
 `join(room)`, `leave(room)`, `to(room)` (the other members), `drained()`, `close(code?, reason?)`,
-`terminate()`. `emit` and `send` return `'sent'`, `'queued'` or `'dropped'`.
+`terminate()`. `emit` and `send` return `'sent'`, `'queued'` (the outbound buffer is above half the
+gateway's `backpressure.limit`: `await conn.drained()` before sending more) or `'dropped'`.
 
 `WsServer` (injectable): `of(GatewayClass | '/path')` returns a lazy `GatewayChannel` (`path`,
 `size`, `connection(id)`, `connections()`, `members(room)`, `rooms()`, `to(room)`, `except(...)`,

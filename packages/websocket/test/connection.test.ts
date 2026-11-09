@@ -253,6 +253,48 @@ describe('heartbeat', () => {
   })
 })
 
+describe('send status', () => {
+  it("returns 'queued' above half the gateway's limit, whatever the transport's own threshold", async () => {
+    const conn = new WsConnectionImpl({
+      id: 'c4',
+      gateway: '/ticker',
+      handshake,
+      protocol: '',
+      limits: LIMITS,
+      rooms: new RoomRegistry<WsConnectionImpl>(),
+      driver: driver().impl,
+    })
+    let events: SocketEvents | undefined
+    // a transport configured with a larger, process-wide limit: it reports 'sent' up to it
+    const socket: TransportSocket & { buffered: number } = {
+      buffered: 0,
+      get bufferedAmount() {
+        return this.buffered
+      },
+      extensions: '',
+      send(frame) {
+        this.buffered += typeof frame === 'string' ? frame.length : frame.byteLength
+        return 'sent'
+      },
+      ping: () => undefined,
+      pause: () => true,
+      resume: () => undefined,
+      close: (code, reason) => events?.close(code, reason),
+      terminate: () => events?.close(1006, ''),
+    }
+    events = conn.socketEvents()
+    conn.start(socket)
+    expect(conn.send('x'.repeat(400))).toBe('sent')
+    expect(conn.send('x'.repeat(200))).toBe('queued')
+    expect(conn.readyState).toBe('open')
+    socket.buffered = 0
+    await conn.drained()
+    expect(conn.send('x'.repeat(10))).toBe('sent')
+    conn.close()
+    await conn.finished
+  })
+})
+
 describe('close frames', () => {
   it('truncates a reason over 123 bytes on a code point boundary', async () => {
     const { impl } = driver()

@@ -291,6 +291,8 @@ export class WsConnectionImpl implements WsConnection, ChannelMember {
         stats.bytesOut += size
       }
     }
+    // the transport's threshold is process-wide: 'queued' is decided against this gateway's limit
+    if (status === 'sent' && socket.bufferedAmount > this.#limits.backpressureLimit / 2) return 'queued'
     return status
   }
 
