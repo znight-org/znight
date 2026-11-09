@@ -110,9 +110,10 @@ Bun types, decorators allowed). `typecheck` runs both.
   Third-party `dependencies`/`peerDependencies` use caret ranges; `@znight/core` is a
   `workspace:*` dependency (an exact version once packed: lockstep) and the optional
   `@znight/compiler` peer a `workspace:^` range. Another first-party package a feature builds on is
-  a `workspace:^` peer (`@znight/http` for `@znight/openapi` and `@znight/graphql`, `@znight/openapi`
-  for the CLI, `@znight/testing` for test helpers), except when the package cannot work without it
-  at runtime (`@znight/websocket` depends on `@znight/http`, `workspace:*`).
+  a `workspace:^` peer: required for `@znight/http` in `@znight/openapi` and `@znight/graphql`,
+  optional (`peerDependenciesMeta`) for `@znight/openapi` in the CLI and `@znight/testing` in
+  `@znight/graphql`. `@znight/websocket` is the exception: it lists `@znight/http` under
+  `dependencies` (`workspace:*`, RFC 0003 §9).
 - Boundaries (enforced by the packages' own tests and, for every package, by
   `tests/boundaries.test.ts`, which follows the value imports of each `package.json#exports` entry):
   - `<pkg>/compiler` entries only `import type` from `@znight/compiler` and never import the
@@ -121,10 +122,10 @@ Bun types, decorators allowed). `typecheck` runs both.
     `@znight/http` `path.ts`, `mime.ts`, `size.ts`; `@znight/openapi` `shared.ts`, the grammars of
     operation ids, header names and media types; `@znight/schedule` `cron/*` (parser, fields, time
     zones, never-fires analysis: one cron engine for the build and the process), `duration.ts` and
-    `names.ts`; `@znight/graphql` `names.ts`, `schema-hash.ts`, `sdl.ts`, `type-ref.ts`,
-    `metadata.ts`) or is duplicated in one and kept equal by a test (`@znight/messaging` retry
-    constants). Other import-free runtime modules (`@znight/http` `cookies.ts`, `sse-parse.ts`) are
-    safe to import anywhere;
+    `names.ts`; `@znight/graphql` `names.ts`, `schema-hash.ts` (`node:crypto` only), `sdl.ts`,
+    `type-ref.ts`, `metadata.ts`) or is duplicated in one and kept equal by a test
+    (`@znight/messaging` retry constants). Other import-free runtime modules (`@znight/http`
+    `cookies.ts`, `sse-parse.ts`) are safe to import anywhere;
   - runtime entries never import `./compiler`;
   - `@znight/compiler` is at most an optional peer of feature packages and of the CLI.
 
