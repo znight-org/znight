@@ -202,6 +202,38 @@ export function assignHeaders(
   }
 }
 
+/**
+ * Headers describing a body and its framing: those a handler set for the body it meant to send
+ * never apply to a body the framework produced instead (an error reply).
+ */
+const REPRESENTATION_HEADERS: ReadonlySet<string> = new Set([
+  'content-type',
+  'content-length',
+  'content-encoding',
+  'content-range',
+  'content-disposition',
+  'transfer-encoding',
+  'etag',
+  'last-modified',
+])
+
+/**
+ * The headers set on the context, without the representation and framing headers of the body the
+ * handler meant to send (see {@link REPRESENTATION_HEADERS}): the headers kept on an error reply.
+ */
+export function errorContextHeaders(
+  headers: Readonly<Record<string, HeaderValue>>,
+): Readonly<Record<string, HeaderValue>> {
+  const names = Object.keys(headers)
+  if (!names.some(name => REPRESENTATION_HEADERS.has(name.toLowerCase()))) return headers
+  const kept = fastRecord<HeaderValue>()
+  for (const name of names) {
+    const value = headers[name]
+    if (value !== undefined && !REPRESENTATION_HEADERS.has(name.toLowerCase())) kept[name] = value
+  }
+  return kept
+}
+
 /** Adds headers that are not already present (case-insensitive). */
 export function addMissingHeaders(
   target: Record<string, HeaderValue>,

@@ -1,3 +1,5 @@
+import type { HttpContext } from '../src/index.ts'
+
 import {
   BadGatewayException,
   BadRequestException,
@@ -6,6 +8,7 @@ import {
   GatewayTimeoutException,
   GoneException,
   HttpException,
+  HttpResponse,
   InternalServerErrorException,
   isHttpException,
   MethodNotAllowedException,
@@ -21,6 +24,7 @@ import {
   ValidationException,
 } from '../src/index.ts'
 import { isBodylessStatus, isValidStatus } from '../src/status.ts'
+import { ADAPTERS, controller, createApp, metadata, provider, route, t, viaFetch } from './helpers.ts'
 import { describe, expect, it } from 'bun:test'
 
 describe('HttpException', () => {
@@ -123,4 +127,52 @@ describe('status helpers', () => {
     expect(isBodylessStatus(101)).toBe(true)
     expect(isBodylessStatus(200)).toBe(false)
   })
+})
+
+describe('context headers on error replies', () => {
+  class Download {
+    csv(ctx: HttpContext, mapped: boolean): never {
+      ctx.setHeader('content-type', 'text/csv')
+      ctx.setHeader('content-length', '5000')
+      ctx.setHeader('content-disposition', 'attachment; filename="a.csv"')
+      ctx.setHeader('www-authenticate', 'Bearer')
+      throw mapped ? new ConflictException('Mapped') : new NotFoundException('The file is gone')
+    }
+  }
+  const meta = metadata({ [t('Download')]: provider(Download) }, [
+    controller(t('Download'), '/', [
+      route('csv', '/csv', (c: Download, ctx) => c.csv(ctx, false), { params: [{ index: 0, source: 'context' }] }),
+      route('mapped', '/mapped', (c: Download, ctx) => c.csv(ctx, true), {
+        params: [{ index: 0, source: 'context' }],
+      }),
+    ]),
+  ])
+  const mapper = {
+    map: (error: unknown) =>
+      error instanceof ConflictException ? new HttpResponse({ mapped: true }, { status: 409 }) : undefined,
+  }
+
+  for (const { name, create } of ADAPTERS) {
+    it(`never carry the representation headers of the failed body (${name})`, async () => {
+      const app = await createApp(meta, { adapter: create(), exceptionMappers: [mapper] })
+      try {
+        const send = viaFetch(app.http)
+        for (const [url, status, body] of [
+          ['/csv', 404, { statusCode: 404, error: 'Not Found', message: 'The file is gone' }],
+          ['/mapped', 409, { mapped: true }],
+        ] as const) {
+          const response = await send({ method: 'GET', url })
+          expect(response.status).toBe(status)
+          expect(response.headers['content-type']).toBe('application/json; charset=utf-8')
+          expect(response.headers['content-length']).toBe(String(Buffer.byteLength(response.body)))
+          expect(response.headers['content-disposition']).toBeUndefined()
+          // other headers set on the context are kept (a guard sets www-authenticate and throws)
+          expect(response.headers['www-authenticate']).toBe('Bearer')
+          expect(JSON.parse(response.body)).toEqual(body)
+        }
+      } finally {
+        await app.stop()
+      }
+    })
+  }
 })

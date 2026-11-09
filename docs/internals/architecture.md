@@ -1977,7 +1977,11 @@ not call `next()` gets the same reply as in the general pipeline.
   `details: [{ path, message }]` (the first 100 issues; past that the message is
   `Invalid <location> (<n> issues, the first 100 listed)`, and `issues` keeps them all), the shape also used by the upload 400s about a field; other errors → `{ statusCode: 500, error: 'Internal Server Error' }`
   (message only with `exposeErrors: true`), sent to hooks and the logger. An exception mapper
-  returning an `HttpResponse` without status keeps the error's status.
+  returning an `HttpResponse` without status keeps the error's status. The headers set on the
+  context (`ctx.setHeader()`) are sent with an error reply and a mapper's reply, except those
+  describing the body the handler meant to send (`content-type`, `content-length`,
+  `content-encoding`, `content-range`, `content-disposition`, `transfer-encoding`, `etag`,
+  `last-modified`).
 - Response headers are validated by the plugin (after the handler, and after the headers added by
   hook wrappers), never by the adapter: a name or value that cannot be sent (CR/LF, a character
   above `\xff`) gives the same generic 500 on every adapter, the body is cancelled and the error

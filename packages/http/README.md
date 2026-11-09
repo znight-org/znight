@@ -346,7 +346,9 @@ interceptors, for routes declaring `@Body()` or [upload parameters](#uploads):
 
 **Header precedence:** content type < `@Header` < `ctx.setHeader()` < `HttpResponse` headers.
 Headers set with `ctx.setHeader()` / `ctx.appendHeader()` are also sent with error responses (a
-guard can set `www-authenticate` and throw). Every response carries the request id header and the
+guard can set `www-authenticate` and throw), except those describing the body the handler meant to
+send (`content-type`, `content-length`, `content-encoding`, `content-range`,
+`content-disposition`, `transfer-encoding`, `etag`, `last-modified`): the error body has its own. Every response carries the request id header and the
 [security headers](#security-headers) it does not set itself.
 
 ```ts

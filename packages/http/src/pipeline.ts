@@ -36,6 +36,7 @@ import {
   addMissingHeaders,
   assignHeaders,
   ContentType,
+  errorContextHeaders,
   type SerializedReply,
   type SerializeOptions,
   serializeError,
@@ -1502,7 +1503,7 @@ export class Pipeline {
             routeMethod: ctx.method,
             status: undefined,
             headers: undefined,
-            context: ctx.hasResponseHeaders ? ctx.responseHeaders : undefined,
+            context: ctx.hasResponseHeaders ? errorContextHeaders(ctx.responseHeaders) : undefined,
           })
         }
         if (isHttpException(mapped)) return this.#renderException(mapped, ctx, error)
@@ -1551,7 +1552,8 @@ export class Pipeline {
       reply = serializeError(500, this.#internalBody(serializeFailure), ctx.method)
       extra = undefined
     }
-    if (ctx.hasResponseHeaders) assignHeaders(reply.headers, ctx.responseHeaders)
+    // not the content type or length of the body the handler meant to send: this one is the error's
+    if (ctx.hasResponseHeaders) assignHeaders(reply.headers, errorContextHeaders(ctx.responseHeaders))
     if (extra !== undefined) assignHeaders(reply.headers, extra)
     return reply
   }
