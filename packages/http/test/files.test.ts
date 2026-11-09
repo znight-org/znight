@@ -136,6 +136,15 @@ describe('Range header', () => {
     expect(parseRange(header, 300)).toBeUndefined()
   })
 
+  it.each([`bytes=${' '.repeat(16_000)}x`, `bytes=-${' '.repeat(16_000)}x`, `bytes=0${' '.repeat(16_000)}x-1`])(
+    'parses a long malformed header in linear time',
+    header => {
+      const started = performance.now()
+      expect(parseRange(header, 100)).toBeUndefined()
+      expect(performance.now() - started).toBeLessThan(20)
+    },
+  )
+
   it('reports unsatisfiable ranges', () => {
     expect(parseRange('bytes=300-', 300)).toBe('unsatisfiable')
     expect(parseRange('bytes=-0', 300)).toBe('unsatisfiable')

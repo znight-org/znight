@@ -347,6 +347,9 @@ export interface ByteRange {
   readonly end: number
 }
 
+/** Zero or more decimal digits. */
+const DIGITS = /^\d*$/
+
 /**
  * Parses a `Range` header for a representation of `size` bytes. Only a single `bytes` range is
  * honoured: other units, several ranges and malformed values return `undefined` (the whole
@@ -358,9 +361,12 @@ export function parseRange(header: string, size: number): ByteRange | 'unsatisfi
   if (equals === -1 || header.slice(0, equals).trim().toLowerCase() !== 'bytes') return undefined
   const spec = header.slice(equals + 1)
   if (spec.includes(',')) return undefined
-  const match = /^\s*(\d*)\s*-\s*(\d*)\s*$/.exec(spec)
-  if (match === null) return undefined
-  const [, first = '', last = ''] = match
+  // split by hand: a regular expression with whitespace around '-' backtracks in quadratic time
+  const dash = spec.indexOf('-')
+  if (dash === -1) return undefined
+  const first = spec.slice(0, dash).trim()
+  const last = spec.slice(dash + 1).trim()
+  if (!DIGITS.test(first) || !DIGITS.test(last)) return undefined
   if (first === '' && last === '') return undefined
   if (first === '') {
     const suffix = Number(last)
