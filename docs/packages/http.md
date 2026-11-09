@@ -31,7 +31,7 @@ await app.start() // SIGINT / SIGTERM: stop accepting connections, drain, close
 import { HttpPlugin } from '@znight/http'
 import { fastifyAdapter } from '@znight/http/fastify'
 
-HttpPlugin.configure({ adapter: fastifyAdapter({ options: { trustProxy: true } }), port: 3000 })
+HttpPlugin.configure({ adapter: fastifyAdapter(), port: 3000, trustProxy: 1 }) // one load balancer in front
 ```
 
 :::
@@ -467,7 +467,9 @@ HttpPlugin.configure({ trustProxy: ['loopback', '10.0.0.0/8'] }) // the addresse
 in `ctx.protocol` (`'http'` or `'https'`), read from `x-forwarded-for` and `x-forwarded-proto` only
 when they come from a trusted proxy. It works the same way on every adapter: a number of hops, or
 IPv4 / IPv6 addresses, CIDR ranges and the aliases `'loopback'`, `'private'` and `'linklocal'`.
-`true` is refused at boot: trusting every hop lets any client choose its `ctx.ip`.
+`true` is refused at boot: trusting every hop lets any client choose its `ctx.ip`. The same goes for
+`trustProxy: true` in the options of `fastifyAdapter()` and for an Express application whose
+`trust proxy` is `true`.
 
 ## Cookies
 

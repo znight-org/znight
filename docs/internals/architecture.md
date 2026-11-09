@@ -2056,7 +2056,9 @@ not call `next()` gets the same reply as in the general pipeline.
   not set them (`@Res()` raw replies excepted), so they lose to the handler, an interceptor, an
   exception or a hook wrapper.
 - **Trusted proxies** (option `trustProxy`, default `false`). `false`: `ctx.ip` is the adapter's
-  `request.ip` (Fastify and Express apply their own proxy settings) and `ctx.protocol` comes from
+  `request.ip` (Fastify and Express apply their own proxy settings; an adapter set to trust every hop,
+  `fastifyAdapter({ options: { trustProxy: true } })` or an Express application whose `trust proxy`
+  is `true`, is ZNIGHT005, at creation for Fastify and when the adapter starts for Express) and `ctx.protocol` comes from
   `request.encrypted`. A number (an integer ≥ 1) or a list of IPv4 / IPv6 addresses, CIDR ranges and
   the aliases `loopback` (127.0.0.0/8, ::1/128), `private` (10.0.0.0/8, 172.16.0.0/12,
   192.168.0.0/16, fc00::/7) and `linklocal` (169.254.0.0/16, fe80::/10) walk the list

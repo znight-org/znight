@@ -1436,7 +1436,9 @@ stops the walk at the last valid address. When the socket peer is trusted, `ctx.
 leftmost `x-forwarded-proto` (`http` or `https` only); otherwise it is the protocol of the
 connection. `true` is refused (ZNIGHT005): trusting every hop would let any client choose its
 `ctx.ip`. Without the option, `ctx.ip` is the adapter's address, so the proxy settings of Fastify
-(`trustProxy`) and Express (`trust proxy`) still apply. The `Forwarded` header (RFC 7239) is not
+(`trustProxy`) and Express (`trust proxy`) still apply; for the same reason, `trustProxy: true` in
+the options of `fastifyAdapter()` and an Express application whose `trust proxy` is `true` are
+refused (ZNIGHT005). Prefer the Znight option, the same on every adapter. The `Forwarded` header (RFC 7239) is not
 read.
 
 ## Interceptors
@@ -1700,7 +1702,7 @@ bun add fastify
 ```ts
 import { fastifyAdapter } from '@znight/http/fastify'
 
-HttpPlugin.configure({ adapter: fastifyAdapter({ options: { trustProxy: true } }) })
+HttpPlugin.configure({ adapter: fastifyAdapter({ options: { connectionTimeout: 30_000 } }), trustProxy: 1 })
 
 // or with your instance (plugins, hooks, native routes)
 const instance = Fastify()
@@ -1708,10 +1710,10 @@ await instance.register(helmet)
 HttpPlugin.configure({ adapter: fastifyAdapter({ instance }) })
 ```
 
-| Option     | Description                                                                    |
-| ---------- | ------------------------------------------------------------------------------ |
-| `instance` | An existing Fastify instance (plugins, hooks, native routes)                   |
-| `options`  | Options of the instance created otherwise (`trustProxy`, `https`, timeouts...) |
+| Option     | Description                                                                                       |
+| ---------- | ------------------------------------------------------------------------------------------------- |
+| `instance` | An existing Fastify instance (plugins, hooks, native routes)                                      |
+| `options`  | Options of the instance created otherwise (`https`, timeouts...; `trustProxy: true` is ZNIGHT005) |
 
 Znight routes are registered in an encapsulated context with their own body handling and 404
 handler, so your other routes keep Fastify's parsers. A `content-type` Fastify cannot parse (`foo`,

@@ -33,6 +33,7 @@ import Fastify, {
 } from 'fastify'
 
 import { toFastifyPath } from '../path.ts'
+import { trustEveryProxyError } from '../proxy.ts'
 import { discardStream } from '../stream.ts'
 import {
   ConnectionTracker,
@@ -81,8 +82,11 @@ export interface FastifyAdapter extends HttpAdapter {
  * ```ts
  * import { fastifyAdapter } from '@znight/http/fastify'
  *
- * HttpPlugin.configure({ adapter: fastifyAdapter({ options: { trustProxy: true } }) })
+ * HttpPlugin.configure({ adapter: fastifyAdapter({ options: { connectionTimeout: 30_000 } }), trustProxy: 1 })
  * ```
+ *
+ * `options.trustProxy: true` is refused (ZNIGHT005): trusting every proxy hop would let any client
+ * choose its `ctx.ip`. Set the trusted proxies with the `trustProxy` option of `HttpPlugin`.
  */
 export function fastifyAdapter(options: FastifyAdapterOptions = {}): FastifyAdapter {
   return new FastifyHttpAdapter(options)
@@ -166,6 +170,9 @@ class FastifyHttpAdapter implements FastifyAdapter {
   constructor(options: FastifyAdapterOptions) {
     if (options.instance === undefined) {
       const serverOptions = options.options ?? {}
+      if (serverOptions.trustProxy === true) {
+        throw trustEveryProxyError('fastifyAdapter', 'the Fastify option trustProxy: true')
+      }
       this.instance = Fastify({
         exposeHeadRoutes: false,
         frameworkErrors: (error, request, reply) => {

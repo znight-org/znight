@@ -3,6 +3,8 @@
  * same way on every adapter from the socket peer (`AdapterRequest.remoteAddress`) and the
  * `x-forwarded-for` / `x-forwarded-proto` headers. The `Forwarded` header (RFC 7239) is not read.
  */
+import { ErrorCode, ZnightError } from '@znight/core'
+
 import { invalidOption } from './option-error.ts'
 
 /**
@@ -50,6 +52,24 @@ const TRUST_HINTS: readonly string[] = [
   'trustProxy: 1 trusts one proxy (the socket peer); trustProxy: ["loopback", "10.0.0.0/8"] trusts these addresses',
   'Trusting every hop would let any client choose its ctx.ip with an x-forwarded-for header',
 ]
+
+/**
+ * ZNIGHT005 for an adapter configured to trust every proxy hop (Fastify `trustProxy: true`, Express
+ * `trust proxy` set to `true`): the adapter's client address, used as `ctx.ip` without the Znight
+ * `trustProxy` option, would be the leftmost `x-forwarded-for` entry, which any client chooses.
+ */
+export function trustEveryProxyError(adapter: string, setting: string): ZnightError {
+  return new ZnightError(
+    ErrorCode.InvalidDecorator,
+    `${adapter}: ${setting} trusts every proxy hop, so any client would choose its ctx.ip with an x-forwarded-for header`,
+    {
+      hints: [
+        `Remove ${setting} and set the trusted proxies on HttpPlugin instead (a hop count or addresses)`,
+        TRUST_HINTS[0] as string,
+      ],
+    },
+  )
+}
 
 /** Validates the `trustProxy` option (ZNIGHT005); `undefined` when proxies are not trusted. */
 export function resolveTrustProxy(value: TrustProxy | undefined): TrustPolicy | undefined {
