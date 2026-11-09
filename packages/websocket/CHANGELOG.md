@@ -1,5 +1,17 @@
 # @znight/websocket
 
+## 0.6.3
+
+### Patch Changes
+
+- 69c2b5c: Fix audit findings: valid close frames (no half-closed connections), per-gateway `'queued'`, handler route metadata merged per group, safe `101` headers, throwing codecs, paused heartbeats and inbound event names.
+- Updated dependencies [0eeac37]
+- Updated dependencies [dede0c2]
+- Updated dependencies [dc4be25]
+  - @znight/compiler@0.6.3
+  - @znight/core@0.6.3
+  - @znight/http@0.6.3
+
 ## 0.6.2
 
 ### Patch Changes

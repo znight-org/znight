@@ -1,5 +1,17 @@
 # @znight/openapi
 
+## 0.6.3
+
+### Patch Changes
+
+- 345cd53: Allow only the pinned CDN files in the UI page's CSP, expand server variables in its connect-src, and keep a plugin serving its application when a second one is refused.
+- Updated dependencies [0eeac37]
+- Updated dependencies [dede0c2]
+- Updated dependencies [dc4be25]
+  - @znight/compiler@0.6.3
+  - @znight/core@0.6.3
+  - @znight/http@0.6.3
+
 ## 0.6.2
 
 ### Patch Changes

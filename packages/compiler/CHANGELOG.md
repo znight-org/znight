@@ -1,5 +1,13 @@
 # @znight/compiler
 
+## 0.6.3
+
+### Patch Changes
+
+- 0eeac37: Fix `export =` cycles that hung the compiler, stale or retained parses of files no compile reads, slow `export *` cycles, the Vite plugin losing its dev server listeners after a restart, and extension load failures cached for the whole session.
+- Updated dependencies [dede0c2]
+  - @znight/core@0.6.3
+
 ## 0.6.2
 
 ### Patch Changes
