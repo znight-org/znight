@@ -204,7 +204,7 @@ describe('adapter proxy settings', () => {
     expect((error as ZnightError).code).toBe(ErrorCode.InvalidDecorator)
     expect((error as ZnightError).message).toContain('trustProxy')
     // a hop count or an address list stays allowed
-    expect(fastifyAdapter({ options: { trustProxy: 1 } }).name).toBe('fastify')
+    expect(fastifyAdapter({ options: { trustProxy: '10.0.0.1' } }).name).toBe('fastify')
   })
 
   it('refuse an Express application trusting every hop (ZNIGHT005)', async () => {
