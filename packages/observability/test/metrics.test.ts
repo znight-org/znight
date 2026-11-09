@@ -330,6 +330,27 @@ describe('MetricsServer', () => {
     await server.close()
   })
 
+  it('starts one server for concurrent listen() calls, and close() during listen() stops it', async () => {
+    const probe = createServer()
+    await new Promise<void>(resolve => probe.listen(0, '127.0.0.1', resolve))
+    const port = (probe.address() as { port: number }).port
+    await new Promise(resolve => probe.close(resolve))
+    const refused = async () => (await caught(() => fetch(`http://127.0.0.1:${port}/metrics`))) !== undefined
+
+    const server = new MetricsServer(registry(), { port, host: '127.0.0.1' })
+    await Promise.all([server.listen(), server.listen()])
+    expect(server.port).toBe(port)
+    await server.close()
+    expect(server.listening).toBe(false)
+    expect(await refused()).toBe(true)
+
+    const listening = server.listen()
+    const closing = server.close()
+    await Promise.all([listening, closing])
+    expect(server.listening).toBe(false)
+    expect(await refused()).toBe(true)
+  })
+
   it('fails to start on a busy port with a clear message', async () => {
     const blocker = createServer()
     await new Promise<void>(resolve => blocker.listen(0, '127.0.0.1', resolve))

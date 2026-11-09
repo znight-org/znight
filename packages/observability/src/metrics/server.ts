@@ -31,6 +31,7 @@ export class MetricsServer {
   readonly #path: string
   #server: Server | undefined
   #closing: Promise<void> | undefined
+  #starting: Promise<void> | undefined
 
   constructor(registry: MetricsRegistry, options: MetricsServerOptions = {}) {
     const port = options.port ?? DEFAULT_METRICS_PORT
@@ -70,9 +71,17 @@ export class MetricsServer {
     return `http://${host.includes(':') ? `[${host}]` : host}:${port}${this.#path}`
   }
 
-  /** Starts listening. Idempotent. */
-  async listen(): Promise<void> {
-    if (this.#server !== undefined) return
+  /** Starts listening. Idempotent: concurrent calls share the same start. */
+  listen(): Promise<void> {
+    if (this.#starting === undefined && this.#server === undefined) {
+      this.#starting = this.#start().finally(() => {
+        this.#starting = undefined
+      })
+    }
+    return this.#starting ?? Promise.resolve()
+  }
+
+  async #start(): Promise<void> {
     await this.#closing
     const server = createServer((request, response) => this.#handle(request, response))
     this.#server = server
@@ -85,7 +94,7 @@ export class MetricsServer {
         })
       })
     } catch (error) {
-      this.#server = undefined
+      if (this.#server === server) this.#server = undefined
       const where = `${this.#host ?? '*'}:${this.#port}`
       const code = (error as { code?: unknown } | null)?.code
       const detail = typeof code === 'string' && !errorMessage(error).includes(code) ? ` (${code})` : ''
@@ -94,8 +103,13 @@ export class MetricsServer {
     server.unref()
   }
 
-  /** Stops listening and closes open connections. Idempotent. */
+  /** Stops listening and closes open connections; waits for a `listen()` in progress first. Idempotent. */
   close(): Promise<void> {
+    const starting = this.#starting
+    if (starting !== undefined) {
+      const close = (): Promise<void> => this.close()
+      return starting.then(close, close)
+    }
     const server = this.#server
     if (server === undefined) return this.#closing ?? Promise.resolve()
     this.#server = undefined
