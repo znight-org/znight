@@ -282,7 +282,8 @@ first credentials the request carries decide:
   `__Host-session` cookie (`cookies.secrets`, `HttpOnly`, `SameSite=Strict`) holding the account, a
   signed expiry and a CSRF token. [`Accounts`](src/session/accounts.ts) verifies passwords with
   [`PasswordHasher`](src/security/password-hasher.ts) (scrypt N = 2^17, PHC strings, at most 4
-  hashes at once), answers the same way for unknown names, and upgrades outdated hashes at sign-in.
+  hashes at once and 16 waiting, `503` beyond; a waiting hash is dropped when its client leaves),
+  answers the same way for unknown names, and upgrades outdated hashes at sign-in.
 
 ### Browsers: CORS, CSRF, headers and proxies
 

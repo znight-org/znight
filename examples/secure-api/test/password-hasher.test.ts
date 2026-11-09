@@ -1,7 +1,7 @@
 import { TestBed } from '@znight/testing'
 
 import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
-import { PasswordHasher } from '../src/security/password-hasher.js'
+import { MAX_CONCURRENT, MAX_WAITING, PasswordHasher } from '../src/security/password-hasher.js'
 import { legacyHash } from './support/fixtures.js'
 import { describe, expect, test as it } from 'bun:test'
 
@@ -75,6 +75,34 @@ describe('PasswordHasher', () => {
 
     expect(hasher.stats).toEqual({ running: 4, waiting: 2 })
     expect(new Set(await Promise.all(hashes)).size).toBe(6)
+    expect(hasher.stats).toEqual({ running: 0, waiting: 0 })
+  })
+
+  it(`refuses to queue more than ${MAX_WAITING} hashes: 503 with retry-after, without waiting`, async () => {
+    const hasher = await createHasher()
+
+    const accepted = Array.from({ length: MAX_CONCURRENT + MAX_WAITING }, (_, i) => hasher.hash(`${PASSWORD} ${i}`))
+    expect(hasher.stats).toEqual({ running: MAX_CONCURRENT, waiting: MAX_WAITING })
+    await expect(hasher.hash(PASSWORD)).rejects.toMatchObject({ status: 503, headers: { 'retry-after': '1' } })
+    expect(hasher.stats).toEqual({ running: MAX_CONCURRENT, waiting: MAX_WAITING })
+
+    await Promise.all(accepted)
+    expect(hasher.stats).toEqual({ running: 0, waiting: 0 })
+  })
+
+  it('drops a waiting hash whose caller gave up (its abort signal)', async () => {
+    const hasher = await createHasher()
+    const stored = await hasher.hash(PASSWORD)
+    const busy = Array.from({ length: MAX_CONCURRENT }, (_, i) => hasher.hash(`${PASSWORD} ${i}`))
+
+    const client = new AbortController()
+    const abandoned = hasher.verify(PASSWORD, stored, client.signal)
+    expect(hasher.stats).toEqual({ running: MAX_CONCURRENT, waiting: 1 })
+    client.abort()
+    await expect(abandoned).rejects.toMatchObject({ name: 'AbortError' })
+    expect(hasher.stats).toEqual({ running: MAX_CONCURRENT, waiting: 0 })
+
+    await Promise.all(busy)
     expect(hasher.stats).toEqual({ running: 0, waiting: 0 })
   })
 })

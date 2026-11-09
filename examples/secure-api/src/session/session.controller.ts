@@ -52,7 +52,7 @@ export class SessionController {
   @RateLimit({ points: 5, duration: 60 }) // per client address: slows down password guessing
   @HttpCode(200)
   async signIn(@Body(SignIn) input: SignIn, @Ctx() ctx: HttpContext): Promise<SessionResponse> {
-    const principal = await this.accounts.signIn(input.username, input.password)
+    const principal = await this.accounts.signIn(input.username, input.password, ctx.signal)
     if (principal === undefined) throw new UnauthorizedException('Invalid username or password')
     return toResponse(this.sessions.open(ctx, principal))
   }
