@@ -447,6 +447,16 @@ describe('openScope', () => {
     expect(scope.close()).toBeUndefined()
   })
 
+  it('closes synchronously when the instances created have nothing to dispose', async () => {
+    const container = create()
+    await container.init()
+    const scope = container.openScope([[HTTP_CONTEXT, { id: 'plain' }]])
+    const state = scope.run(() => container.get(RequestState))
+    expect(scope.run(() => container.get(RequestState))).toBe(state)
+    expect(scope.close()).toBeUndefined()
+    expect(scope.context.closed).toBe(true)
+  })
+
   it('disposes the instances created in the scope in reverse creation order', async () => {
     const disposed: string[] = []
     const container = create(disposed)

@@ -31,7 +31,7 @@ import {
   isMissing,
   missingProvidersError,
 } from './graph.ts'
-import { disposeInstance } from './lifecycle.ts'
+import { disposeInstance, isDisposable } from './lifecycle.ts'
 import {
   type ExternalDefinition,
   type Lazy,
@@ -620,7 +620,9 @@ export class Container {
     this.#assertResolvable(slot)
     const instance = this.#create(slot)
     values.set(slot.token, instance)
-    scope.created.push({ token: slot.token, instance, dispose: slot.definition?.dispose })
+    // only what has something to dispose is tracked: a scope without any closes synchronously
+    const dispose = slot.definition?.dispose
+    if (isDisposable(instance, dispose)) scope.created.push({ token: slot.token, instance, dispose })
     return instance
   }
 

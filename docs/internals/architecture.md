@@ -1445,8 +1445,9 @@ type ProviderKey<T> = TypedToken<T> | ProviderClass<T> | ClassKey<T> // ClassKey
   disposal failure rejects, with ZNIGHT021). `openScope` is the callback-free form for hot paths:
   the same scope, whose owner calls `run(fn, ...args)` (synchronous; the code and the continuations
   it creates see the scope) as many times as needed, then `close()`, which disposes the instances
-  created in it and returns `undefined` when there were none (nothing to wait for), otherwise a
-  promise rejecting with ZNIGHT021 when a disposal fails. Seed values are copied into the scope's
+  created in it and returns `undefined` when none of them has anything to dispose (no dispose
+  method, `[Symbol.asyncDispose]` or `[Symbol.dispose]`: nothing to wait for), otherwise a promise
+  rejecting with ZNIGHT021 when a disposal fails. Seed values are copied into the scope's
   map when it is first read.
 - **Lifecycle** is duck-typed on instantiated singletons (compiled providers and `@Provides`
   values): `onStart`, `onReady`, `onStop`, then disposal (`dispose` method name,
