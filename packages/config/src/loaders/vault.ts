@@ -120,10 +120,13 @@ function isInvalidHeaderValue(value: string): boolean {
 }
 
 /**
- * Rejects a value `fetch` would refuse as a header. `fetch` quotes the value in its error (Node.js),
- * so the check runs first and names where the value came from, never the value: it may be a secret.
+ * Normalises a header value as `fetch` does (leading and trailing HTTP white space removed: a token
+ * read from a file keeps its final newline), then rejects what `fetch` would refuse. `fetch` quotes
+ * the value in its error (Node.js), so the check runs first and names where the value came from,
+ * never the value: it may be a secret.
  */
-function headerValue(value: string, what: string, origin: string): string {
+function headerValue(raw: string, what: string, origin: string): string {
+  const value = raw.replace(HTTP_WHITESPACE_EDGES, '')
   if (isInvalidHeaderValue(value)) {
     throw new ConfigLoaderError(
       'vault',
@@ -133,6 +136,9 @@ function headerValue(value: string, what: string, origin: string): string {
   }
   return value
 }
+
+/** Leading and trailing HTTP white space (tab, line feed, carriage return, space). */
+const HTTP_WHITESPACE_EDGES = /^[\t\n\r ]+|[\t\n\r ]+$/g
 
 async function resolveToken(context: ConfigLoaderContext, options: VaultLoaderOptions): Promise<string> {
   if (options.token !== undefined && options.token !== '') {

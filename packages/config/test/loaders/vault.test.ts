@@ -226,6 +226,21 @@ describe('vault()', () => {
     }
   })
 
+  it('trims the white space around an explicit token or namespace, as fetch does', async () => {
+    const sent: (string | null)[][] = []
+    const spy = ((_input: string | URL | Request, init?: RequestInit) => {
+      const headers = new Headers(init?.headers)
+      sent.push([headers.get('x-vault-token'), headers.get('x-vault-namespace')])
+      return Promise.resolve(Response.json({ data: { data: { KEY: 'v' } } }))
+    }) as typeof fetch
+    const source = await loadConfigSource(
+      [vault({ address, ...fast, fetch: spy, path: 'secret/app', token: 'abc\n', namespace: ' team\r\n' })],
+      { env: {} },
+    )
+    expect(source.get('KEY')).toBe('v')
+    expect(sent).toEqual([['abc', 'team']])
+  })
+
   it('requires an address and a token', async () => {
     const noAddress = await caught(() => loadConfigSource([vault({ token: TOKEN, path: 'secret/myapp' })], { env: {} }))
     expect(noAddress).toBeInstanceOf(ConfigLoaderError)

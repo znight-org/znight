@@ -311,9 +311,10 @@ ConfigPlugin.configure({
 > of the others are cancelled (`awsSecretsManager()` does the same with its secrets).
 
 `VAULT_*` settings are read from the values loaded by the previous loaders first (a `.env` file
-works), then from the environment. A token or namespace that is not a valid header value (a token
-file with several lines, a line break, NUL or a character above U+00FF) fails before any request,
-naming its origin. The token never appears in error messages, and neither does
+works), then from the environment. A token or namespace loses its leading and trailing white space
+(as `fetch` does: `readFileSync(path, 'utf8')` keeps a final newline); one that is still not a valid
+header value (a token file with several lines, an inner line break, NUL or a character above
+U+00FF) fails before any request, naming its origin. The token never appears in error messages, and neither does
 the content of a response that is not valid JSON (a truncated body may hold a secret): only its
 length and content type are reported.
 
