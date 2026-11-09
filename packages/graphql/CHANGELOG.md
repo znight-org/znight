@@ -1,5 +1,15 @@
 # @znight/graphql
 
+## 0.6.2
+
+### Patch Changes
+
+- 0fd25f5: The Yoga driver is about twice as fast on Node.js: Yoga keeps its default Fetch API (the `@whatwg-node` ponyfills, instead of undici), its responses are converted for `HttpPlugin` (a JSON body sent as text with its length, an event stream still streamed), and request bodies are no longer piped through Yoga's own size limit (the route's body limit already applies).
+- @znight/compiler@0.6.2
+  - @znight/core@0.6.2
+  - @znight/http@0.6.2
+  - @znight/testing@0.6.2
+
 ## 0.6.1
 
 ### Patch Changes
