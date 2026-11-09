@@ -117,8 +117,8 @@ export function znight(options: ZnightOptions = {}): Plugin<ZnightPluginApi> {
     configureServer(server) {
       state.attachServer(server)
     },
-    closeServer() {
-      state.detachServer()
+    closeServer({ reason }) {
+      state.detachServer(reason)
     },
     async buildStart() {
       const kind = sessionKind(this.environment.mode === 'dev', this.meta.watchMode)
@@ -169,6 +169,12 @@ export function znight(options: ZnightOptions = {}): Plugin<ZnightPluginApi> {
 /** Kind of compile session: `vite build`, `vite build --watch`, or a dev server (Vitest included). */
 type SessionKind = 'build' | 'watch' | 'dev'
 
+/** The watcher of a dev server (kept: a restart reassigns the server's properties) and our listeners on it. */
+interface ServerListeners {
+  readonly watcher: ViteDevServer['watcher']
+  readonly listeners: [event: string, listener: (file: string) => void][]
+}
+
 interface BuildStartOutcome {
   /** Files and directories to watch (`addWatchFile`). */
   readonly watchPaths: readonly string[]
@@ -199,10 +205,13 @@ class PluginState {
   #scheduled: PromiseWithResolvers<CompileResult> | undefined
   #lastDiagnostics = ''
   readonly #serverWatched = new Set<string>()
-  /** Watcher listeners of {@link #server}. */
-  #listeners: [event: string, listener: (file: string) => void][] = []
-  /** Servers replaced by a restart whose `closeServer` hook has not run yet (it must not detach the new one). */
-  #superseded = 0
+  /**
+   * Watcher listeners of each configured server: the active one, and a server configured by a
+   * restart that has not replaced it yet (or never will: a restart that fails keeps the old one).
+   */
+  readonly #attached = new Map<ViteDevServer, ServerListeners>()
+  /** A server configured while another one is active: it replaces it on `closeServer` (`restart`). */
+  #next: ViteDevServer | undefined
   /** Environments waiting for the generated module (`load`): they will get the next result. */
   readonly #loading = new Map<string, number>()
 
@@ -470,42 +479,57 @@ class PluginState {
    * module importing the generated one, the change is already recorded and the load waits for it.
    */
   attachServer(server: ViteDevServer): void {
-    if (this.#server !== undefined && this.#server !== server) {
-      // a restart of a server sharing this plugin instance creates the new server, then closes the
-      // old one: stop listening to the old watcher now, and ignore its `closeServer`
-      this.#unlisten()
-      this.#superseded++
-    }
-    this.#server = server
-    this.#serverWatched.clear()
     this.#kind = 'dev'
-    for (const event of SERVER_EVENTS.keys()) {
-      const listener = (file: string): void => this.#onServerEvent(event, file)
-      server.watcher.prependListener(event, listener)
-      this.#listeners.push([event, listener])
+    if (!this.#attached.has(server)) {
+      const listeners: ServerListeners = { watcher: server.watcher, listeners: [] }
+      for (const event of SERVER_EVENTS.keys()) {
+        const listener = (file: string): void => this.#onServerEvent(event, file)
+        server.watcher.prependListener(event, listener)
+        listeners.listeners.push([event, listener])
+      }
+      this.#attached.set(server, listeners)
+    }
+    if (this.#server === undefined || this.#server === server) {
+      this.#server = server
+      this.#serverWatched.clear()
+    } else {
+      // a restart of a server sharing this plugin instance configures the new server, then closes
+      // the old one (`closeServer` with `restart`); when creating it fails, the old one stays
+      this.#next = server
     }
   }
 
-  detachServer(): void {
-    if (this.#superseded > 0) {
-      this.#superseded--
+  /** `closeServer`: a restart promotes the server it configured; a close detaches every server. */
+  detachServer(reason: 'restart' | 'close' | undefined): void {
+    const next = this.#next
+    this.#next = undefined
+    if (reason === 'restart' && next !== undefined) {
+      for (const server of [...this.#attached.keys()]) {
+        if (server !== next) {
+          this.#unlisten(server)
+        }
+      }
+      this.#server = next
+      this.#serverWatched.clear()
       return
     }
     if (this.#timer !== undefined) {
       clearTimeout(this.#timer)
       this.#timer = undefined
     }
-    this.#unlisten()
+    for (const server of [...this.#attached.keys()]) {
+      this.#unlisten(server)
+    }
     this.#server = undefined
     this.#serverWatched.clear()
   }
 
-  #unlisten(): void {
-    const watcher = this.#server?.watcher
-    for (const [event, listener] of this.#listeners) {
-      watcher?.off(event, listener)
+  #unlisten(server: ViteDevServer): void {
+    const attached = this.#attached.get(server)
+    this.#attached.delete(server)
+    for (const [event, listener] of attached?.listeners ?? []) {
+      attached?.watcher.off(event, listener)
     }
-    this.#listeners = []
   }
 
   #onServerEvent(event: string, file: string): void {
