@@ -215,10 +215,20 @@ class CachedDocument {
   }
 }
 
-/** A bounded LRU of documents by exact query text. */
+/**
+ * Longest query text kept in the document cache (characters): comments and white space do not count
+ * toward `maxTokens`, so without it a client could pin `documentCache` times the body limit.
+ */
+const MAX_CACHED_DOCUMENT_LENGTH = 16 * 1024
+
+/** Total query text kept in the document cache (characters); the oldest documents go first. */
+const DOCUMENT_CACHE_BUDGET = 8 * 1024 * 1024
+
+/** A bounded LRU of documents by exact query text: at most `max` entries and a text budget. */
 class DocumentCache {
   readonly #max: number
   readonly #entries = new Map<string, CachedDocument>()
+  #characters = 0
   #last: string | undefined
 
   constructor(max: number) {
@@ -227,6 +237,11 @@ class DocumentCache {
 
   get size(): number {
     return this.#entries.size
+  }
+
+  /** Characters of query text kept. */
+  get characters(): number {
+    return this.#characters
   }
 
   get(query: string): CachedDocument | undefined {
@@ -241,17 +256,28 @@ class DocumentCache {
   }
 
   set(query: string, entry: CachedDocument): void {
-    if (this.#max === 0) return
-    if (this.#entries.size >= this.#max) {
-      const oldest = this.#entries.keys().next()
-      if (oldest.done !== true) this.#entries.delete(oldest.value)
+    if (this.#max === 0 || query.length > MAX_CACHED_DOCUMENT_LENGTH) return
+    const previous = this.#entries.get(query)
+    if (previous !== undefined) {
+      this.#entries.delete(query)
+      this.#characters -= query.length
+    }
+    while (
+      this.#entries.size > 0 &&
+      (this.#entries.size >= this.#max || this.#characters + query.length > DOCUMENT_CACHE_BUDGET)
+    ) {
+      const oldest = this.#entries.keys().next().value as string
+      this.#entries.delete(oldest)
+      this.#characters -= oldest.length
     }
     this.#entries.set(query, entry)
+    this.#characters += query.length
     this.#last = query
   }
 
   clear(): void {
     this.#entries.clear()
+    this.#characters = 0
     this.#last = undefined
   }
 }
@@ -378,6 +404,11 @@ export class GraphQLExecutor {
   /** Documents in the cache. */
   get cachedDocuments(): number {
     return this.#cache.size
+  }
+
+  /** Characters of query text in the cache. */
+  get cachedCharacters(): number {
+    return this.#cache.characters
   }
 
   /**

@@ -105,7 +105,10 @@ export interface GraphQLPluginOptions {
    */
   readonly graphiql?: boolean
   readonly limits?: GraphQLLimits
-  /** Distinct documents kept parsed and validated (LRU); 0 disables the cache. Default 1 000. */
+  /**
+   * Distinct documents kept parsed and validated (LRU); 0 disables the cache. Default 1 000. Texts
+   * over 16 KiB are not kept, and the kept text stays under 8 MiB.
+   */
   readonly documentCache?: number
   /** `false` disables subscriptions over SSE (with a `driver`, subscriptions altogether). */
   readonly subscriptions?: GraphQLSubscriptionOptions | false

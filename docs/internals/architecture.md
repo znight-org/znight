@@ -3235,7 +3235,10 @@ below; absent: the built-in transport); unknown keys and invalid values are ZNIG
   pass (aliases as written, and as each operation executes them: a fragment spread several times
   counts its aliases each time, memoised per fragment), then validated (specified rules, plus `NoSchemaIntrospectionCustomRule` and
   `hideSuggestions` when introspection is off); only valid documents enter the LRU document cache,
-  keyed by the query text. The `GraphQLContext` is seeded in the scope and passed as
+  keyed by the query text. Impl.: the cache is also bounded by size, since comments and white space
+  do not count toward `maxTokens`: a text longer than 16 KiB characters is not kept (it is parsed
+  and validated on every request), and the oldest entries go when the kept text would exceed
+  8 MiB characters. The `GraphQLContext` is seeded in the scope and passed as
   `contextValue`, with the request's `ctx.signal` as `abortSignal`. Subscriptions use
   `createSourceEventStream` and `executeSubscriptionEvent` with fresh loaders per event; past
   `subscriptions.maxActive`, a subscription is rejected with 503. The source event stream MUST be
