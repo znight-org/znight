@@ -9,7 +9,7 @@ import { ErrorCode } from '@znight/core'
 
 import { nodeAdapter } from '../src/adapters/node.ts'
 import { HttpResponse } from '../src/index.ts'
-import { caught, controller, createApp, metadata, provider, route, t } from './helpers.ts'
+import { ADAPTERS, caught, controller, createApp, metadata, provider, route, t } from './helpers.ts'
 import { describe, expect, it } from 'bun:test'
 
 class SimpleController {
@@ -186,6 +186,33 @@ describe('injectStream()', () => {
     )
     await app.stop()
   })
+
+  for (const { name, create } of ADAPTERS) {
+    it(`leaves no listener on a reused signal once the body ended or was cancelled (${name})`, async () => {
+      const app = await createApp(meta(), { adapter: create() }, { start: false })
+      const controller = new AbortController()
+      const signal = controller.signal
+      let listeners = 0
+      const add = signal.addEventListener.bind(signal)
+      const remove = signal.removeEventListener.bind(signal)
+      signal.addEventListener = ((type: string, listener: EventListener, options?: AddEventListenerOptions) => {
+        listeners++
+        add(type, listener, options)
+      }) as typeof signal.addEventListener
+      signal.removeEventListener = ((type: string, listener: EventListener, options?: EventListenerOptions) => {
+        listeners--
+        remove(type, listener, options)
+      }) as typeof signal.removeEventListener
+      for (let index = 0; index < 5; index++) {
+        const response = await app.http.injectStream({ method: 'GET', url: '/', signal })
+        expect(await new Response(response.body).text()).toBe('hello')
+      }
+      const cancelled = await app.http.injectStream({ method: 'GET', url: '/', signal })
+      await cancelled.body.cancel()
+      expect(listeners).toBe(0)
+      await app.stop()
+    })
+  }
 
   it('reads non-event-stream answers to the end with injectSse()', async () => {
     const app = await createApp(meta(), {}, { start: false })
