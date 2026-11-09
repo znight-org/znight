@@ -129,7 +129,7 @@ EventsPlugin.configure({
 
 | Option           | Default             | Effect                                                                        |
 | ---------------- | ------------------- | ----------------------------------------------------------------------------- |
-| `onError`        | `logger.error(...)` | Receives errors of detached listeners and of `emit()`; may be async           |
+| `onError`        | `logger.error(...)` | Receives errors of detached listeners and of `emit()`; may be async (awaited) |
 | `drainTimeoutMs` | `4000`              | How long `onStop` waits for detached listeners in flight (`Infinity`: no cap) |
 
 Keep `drainTimeoutMs` below `shutdown.hookTimeoutMs` of `Application.create()` (5 000 by default):

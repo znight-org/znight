@@ -3467,7 +3467,8 @@ Runtime (`EventsPlugin`):
   not scheduled.
 - **Detached (normative).** After a successful inline phase, detached listeners start on a macrotask
   (`setImmediate`), each in a fresh scope (`container.runInScope()`), concurrently. Their errors go to
-  `EventsPlugin.configure({ onError })` (default: `logger.error`), never to the publisher.
+  `EventsPlugin.configure({ onError })` (default: `logger.error`), never to the publisher. An async
+  `onError` is part of the tracked work: `idle()` and the drain wait until it settles.
   `emit(event)` runs the whole publication on a macrotask in a fresh scope and reports every error.
 - **Shutdown.** `onStop` waits for detached listeners and `emit()` work in flight, bounded by
   `drainTimeoutMs` (default 4 000, below the default `shutdown.hookTimeoutMs`), and logs those still running; from then on `publish()` awaits its

@@ -20,7 +20,8 @@ export interface EventErrorInfo {
 
 /**
  * Receives the errors no caller can receive: detached listeners, and every listener of an `emit()`.
- * May be async; what it throws or rejects with is logged.
+ * May be async: the report is part of the tracked work (`idle()` and the drain on stop wait for it).
+ * What it throws or rejects with is logged.
  */
 export type EventErrorHandler = (error: unknown, info: EventErrorInfo) => unknown
 

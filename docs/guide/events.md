@@ -111,7 +111,8 @@ EventsPlugin.configure({
 })
 ```
 
-Without `onError`, errors are logged by the application logger. There are no retries: work that must
+Without `onError`, errors are logged by the application logger. An async `onError` is awaited:
+`recordEvents().idle()` and the drain on shutdown wait for the report. There are no retries: work that must
 eventually succeed belongs to a message consumer.
 
 ## Transactions

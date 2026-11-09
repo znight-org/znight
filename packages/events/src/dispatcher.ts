@@ -277,7 +277,10 @@ export class Dispatcher {
     return Promise.all(plan.detached.map(listener => this.#detached(event, plan, listener, mode))).then(() => undefined)
   }
 
-  /** One detached listener in a fresh scope; never rejects. `mode`: the publication that scheduled it. */
+  /**
+   * One detached listener in a fresh scope; never rejects, and settles once its error (if any) is
+   * reported. `mode`: the publication that scheduled it.
+   */
   #detached(event: object, plan: DispatchPlan, listener: Listener, mode: 'publish' | 'emit'): Promise<void> {
     return this.#container
       .runInScope(() => this.#invoke(listener, event, plan, true))
@@ -289,13 +292,17 @@ export class Dispatcher {
 
   // ---------------------------------------------------------------------------------- reporting
 
+  /**
+   * Reports an error to `onError` (default: the logger). Returns the promise of an async handler,
+   * settled and never rejected, so that the tracked work (and the drain) covers the report.
+   */
   #report(
     error: unknown,
     event: object,
     plan: DispatchPlan,
     listener: Listener | undefined,
     mode: 'publish' | 'emit',
-  ): void {
+  ): Promise<void> | undefined {
     const info: EventErrorInfo = {
       event,
       eventName: plan.eventName,
@@ -311,14 +318,20 @@ export class Dispatcher {
         detached: info.detached,
         err: error,
       })
-      return
+      return undefined
     }
     try {
       const result = handler(error, info)
-      if (isThenable(result)) result.then(undefined, failure => this.#onErrorFailed(failure, error))
+      if (isThenable(result)) {
+        return Promise.resolve(result).then(
+          () => undefined,
+          failure => this.#onErrorFailed(failure, error),
+        )
+      }
     } catch (failure) {
       this.#onErrorFailed(failure, error)
     }
+    return undefined
   }
 
   #onErrorFailed(failure: unknown, original: unknown): void {

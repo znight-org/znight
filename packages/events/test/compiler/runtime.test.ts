@@ -161,6 +161,24 @@ describe('errors', () => {
     expect(mod.log).toEqual(['first', 'second', 'detached-fail', 'detached-ok'])
     expect(errors.map(info => [info.listener, info.detached, info.mode])).toEqual([['Later.fail', true, 'emit']])
   })
+  it('waits for an async onError before the work counts as done', async () => {
+    mod.log.length = 0
+    const reported: string[] = []
+    const plugin = EventsPlugin.configure({
+      onError: async (_error, info) => {
+        await new Promise(resolve => setTimeout(resolve, 30))
+        reported.push(`${info.listener} ${info.mode}`)
+      },
+    })
+    await using test = await TestApp.create({ metadata, plugins: [plugin], logger: silentLogger })
+    const publisher = test.app.container.get(EventPublisher)
+    await publisher.publish(new mod.Boom('detached'))
+    await plugin.idle()
+    expect(reported).toEqual(['Later.fail publish'])
+    publisher.emit(new mod.Boom('inline'))
+    await test.app.stop()
+    expect(reported).toEqual(['Later.fail publish', 'First.run emit'])
+  })
 })
 
 describe('hooks', () => {
