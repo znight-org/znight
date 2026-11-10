@@ -1,5 +1,14 @@
 # @znight/http
 
+## 0.6.5
+
+### Patch Changes
+
+- 1a2b15c: A client leaving during a WebSocket handshake now aborts `ctx.signal` (`kind: 'client'`) and the handshake is not completed (`PendingUpgrade.disconnected`); the accepted connection closing later never aborts it. On `node:http` a client's FIN is detected even behind bytes it sent after its headers, and a guard failing with that abort (passing `ctx.signal` to `fetch()`) is answered `400` without an error log. `upgradeInMemory()` takes a `signal`, and `AdapterRequest.onAbort` may return a function removing its listener.
+- ad31655: `HttpResponse.file()` accepts a lazy file (`{ size, etag?, lastModified?, type?, name?, load() }`): conditional requests and ranges are evaluated from its metadata, and `load()` is called only when a body is sent (never for a 304, a 412 or a `HEAD` request). A weak entity tag no longer satisfies `If-Match` nor `If-Range`, and `If-Match` / `If-None-Match` lists are split outside quotes, so an entity tag containing a comma (`"3,7"`) matches.
+- @znight/compiler@0.6.5
+  - @znight/core@0.6.5
+
 ## 0.6.4
 
 ### Patch Changes

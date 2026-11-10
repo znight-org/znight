@@ -1,5 +1,13 @@
 # @znight/cli
 
+## 0.6.5
+
+### Patch Changes
+
+- @znight/openapi@0.6.5
+  - @znight/compiler@0.6.5
+  - @znight/core@0.6.5
+
 ## 0.6.4
 
 ### Patch Changes
