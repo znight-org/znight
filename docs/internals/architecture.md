@@ -2756,7 +2756,9 @@ the final `Application stopped` / `The application stopped with errors` entries 
   accepts `(message, context | Error)` and `(context, message)`, and adds `requestId` (from the
   current scope, token `@znight/http#RequestId`) and `traceId`/`spanId` (active span). Level:
   option, else `LOG_LEVEL`, else `info`. Transports: console (default), pretty (optional peer
-  `pino-pretty`), CloudWatch (stdout JSON), Datadog (HTTP intake, batching, retries; entry fields
+  `pino-pretty`, development only; Impl.: one line per entry, a short message for the
+  instrumentation entries, a `[name]` prefix for the `logger` / `component` field, `pid`,
+  `hostname`, `traceId` and `spanId` hidden; it never changes the JSON entries), CloudWatch (stdout JSON), Datadog (HTTP intake, batching, retries; entry fields
   clashing with the reserved attributes are kept, never overwritten: an HTTP status code in `status`
   becomes `http.status_code`, another `status`, a `message` next to the log message and a
   `timestamp` next to the log time go under `attributes.*`).

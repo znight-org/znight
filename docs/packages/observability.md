@@ -80,6 +80,22 @@ writes one entry per HTTP request (`request completed`) and per message delivery
 logger on shutdown, and entries written after that (the final `Application stopped`) are flushed
 as soon as they are written, so they are delivered before the process exits.
 
+With `pretty: true` (development, `pino-pretty`), each entry is one line: the instrumentation entries
+get a short message, named loggers a `[name]` prefix, the remaining fields a compact `{...}`, and
+errors their stack below. `pid`, `hostname`, `traceId` and `spanId` are hidden; the JSON output is
+unchanged:
+
+```txt
+[14:38:00.040] INFO (users-api): [UserService] User created {"requestId":"req-7f3a","userId":42}
+[14:38:00.041] INFO (users-api): [GET] [/users/42] - [200] 3.3ms {"requestId":"req-7f3a"}
+[14:38:00.041] INFO (users-api): [queue orders] message processed 12ms {"type":"order.created","messageId":"msg-1","attempt":1,"consumer":"OrderConsumer","handler":"onCreated"}
+[14:38:00.042] INFO (users-api): [job cleanup] run completed 40ms {"runId":"run-1","trigger":"schedule","scheduledAt":"2026-11-10T08:00:00.000Z"}
+[14:38:00.042] INFO (users-api): [GraphQL query GetUser] 5ms {"transport":"http","documentId":"a1b2c3","requestId":"req-7f3a"}
+```
+
+`PrettyOptions` (`ignore`, `singleLine`, `colorize`, `translateTime`, raw `options`) override these
+defaults; see the [README](../../packages/observability/README.md#pretty-output-development).
+
 ### Static loggers
 
 Inject the `Logger` by default. For code outside dependency injection, or to migrate static loggers
