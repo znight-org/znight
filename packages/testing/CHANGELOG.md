@@ -1,5 +1,11 @@
 # @znight/testing
 
+## 0.7.0
+
+### Patch Changes
+
+- @znight/core@0.7.0
+
 ## 0.6.6
 
 ### Patch Changes

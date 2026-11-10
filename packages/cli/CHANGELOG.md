@@ -1,5 +1,16 @@
 # @znight/cli
 
+## 0.7.0
+
+### Patch Changes
+
+- 209fe6a: `znight new`: the generated `AppConfig.environment` defaults to `'production'`, so an application started without `NODE_ENV` logs JSON; `znight dev` still sets `development`.
+- 4bb74a2: `znight new`: the OpenAPI document is `src/openapi.ts` and sets `info` (title, description, version), `--openapi-ui none` (and a "No UI" choice) configures no API reference UI, and observability logs are pretty-printed in development (`NODE_ENV`, read through `AppConfig.environment` with `config`; `pino-pretty` added as a dev dependency) and JSON in production, with metrics and tracing off.
+- Updated dependencies [8dbbb4b]
+  - @znight/openapi@0.7.0
+  - @znight/compiler@0.7.0
+  - @znight/core@0.7.0
+
 ## 0.6.6
 
 ### Patch Changes

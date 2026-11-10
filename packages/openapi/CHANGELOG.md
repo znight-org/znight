@@ -1,5 +1,17 @@
 # @znight/openapi
 
+## 0.7.0
+
+### Minor Changes
+
+- 8dbbb4b: `OpenApiPlugin`'s `ui` option has no default anymore: without it, only the document is served, no API reference page (migration: set `ui: 'scalar'` to keep the API reference page).
+
+### Patch Changes
+
+- @znight/compiler@0.7.0
+  - @znight/core@0.7.0
+  - @znight/http@0.7.0
+
 ## 0.6.6
 
 ### Patch Changes
