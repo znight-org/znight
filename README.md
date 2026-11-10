@@ -231,8 +231,8 @@ cron expressions: every diagnostic has a stable `ZNIGHTxxx` code, explained in t
   per-consumer concurrency and a draining shutdown, on RabbitMQ, Amazon SQS, Kafka, Google Cloud
   Pub/Sub or in memory.
 - **Configuration.** Typed `@Config` classes loaded from the environment, `.env`, JSON/YAML files,
-  HashiCorp Vault, AWS Secrets Manager or Google Cloud Secret Manager, validated all at once before
-  anything starts; secrets masked in logs and errors.
+  HashiCorp Vault, AWS Secrets Manager, Google Cloud Secret Manager, Azure Key Vault or OCI Vault,
+  validated all at once before anything starts; secrets masked in logs and errors.
 - **Observability.** A Pino logger enriched with request and trace ids, Prometheus metrics and
   OpenTelemetry traces: one log entry, metric and span per HTTP request, message and scheduled run.
 - **OpenAPI.** An OpenAPI 3.1 document built from your controllers, schemas, return types and JSDoc
@@ -333,7 +333,7 @@ amqplib, prom-client...) are optional peer dependencies loaded from subpath expo
 | [`@znight/compiler`](./packages/compiler)           | Analysis, validation and code generation: Vite plugin, Bun preload, API               | devDependency |
 | [`@znight/http`](./packages/http)                   | Controllers, validation, files, cookies, SSE, security; node, Fastify, Express, Hono  | dependency    |
 | [`@znight/messaging`](./packages/messaging)         | Consumers, retries, dead-letter queues; RabbitMQ, SQS, Kafka, Pub/Sub, in-memory      | dependency    |
-| [`@znight/config`](./packages/config)               | Typed config classes from env, `.env`, JSON/YAML, Vault, AWS/GCP secret managers      | dependency    |
+| [`@znight/config`](./packages/config)               | Typed config classes from env, `.env`, JSON/YAML, Vault, AWS/GCP/Azure/OCI secrets    | dependency    |
 | [`@znight/observability`](./packages/observability) | Pino logging, Prometheus metrics, OpenTelemetry tracing                               | dependency    |
 | [`@znight/openapi`](./packages/openapi)             | OpenAPI 3.1 document built at compile time, served with Scalar or Swagger UI          | dependency    |
 | [`@znight/schedule`](./packages/schedule)           | Cron, interval and timeout jobs checked at build time, locks across instances         | dependency    |

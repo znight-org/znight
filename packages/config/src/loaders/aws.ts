@@ -1,9 +1,21 @@
 import type { ConfigLayer } from '../source.ts'
+import type { NormalizedSecret } from './secret-store.ts'
 import type { ConfigLoader, ConfigLoaderContext } from './types.ts'
 
-import { ConfigLoaderError, errorMessage, invalidConfig } from '../errors.ts'
-import { nestUnder } from '../source.ts'
-import { importOptionalPeer, isRecord, readAll, setting, timeoutOption } from './shared.ts'
+import { invalidConfig } from '../errors.ts'
+import {
+  abortable,
+  errorProperty,
+  normalizeSecrets,
+  noValueError,
+  readError,
+  readSecretLayers,
+  requestSignal,
+  requireOptions,
+  secretLayer,
+  secretValues,
+} from './secret-store.ts'
+import { importOptionalPeer, setting, timeoutOption } from './shared.ts'
 
 /** One secret read by {@link awsSecretsManager}. */
 export interface AwsSecretRef {
@@ -16,7 +28,9 @@ export interface AwsSecretRef {
   readonly key?: string
   readonly versionStage?: string
   readonly versionId?: string
-  /** Skip the secret when it does not exist (`ResourceNotFoundException`). */
+  /** Expand a JSON object secret into one value per entry. Default: the loader `json` (`true`). */
+  readonly json?: boolean
+  /** Skip the secret when it does not exist (`ResourceNotFoundException`). Default: the loader `optional`. */
   readonly optional?: boolean
 }
 
@@ -56,6 +70,8 @@ export interface AwsSecretsManagerLoaderOptions {
   readonly client?: SecretsManagerClientLike
   /** Extra configuration of the default client (`endpoint`, `credentials`, `maxAttempts`...). */
   readonly clientConfig?: Readonly<Record<string, unknown>>
+  /** Expand JSON object secrets into one value per entry. Default: `true`. */
+  readonly json?: boolean
   /** Skip every secret that does not exist. Default: `false`. */
   readonly optional?: boolean
   /** Timeout of each request, in milliseconds. Default: `10000`. */
@@ -69,22 +85,7 @@ interface SecretsManagerModule {
 
 const SDK = '@aws-sdk/client-secrets-manager'
 const LOADER = 'aws-secrets-manager'
-
-function normalizeRefs(secretId: AwsSecretsManagerLoaderOptions['secretId']): AwsSecretRef[] {
-  const items = Array.isArray(secretId)
-    ? (secretId as readonly (string | AwsSecretRef)[])
-    : [secretId as string | AwsSecretRef]
-  const refs = items.map(item => (typeof item === 'string' ? { secretId: item } : item))
-  if (
-    refs.length === 0 ||
-    refs.some(ref => !isRecord(ref) || typeof ref.secretId !== 'string' || ref.secretId === '')
-  ) {
-    throw invalidConfig(
-      'awsSecretsManager(): "secretId" must be a non-empty string, a { secretId } object or an array of them',
-    )
-  }
-  return refs
-}
+const WHERE = 'awsSecretsManager()'
 
 function secretText(output: GetSecretValueOutputLike): string | undefined {
   if (typeof output.SecretString === 'string') return output.SecretString
@@ -92,23 +93,41 @@ function secretText(output: GetSecretValueOutputLike): string | undefined {
   return undefined
 }
 
-/** JSON object secrets are key/value maps; anything else is a single value. */
-function secretValues(ref: AwsSecretRef, text: string): Readonly<Record<string, unknown>> {
-  const trimmed = text.trim()
-  if (trimmed.startsWith('{')) {
-    try {
-      const parsed: unknown = JSON.parse(trimmed)
-      if (isRecord(parsed)) return nestUnder(parsed, ref.key)
-    } catch {
-      // not JSON: a plain secret starting with "{"
-    }
-  }
-  return { [ref.key ?? ref.secretId]: text }
+/** The SDK exception name (`ResourceNotFoundException`), `undefined` for a plain `Error`. */
+function errorName(error: unknown): string | undefined {
+  const name = errorProperty(error, 'name')
+  return typeof name === 'string' && name !== 'Error' ? name : undefined
 }
 
-function errorName(error: unknown): string | undefined {
-  const name = (error as { name?: unknown } | null)?.name
-  return typeof name === 'string' ? name : undefined
+const CREDENTIALS_HINT =
+  'Check the AWS credentials: the default chain reads AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY, AWS_PROFILE (shared config, SSO), web identity and the container or instance role; or pass clientConfig.credentials'
+
+/** Exceptions of a missing, invalid or expired identity. */
+const CREDENTIALS_ERRORS: ReadonlySet<string> = new Set([
+  'CredentialsProviderError',
+  'UnrecognizedClientException',
+  'InvalidClientTokenId',
+  'InvalidSignatureException',
+  'ExpiredTokenException',
+  'ExpiredToken',
+])
+
+function accessHints(error: unknown): string[] {
+  const name = errorName(error)
+  switch (name) {
+    case 'AccessDeniedException':
+      return [
+        'Allow secretsmanager:GetSecretValue on the secret to the identity the application runs as (and kms:Decrypt on its key when the secret uses a customer managed KMS key)',
+      ]
+    case 'ResourceNotFoundException':
+      return ['Check the secret name or ARN and the region, or mark the secret optional']
+    case 'DecryptionFailure':
+      return [
+        'Secrets Manager cannot decrypt the secret: allow kms:Decrypt on its KMS key to the identity the application runs as',
+      ]
+    default:
+      return name !== undefined && CREDENTIALS_ERRORS.has(name) ? [CREDENTIALS_HINT] : []
+  }
 }
 
 async function createClient(
@@ -142,52 +161,52 @@ async function createClient(
  * ```
  */
 export function awsSecretsManager(options: AwsSecretsManagerLoaderOptions): ConfigLoader {
-  const refs = normalizeRefs(options?.secretId)
+  requireOptions(WHERE, options)
+  const secrets = normalizeSecrets<AwsSecretRef & Record<string, unknown>>(WHERE, 'secretId', options.secretId, {
+    json: options.json,
+    optional: options.optional,
+  })
   const client = options.client
   if (client !== undefined && typeof client?.getSecretValue !== 'function' && typeof client?.send !== 'function') {
-    throw invalidConfig('awsSecretsManager(): "client" must have a getSecretValue(input) or send(command) method')
+    throw invalidConfig(`${WHERE}: "client" must have a getSecretValue(input) or send(command) method`)
   }
-  const timeoutMs = timeoutOption('awsSecretsManager()', options.timeoutMs, 10_000)
+  const timeoutMs = timeoutOption(WHERE, options.timeoutMs, 10_000)
 
   return {
     name: LOADER,
     async load(context) {
       const { client, owned, sdk } = await createClient(context, options)
-      const fetchSecret = (ref: AwsSecretRef, cancel: AbortSignal): Promise<GetSecretValueOutputLike> => {
+      const fetchSecret = (ref: AwsSecretRef, signal: AbortSignal): Promise<GetSecretValueOutputLike> => {
         const input: GetSecretValueInputLike = {
           SecretId: ref.secretId,
           ...(ref.versionStage === undefined ? {} : { VersionStage: ref.versionStage }),
           ...(ref.versionId === undefined ? {} : { VersionId: ref.versionId }),
         }
-        const requestOptions = { abortSignal: AbortSignal.any([cancel, AbortSignal.timeout(timeoutMs)]) }
+        const requestOptions = { abortSignal: signal }
         if (typeof client.getSecretValue === 'function') return client.getSecretValue(input, requestOptions)
         // createClient guarantees `send` and the SDK otherwise
         const { send } = client as Required<Pick<SecretsManagerClientLike, 'send'>>
         const command = new (sdk as SecretsManagerModule).GetSecretValueCommand(input)
         return send.call(client, command, requestOptions)
       }
-      const read = async (ref: AwsSecretRef, cancel: AbortSignal): Promise<ConfigLayer | undefined> => {
+      const read = async (
+        secret: NormalizedSecret<AwsSecretRef>,
+        cancel: AbortSignal,
+      ): Promise<ConfigLayer | undefined> => {
         let output: GetSecretValueOutputLike
         try {
-          output = await fetchSecret(ref, cancel)
+          const signal = requestSignal(cancel, timeoutMs)
+          output = await abortable(fetchSecret(secret.ref, signal), signal)
         } catch (error) {
-          if (errorName(error) === 'ResourceNotFoundException' && (ref.optional ?? options.optional) === true) {
-            return undefined
-          }
-          if (error instanceof ConfigLoaderError) throw error
-          const name = errorName(error)
-          const prefix = name === undefined || name === 'Error' ? '' : `${name}: `
-          throw new ConfigLoaderError(LOADER, `cannot read secret "${ref.secretId}": ${prefix}${errorMessage(error)}`, {
-            cause: error,
-          })
+          if (errorName(error) === 'ResourceNotFoundException' && secret.optional) return undefined
+          throw readError(LOADER, secret.id, error, { status: errorName(error), timeoutMs, hints: accessHints(error) })
         }
         const text = secretText(output ?? {})
-        if (text === undefined) throw new ConfigLoaderError(LOADER, `secret "${ref.secretId}" has no value`)
-        return { origin: `aws-secrets-manager:${ref.secretId}`, values: secretValues(ref, text), secret: true }
+        if (text === undefined) throw noValueError(LOADER, secret.id)
+        return secretLayer(`${LOADER}:${secret.id}`, secretValues(text, secret, secret.id))
       }
       try {
-        const layers = await readAll(refs, read)
-        return layers.filter((layer): layer is ConfigLayer => layer !== undefined)
+        return await readSecretLayers(secrets, read)
       } finally {
         if (owned) client.destroy?.()
       }
