@@ -8,6 +8,7 @@ export default defineConfig({
     sqs: 'src/drivers/sqs.ts',
     kafka: 'src/drivers/kafka.ts',
     pubsub: 'src/drivers/pubsub.ts',
+    redis: 'src/drivers/redis.ts',
     testing: 'src/testing.ts',
     compiler: 'src/compiler/index.ts',
   },
@@ -16,5 +17,5 @@ export default defineConfig({
   dts: true,
   sourcemap: true,
   clean: true,
-  external: ['amqplib', '@aws-sdk/client-sqs', '@platformatic/kafka', '@google-cloud/pubsub'],
+  external: ['amqplib', '@aws-sdk/client-sqs', '@platformatic/kafka', '@google-cloud/pubsub', 'ioredis'],
 })

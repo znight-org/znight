@@ -91,6 +91,8 @@ export class FakeRedis {
   readonly data = new Map<string, Value>()
   /** Fails a command when it returns an error (checked before the command runs). */
   failures: (command: string, args: readonly string[]) => Error | undefined = () => undefined
+  /** Answers `XREADGROUP` as a RESP3 map (ioredis 6 default protocol), flattened. */
+  resp3 = false
   /** Replicas acknowledging a WAIT. */
   replicas = 0
   /** Script SHAs loaded by EVAL. */
@@ -335,7 +337,9 @@ export class FakeRedis {
         state.lastId = entry.id
         state.pending.set(entry.id, { consumer, deliveredAt: now, deliveries: 1 })
       }
-      return [[Buffer.from(key), fresh.map(entry => this.#reply(entry))]]
+      const entries = fresh.map(entry => this.#reply(entry))
+      // RESP3 maps reach ioredis' callBuffer() flattened: [stream, entries]
+      return this.resp3 ? [Buffer.from(key), entries] : [[Buffer.from(key), entries]]
     }
     const immediate = read()
     if (immediate !== undefined || block === undefined) return immediate ?? null

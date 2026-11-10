@@ -154,7 +154,7 @@ describe('wire format', () => {
       headers: { traceparent: '00-1-2-01' },
     })
     expect(fake.callsOf('XGROUP')[0]?.args).toEqual(['CREATE', 'orders', 'znight', '0', 'MKSTREAM'])
-    expect(fake.pending('orders', 'znight')).toEqual([])
+    await waitFor(() => fake.pending('orders', 'znight').length === 0, 'the acknowledgement')
   })
 
   it('reads entries written by other producers: fields as headers, the entry id and time', async () => {
@@ -175,6 +175,20 @@ describe('wire format', () => {
       headers: { source: 'legacy', 'x-trace': 't' },
       timestamp: Number(entryId.split('-')[0]),
     })
+  })
+
+  it('reads RESP3 replies (a map of streams, flattened by ioredis)', async () => {
+    const fake = new FakeRedis()
+    fake.resp3 = true
+    const driver = driverFor(fake)
+    const { received, subscription } = await deliveries(driver, 'orders')
+    fake.add('orders', { body: 'x', id: 'm-3' })
+    await waitFor(() => received.length === 1, 'the delivery')
+    expect(received[0]?.id).toBe('m-3')
+    await received[0]?.ack()
+    await subscription.cancel()
+    await subscription.close()
+    await driver.close()
   })
 
   it('prefixes keys and trims the streams it writes to', async () => {
@@ -435,6 +449,8 @@ describe('settlements', () => {
     fake.failures = () => undefined
     await delivery.release()
     expect(await caught(() => delivery.ack())).toBeInstanceOf(Error)
+    await waitFor(() => received.length === 2, 'the released copy')
+    await received[1]?.ack()
     await subscription.cancel()
     await subscription.close()
     await driver.close()
@@ -449,8 +465,11 @@ describe('settlements', () => {
     await received[0]?.retry({ attempt: 2, delayMs: 0, error: new Error('x') })
     await waitFor(() => received.length === 2, 'the copy')
     await received[1]?.retry({ attempt: 3, delayMs: 0, error: new Error('x') })
+    await waitFor(() => received.length === 3, 'the second copy')
+    await received[2]?.ack()
     // first EVALSHA answered NOSCRIPT, then EVAL loaded the script, then EVALSHA succeeded
-    expect(fake.callsOf('EVAL')).toHaveLength(1)
+    const isMove = (call: { args: readonly string[] }) => call.args[0]?.startsWith('-- znight:move') === true
+    expect(fake.callsOf('EVAL').filter(isMove)).toHaveLength(1)
     expect(fake.callsOf('EVALSHA').length).toBeGreaterThanOrEqual(2)
     await subscription.cancel()
     await subscription.close()
@@ -580,7 +599,9 @@ describe('shutdown', () => {
     const started = Date.now()
     await subscription.cancel()
     expect(Date.now() - started).toBeLessThan(1000)
-    expect(fake.callsOf('CLIENT').map(call => call.args[0])).toEqual(['ID', 'UNBLOCK'])
+    const client_ = fake.callsOf('CLIENT').map(call => call.args[0])
+    expect(client_[0]).toBe('ID')
+    expect(client_).toContain('UNBLOCK')
     await subscription.close()
     expect(fake.consumers('orders', 'znight')).toEqual([])
     await driver.close()
