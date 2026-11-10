@@ -1,3 +1,4 @@
+import type { ErrorReportEvent } from '@znight/core'
 import type { GraphQLContext, GraphQLErrorMapper } from '../src/index.ts'
 
 import {
@@ -271,6 +272,62 @@ describe('error formatting', () => {
     const result = await booted.plugin.execute({ query: '{ required }' })
     expect(result.data).toBeNull()
     expect(result.errors?.[0]?.extensions?.['code']).toBe('INTERNAL_SERVER_ERROR')
+  })
+})
+
+describe('error:report', () => {
+  async function reporting() {
+    const booted = await boot(metadata(), { errorMappers: [DomainMapper] })
+    const reports: ErrorReportEvent[] = []
+    booted.app.hooks.on('error:report', report => {
+      reports.push(report)
+    })
+    return { booted, reports }
+  }
+
+  it('reports each unexpected error once per operation, with the operation context', async () => {
+    const { booted, reports } = await reporting()
+    await using _ = booted
+    const result = await booted.plugin.execute(
+      { query: 'query Shelf { plain server b: book { broken } }', operationName: 'Shelf' },
+      { requestId: 'req-5' },
+    )
+    expect(result.errors).toHaveLength(3)
+    expect(reports.map(report => [(report.error as Error).message, report.tags['coordinate']])).toEqual([
+      ['connection string postgres://secret', 'Query.plain'],
+      ['database down', 'Query.server'],
+      ['later', 'Book.broken'],
+    ])
+    const report = reports[2] as ErrorReportEvent
+    expect(report.source).toBe('graphql')
+    expect(report.operation).toBe('query Shelf')
+    expect(report.requestId).toBe('req-5')
+    expect(report.tags).toEqual({
+      operationType: 'query',
+      operationName: 'Shelf',
+      transport: 'direct',
+      coordinate: 'Book.broken',
+      path: 'b.broken',
+    })
+    expect((report.context as GraphQLContext).requestId).toBe('req-5')
+  })
+
+  it('reports the cause of a shown GraphQLException once, with its code', async () => {
+    const { booted, reports } = await reporting()
+    await using _ = booted
+    await booted.plugin.execute({ query: '{ caused causedAgain }' })
+    expect(reports.map(report => [report.error, report.operation, report.tags['code']])).toEqual([
+      [DB_ERROR, 'query', 'ORDER_FAILED'],
+    ])
+  })
+
+  it('does not report expected errors nor rejected operations', async () => {
+    const { booted, reports } = await reporting()
+    await using _ = booted
+    await booted.plugin.execute({ query: '{ exception graphql domain unauthorized forbidden conflict validation }' })
+    await booted.plugin.execute({ query: '{ nope }' })
+    await booted.plugin.execute({ query: '{ plain' })
+    expect(reports).toEqual([])
   })
 })
 
