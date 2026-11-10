@@ -17,7 +17,7 @@
     "@znight/core": "workspace:*",
     "@znight/http": "workspace:*",
     "@znight/websocket": "workspace:*",
-    "ws": "8.22.0",
+    "ws": "8.22.1",
     "zod": "catalog:"
   },
   "devDependencies": {

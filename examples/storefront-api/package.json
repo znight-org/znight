@@ -22,8 +22,8 @@
     "@znight/openapi": "workspace:*",
     "@znight/config": "workspace:*",
     "@znight/observability": "workspace:*",
-    "hono": "4.13.14",
-    "@hono/node-server": "2.1.5",
+    "hono": "4.13.17",
+    "@hono/node-server": "2.1.6",
     "zod": "catalog:",
     "valibot": "1.5.0",
     "@valibot/to-json-schema": "1.8.0"

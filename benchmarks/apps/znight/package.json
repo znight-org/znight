@@ -8,12 +8,12 @@
     "typecheck": "znight generate && tsc --noEmit"
   },
   "dependencies": {
-    "@hono/node-server": "2.1.5",
+    "@hono/node-server": "2.1.6",
     "@znight/core": "workspace:*",
     "@znight/http": "workspace:*",
     "express": "5.3.0",
-    "fastify": "5.12.7",
-    "hono": "4.13.14",
+    "fastify": "5.12.8",
+    "hono": "4.13.17",
     "zod": "catalog:"
   },
   "devDependencies": {

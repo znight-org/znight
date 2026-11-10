@@ -96,12 +96,12 @@
     }
   },
   "devDependencies": {
-    "@aws-sdk/client-sqs": "3.1160.0",
-    "@platformatic/kafka": "2.14.0",
+    "@aws-sdk/client-sqs": "3.1164.0",
+    "@platformatic/kafka": "2.15.0",
     "@testcontainers/kafka": "12.2.1",
     "@testcontainers/localstack": "12.2.1",
     "@testcontainers/rabbitmq": "12.2.1",
-    "amqplib": "2.2.0",
+    "amqplib": "2.2.1",
     "testcontainers": "12.2.1",
     "zod": "catalog:",
     "@znight/compiler": "workspace:*"
