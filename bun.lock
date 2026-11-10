@@ -465,16 +465,19 @@
       },
       "devDependencies": {
         "@aws-sdk/client-secrets-manager": "3.1164.0",
+        "@google-cloud/secret-manager": "7.2.0",
         "@znight/compiler": "workspace:*",
         "yaml": "2.9.1",
       },
       "peerDependencies": {
         "@aws-sdk/client-secrets-manager": "^3.0.0",
+        "@google-cloud/secret-manager": "^6.0.0 || ^7.0.0 || ^8.0.0",
         "@znight/compiler": "workspace:^",
         "yaml": "^2.0.0",
       },
       "optionalPeers": [
         "@aws-sdk/client-secrets-manager",
+        "@google-cloud/secret-manager",
         "@znight/compiler",
         "yaml",
       ],
@@ -590,12 +593,14 @@
       },
       "peerDependencies": {
         "@aws-sdk/client-sqs": "^3.600.0",
+        "@google-cloud/pubsub": "^6.0.0",
         "@platformatic/kafka": "^2.0.0",
         "@znight/compiler": "workspace:^",
         "amqplib": "^2.0.0",
       },
       "optionalPeers": [
         "@aws-sdk/client-sqs",
+        "@google-cloud/pubsub",
         "@platformatic/kafka",
         "@znight/compiler",
         "amqplib",
@@ -976,6 +981,8 @@
     "@google-cloud/pubsub": ["@google-cloud/pubsub@6.3.2", "", { "dependencies": { "@google-cloud/paginator": "^7.2.0", "@google-cloud/precise-date": "^6.2.0", "@google-cloud/projectify": "^6.2.0", "@google-cloud/promisify": "^6.2.0", "@google-cloud/pubsub-api": "^0.7.0", "@opentelemetry/api": "~1.9.0", "@opentelemetry/core": "^2.8.0", "@opentelemetry/semantic-conventions": "~1.39.0", "arrify": "^2.0.0", "extend": "^3.0.2", "google-auth-library": "^11.3.1", "google-gax": "^6.12.1", "google-logging-utils": "^2.1.0", "heap-js": "^2.6.0", "is-stream-ended": "^0.1.4", "lodash.snakecase": "^4.1.1", "long": "^5.3.1", "p-defer": "^3.0.0" } }, "sha512-Ym0Qsu4dep1Pn/m14QHABE5gJ6PyysrpbMXGlgerFRKmxE5E9O0Drxi24qA+/vYqC5bNQUR9+ua0IyvT+CS4fA=="],
 
     "@google-cloud/pubsub-api": ["@google-cloud/pubsub-api@0.7.0", "", { "dependencies": { "google-gax": "^6.0.0" } }, "sha512-HlBt8JEceIJX9pgikVavq+6umuiEqc1loRwPPJgE8WNiRx1IgAyk9ohhwXwskFbPdzScpb/NKnSQOPy6lJYLFA=="],
+
+    "@google-cloud/secret-manager": ["@google-cloud/secret-manager@7.2.0", "", { "dependencies": { "google-gax": "^6.5.0" } }, "sha512-SQ/e9mo7Pl5QpFIn3GOa8K/PhS+3HgQnlWpMZbaE1UiZBa42AFB+EqxWQZOljv0kNwemo/PWiesAh8TywU9uVw=="],
 
     "@graphql-hive/logger": ["@graphql-hive/logger@1.1.1", "", { "peerDependencies": { "@logtape/logtape": "^1.2.0 || ^2.0.0", "pino": "^9.13.0 || ^10.0.0", "winston": "*" }, "optionalPeers": ["@logtape/logtape", "pino", "winston"] }, "sha512-fVUlEQCpnJnR/KJeEDHZbEDwEq4fMNTjKvicauCFMfxPLlcpIWdrscXpI/azwQkpsARyWPV0RnwdgjZIrFBmwQ=="],
 

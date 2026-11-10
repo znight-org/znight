@@ -1,5 +1,5 @@
 ---
-description: "@znight/config - typed configuration classes loaded from environment variables, .env files, JSON/YAML files, Vault or AWS Secrets Manager, validated at boot."
+description: "@znight/config - typed configuration classes loaded from environment variables, .env files, JSON/YAML files, Vault, AWS Secrets Manager or Google Cloud Secret Manager, validated at boot."
 ---
 
 # @znight/config <Badge type="tip" text="available" />
@@ -12,6 +12,7 @@ class at boot and injects them like any other provider.
 npm install @znight/config
 npm install yaml                              # optional, for yaml()
 npm install @aws-sdk/client-secrets-manager   # optional, for awsSecretsManager()
+npm install @google-cloud/secret-manager      # optional, for gcpSecretManager()
 ```
 
 ## Config classes
@@ -119,6 +120,7 @@ ConfigPlugin.configure({
 | `json(path)` / `yaml(path)`       | structured files: key paths (`database.host`) or environment names at the top level (`yaml` peer)                                                              |
 | `vault({ path })`                 | KV secrets of HashiCorp Vault over its HTTP API (token auth, `VAULT_ADDR` / `VAULT_TOKEN`)                                                                     |
 | `awsSecretsManager({ secretId })` | AWS Secrets Manager secrets (`@aws-sdk/client-secrets-manager` peer)                                                                                           |
+| `gcpSecretManager({ labels })`    | Google Cloud Secret Manager secrets, by name (`secrets`) and/or by label or filter, version `latest`, prefix stripping (`@google-cloud/secret-manager` peer)   |
 | `inline(values)`                  | fixed values (defaults first, or overrides last)                                                                                                               |
 
 A failing loader stops the boot with a `ConfigLoaderError` (`ZNIGHT006`) naming it. A custom loader
@@ -133,6 +135,38 @@ the parser message (which quotes the content: a secret, maybe), and the parser e
 ```txt
 ZnightError: ZNIGHT006: Config loader "json" failed: invalid JSON in config/secrets.json at line 2, column 16: unexpected character
 ```
+
+Values from a secret store (`vault()`, `awsSecretsManager()`, `gcpSecretManager()`) are masked like
+`@Secret` values, in validation messages and when the config instance is printed or serialised, even
+for a field without `@Secret`.
+
+### Google Cloud Secret Manager
+
+`gcpSecretManager()` reads every secret carrying some labels, the secrets you name, or both. Each
+secret provides one value under its id, so a secret `DB_PASSWORD` fills `@Secret('DB_PASSWORD')`;
+`stripPrefix` removes an environment prefix from the ids (`PROD_DB_PASSWORD` → `DB_PASSWORD`) and
+`mapKey` builds any other key.
+
+```ts
+import { ConfigPlugin, dotenv, env, gcpSecretManager } from '@znight/config'
+
+ConfigPlugin.configure({
+  loaders: [
+    dotenv(),
+    env(),
+    gcpSecretManager({ labels: { app: 'api', env: 'prod' }, stripPrefix: 'PROD_' }),
+    gcpSecretManager({ projectId: 'acme-shared', secrets: [{ name: 'smtp', json: true }], optional: true }),
+  ],
+})
+```
+
+The project comes from `projectId`, `GOOGLE_CLOUD_PROJECT` (environment or a previous loader) or the
+credentials; authentication uses Application Default Credentials unless you pass `clientOptions` or
+your own `client`. Values stay text unless `json` is set (then a JSON object secret provides one
+value per entry), and errors name the secret and the gRPC status, with a hint for missing roles
+(`roles/secretmanager.secretAccessor`, `roles/secretmanager.viewer` to list by label) or credentials.
+A loader reads the secrets of one location, global by default or `location` for regional secrets
+(each location has its own endpoint): use one loader per location. All the options are in the [package README](../../packages/config/README.md#gcpsecretmanageroptions).
 
 ## Bun's automatic `.env` loading {#bun-env-loading}
 

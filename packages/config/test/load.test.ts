@@ -1,5 +1,6 @@
 import type { ConfigFieldDefinition, ConfigMetadata, ConfigProblem } from '../src/index.ts'
 
+import { inspect } from 'node:util'
 import { ErrorCode } from '@znight/core'
 
 import {
@@ -237,6 +238,55 @@ describe('loadConfig', () => {
         loadConfig(Db, layered, [field('port', 'number', { key: 'database.port', required: false })]),
       )
       expect(error.message).toContain('Db.port: expected a number but got "nope" (PORT from env)')
+    })
+
+    it('masks values of secret layers, even for fields without @Secret', async () => {
+      class Server {
+        port!: number
+        host!: string
+      }
+      const layered = createConfigSource([
+        { origin: 'file', values: { HOST: 'not-a-number' } },
+        { origin: 'gcp-secret-manager:PORT', values: { PORT: 'hunter2' }, secret: true },
+      ])
+      const error = await caught(() => loadConfig(Server, layered, [field('port', 'number'), field('host', 'number')]))
+      expect(error.message).toContain(
+        `Server.port: expected a number but got ${SECRET_MASK} (PORT from gcp-secret-manager:PORT)`,
+      )
+      expect(error.message).toContain('Server.host: expected a number but got "not-a-number" (HOST from file)')
+      expect(error.message).not.toContain('hunter2')
+    })
+
+    it('masks properties filled from secret layers like @Secret ones, even without @Secret', () => {
+      class Db {
+        host!: string
+        password!: string
+        user = 'app'
+      }
+      const layered = createConfigSource([
+        { origin: 'env', values: { HOST: 'db.internal', PASSWORD: 'from-env', USER: 'admin' } },
+        { origin: 'gcp-secret-manager:PASSWORD', values: { PASSWORD: 's3cr3t-pw' }, secret: true },
+      ])
+      const fields = [field('host'), field('password'), field('user', 'string', { required: false })]
+      expect(resolveFields('Db', fields, layered).secrets).toEqual(new Set(['password']))
+      const db = loadConfig(Db, layered, fields)
+      expect(db.password).toBe('s3cr3t-pw')
+      expect(JSON.stringify(db)).toBe(`{"host":"db.internal","password":"${SECRET_MASK}","user":"admin"}`)
+      expect(inspect(db)).toBe(`Db { host: 'db.internal', password: '${SECRET_MASK}', user: 'admin' }`)
+      expect(String(db)).toBe(`Db {"host":"db.internal","password":"${SECRET_MASK}","user":"admin"}`)
+    })
+
+    it('does not mask values a plain layer overrides over a secret layer', () => {
+      class Db {
+        password!: string
+      }
+      const layered = createConfigSource([
+        { origin: 'vault:secret/app', values: { PASSWORD: 'from-vault' }, secret: true },
+        { origin: 'env', values: { PASSWORD: 'local-override' } },
+      ])
+      const fields = [field('password')]
+      expect(resolveFields('Db', fields, layered).secrets.size).toBe(0)
+      expect(JSON.stringify(loadConfig(Db, layered, fields))).toBe('{"password":"local-override"}')
     })
 
     it('reports invalid defaults', async () => {

@@ -34,12 +34,19 @@ export interface ConfigLayer {
   readonly origin: string
   /** Flat (`{ DB_HOST, 'database.host' }`) and/or nested (`{ database: { host } }`) values. */
   readonly values: Readonly<Record<string, unknown>>
+  /**
+   * The values are secrets (secret stores): error messages mask them as `[REDACTED]`, even for
+   * fields without `@Secret`. Default: `false`.
+   */
+  readonly secret?: boolean
 }
 
 /** A value found in a source, with its origin. */
 export interface ConfigEntry {
   readonly value: unknown
   readonly origin: string
+  /** The value comes from a {@link ConfigLayer.secret} layer. */
+  readonly secret?: boolean
 }
 
 type RecordLike = Readonly<Record<string, unknown>>
@@ -135,7 +142,9 @@ class LayeredConfigSource implements ConfigSource {
     for (let index = this.#layers.length - 1; index >= 0; index--) {
       const layer = this.#layers[index] as ConfigLayer
       const value = lookupPath(layer.values, key)
-      if (value !== undefined && value !== null) return { value, origin: layer.origin }
+      if (value !== undefined && value !== null) {
+        return layer.secret === true ? { value, origin: layer.origin, secret: true } : { value, origin: layer.origin }
+      }
     }
     return undefined
   }

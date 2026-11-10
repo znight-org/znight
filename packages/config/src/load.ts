@@ -45,9 +45,9 @@ function sourceHints(source: ConfigSource): string[] {
  *
  * The class is instantiated without arguments (initializers run), then every field is resolved
  * (see {@link resolveFields}: environment name, key path, `@Default`, initializer), coerced, checked
- * against its `enum` and assigned. Secret properties are masked in `JSON.stringify`,
- * `util.inspect` and `toString()`. Without `source` (no `ConfigPlugin`), values are read from
- * `process.env` (or `options.env`).
+ * against its `enum` and assigned. Secret properties (`@Secret`, or filled from a
+ * `ConfigLayer.secret` layer) are masked in `JSON.stringify`, `util.inspect` and `toString()`.
+ * Without `source` (no `ConfigPlugin`), values are read from `process.env` (or `options.env`).
  *
  * @throws ConfigValidationError (ZNIGHT006) listing every missing or invalid value of the class.
  * @throws ZnightError (ZNIGHT012) when a field definition is malformed.
@@ -62,7 +62,12 @@ export function loadConfig<T extends object>(
   const instance = new ConfigClass()
   const record = instance as Record<string, unknown>
   const effective = source ?? envSource(options.env)
-  const { values, problems } = resolveFields(name, fields, effective, property => record[property] !== undefined)
+  const { values, secrets, problems } = resolveFields(
+    name,
+    fields,
+    effective,
+    property => record[property] !== undefined,
+  )
   if (problems.length > 0) {
     const hints = sourceHints(effective)
     if (source === undefined) hints.push(NO_PLUGIN_HINT)
@@ -72,10 +77,8 @@ export function loadConfig<T extends object>(
     // [[Define]] semantics, like class fields: setters and inherited accessors are bypassed
     Object.defineProperty(instance, property, { value, writable: true, enumerable: true, configurable: true })
   }
-  maskSecrets(
-    instance,
-    fields.filter(field => field.secret === true).map(field => field.property),
-  )
+  // @Secret fields, and fields filled from a secret store (vault(), awsSecretsManager()...)
+  maskSecrets(instance, [...fields.filter(field => field.secret === true).map(field => field.property), ...secrets])
   return instance
 }
 
