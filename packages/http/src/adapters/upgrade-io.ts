@@ -19,6 +19,42 @@ const EMPTY = new Uint8Array(0)
 /** A handshake has no body: Znight never reads one. */
 const NO_BODY: Promise<Uint8Array> = Promise.resolve(EMPTY)
 
+/** No listener to remove. */
+const NOTHING = (): void => undefined
+
+/** Calls `listener` on the next microtask, unless the returned function was called before. */
+function callSoon(listener: () => void): () => void {
+  let removed = false
+  queueMicrotask(() => {
+    if (!removed) listener()
+  })
+  return () => {
+    removed = true
+  }
+}
+
+/**
+ * Calls `listener` once when `signal` aborts (on the next microtask when it already did); returns
+ * the function removing it.
+ */
+function onSignalAbort(signal: AbortSignal | undefined, listener: () => void): () => void {
+  if (signal === undefined) return NOTHING
+  if (signal.aborted) return callSoon(listener)
+  const aborted = (): void => listener()
+  signal.addEventListener('abort', aborted, { once: true })
+  return () => signal.removeEventListener('abort', aborted)
+}
+
+/**
+ * Whether the client ended its side of `socket`: `readableEnded` only turns true once the buffered
+ * bytes were read, the stream state knows as soon as the end arrived (Node.js and Bun keep it as
+ * `_readableState.ended`).
+ */
+function ended(socket: Duplex): boolean {
+  const state = (socket as { readonly _readableState?: { readonly ended?: unknown } })._readableState
+  return socket.readableEnded || state?.ended === true
+}
+
 /** The `IncomingMessage` of a `node:http` upgrade as an {@link AdapterRequest}. */
 class NodeUpgradeRequest implements AdapterRequest {
   readonly method: string
@@ -48,6 +84,37 @@ class NodeUpgradeRequest implements AdapterRequest {
 
   hasBody(): boolean {
     return false
+  }
+
+  /**
+   * The client left during the handshake: the socket closed, or the client ended its side (a
+   * `node:http` server allows half-open sockets, so a client's FIN alone never closes the socket).
+   * Nothing reads the socket during the handshake, so a FIN after bytes the client sent past its
+   * headers (a frame sent early) emits no `end` until they are read: `readable`, emitted at the end
+   * of the stream whatever is buffered, catches it (and reads nothing). The plugin removes the
+   * listeners once the transport took the socket (removing `readable` hands the socket back
+   * unpaused to whoever reads it next): its later close is the connection's, not the handshake's.
+   */
+  onAbort(listener: () => void): () => void {
+    const socket = this.rawResponse as Duplex
+    if (socket.destroyed || ended(socket)) return callSoon(listener)
+    let called = false
+    const gone = (): void => {
+      if (called) return
+      called = true
+      listener()
+    }
+    const readable = (): void => {
+      if (ended(socket)) gone()
+    }
+    socket.once('end', gone)
+    socket.once('close', gone)
+    socket.on('readable', readable)
+    return () => {
+      socket.removeListener('end', gone)
+      socket.removeListener('close', gone)
+      socket.removeListener('readable', readable)
+    }
   }
 }
 
@@ -79,6 +146,15 @@ export class FetchUpgradeRequest implements AdapterRequest {
   hasBody(): boolean {
     return false
   }
+
+  /**
+   * `request.signal` aborted: `Bun.serve()` aborts it when the client closes its connection, during
+   * the handshake and also once upgraded (when the WebSocket closes), hence the removal once the
+   * transport took the connection.
+   */
+  onAbort(listener: () => void): () => void {
+    return onSignalAbort(this.raw.signal, listener)
+  }
 }
 
 /** An in-memory handshake (`HttpPlugin.upgradeInMemory()`) as an {@link AdapterRequest}. */
@@ -91,11 +167,14 @@ export class MemoryUpgradeRequest implements AdapterRequest {
   readonly encrypted = false
   readonly raw: unknown = undefined
   readonly rawResponse: unknown = undefined
+  readonly #signal: AbortSignal | undefined
 
-  constructor(method: string, url: string, headers: Record<string, string>) {
+  /** `signal`: aborting it disconnects the client. */
+  constructor(method: string, url: string, headers: Record<string, string>, signal?: AbortSignal) {
     this.method = method
     this.url = url
     this.headers = headers
+    this.#signal = signal
   }
 
   readBody(): Promise<Uint8Array> {
@@ -104,6 +183,11 @@ export class MemoryUpgradeRequest implements AdapterRequest {
 
   hasBody(): boolean {
     return false
+  }
+
+  /** The caller's `signal` aborted. */
+  onAbort(listener: () => void): () => void {
+    return onSignalAbort(this.#signal, listener)
   }
 }
 

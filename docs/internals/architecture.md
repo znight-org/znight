@@ -2134,9 +2134,22 @@ not call `next()` gets the same reply as in the general pipeline.
   `expired` (the guards still running can stop their work) and `upgrade.expired` becomes `true`:
   `accept` MUST NOT complete it (it checks the flag after every `await`, right before the
   transport, and refuses with a `4xx`).
+  The pipeline listens to the client from the start of a handshake (`AdapterRequest.onAbort` of the
+  upgrade request: the socket's `end` or `close` for `node:http`, and its `readable` at the end of
+  the stream, since nothing reads the socket during the handshake and a client's FIN behind unread
+  bytes emits no `end`; `request.signal` for `Bun.serve()`, the caller's `signal` in memory): when
+  the client leaves first, `ctx.signal` aborts with the kind `client` and `upgrade.disconnected`
+  becomes `true`, with the same rule as `expired` for `accept` (`HttpPlugin` refuses with `400`
+  when the guards let it through). A handshake failing with that abort (the signal's reason, or an
+  error whose `cause` it is: a guard passing `ctx.signal` to `fetch()`) is answered the same `400`,
+  not as a server error: nothing is logged at `error` level. The listeners are removed by
+  `upgrade.hold()` (the transport took the connection: closing it never aborts the handshake's
+  `ctx.signal`; the socket is handed back unpaused) and when the handshake is answered (refusal,
+  `408`).
   A refusal (an exception) is written as an HTTP response on the raw socket. A plain `GET` of an
   upgrade path answers `426`. `HttpPlugin.upgradeInMemory(request, { kind: 'memory', peer })` runs
-  a handshake without socket (tests). Applications without upgrade routes run no upgrade code.
+  a handshake without socket (tests); aborting `request.signal` before it completes disconnects the
+  client. Applications without upgrade routes run no upgrade code.
 - **Cookies** (RFC 0006; `cookies.ts` is import-free). Request: the `cookie` header is split on `;`
   only, pairs trimmed, quoted values unquoted, `%` sequences decoded (malformed: kept raw); pairs
   without `=` or with an empty name are ignored; the first occurrence of a name wins; repeated
@@ -2204,7 +2217,9 @@ not call `next()` gets the same reply as in the general pipeline.
   exported.
 - **`ctx.signal`** exists on every route (created on first access): it aborts when the client
   disconnects before the response was written (`AdapterRequest.onAbort`), when the response body is
-  cancelled, or when the server closes an event stream; never after a normal completion. Its reason
+  cancelled, or when the server closes an event stream; never after a normal completion. On a
+  WebSocket handshake it aborts when the client leaves before the transport took the connection,
+  never because the accepted connection closes. Its reason
   is a `RequestAbortedError` (`name: 'AbortError'`, `kind: 'client' | 'shutdown' | 'expired'`;
   `expired` covers an event stream's `maxDuration` and a handshake timeout, told apart by `message`).
   Ordinary in-flight requests are not aborted on shutdown: they drain.
@@ -2271,7 +2286,8 @@ interface AdapterRequest {
   streamBody?(limit: number): ReadableStream<Uint8Array> // pull-based, 413 past the limit, 400 on abort
   hasBody?(): boolean // asked only without content-length / transfer-encoding; false over HTTP/1.1
   rawStatus?(): number | undefined // status written through @Res()
-  onAbort?(listener: () => void): void // client gone before the response was written; never after a complete one
+  // client gone before the response was written, never after a complete one; a returned function removes it
+  onAbort?(listener: () => void): unknown
 }
 type ReplyBody = Uint8Array | ReadableStream<Uint8Array> | Blob | null // the plugin sends no Blob
 interface AdapterReply {
@@ -3657,8 +3673,8 @@ are ZNIGHT050):
   upgrade with the transport (an in-memory transport for `memory` upgrades), emits
   `websocket:connection` (`open`) and holds the request scope until the connection is fully closed.
   It checks `maxConnections` again and reserves a slot before its first `await`, and refuses
-  without completing the upgrade when `upgrade.expired` (`408`) or the drain began (`503`) by the
-  time the transport is called; a connection completed while the drain began is closed with
+  without completing the upgrade when `upgrade.expired` (`408`), `upgrade.disconnected` (`400`)
+  or the drain began (`503`) by the time the transport is called; a connection completed while the drain began is closed with
   `shutdown.code` / `shutdown.reason` at once. A transport's `accept` MUST settle: the `ws`
   transport rejects (`400`) when the socket closes before `ws` completes the handshake (client gone,
   header `ws` refuses), and hands `ws` only the selected subprotocol. Transports write only the

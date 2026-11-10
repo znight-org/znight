@@ -11,7 +11,8 @@ The
 - **The handshake is an HTTP request.** It runs through the `HttpPlugin` pipeline: request scope,
   `http:request` hook, global guards, access decisions, exception mappers. The request scope lasts
   as long as the connection, so what a guard put in a request-scoped provider is there for every
-  message.
+  message. `ctx.signal` aborts when the client leaves during the handshake, which is then not
+  completed.
 - **Checked at build time.** Gateways, events, parameters, guards and options are read by the
   compiler: a duplicate event, a reserved `$` event or a singleton gateway injecting `WsConnection`
   fail the build ([`ZNIGHT050`](/reference/error-codes#znight050),

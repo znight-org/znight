@@ -48,7 +48,7 @@ import { isSseBody, isSseSource, type SseOptions, SseSession, type SseSource } f
 import { isBodylessStatus } from './status.ts'
 import { type ContextRunner, captureContext, discardStream, type TrackedStream, trackStream } from './stream.ts'
 import { HttpTokens } from './tokens.ts'
-import { PendingUpgradeState } from './upgrade.ts'
+import { handshakeAborted, PendingUpgradeState } from './upgrade.ts'
 import { emptyRecord, errorMessage, fastRecord, isBun, isThenable } from './utils.ts'
 
 /** A dependency of the pipeline: an instance resolved at bootstrap, or a token resolved per request. */
@@ -832,12 +832,21 @@ export class Pipeline {
       let context: RequestContext | undefined
       const replied = this.#serve(request, url, plan.info, params, target, startTime, plan.body, ctx => {
         context = ctx
-        pending = new PendingUpgradeState(native, () => this.#upgradeHeaders(ctx))
+        pending = new PendingUpgradeState(native, {
+          headers: () => this.#upgradeHeaders(ctx),
+          disconnected: () => ctx.abortKind === 'client',
+          // the connection's own close must not abort the signal of its handshake
+          accepted: () => ctx.releaseClient(),
+        })
         UPGRADES.set(ctx, pending)
+        // eagerly: `disconnected` is known even when nothing reads ctx.signal
+        ctx.watchClient()
       })
+      // answered (accepted, refused or timed out): nothing to abort any more
+      const release = (): void => context?.releaseClient()
       const settled = replied.then(reply => (pending?.accepted === true ? undefined : reply))
       const timeoutMs = upgrade.timeoutMs
-      if (timeoutMs === undefined) return settled
+      if (timeoutMs === undefined) return settled.finally(release)
       let timer: ReturnType<typeof setTimeout> | undefined
       const expired = new Promise<AdapterReply>(resolve => {
         timer = setTimeout(() => {
@@ -848,7 +857,10 @@ export class Pipeline {
           resolve(adapterReply(serializeError(408, body, 'GET'), null))
         }, timeoutMs)
       })
-      return Promise.race([settled, expired]).finally(() => clearTimeout(timer))
+      return Promise.race([settled, expired]).finally(() => {
+        clearTimeout(timer)
+        release()
+      })
     } catch (error) {
       return Promise.reject(error)
     }
@@ -1477,8 +1489,14 @@ export class Pipeline {
     return reply
   }
 
-  /** Maps an error to a reply: exception mappers first, then the default rendering. Never throws. */
-  async #errorReply(error: unknown, ctx: RequestContext): Promise<SerializedReply> {
+  /**
+   * Maps an error to a reply: exception mappers first, then the default rendering. Never throws. A
+   * WebSocket handshake failing with the abort of its own client (a guard passing `ctx.signal` to
+   * its work, like `fetch()`) is answered like a client that left: a `400`, not a logged server
+   * error (the reply reaches nobody).
+   */
+  async #errorReply(thrown: unknown, ctx: RequestContext): Promise<SerializedReply> {
+    const error = UPGRADES.has(ctx) && ctx.isClientAbort(thrown) ? handshakeAborted() : thrown
     for (const mapper of this.#options.mappers) {
       let mapped: unknown
       try {

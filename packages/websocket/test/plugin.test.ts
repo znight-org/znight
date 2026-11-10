@@ -362,9 +362,32 @@ describe('WebSocketPlugin handshakes in flight', () => {
   const SLOW = 'src/slow.gateway.ts#SlowGateway'
   const GATED = 'src/gated.gateway.ts#GatedGateway'
   const SLOW_GUARD = 'src/slow.guard.ts#SlowGuard'
+  const WAITING = 'src/waiting.gateway.ts#WaitingGateway'
+  const WAITING_GUARD = 'src/waiting.guard.ts#WaitingGuard'
 
   class SlowGateway {}
   class GatedGateway {}
+  class WaitingGateway {}
+
+  /** What the request-scoped {@link WaitingGuard} saw. */
+  let waiting = { entered: Promise.withResolvers<void>(), reason: undefined as unknown, disposed: 0 }
+
+  /** Waits on `ctx.signal`, then lets the handshake through, aborted or not. */
+  class WaitingGuard implements CanActivate {
+    canActivate(ctx: HttpContext): Promise<boolean> {
+      waiting.entered.resolve()
+      return new Promise(resolve =>
+        ctx.signal.addEventListener('abort', () => {
+          waiting.reason = ctx.signal.reason
+          resolve(true)
+        }),
+      )
+    }
+
+    release(): void {
+      waiting.disposed++
+    }
+  }
 
   class SlowGuard implements CanActivate {
     async canActivate(): Promise<boolean> {
@@ -392,6 +415,8 @@ describe('WebSocketPlugin handshakes in flight', () => {
       providers: {
         [SLOW]: singleton(SlowGateway),
         [SLOW_GUARD]: singleton(SlowGuard),
+        [WAITING]: singleton(WaitingGateway),
+        [WAITING_GUARD]: { ...singleton(WaitingGuard, [], 'request'), dispose: 'release' },
         [GATED]: {
           scope: 'request',
           class: GatedGateway as never,
@@ -403,10 +428,12 @@ describe('WebSocketPlugin handshakes in flight', () => {
           },
         },
       },
-      resolutionOrder: [SLOW, SLOW_GUARD],
+      resolutionOrder: [SLOW, SLOW_GUARD, WAITING],
       extensions: {
         http: { controllers: [] },
-        websocket: { gateways: [raw(SLOW, '/slow', [SLOW_GUARD]), raw(GATED, '/gated')] },
+        websocket: {
+          gateways: [raw(SLOW, '/slow', [SLOW_GUARD]), raw(GATED, '/gated'), raw(WAITING, '/waiting', [WAITING_GUARD])],
+        },
       },
     }
     const websocket = WebSocketPlugin.configure(options)
@@ -454,6 +481,70 @@ describe('WebSocketPlugin handshakes in flight', () => {
     await stopped
     expect(performance.now() - started).toBeLessThan(1000)
     expect(websocket.stats().opened).toBe(0)
+  })
+
+  it('aborts ctx.signal when the client leaves while a guard waits, and completes nothing', async () => {
+    waiting = { entered: Promise.withResolvers(), reason: undefined, disposed: 0 }
+    const http = HttpPlugin.configure({ port: 0 })
+    const { created, websocket } = gatedApp({}, http)
+    const app = await created
+    try {
+      const client = new AbortController()
+      const result = websocket.connect('/waiting', { signal: client.signal }).then(
+        () => 'open',
+        (error: unknown) => error,
+      )
+      await waiting.entered.promise
+      expect(http.inflight).toBe(1)
+      client.abort()
+      // rejects like fetch(): with the reason of the caller's signal
+      expect(await result).toBe(client.signal.reason)
+      expect(waiting.reason).toMatchObject({ name: 'AbortError', kind: 'client' })
+      expect(websocket.connections).toBe(0)
+      expect(websocket.stats().opened).toBe(0)
+      // the request scope of the handshake closed
+      expect(http.inflight).toBe(0)
+      expect(waiting.disposed).toBe(1)
+    } finally {
+      await app.stop()
+    }
+  })
+
+  it('does not complete a handshake whose client left while the gateway was created', async () => {
+    const { created, websocket, entered, release } = gatedApp({})
+    const app = await created
+    try {
+      const client = new AbortController()
+      const result = websocket.connect('/gated', { signal: client.signal }).then(
+        () => 'open',
+        (error: unknown) => error,
+      )
+      await entered
+      client.abort()
+      release()
+      expect(await result).toBe(client.signal.reason)
+      await Bun.sleep(20)
+      expect(websocket.connections).toBe(0)
+      expect(websocket.stats().opened).toBe(0)
+    } finally {
+      await app.stop()
+    }
+  })
+
+  it('ignores the signal of connect() once the connection is open', async () => {
+    const { created, websocket } = gatedApp({})
+    const app = await created
+    try {
+      const client = new AbortController()
+      const conn = await websocket.connect('/slow', { signal: client.signal })
+      client.abort()
+      await Bun.sleep(5)
+      expect(websocket.connections).toBe(1)
+      expect(await Promise.race([conn.closed, Bun.sleep(5).then(() => 'open')])).toBe('open')
+      await conn.close()
+    } finally {
+      await app.stop()
+    }
   })
 
   it('does not complete a handshake that timed out while the gateway was created', async () => {

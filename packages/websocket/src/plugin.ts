@@ -331,10 +331,15 @@ export class WebSocketPlugin implements Plugin, PluginHttpUpgrades {
         headers,
         ...(options.query === undefined ? {} : { query: options.query }),
         ...(options.cookies === undefined ? {} : { cookies: options.cookies }),
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
       },
       { kind: 'memory', peer },
     )
-    if (refused !== undefined) throw new WsHandshakeError(refused)
+    if (refused !== undefined) {
+      // like fetch(): the handshake was given up by its caller
+      if (options.signal?.aborted === true) throw options.signal.reason
+      throw new WsHandshakeError(refused)
+    }
     return new WsClient(peer)
   }
 
@@ -560,8 +565,10 @@ export class WebSocketPlugin implements Plugin, PluginHttpUpgrades {
       drain: () => events.drain(),
       close: (code, reason) => run(() => events.close(code, reason)),
     }
-    // after every await: a handshake answered 408, or refused by a drain, is not completed
+    // after every await: a handshake answered 408, given up by its client, or refused by a drain,
+    // is not completed
     if (upgrade.expired) throw new HttpException(408, 'WebSocket handshake timed out')
+    if (upgrade.disconnected) throw new HttpException(400, 'The WebSocket handshake was aborted')
     if (this.#draining) throw unavailable('The server is shutting down')
     const socket = await transport.accept(
       upgrade.native,

@@ -5,6 +5,7 @@ import type {
   InjectRequest,
   InjectResponse,
   InjectStreamOptions,
+  InjectStreamRequest,
   InjectStreamResponse,
 } from './adapter.ts'
 import type { HttpContext } from './context.ts'
@@ -70,7 +71,7 @@ import { parseByteSize } from './size.ts'
 import { MAX_SSE_TIMER_MS, MIN_SSE_INTERVAL_MS } from './sse.ts'
 import { isValidStatus } from './status.ts'
 import { HttpTokens } from './tokens.ts'
-import { checkHandshake, collectPluginUpgrades } from './upgrade.ts'
+import { checkHandshake, collectPluginUpgrades, handshakeAborted } from './upgrade.ts'
 import { bodyPlan, DEFAULT_UPLOAD_LIMITS, type ResolvedUploadLimits, type UploadLimits } from './uploads.ts'
 
 /** How requests whose path ends with an extra `/` are handled. */
@@ -466,9 +467,11 @@ export class HttpPlugin implements Plugin {
    * Runs a WebSocket handshake in memory (RFC 0003, `WebSocketPlugin.connect()`): the same pipeline
    * as an upgrade request of the adapter (guards, hooks, the route's checks), without socket. The
    * transport receives `{ kind: 'memory', peer }`. Resolves with the refusal, or `undefined` once
-   * the connection was accepted. Available after `onBootstrap`.
+   * the connection was accepted. Aborting `request.signal` before then disconnects the client:
+   * `ctx.signal` aborts (`kind: 'client'`) and the handshake is refused (`400`) instead of
+   * completed; once accepted, the signal is ignored. Available after `onBootstrap`.
    */
-  async upgradeInMemory(request: InjectRequest, native: MemoryUpgrade): Promise<InjectResponse | undefined> {
+  async upgradeInMemory(request: InjectStreamRequest, native: MemoryUpgrade): Promise<InjectResponse | undefined> {
     const runtime = this.#require('upgradeInMemory()')
     const normalized = await normalizeInject(withSignedCookies(request, runtime.options.cookies, 'upgradeInMemory()'))
     const headers = normalized.headers
@@ -478,7 +481,7 @@ export class HttpPlugin implements Plugin {
     headers['sec-websocket-key'] ??= btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))))
     headers['host'] ??= 'localhost'
     const reply = await runtime.pipeline.upgrade(
-      new MemoryUpgradeRequest(normalized.method, normalized.url, headers),
+      new MemoryUpgradeRequest(normalized.method, normalized.url, headers, request.signal),
       native,
     )
     if (reply === undefined) return undefined
@@ -1206,8 +1209,9 @@ function buildRegistrations(
       invoke: async (_plugin: unknown, http: HttpContext): Promise<undefined> => {
         const upgrade = pendingUpgradeOf(http)
         if (upgrade === undefined) throw new Error(`The upgrade route ${where} only serves upgrade requests`)
-        // answered 408 already: the late handshake is not completed
+        // answered 408 already, or the client left: the late handshake is not completed
         if (upgrade.expired) throw handshakeExpired()
+        if (upgrade.disconnected) throw handshakeAborted()
         await accept(http, upgrade)
         if (!upgrade.accepted) throw new Error(`accept() of the upgrade route ${where} did not take the connection`)
         return undefined

@@ -18,6 +18,12 @@ export interface WsConnectOptions {
   readonly origin?: string
   /** Cookies of the handshake. */
   readonly cookies?: Readonly<Record<string, string>>
+  /**
+   * Aborting it before the connection opens disconnects the client: `ctx.signal` of the handshake
+   * aborts (`kind: 'client'`), the handshake is not completed and `connect()` rejects with the
+   * signal's reason. Ignored once the connection is open (close the client instead).
+   */
+  readonly signal?: AbortSignal
 }
 
 /** Options of the waiting methods of {@link WsClient}. */
