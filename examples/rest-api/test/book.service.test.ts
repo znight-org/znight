@@ -6,7 +6,7 @@ import { TestBed } from '@znight/testing'
 
 import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
 import { BookAdded } from '../src/books/book.events.js'
-import { BookNotFoundError, CoverNotFoundError, UnsupportedCoverError } from '../src/books/book.js'
+import { BookNotFoundError, CoverChangedError, CoverNotFoundError, UnsupportedCoverError } from '../src/books/book.js'
 import { BookService } from '../src/books/book.service.js'
 import { aBook, PNG_BYTES, pngFile } from './support/fixtures.js'
 import { describe, expect, test as it } from 'bun:test'
@@ -105,11 +105,21 @@ describe('BookService', () => {
     it('reports a missing cover', async () => {
       const { service, repository } = await setup()
       repository.findCoverInfo.mockResolvedValue(undefined)
-      repository.findCoverData.mockResolvedValue(undefined)
 
       await expect(service.getCoverInfo(1)).rejects.toBeInstanceOf(CoverNotFoundError)
-      // deleted between the metadata and the bytes
-      await expect(service.getCoverData(1)).rejects.toBeInstanceOf(CoverNotFoundError)
+    })
+
+    it('reads the bytes of the cover version its metadata described', async () => {
+      const { service, repository } = await setup()
+      const info = { contentType: 'image/png', size: PNG_BYTES.byteLength, updatedAt: new Date('2024-05-06T07:08:09Z') }
+      repository.findCoverData.mockResolvedValue(PNG_BYTES)
+
+      expect(await service.getCoverData(1, info)).toEqual(PNG_BYTES)
+      expect(repository.findCoverData).toHaveBeenCalledWith(1, info.updatedAt)
+
+      // replaced or deleted between the metadata and the bytes
+      repository.findCoverData.mockResolvedValue(undefined)
+      await expect(service.getCoverData(1, info)).rejects.toBeInstanceOf(CoverChangedError)
     })
   })
 })

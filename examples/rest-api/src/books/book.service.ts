@@ -10,6 +10,7 @@ import {
   type BookChanges,
   BookNotFoundError,
   type BookQuery,
+  CoverChangedError,
   type CoverInfo,
   CoverNotFoundError,
   type NewBook,
@@ -88,11 +89,14 @@ export class BookService {
     return cover
   }
 
-  /** The bytes of a cover. */
-  async getCoverData(id: number): Promise<Uint8Array> {
-    const data = await this.books.findCoverData(id)
-    // deleted since its metadata was read
-    if (data === undefined) throw new CoverNotFoundError(id)
+  /**
+   * The bytes of the cover version that `info` describes. The cover may have been replaced since
+   * `info` was read: its bytes would not match the size, type and validators already chosen (and a
+   * resumed download would mix two images), so that is an error the client retries.
+   */
+  async getCoverData(id: number, info: CoverInfo): Promise<Uint8Array> {
+    const data = await this.books.findCoverData(id, info.updatedAt)
+    if (data === undefined) throw new CoverChangedError(id)
     return data
   }
 }

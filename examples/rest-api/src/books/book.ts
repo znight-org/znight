@@ -95,6 +95,20 @@ export class UnsupportedCoverError extends Error {
   }
 }
 
+/**
+ * Thrown when a cover was replaced or deleted between the read of its metadata and the read of its
+ * bytes: mapped to `503 Service Unavailable` with `Retry-After`, a retry sees the new version.
+ */
+export class CoverChangedError extends Error {
+  readonly bookId: number
+
+  constructor(bookId: number) {
+    super(`The cover of book ${bookId} changed while it was being sent`)
+    this.name = 'CoverChangedError'
+    this.bookId = bookId
+  }
+}
+
 /** Thrown when a book has no cover: mapped to `404 Not Found`. */
 export class CoverNotFoundError extends Error {
   readonly bookId: number

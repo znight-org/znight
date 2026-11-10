@@ -21,6 +21,9 @@ export interface BookRepository {
   saveCover(id: number, cover: Omit<Cover, 'updatedAt'>): Promise<boolean>
   /** The type, size and date of the cover, without its bytes. */
   findCoverInfo(id: number): Promise<CoverInfo | undefined>
-  /** The bytes of the cover. */
-  findCoverData(id: number): Promise<Uint8Array | undefined>
+  /**
+   * The bytes of the cover if it is still the version of `updatedAt` (the one its metadata
+   * described), `undefined` when it was replaced or deleted since.
+   */
+  findCoverData(id: number, updatedAt: Date): Promise<Uint8Array | undefined>
 }

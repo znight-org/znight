@@ -135,10 +135,14 @@ export class DrizzleBookRepository implements BookRepository {
     return cover
   }
 
-  async findCoverData(id: number): Promise<Uint8Array | undefined> {
+  async findCoverData(id: number, updatedAt: Date): Promise<Uint8Array | undefined> {
     if (!isBookId(id)) return undefined
-    const [cover] = await this.db.select({ data: bookCovers.data }).from(bookCovers).where(eq(bookCovers.bookId, id))
-    return cover?.data
+    // compared in JavaScript: PostgreSQL keeps microseconds, the Date of findCoverInfo() milliseconds
+    const [cover] = await this.db
+      .select({ data: bookCovers.data, updatedAt: bookCovers.updatedAt })
+      .from(bookCovers)
+      .where(eq(bookCovers.bookId, id))
+    return cover?.updatedAt.getTime() === updatedAt.getTime() ? cover.data : undefined
   }
 }
 

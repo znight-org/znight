@@ -265,6 +265,55 @@ describe('Books API', () => {
       }
     })
 
+    it('never sends the bytes of a cover replaced after its metadata was read', async () => {
+      const book = await createBook()
+      const form = new FormData()
+      form.append('cover', pngFile())
+      await app.inject({ method: 'PUT', url: `/books/${book.id}/cover`, headers: admin, body: form })
+      const url = `/books/${book.id}/cover`
+      const etag = String((await app.inject({ url })).headers.etag)
+      const repository = app.app.container.get(DrizzleBookRepository)
+      const findCoverInfo = repository.findCoverInfo.bind(repository)
+      /** Replaces the cover right after the next read of its metadata, before load() reads the bytes. */
+      const replaceAfterInfo = (data: Uint8Array) =>
+        spyOn(repository, 'findCoverInfo').mockImplementationOnce(async id => {
+          const info = await findCoverInfo(id)
+          await Bun.sleep(2) // a later millisecond: another version
+          await repository.saveCover(id, { contentType: 'image/jpeg', data })
+          return info
+        })
+
+      // same size, resumed download of the old version: no 206 stitching the new bytes onto the old ones
+      const sameSize = PNG_BYTES.map(byte => byte ^ 0xff)
+      const resumed = replaceAfterInfo(sameSize)
+      try {
+        const response = await app.inject({ url, headers: { range: 'bytes=4-', 'if-range': etag } })
+        expect(response.status).toBe(503)
+        expect(response.headers['retry-after']).toBe('1')
+        expect(response.json()).toMatchObject({
+          message: `The cover of book ${book.id} changed while it was being sent`,
+        })
+      } finally {
+        resumed.mockRestore()
+      }
+      // the retry sees the new version, under new validators
+      const retried = await app.inject({ url, headers: { range: 'bytes=4-', 'if-range': etag } })
+      expect(retried.status).toBe(200)
+      expect(retried.headers['content-type']).toBe('image/jpeg')
+      expect(retried.headers.etag).not.toBe(etag)
+      expect(retried.bytes).toEqual(sameSize)
+
+      // another size: a retryable 503 as well, not a 500
+      const larger = new Uint8Array([...PNG_BYTES, 1, 2, 3])
+      const replaced = replaceAfterInfo(larger)
+      try {
+        expect((await app.inject({ url })).status).toBe(503)
+      } finally {
+        replaced.mockRestore()
+      }
+      expect((await app.inject({ url })).bytes).toEqual(larger)
+    })
+
     it('enforces the upload limits', async () => {
       const book = await createBook()
 
