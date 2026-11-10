@@ -585,6 +585,37 @@ describe('lazy files', () => {
     expect(stale.status).toBe(200)
   })
 
+  it('matches entity tags containing commas in If-None-Match / If-Match lists', async () => {
+    const comma = { etag: '"3,7"' }
+    for (const header of ['"3,7"', '"other", "3,7"', '"3,7" , W/"x"', 'W/"3,7"']) {
+      const { body, calls } = lazy(undefined, comma)
+      expect((await resolveFile(body, get({ 'if-none-match': header }))).status).toBe(304)
+      expect(calls.loads).toBe(0)
+    }
+    for (const header of ['"3"', '"7"', '"3", "7"']) {
+      expect((await resolveFile(lazy(undefined, comma).body, get({ 'if-none-match': header }))).status).toBe(200)
+    }
+    const matched = lazy(undefined, comma)
+    const resolved = await resolveFile(matched.body, get({ 'if-match': '"a", "3,7"' }))
+    expect(resolved.status).toBe(200)
+    expect(await text(resolved)).toBe(CONTENT)
+    expect(matched.calls.loads).toBe(1)
+    const error = await caught(() => resolveFile(lazy(undefined, comma).body, get({ 'if-match': '"3", "7"' })))
+    expect((error as HttpException).status).toBe(412)
+    const ranged = await resolveFile(lazy(undefined, comma).body, get({ range: 'bytes=0-1', 'if-range': '"3,7"' }))
+    expect(ranged.status).toBe(206)
+  })
+
+  it('loads the content for a body sent to a method other than GET and HEAD (whole content, no range)', async () => {
+    for (const method of ['POST', 'PUT', 'DELETE']) {
+      const { body, calls } = lazy()
+      const resolved = await resolveFile(body, { method, headers: { range: 'bytes=0-1' } })
+      expect(resolved.status).toBe(200)
+      expect(await text(resolved)).toBe(CONTENT)
+      expect(calls.loads).toBe(1)
+    }
+  })
+
   it('derives the validators from the size and date when no entity tag is given', async () => {
     const dated = await resolveFile(lazy(undefined, { etag: undefined }).body, get())
     expect(dated.headers['etag']).toBe(`"${MODIFIED.toString(16)}-12c"`)

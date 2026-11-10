@@ -804,7 +804,7 @@ export class CoverController {
         size: cover.size,
         lastModified: cover.updatedAt,
         type: cover.contentType,
-        load: () => this.covers.bytes(id), // only for a 200 or a 206
+        load: () => this.covers.bytes(id, cover.updatedAt), // only for a 200 or a 206
       },
       { disposition: 'inline' },
     )
@@ -834,6 +834,11 @@ export class CoverController {
   logged).
 - A weak `etag` satisfies `If-None-Match` (weak comparison) but never `If-Match` nor `If-Range`
   (strong comparison).
+- `load()` runs after the metadata was read, so the content may have changed in between. Load the
+  version that the metadata describes (the same `updatedAt`, version or etag) and throw when it is
+  gone, rather than sending other bytes under the old validators: a resumed download (`Range` +
+  `If-Range`) would otherwise mix two versions. `examples/rest-api` answers `503` with
+  `Retry-After` in that case.
 - A stream is sent with the declared `Content-Length`, except by `Bun.serve()` (Hono on Bun), which
   sends streams chunked (see the Hono adapter); bytes and `Blob`s keep it everywhere.
 

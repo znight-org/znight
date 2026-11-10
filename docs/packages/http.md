@@ -273,14 +273,15 @@ async cover(@Param('id') id: number) {
     size: cover.size,
     lastModified: cover.updatedAt, // or etag: '"v42"'
     type: cover.contentType,
-    load: () => this.covers.bytes(id), // Uint8Array, Blob or stream: the whole content
+    load: () => this.covers.bytes(id, cover.updatedAt), // Uint8Array, Blob or stream: the whole content
   })
 }
 ```
 
 An error of `load()` goes through the exception mappers like an error of the handler; a stream it
 returns is read as the client receives it and cancelled when the client disconnects. The content
-must have the declared `size`. See the
+must have the declared `size`, and `load()` should read the version the metadata describes (it runs
+later, after a concurrent update the bytes may belong to another version). See the
 [package README](../../packages/http/README.md#lazy-files) for the details.
 
 ### Streaming responses

@@ -475,9 +475,7 @@ function evaluatePreconditions(
 function matchesEntityTag(header: string, etag: string | undefined, strong: boolean): boolean {
   if (header.trim() === '*') return true
   if (etag === undefined) return false
-  for (const raw of header.split(',')) {
-    const candidate = raw.trim()
-    if (candidate === '') continue
+  for (const candidate of entityTagList(header)) {
     if (strong) {
       if (candidate === etag && !isWeak(etag)) return true
     } else if (stripWeak(candidate) === stripWeak(etag)) {
@@ -485,6 +483,26 @@ function matchesEntityTag(header: string, etag: string | undefined, strong: bool
     }
   }
   return false
+}
+
+/**
+ * The members of an entity tag list, split on the commas outside quotes: `"3,7"` is one tag (a comma
+ * is a valid `etagc`, RFC 9110 §8.8.3).
+ */
+function entityTagList(header: string): string[] {
+  const tags: string[] = []
+  let start = 0
+  let quoted = false
+  for (let index = 0; index < header.length; index++) {
+    const char = header[index]
+    if (char === '"') quoted = !quoted
+    else if (char === ',' && !quoted) {
+      tags.push(header.slice(start, index).trim())
+      start = index + 1
+    }
+  }
+  tags.push(header.slice(start).trim())
+  return tags.filter(tag => tag !== '')
 }
 
 function isWeak(tag: string): boolean {

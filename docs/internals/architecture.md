@@ -1965,8 +1965,9 @@ not call `next()` gets the same reply as in the general pipeline.
   `ETag`; conditional requests 304/412; a single `bytes` range 206/416, other ranges → 200; RFC 6266
   `Content-Disposition`). `HttpResponse.file()` also accepts a lazy file `{ size, etag?,
   lastModified?, type?, name?, load() }`: the preconditions and the range MUST be evaluated from
-  that metadata, and `load()` MUST be called at most once, only when a body is sent (200 / 206 to a
-  `GET`), never for a 304, a 412, a 416, a `HEAD` request or an empty file. `load()` returns the
+  that metadata, and `load()` MUST be called at most once, only when a body is sent (a 200 or a 206
+  to a request other than `HEAD`; a range is honoured for `GET` only), never for a 304, a 412, a 416,
+  a `HEAD` request or an empty file. `load()` returns the
   whole content (bytes, `Blob` or stream source); the pipeline cuts the range out of it, a content
   of another size than `size` fails (500 for bytes and blobs, an interrupted body for streams), a
   `load()` error goes through the exception mappers like a handler error, and a stream is read
