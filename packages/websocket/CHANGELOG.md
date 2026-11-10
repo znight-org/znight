@@ -1,5 +1,17 @@
 # @znight/websocket
 
+## 0.7.3
+
+### Patch Changes
+
+- bb1c8f1: Report unexpected failures of handlers, `@OnConnect` and `@OnDisconnect` on the `error:report` hook (the original error of a mapped failure); a `WsException` with code `INTERNAL`, thrown or returned by a mapper, is now logged and reported as an unexpected failure.
+- Updated dependencies [bb1c8f1]
+- Updated dependencies [0804801]
+- Updated dependencies [bb1c8f1]
+  - @znight/core@0.7.3
+  - @znight/http@0.7.3
+  - @znight/compiler@0.7.3
+
 ## 0.7.2
 
 ### Patch Changes
