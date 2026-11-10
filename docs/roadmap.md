@@ -1,5 +1,5 @@
 ---
-description: What each Znight release brought (0.1 to 0.6, from the first packages to GraphQL, custom parameter decorators, application events and WebSocket gateways), what is planned without a date (a cache package, the Apollo Server driver), what is being considered, and what is deliberately not planned.
+description: What each Znight release brought (0.1 to 0.6, from the first packages to GraphQL, custom parameter decorators, application events and WebSocket gateways), what is planned without a date (a cache package, the Apollo Server driver, new messaging drivers), what is being considered, and what is deliberately not planned.
 ---
 
 # Roadmap
@@ -24,6 +24,7 @@ and the release that brought it. Until 1.0, minor versions may change APIs; each
 | [0010](https://github.com/znight-org/znight/blob/main/rfcs/0010-custom-parameter-decorators.md) | Custom parameter decorators               | Implemented (0.4.0)                   |
 | [0011](https://github.com/znight-org/znight/blob/main/rfcs/0011-application-events.md)          | Application events (`@znight/events`)     | Implemented (0.5.0)                   |
 | [0012](https://github.com/znight-org/znight/blob/main/rfcs/0012-messaging-pubsub.md)            | Pub/Sub driver (`@znight/messaging`)      | Accepted (implemented, unreleased)    |
+| [0014](https://github.com/znight-org/znight/blob/main/rfcs/0014-messaging-drivers.md)           | Messaging drivers (`@znight/messaging`)   | Accepted (M1 implemented, unreleased) |
 
 ## Released {#released}
 
@@ -144,6 +145,15 @@ mechanism. Its design has not been written yet. Until it lands, the
 Milestone 3 of [RFC 0009](https://github.com/znight-org/znight/blob/main/rfcs/0009-graphql-drivers.md):
 `@znight/graphql/apollo`, serving the engine with Apollo Server, once Apollo Server accepts
 graphql-js 17. The engine and the GraphQL Yoga driver are in place.
+
+### Messaging drivers
+
+Milestone 2 of [RFC 0014](https://github.com/znight-org/znight/blob/main/rfcs/0014-messaging-drivers.md):
+first-party drivers for Redis Streams (`@znight/messaging/redis`), NATS JetStream
+(`@znight/messaging/nats`) and Azure Service Bus (`@znight/messaging/azure-service-bus`), each
+checked by the conformance kit. The public driver contract and the kit
+(`@znight/messaging/testing`) are in place; OCI Streaming and Azure Event Hubs already work through
+the Kafka driver, and OCI Queue is left to a third-party driver.
 
 ## Considered, not scheduled {#considered}
 

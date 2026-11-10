@@ -8,6 +8,7 @@ export default defineConfig({
     sqs: 'src/drivers/sqs.ts',
     kafka: 'src/drivers/kafka.ts',
     pubsub: 'src/drivers/pubsub.ts',
+    testing: 'src/testing.ts',
     compiler: 'src/compiler/index.ts',
   },
   format: 'esm',

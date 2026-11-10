@@ -5,11 +5,14 @@ import { connect } from 'amqplib'
 
 import { RabbitMQDriver, rabbitmq } from '../../src/drivers/rabbitmq.ts'
 import { MessageBroker, NonRetryableError } from '../../src/index.ts'
+import { describeDriverConformance } from '../../src/testing.ts'
 import { handler, memoryLogger, sleep } from '../helpers.ts'
-import { driverConformance, integration, startApp, waitFor } from './conformance.ts'
-import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
+import { integration, startApp, stopApps, waitFor } from './support.ts'
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test'
 
 describe.skipIf(!integration)('RabbitMQ (testcontainers)', () => {
+  afterEach(stopApps)
+
   let container: StartedRabbitMQContainer
   let url: string
 
@@ -22,15 +25,13 @@ describe.skipIf(!integration)('RabbitMQ (testcontainers)', () => {
     await container?.stop()
   })
 
-  driverConformance(
-    'rabbitmq',
-    () => ({
-      createDriver: overrides => rabbitmq({ url, reconnect: { initialDelayMs: 100, maxDelayMs: 1000 }, ...overrides }),
-      prepareQueue: async () => {},
-      nativeDelayMs: 1000,
-    }),
-    { delayedPublish: true },
-  )
+  describeDriverConformance({
+    name: 'rabbitmq',
+    driver: overrides => rabbitmq({ url, reconnect: { initialDelayMs: 100, maxDelayMs: 1000 }, ...overrides }),
+    test: { describe, it },
+    nativeDelayMs: 1000,
+    timeoutMs: 120_000,
+  })
 
   it('counts redeliveries of quorum queues (x-delivery-count)', async () => {
     const attempts: number[] = []

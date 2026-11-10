@@ -61,6 +61,11 @@
       "types": "./dist/pubsub.d.mts",
       "default": "./dist/pubsub.mjs"
     },
+    "./testing": {
+      "@znight/source": "./src/testing.ts",
+      "types": "./dist/testing.d.mts",
+      "default": "./dist/testing.mjs"
+    },
     "./compiler": {
       "@znight/source": "./src/compiler/index.ts",
       "types": "./dist/compiler.d.mts",

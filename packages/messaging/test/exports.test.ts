@@ -31,6 +31,7 @@ describe('public entries', () => {
         'bodyToBytes',
         'bodyToText',
         'computeRetryDelay',
+        'deadLetterHeaders',
         'isNonRetryable',
         'isStandardSchema',
         'jsonCodec',
@@ -55,6 +56,8 @@ describe('public entries', () => {
     const pubsub = await import('@znight/messaging/pubsub')
     expect(typeof pubsub.pubsub).toBe('function')
     expect(typeof pubsub.PubSubDriver).toBe('function')
+    const testing = await import('@znight/messaging/testing')
+    expect(Object.keys(testing)).toEqual(['describeDriverConformance'])
     const root = await import('@znight/messaging')
     expect(root.MessagingPlugin).toBe(entry.MessagingPlugin)
   })

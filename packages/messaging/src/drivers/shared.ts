@@ -1,4 +1,4 @@
-/** Helpers shared by the drivers (internal). */
+/** Helpers shared by the drivers (internal, except `deadLetterHeaders`, exported from the root). */
 import type { DeadLetterRequest } from '../driver.ts'
 
 import { headerRecord, MessagingHeaders } from '../headers.ts'
@@ -10,6 +10,7 @@ export const MAX_ERROR_HEADER_LENGTH = 1024
 /**
  * Headers of a dead-lettered copy: the original headers without the attempt counter (so that a
  * redrive starts over) plus the reason, the error, the original queue and the attempts made.
+ * Exported from `@znight/messaging` for third-party drivers (RFC 0014).
  */
 export function deadLetterHeaders(
   headers: Readonly<Record<string, string>>,

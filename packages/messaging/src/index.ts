@@ -45,6 +45,7 @@ export {
   OnMessage,
   Retry,
 } from './decorators.ts'
+export { deadLetterHeaders } from './drivers/shared.ts'
 export {
   AttemptsExhaustedError,
   isNonRetryable,

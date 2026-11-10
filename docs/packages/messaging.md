@@ -135,7 +135,9 @@ Pub/Sub ordering key, `delay` is not supported by Kafka nor Pub/Sub.
 A driver implements
 `MessagingDriver { name, capabilities, connect(), subscribe(), publish(), close(), deadLetterName() }`;
 `capabilities` (`nativeDelay`, `maxNativeDelayMs`, `maxInProcessDelayMs`, `deliveryCount`,
-`maxPublishDelayMs`) let the plugin validate retry policies at boot.
+`maxPublishDelayMs`) let the plugin validate retry policies at boot. OCI Streaming and Azure Event Hubs work
+through the Kafka driver ([below](#oracle-cloud-infrastructure-streaming)); for another broker,
+[write your own driver](#writing-your-own-driver).
 
 `MessagingPlugin.configure({ driver, defaults?, codec?, consume? })`: `defaults.retry` (3 attempts,
 exponential from 1 s, capped at 30 s; `false` = a single attempt), `defaults.concurrency` (1),
@@ -176,6 +178,295 @@ MessagingPlugin.configure({
   defaults: { retry: { attempts: 5, backoff: 'fixed', delay: 0 } }, // the subscription's maxDeliveryAttempts
 })
 ```
+
+### Oracle Cloud Infrastructure Streaming
+
+OCI Streaming exposes a Kafka-compatible endpoint, so the Kafka driver works with it: point
+`bootstrapBrokers` at the stream pool and authenticate with SASL `PLAIN` over TLS, the user being
+`<tenancy>/<user>/<stream pool OCID>` and the password an auth token.
+
+```ts
+import { kafka } from '@znight/messaging/kafka'
+
+kafka({
+  bootstrapBrokers: ['cell-1.streaming.eu-frankfurt-1.oci.oraclecloud.com:9092'],
+  connection: {
+    tls: {}, // TLS with the default certificate authorities
+    sasl: { mechanism: 'PLAIN', username: process.env['OCI_STREAM_USER'], password: process.env['OCI_AUTH_TOKEN'] },
+  },
+})
+```
+
+The topics the driver uses are streams of that pool: the consumed topics, the retry topic of each
+consumer group (`<group>.retry`) and the dead-letter topics (`<topic>.dlq`). Create them beforehand,
+or let `createTopics` create them where the pool allows it. Azure Event Hubs, Kafka-compatible too,
+works the same way. OCI Queue has no first-party driver ([RFC 0014](../../rfcs/0014-messaging-drivers.md)):
+a third-party driver can cover it.
+
+### Writing your own driver
+
+A driver is an object implementing `MessagingDriver`; its types are exported from
+`@znight/messaging` and the contract is public ([RFC 0014](../../rfcs/0014-messaging-drivers.md),
+[specification §9.2](/contributing/architecture)). Drivers are runtime-only: no compiler extension, no manifest, just a package
+exporting a factory that applications pass to `MessagingPlugin.configure({ driver })`.
+
+| Member                            | What it does                                                                                                                                                   |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`                            | Short name (`acme`), exposed as `InboundMessage.driver`.                                                                                                       |
+| `capabilities`                    | `nativeDelay`, `maxNativeDelayMs`, `maxInProcessDelayMs`, `deliveryCount` (`'native'` or `'header'`), `maxPublishDelayMs` (`0`: no delayed publishing).        |
+| `connect({ logger })`             | Opens the connection, in `onBootstrap`. The logger is for background failures (lost connection, polling errors).                                               |
+| `subscribe(queue, handler, opts)` | Verifies the queue and its dead-letter destination, then calls `handler(delivery)` for each message, with at most `opts.concurrency` pending handler promises. |
+| `publish(queue, message)`         | Resolves once the broker **confirmed** the message; `message.delayMs > 0` asks for a delayed delivery.                                                         |
+| `deadLetterName(queue)`           | Default dead-letter destination (`orders.dlq`, `orders-dlq`...).                                                                                               |
+| `close()`                         | Closes the subscriptions and the connection, in `onDispose`. Idempotent.                                                                                       |
+
+**Lifecycle.** `connect` runs once in `onBootstrap`, after the plugin validated every `@Retry` policy
+against `capabilities` (ZNIGHT011 otherwise: the runtime never asks for more than the driver
+declares). `onStart` subscribes each consumer, with `SubscribeOptions` (`consumer`, `concurrency`,
+`deadLetterQueue`, `maxAttempts`, `retryDelays`, and the driver options of `@Consumer({ queue,
+...options })`). On stop, the runtime calls `subscription.cancel()` (stop receiving), releases the
+deliveries waiting for an in-process retry, waits for the handlers in flight, then calls
+`subscription.close()`; `close()` comes last, in `onDispose`.
+
+**Settlement.** Each `DriverDelivery` (`id`, `body`, `contentType`, `headers`, `type`, `key`,
+`attempt`, `redelivered`, `timestamp`, `raw`) gets exactly one settlement, possibly followed by
+`release()` when it failed, and each one resolves once the broker acknowledged it:
+
+- `ack()`: the message was handled.
+- `retry({ attempt, delayMs })`: redeliver it as attempt `attempt` after `delayMs`. The copy (or the
+  native redelivery) must be durable before the original is settled: at-least-once, never
+  at-most-once. Waits up to `maxInProcessDelayMs` happen in the runtime, which then asks for
+  `delayMs: 0`.
+- `deadLetter({ queue, reason, error, attempt })`: publish the copy to `queue` with
+  `deadLetterHeaders(headers, request, originalQueue)` (the original headers minus
+  `x-znight-attempt`, plus the reason, the error, the original queue and the attempts), then settle
+  the original. `queue` is `undefined` when dead-lettering is disabled: reject the message natively
+  (so that a broker dead-letter policy applies) or discard it. A subscription whose broker
+  dead-letters by its own policy reports `nativeDeadLetter: true`.
+- `release()`: give the message back for a later redelivery without settling it. Never lose it.
+
+**Attempts.** `attempt` is 1-based: the broker's delivery count (`deliveryCount: 'native'`), or the
+`x-znight-attempt` header of the copies `retry` publishes (`deliveryCount: 'header'`, read it with
+`attemptFromHeaders()`), or both combined.
+
+**Headers and trace context.** Carry every header verbatim, both ways, as strings: Znight's
+(`x-znight-*`), the application's, and the trace context `@znight/observability` writes in the
+`messaging:publish` hook (`traceparent`, `tracestate`, whatever the configured propagator writes), which it reads back on delivery.
+A broker that renames headers maps them back. `id`, `type`, `key`, `contentType` and `timestamp`
+survive the round trip, in message properties or in `x-znight-*` headers (`MessagingHeaders`).
+
+**Shutdown.** `cancel()` stops receiving. `close()` waits for the deliveries in flight to settle and
+gives back what was received but not handed to the runtime.
+
+A minimal driver over an in-process broker (a real driver holds a client instead), run by the
+conformance kit in this package's tests:
+
+<!-- sample: packages/messaging/test/testing/local-driver.ts -->
+
+```ts
+/** A minimal messaging driver over an in-process broker, conformant (`describeDriverConformance()`). */
+import type {
+  DeadLetterRequest,
+  DeliveryHandler,
+  DriverCapabilities,
+  DriverContext,
+  DriverDelivery,
+  MessagingDriver,
+  OutboundMessage,
+  RetryRequest,
+  SubscribeOptions,
+  Subscription,
+} from '@znight/messaging'
+
+import { attemptFromHeaders, deadLetterHeaders, MessagingHeaders } from '@znight/messaging'
+
+/** The "broker": queues shared by every driver created on it (a real driver holds a client instead). */
+export class LocalBroker {
+  readonly #queues = new Map<string, OutboundMessage[]>()
+
+  /** The messages of a queue, oldest first. */
+  queue(name: string): OutboundMessage[] {
+    const messages = this.#queues.get(name) ?? []
+    this.#queues.set(name, messages)
+    return messages
+  }
+
+  /** Stores a message, now or after `delayMs` (the broker's delayed delivery). */
+  enqueue(name: string, message: OutboundMessage, delayMs: number): Promise<void> {
+    if (delayMs <= 0) this.queue(name).push(message)
+    else setTimeout(() => this.queue(name).push(message), delayMs)
+    return Promise.resolve() // a real broker confirms the write
+  }
+}
+
+export interface LocalDriverOptions {
+  /** Longest retry delay the runtime waits in-process. Default: 1000 ms. */
+  readonly maxInProcessDelayMs?: number
+}
+
+export function localDriver(broker: LocalBroker, options: LocalDriverOptions = {}): MessagingDriver {
+  return new LocalDriver(broker, options)
+}
+
+const MAX_DELAY_MS = 2 ** 31 - 1
+
+class LocalDriver implements MessagingDriver {
+  readonly name = 'local'
+  readonly capabilities: DriverCapabilities
+  readonly #broker: LocalBroker
+  readonly #subscriptions = new Set<LocalSubscription>()
+  #context: DriverContext | undefined
+
+  constructor(broker: LocalBroker, options: LocalDriverOptions) {
+    this.#broker = broker
+    this.capabilities = {
+      nativeDelay: true, // retries are enqueued again after their delay
+      maxNativeDelayMs: MAX_DELAY_MS,
+      maxInProcessDelayMs: options.maxInProcessDelayMs ?? 1000,
+      deliveryCount: 'header', // attempts travel in the x-znight-attempt header of the copies
+      maxPublishDelayMs: MAX_DELAY_MS,
+    }
+  }
+
+  connect(context: DriverContext): Promise<void> {
+    this.#context = context // a real driver opens its connection here
+    return Promise.resolve()
+  }
+
+  deadLetterName(queue: string): string {
+    return `${queue}.dlq`
+  }
+
+  publish(queue: string, message: OutboundMessage): Promise<void> {
+    return this.#broker.enqueue(queue, message, message.delayMs)
+  }
+
+  subscribe(queue: string, handler: DeliveryHandler, options: SubscribeOptions): Promise<Subscription> {
+    // a real driver verifies here that `queue` and `options.deadLetterQueue` exist
+    const logger = this.#context?.logger
+    const subscription = new LocalSubscription(this.#broker, queue, options.concurrency, delivery =>
+      handler(delivery).catch((error: unknown) => logger?.error('[local] delivery failed', { error })),
+    )
+    this.#subscriptions.add(subscription)
+    return Promise.resolve(subscription)
+  }
+
+  async close(): Promise<void> {
+    for (const subscription of this.#subscriptions) await subscription.close()
+    this.#subscriptions.clear()
+  }
+}
+
+class LocalSubscription implements Subscription {
+  readonly #inflight = new Set<Promise<void>>()
+  readonly #timer: ReturnType<typeof setInterval>
+
+  constructor(broker: LocalBroker, queue: string, concurrency: number, handle: DeliveryHandler) {
+    this.#timer = setInterval(() => {
+      const messages = broker.queue(queue)
+      // back-pressure: never more than `concurrency` deliveries in flight
+      while (this.#inflight.size < concurrency && messages.length > 0) {
+        const delivery = toDelivery(broker, queue, messages.shift() as OutboundMessage)
+        const handled: Promise<void> = handle(delivery).finally(() => this.#inflight.delete(handled))
+        this.#inflight.add(handled)
+      }
+    }, 10)
+  }
+
+  cancel(): Promise<void> {
+    clearInterval(this.#timer) // stop receiving
+    return Promise.resolve()
+  }
+
+  async close(): Promise<void> {
+    clearInterval(this.#timer)
+    await Promise.all(this.#inflight) // the runtime settles what it received
+  }
+}
+
+function toDelivery(broker: LocalBroker, queue: string, message: OutboundMessage): DriverDelivery {
+  return {
+    id: message.id,
+    body: message.body,
+    contentType: message.contentType,
+    headers: message.headers,
+    type: message.type,
+    key: message.key,
+    attempt: attemptFromHeaders(message.headers),
+    redelivered: false,
+    timestamp: message.timestamp,
+    raw: message,
+    // a received message left the queue: nothing to acknowledge
+    ack: () => Promise.resolve(),
+    retry: ({ attempt, delayMs }: RetryRequest) => {
+      const headers = { ...message.headers, [MessagingHeaders.Attempt]: String(attempt) }
+      return broker.enqueue(queue, { ...message, headers }, delayMs)
+    },
+    deadLetter: (request: DeadLetterRequest) => {
+      // `request.queue` is undefined when dead-lettering is disabled: the message is dropped
+      if (request.queue === undefined) return Promise.resolve()
+      const headers = deadLetterHeaders(message.headers, request, queue)
+      return broker.enqueue(request.queue, { ...message, headers }, 0)
+    },
+    release: () => {
+      broker.queue(queue).unshift(message) // back at the head, for a later redelivery
+      return Promise.resolve()
+    },
+  }
+}
+```
+
+**Conformance kit.** `describeDriverConformance()` of `@znight/messaging/testing` registers the
+scenarios every first-party driver passes: publishing and consuming with type routing, headers and
+trace context; retries in-process then native; dead letters (last attempt, non-retryable error,
+validation) and their headers; concurrency; pending retries released on stop and redelivered after a
+restart; delayed publishing honoured, or refused when `maxPublishDelayMs` is `0`. It takes the
+`describe` and `it` of your test framework (`bun:test`, Vitest, Jest) and asserts with `node:assert`:
+
+```ts
+import { describeDriverConformance } from '@znight/messaging/testing'
+import { describe, it } from 'vitest'
+
+import { acme } from '../src/index.ts'
+
+describeDriverConformance({
+  name: 'acme',
+  // a driver per application; all of them reach the same broker
+  driver: overrides => acme({ url: process.env['ACME_URL'], ...overrides }),
+  test: { describe, it },
+  // for a driver that never creates resources
+  prepareQueue: async (queue, deadLetterQueue) => createQueues(queue, deadLetterQueue),
+  nativeDelayMs: 1000, // shortest native delay the broker honours precisely
+})
+```
+
+| Option                            | Default   | Description                                                                                   |
+| --------------------------------- | --------- | --------------------------------------------------------------------------------------------- |
+| `name`                            | —         | Name in the scenario names (`acme driver conformance`).                                       |
+| `driver(overrides)`               | —         | A driver for one application. Must honour `overrides.maxInProcessDelayMs` (see below).        |
+| `test`                            | —         | `{ describe, it }` of the test framework (`it(name, body, timeoutMs)`).                       |
+| `prepareQueue(queue, deadLetter)` | none      | Creates a queue and its dead-letter destination before a scenario uses them.                  |
+| `consumerOptions(queue)`          | none      | Driver options of `@Consumer` (a consumer group...).                                          |
+| `nativeDelayMs`                   | `1000`    | Shortest native retry delay the broker honours precisely (whole seconds for SQS and Pub/Sub). |
+| `timeoutMs`                       | `120_000` | Timeout of each scenario; its waits give up a quarter of it (at most 10 s) earlier.           |
+
+`overrides.maxInProcessDelayMs` is the in-process retry budget a scenario needs: the retry scenario
+sets it below its second retry delay to force a native retry, the restart scenario above its retry
+delay (1 s) so that a retry is pending in-process when the application stops and `release()` must
+give it back. A driver that keeps another budget fails these scenarios with an explanation. For an
+in-process broker held by the driver instance, return the same instance for the same overrides (it
+is connected again after `close()`).
+
+Run it against a real broker (Testcontainers, an emulator) in CI. Each scenario stops the
+applications it started, whatever its outcome; its waits give up before `timeoutMs`, so a failure
+names what it waited for instead of surfacing as a framework timeout.
+
+**Publishing.** Name the package `znight-messaging-<broker>` (or `@<scope>/znight-messaging-<broker>`)
+and export a factory (`acme(options)`) and the driver class. Declare `@znight/messaging` as a peer
+dependency on the minor you test against (for instance `^0.7.4`: before 1.0, a minor release may change the
+contract, and the changelog says so), and the broker client as a dependency, or as a peer dependency
+when applications configure it themselves. Ship ESM, run on Node.js 24+ and Bun 1.3+, and run the
+conformance kit in your CI.
 
 ## Concurrency
 

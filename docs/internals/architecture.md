@@ -2574,6 +2574,33 @@ interface MessagingDriver {
 //   queue: undefined, logs them as rejected and reports no dead-letter queue for the consumer)
 ```
 
+The contract is **public** (RFC 0014): third-party drivers implement it from the types exported by
+`@znight/messaging`, and MUST honour the same guarantees as the first-party ones. `publish` and every
+settlement resolve once the broker confirmed them; `retry` and `deadLetter` make the copy durable
+before settling the original (at-least-once); `release` never loses a message; a subscription never
+has more than `concurrency` pending handler promises; every header is carried verbatim both ways as
+strings (`x-znight-*`, application headers, the trace context `traceparent` / `tracestate`
+written in `messaging:publish`; a broker renaming headers maps them back); `id`, `type`,
+`key`, `contentType` and `timestamp` survive the round trip; dead-lettered copies carry
+`deadLetterHeaders(headers, request, originalQueue)` (exported from the root: the original headers
+without `x-znight-attempt`, plus the reason, the error, the original queue and the attempts).
+`connect` is called once in `onBootstrap` after the retry policies were validated against
+`capabilities`, `close` once in `onDispose` after every subscription was cancelled and closed.
+
+`@znight/messaging/testing` exports `describeDriverConformance({ name, driver(overrides), test: {
+describe, it }, prepareQueue?, consumerOptions?, nativeDelayMs?, timeoutMs? })`: the scenarios every
+first-party driver passes (publish and consume with type routing, headers and trace context; retries
+in-process then native; dead letters for the last attempt, a non-retryable error and a validation
+failure, with their headers; bounded concurrency; pending retries released on stop and redelivered
+after a restart; delayed publishing honoured, or refused when `maxPublishDelayMs` is `0`).
+Framework-neutral: the caller passes `describe` / `it` (`it(name, body, timeoutMs)`), assertions are
+`node:assert`'s, each scenario boots applications from hand-written metadata and stops them whatever
+its outcome, its waits ending ahead of `timeoutMs`. `driver(overrides)` is called for each
+application (all of them reach the same broker) and MUST honour `overrides.maxInProcessDelayMs`: the
+retry scenario lowers it to force a native retry, the restart scenario raises it to the retry delay
+so that `release()` runs on stop; a driver keeping another budget fails them. The memory driver runs
+it in the regular test run, the broker drivers under `ZNIGHT_INTEGRATION=1`.
+
 Drivers verify their topology (and native DLQ configuration) at subscribe time. **Impl.** driver
 specifics:
 
@@ -2586,6 +2613,11 @@ specifics:
 | `/pubsub` (@google-cloud/pubsub ^6) | `deliveryAttempt` (subscriptions with a dead-letter policy), else the retries it requested (in memory) | ack deadline (`ModifyAckDeadline`, ≤ 600 s)                                                      | 1 s (0 with `retries: 'subscription'`) | topic `<q>-dlq` or the dead-letter policy topic | `@Consumer` queue = subscription, published queue = topic (`topics` / `subscriptions` maps); unary Pull, at most `concurrency` messages leased, lease extension (stopped before each settlement); `retries: 'subscription'` nacks every failure (subscription retry and dead-letter policies own redelivery; a dead-letter policy is required); `maxDeliveryAttempts` ≥ attempts checked otherwise; ordering keys serialised; no delayed publish; topology verified (`provision` creates it) |
 
 More on the drivers:
+
+- **Kafka-compatible services.** OCI Streaming and Azure Event Hubs expose a Kafka endpoint: the
+  Kafka driver works with them (SASL over TLS in `connection`; the retry and dead-letter topics are
+  streams to create beforehand where the service cannot create topics). OCI Queue has no first-party
+  driver (RFC 0014).
 
 - **RabbitMQ delays.** Retries go through per-delay queues `<q>.delay.<ms>` (the delays come from
   the `@Retry` policies: a bounded set, declared at subscribe time). Delayed publications
