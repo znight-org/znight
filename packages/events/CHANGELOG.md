@@ -1,5 +1,14 @@
 # @znight/events
 
+## 0.7.3
+
+### Patch Changes
+
+- bb1c8f1: Report the errors of detached listeners and of `emit()` on the `error:report` hook.
+- Updated dependencies [bb1c8f1]
+  - @znight/core@0.7.3
+  - @znight/compiler@0.7.3
+
 ## 0.7.2
 
 ### Patch Changes

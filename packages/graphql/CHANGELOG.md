@@ -1,5 +1,18 @@
 # @znight/graphql
 
+## 0.7.3
+
+### Patch Changes
+
+- bb1c8f1: Report unexpected resolver errors (and the causes of shown `GraphQLException`s) on the `error:report` hook, with the operation context.
+- Updated dependencies [bb1c8f1]
+- Updated dependencies [0804801]
+- Updated dependencies [bb1c8f1]
+  - @znight/core@0.7.3
+  - @znight/http@0.7.3
+  - @znight/compiler@0.7.3
+  - @znight/testing@0.7.3
+
 ## 0.7.2
 
 ### Patch Changes

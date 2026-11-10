@@ -1,5 +1,12 @@
 # @znight/compiler
 
+## 0.7.3
+
+### Patch Changes
+
+- Updated dependencies [bb1c8f1]
+  - @znight/core@0.7.3
+
 ## 0.7.2
 
 ### Patch Changes

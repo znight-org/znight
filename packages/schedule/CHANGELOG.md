@@ -1,5 +1,14 @@
 # @znight/schedule
 
+## 0.7.3
+
+### Patch Changes
+
+- bb1c8f1: Report failed runs (and lock store failures) on the `error:report` hook, with the job context; a run honouring the abort of a shutdown or a removal is not reported.
+- Updated dependencies [bb1c8f1]
+  - @znight/core@0.7.3
+  - @znight/compiler@0.7.3
+
 ## 0.7.2
 
 ### Patch Changes

@@ -1,5 +1,15 @@
 # @znight/http
 
+## 0.7.3
+
+### Patch Changes
+
+- 0804801: `fastifyAdapter({ instance })` works with an instance that has its own not-found handler: unknown URLs reach that handler while Znight keeps its routes, `405`, automatic `OPTIONS` and CORS preflights (new `notFound: 'znight' | 'instance'` option).
+- bb1c8f1: Report the errors answered with a 5xx (and failed response and event streams) on the `error:report` hook, with the request context.
+- Updated dependencies [bb1c8f1]
+  - @znight/core@0.7.3
+  - @znight/compiler@0.7.3
+
 ## 0.7.2
 
 ### Patch Changes
