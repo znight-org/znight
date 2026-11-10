@@ -1090,7 +1090,9 @@ on other routes (`EventSource` requires 200; `fetch()` clients read any status).
 
 **`ctx.signal`** exists on every route, not only SSE: it aborts when the client disconnects before
 the response was written, when the response body is cancelled, or when the server closes an event
-stream; never after a normal completion (pass it to work that outlives the response). Its reason
+stream; never after a normal completion (pass it to work that outlives the response). On a
+WebSocket handshake it aborts when the client leaves before the connection was accepted, never when
+the accepted connection closes. Its reason
 is a `RequestAbortedError` (`name: 'AbortError'`, what `fetch` and `node:timers/promises` check)
 with `kind: 'client' | 'shutdown' | 'expired'` (`expired`: an event stream reached its `maxDuration`
 or a WebSocket handshake timed out, as its `message` says). Ordinary in-flight requests are not aborted on
@@ -1689,10 +1691,15 @@ optional `meta`, `guards`, `timeoutMs` and `precheck`, and an `accept(ctx, upgra
 the handshake on `upgrade.native` (a `node:http` socket, a `Bun.serve()` request or an in-memory
 peer) and calls `upgrade.hold(closed)`. Once `timeoutMs` answered `408`, `upgrade.expired` is
 `true`, `ctx.signal` aborts (`kind: 'expired'`, so guards waiting on it stop) and `accept` must not
-complete the handshake. The handshake runs the request pipeline (hook, request scope,
-global and route guards); a refusal is an HTTP response, and a plain `GET` of an upgrade path answers
-`426`. Every built-in adapter supports upgrades; `HttpPlugin.upgradeInMemory()` runs a handshake
-without socket. Applications without upgrade routes pay nothing.
+complete the handshake. When the client leaves first (its socket ends or closes, `Bun.serve()`
+aborts `request.signal`, or the `signal` given to `upgradeInMemory()` aborts), `ctx.signal`
+aborts with `kind: 'client'`, `upgrade.disconnected` is `true` and the handshake is not completed
+either (`400` when the guards let it through anyway). Once `hold()` was called the client is no
+longer watched: the connection closing never aborts the handshake's `ctx.signal`. The handshake
+runs the request pipeline (hook, request scope, global and route guards); a refusal is an HTTP
+response, and a plain `GET` of an upgrade path answers `426`. Every built-in adapter supports
+upgrades; `HttpPlugin.upgradeInMemory()` runs a handshake without socket. Applications without
+upgrade routes pay nothing.
 
 ## Adapters
 
@@ -2512,7 +2519,11 @@ interface HttpAdapter {
 - Optionally implement `AdapterRequest.onAbort(listener)`: call the listener once when the client
   disconnects before the response was fully written (on the next microtask when that already
   happened), never after a complete response. Without it, `ctx.signal` only aborts when the reply
-  body is cancelled or an event stream is closed by the server.
+  body is cancelled or an event stream is closed by the server. It may return a function removing
+  the listener: `HttpPlugin` calls it once it stops listening (a WebSocket handshake accepted or
+  answered) and ignores the listener from then on. The request an upgrade-capable adapter gives to
+  `UpgradeHandlerOptions.handle()` should implement it, so that a client leaving during a handshake
+  aborts `ctx.signal`.
 - `AdapterReply.text` is the string a body was serialised from (JSON, text), next to its UTF-8
   bytes in `body`: an adapter that writes strings (`ServerResponse.end()`, `new Response()`) may
   send it instead, which writes the same bytes; on Node.js a string is written with the headers at

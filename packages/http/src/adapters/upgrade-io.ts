@@ -19,6 +19,32 @@ const EMPTY = new Uint8Array(0)
 /** A handshake has no body: Znight never reads one. */
 const NO_BODY: Promise<Uint8Array> = Promise.resolve(EMPTY)
 
+/** No listener to remove. */
+const NOTHING = (): void => undefined
+
+/** Calls `listener` on the next microtask, unless the returned function was called before. */
+function callSoon(listener: () => void): () => void {
+  let removed = false
+  queueMicrotask(() => {
+    if (!removed) listener()
+  })
+  return () => {
+    removed = true
+  }
+}
+
+/**
+ * Calls `listener` once when `signal` aborts (on the next microtask when it already did); returns
+ * the function removing it.
+ */
+function onSignalAbort(signal: AbortSignal | undefined, listener: () => void): () => void {
+  if (signal === undefined) return NOTHING
+  if (signal.aborted) return callSoon(listener)
+  const aborted = (): void => listener()
+  signal.addEventListener('abort', aborted, { once: true })
+  return () => signal.removeEventListener('abort', aborted)
+}
+
 /** The `IncomingMessage` of a `node:http` upgrade as an {@link AdapterRequest}. */
 class NodeUpgradeRequest implements AdapterRequest {
   readonly method: string
@@ -48,6 +74,29 @@ class NodeUpgradeRequest implements AdapterRequest {
 
   hasBody(): boolean {
     return false
+  }
+
+  /**
+   * The client left during the handshake: the socket closed, or the client ended its side (a
+   * `node:http` server allows half-open sockets, so a client's FIN alone never closes the socket).
+   * The plugin removes the listeners once the transport took the socket: its later close is the
+   * connection's, not the handshake's.
+   */
+  onAbort(listener: () => void): () => void {
+    const socket = this.rawResponse as Duplex
+    if (socket.destroyed || socket.readableEnded) return callSoon(listener)
+    let called = false
+    const gone = (): void => {
+      if (called) return
+      called = true
+      listener()
+    }
+    socket.once('end', gone)
+    socket.once('close', gone)
+    return () => {
+      socket.removeListener('end', gone)
+      socket.removeListener('close', gone)
+    }
   }
 }
 
@@ -79,6 +128,15 @@ export class FetchUpgradeRequest implements AdapterRequest {
   hasBody(): boolean {
     return false
   }
+
+  /**
+   * `request.signal` aborted: `Bun.serve()` aborts it when the client closes its connection, during
+   * the handshake and also once upgraded (when the WebSocket closes), hence the removal once the
+   * transport took the connection.
+   */
+  onAbort(listener: () => void): () => void {
+    return onSignalAbort(this.raw.signal, listener)
+  }
 }
 
 /** An in-memory handshake (`HttpPlugin.upgradeInMemory()`) as an {@link AdapterRequest}. */
@@ -91,11 +149,14 @@ export class MemoryUpgradeRequest implements AdapterRequest {
   readonly encrypted = false
   readonly raw: unknown = undefined
   readonly rawResponse: unknown = undefined
+  readonly #signal: AbortSignal | undefined
 
-  constructor(method: string, url: string, headers: Record<string, string>) {
+  /** `signal`: aborting it disconnects the client. */
+  constructor(method: string, url: string, headers: Record<string, string>, signal?: AbortSignal) {
     this.method = method
     this.url = url
     this.headers = headers
+    this.#signal = signal
   }
 
   readBody(): Promise<Uint8Array> {
@@ -104,6 +165,11 @@ export class MemoryUpgradeRequest implements AdapterRequest {
 
   hasBody(): boolean {
     return false
+  }
+
+  /** The caller's `signal` aborted. */
+  onAbort(listener: () => void): () => void {
+    return onSignalAbort(this.#signal, listener)
   }
 }
 

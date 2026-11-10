@@ -5,6 +5,7 @@ import type {
   InjectRequest,
   InjectResponse,
   InjectStreamOptions,
+  InjectStreamRequest,
   InjectStreamResponse,
 } from './adapter.ts'
 import type { HttpContext } from './context.ts'
@@ -46,7 +47,7 @@ import {
   RouteGroups,
   type RouteMeta,
 } from './decisions.ts'
-import { HttpException, ServiceUnavailableException } from './exceptions.ts'
+import { BadRequestException, HttpException, ServiceUnavailableException } from './exceptions.ts'
 import { isHeaderName } from './headers.ts'
 import { openInjectSse } from './inject-sse.ts'
 import { isMediaTypePattern } from './mime.ts'
@@ -466,9 +467,11 @@ export class HttpPlugin implements Plugin {
    * Runs a WebSocket handshake in memory (RFC 0003, `WebSocketPlugin.connect()`): the same pipeline
    * as an upgrade request of the adapter (guards, hooks, the route's checks), without socket. The
    * transport receives `{ kind: 'memory', peer }`. Resolves with the refusal, or `undefined` once
-   * the connection was accepted. Available after `onBootstrap`.
+   * the connection was accepted. Aborting `request.signal` before then disconnects the client:
+   * `ctx.signal` aborts (`kind: 'client'`) and the handshake is refused (`400`) instead of
+   * completed; once accepted, the signal is ignored. Available after `onBootstrap`.
    */
-  async upgradeInMemory(request: InjectRequest, native: MemoryUpgrade): Promise<InjectResponse | undefined> {
+  async upgradeInMemory(request: InjectStreamRequest, native: MemoryUpgrade): Promise<InjectResponse | undefined> {
     const runtime = this.#require('upgradeInMemory()')
     const normalized = await normalizeInject(withSignedCookies(request, runtime.options.cookies, 'upgradeInMemory()'))
     const headers = normalized.headers
@@ -478,7 +481,7 @@ export class HttpPlugin implements Plugin {
     headers['sec-websocket-key'] ??= btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))))
     headers['host'] ??= 'localhost'
     const reply = await runtime.pipeline.upgrade(
-      new MemoryUpgradeRequest(normalized.method, normalized.url, headers),
+      new MemoryUpgradeRequest(normalized.method, normalized.url, headers, request.signal),
       native,
     )
     if (reply === undefined) return undefined
@@ -1206,8 +1209,9 @@ function buildRegistrations(
       invoke: async (_plugin: unknown, http: HttpContext): Promise<undefined> => {
         const upgrade = pendingUpgradeOf(http)
         if (upgrade === undefined) throw new Error(`The upgrade route ${where} only serves upgrade requests`)
-        // answered 408 already: the late handshake is not completed
+        // answered 408 already, or the client left: the late handshake is not completed
         if (upgrade.expired) throw handshakeExpired()
+        if (upgrade.disconnected) throw handshakeAborted()
         await accept(http, upgrade)
         if (!upgrade.accepted) throw new Error(`accept() of the upgrade route ${where} did not take the connection`)
         return undefined
@@ -1664,4 +1668,8 @@ function resolveRef<T>(
 /** A handshake completed after its `408`: refused quietly (a 4xx is not logged as a server error). */
 function handshakeExpired(): HttpException {
   return new HttpException(408, 'WebSocket handshake timed out')
+}
+
+function handshakeAborted(): HttpException {
+  return new BadRequestException('The WebSocket handshake was aborted')
 }

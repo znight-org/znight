@@ -12,7 +12,10 @@ backpressure, heartbeats and a graceful shutdown. Like every Znight feature, gat
   long as the connection: request-scoped providers filled by a guard are there for every message.
   Headers and cookies a guard sets are sent with the `101` response, minus those `res.setHeader()`
   would refuse on an HTTP route (a name that is not a token, a value with CR, LF or another control
-  character): they are dropped.
+  character): they are dropped. A client leaving during the handshake aborts `ctx.signal`
+  (`kind: 'client'`, so a guard calling an auth service with it stops) and the handshake is not
+  completed; once the connection is open, its close no longer touches that signal (use
+  `conn.signal`).
 - One server, every adapter: `node`, `fastify`, `express` and `hono` on Node.js and Bun. The `ws`
   transport serves `node:http` servers (Bun ships its own `ws`); Bun's native WebSocket serves
   `honoAdapter()` on `Bun.serve()`.
@@ -188,7 +191,10 @@ reply is a server bug: it is logged at `error` every time (the reply is then not
 
 The instance exposes `server` (`WsServer`), `transport`, `gateways`, `connections`, `stats()`
 (`{ connections, opened, closed, messagesIn, messagesOut, bytesIn, bytesOut, dropped,
-slowConsumerCloses }`), `connect(path, options?)` and `initRoots()`.
+slowConsumerCloses }`), `connect(path, options?)` and `initRoots()`. `connect()` takes `query`,
+`headers`, `protocols`, `origin`, `cookies` and `signal`: aborting `signal` before the connection
+opens disconnects the in-memory client (the handshake's `ctx.signal` aborts with `kind: 'client'`,
+nothing is completed) and `connect()` rejects with the signal's reason; it is ignored once open.
 
 ## Testing
 

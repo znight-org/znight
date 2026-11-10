@@ -69,9 +69,14 @@ export interface PendingUpgrade {
    */
   readonly expired: boolean
   /**
+   * The client closed its connection before the handshake completed (`ctx.signal` aborted with the
+   * kind `client`): the transport must not complete it. Check it like {@link expired}.
+   */
+  readonly disconnected: boolean
+  /**
    * Keeps the request scope (and the in-flight count of `HttpPlugin`) open until `closed`
    * settles: the connection lives in the scope of its handshake. Call it once, after the transport
-   * completed the handshake.
+   * completed the handshake. From then on, the connection closing no longer aborts `ctx.signal`.
    */
   hold(closed: Promise<unknown>): void
 }
@@ -311,28 +316,43 @@ export function checkHandshake(ctx: HttpContext): void {
   if (key === undefined || !KEY.test(key.trim())) throw new BadRequestException('Invalid Sec-WebSocket-Key')
 }
 
+/** What the pipeline gives to a {@link PendingUpgradeState} (internal). */
+export interface PendingUpgradeHooks {
+  /** The headers of the `101` response. */
+  headers(): Readonly<Record<string, HeaderValue>>
+  /** Whether the client left (`ctx.signal` aborted with the kind `client`). */
+  disconnected(): boolean
+  /** Stops listening to the client disconnects: the transport took the connection. */
+  accepted(): void
+}
+
 /** Internal: the pending upgrade of a handshake, created by the pipeline. */
 export class PendingUpgradeState implements PendingUpgrade {
   readonly native: NativeUpgrade
-  readonly #headers: () => Readonly<Record<string, HeaderValue>>
+  readonly #hooks: PendingUpgradeHooks
   /** The transport completed the handshake (`101`). */
   accepted = false
   /** The handshake timed out: the transport must not complete it. */
   expired = false
   held: Promise<unknown> | undefined
 
-  constructor(native: NativeUpgrade, headers: () => Readonly<Record<string, HeaderValue>>) {
+  constructor(native: NativeUpgrade, hooks: PendingUpgradeHooks) {
     this.native = native
-    this.#headers = headers
+    this.#hooks = hooks
   }
 
   get headers(): Readonly<Record<string, HeaderValue>> {
-    return this.#headers()
+    return this.#hooks.headers()
+  }
+
+  get disconnected(): boolean {
+    return this.#hooks.disconnected()
   }
 
   hold(closed: Promise<unknown>): void {
     if (this.held !== undefined) throw new Error('PendingUpgrade.hold() can only be called once')
     this.accepted = true
+    this.#hooks.accepted()
     this.held = closed.then(
       () => undefined,
       () => undefined,

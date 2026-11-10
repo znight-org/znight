@@ -832,12 +832,21 @@ export class Pipeline {
       let context: RequestContext | undefined
       const replied = this.#serve(request, url, plan.info, params, target, startTime, plan.body, ctx => {
         context = ctx
-        pending = new PendingUpgradeState(native, () => this.#upgradeHeaders(ctx))
+        pending = new PendingUpgradeState(native, {
+          headers: () => this.#upgradeHeaders(ctx),
+          disconnected: () => ctx.abortKind === 'client',
+          // the connection's own close must not abort the signal of its handshake
+          accepted: () => ctx.releaseClient(),
+        })
         UPGRADES.set(ctx, pending)
+        // eagerly: `disconnected` is known even when nothing reads ctx.signal
+        ctx.watchClient()
       })
+      // answered (accepted, refused or timed out): nothing to abort any more
+      const release = (): void => context?.releaseClient()
       const settled = replied.then(reply => (pending?.accepted === true ? undefined : reply))
       const timeoutMs = upgrade.timeoutMs
-      if (timeoutMs === undefined) return settled
+      if (timeoutMs === undefined) return settled.finally(release)
       let timer: ReturnType<typeof setTimeout> | undefined
       const expired = new Promise<AdapterReply>(resolve => {
         timer = setTimeout(() => {
@@ -848,7 +857,10 @@ export class Pipeline {
           resolve(adapterReply(serializeError(408, body, 'GET'), null))
         }, timeoutMs)
       })
-      return Promise.race([settled, expired]).finally(() => clearTimeout(timer))
+      return Promise.race([settled, expired]).finally(() => {
+        clearTimeout(timer)
+        release()
+      })
     } catch (error) {
       return Promise.reject(error)
     }

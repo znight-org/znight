@@ -30,7 +30,7 @@ const EXPECTED = {
     closed: true,
     reason: null,
     accepted: 1,
-    released: 1,
+    released: true,
   },
 }
 

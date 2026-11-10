@@ -30,8 +30,8 @@ interface Run {
   /** Why `ctx.signal` aborted, `undefined` while it did not. */
   reason: string | undefined
   accepted: number
-  /** Client listeners removed by `hold()` (1: the handshake's own). */
-  released: number | undefined
+  /** `hold()` removed the client listeners of the handshake. */
+  released: boolean | undefined
 }
 
 let run: Run = fresh()
@@ -59,10 +59,13 @@ class SlowGuard implements CanActivate {
   }
 }
 
-/** The number of client listeners of a native upgrade (socket `close`, request `abort`). */
+/** The number of client listeners of a native upgrade (socket `end` and `close`, request `abort`). */
 function listeners(upgrade: PendingUpgrade): number {
   const native = upgrade.native
-  if (native.kind === 'node') return (native.socket as Duplex).listenerCount('close')
+  if (native.kind === 'node') {
+    const socket = native.socket as Duplex
+    return socket.listenerCount('end') + socket.listenerCount('close')
+  }
   if (native.kind === 'bun') return getEventListeners(native.request.signal, 'abort').length
   return 0
 }
@@ -90,6 +93,8 @@ function complete(ctx: HttpContext, upgrade: PendingUpgrade): Promise<void> {
   socket.write(
     `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${digest}\r\n\r\n`,
   )
+  // the server allows half-open sockets: end ours when the client ends its side
+  socket.once('end', () => socket.end())
   return new Promise(resolve => socket.once('close', () => resolve()))
 }
 
@@ -106,7 +111,7 @@ const plugin: Plugin & PluginHttpUpgrades = {
           const closed = complete(ctx, upgrade)
           const before = listeners(upgrade)
           upgrade.hold(closed)
-          run.released = before - listeners(upgrade)
+          run.released = listeners(upgrade) < before
         },
       },
     ],

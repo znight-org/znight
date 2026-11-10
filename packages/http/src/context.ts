@@ -232,6 +232,10 @@ class ContextState {
   signed: Map<string, string | undefined> | undefined = undefined
   abortReason: RequestAbortedError | undefined = undefined
   abortController: AbortController | undefined = undefined
+  /** Client disconnects: not listened to yet, listened to (`AdapterRequest.onAbort`), or no longer. */
+  client: 'idle' | 'watching' | 'released' = 'idle'
+  /** Removes the `onAbort` listener, when the adapter returned a way to. */
+  unwatch: (() => void) | undefined = undefined
 }
 
 /** Implementation of {@link HttpContext} used by the pipeline (internal). */
@@ -435,10 +439,43 @@ export class RequestContext implements HttpContext {
     if (state.abortController === undefined) {
       const controller = new AbortController()
       state.abortController = controller
-      if (state.abortReason !== undefined) controller.abort(state.abortReason)
-      else if (!this.#completed) this.#source.onAbort?.(() => this.abort('client'))
+      if (state.abortReason === undefined) this.watchClient()
+      else controller.abort(state.abortReason)
     }
     return state.abortController.signal
+  }
+
+  /**
+   * Listens to the client disconnects (`AdapterRequest.onAbort`), at most once: lazily from
+   * {@link signal}, eagerly for a WebSocket handshake (internal).
+   */
+  watchClient(): void {
+    const state = this.#extra
+    if (state.client !== 'idle' || this.#completed || state.abortReason !== undefined) return
+    state.client = 'watching'
+    const unwatch = this.#source.onAbort?.(() => {
+      if (state.client === 'watching') this.abort('client')
+    })
+    if (typeof unwatch === 'function') state.unwatch = unwatch as () => void
+  }
+
+  /**
+   * Stops listening to the client disconnects for good (internal): the transport took the
+   * connection of a WebSocket handshake (closing it must not abort {@link signal}), or the handshake
+   * was answered.
+   */
+  releaseClient(): void {
+    const state = this.#extra
+    if (state.client === 'released') return
+    state.client = 'released'
+    const unwatch = state.unwatch
+    state.unwatch = undefined
+    unwatch?.()
+  }
+
+  /** Why {@link signal} aborted, `undefined` while it did not (internal). */
+  get abortKind(): RequestAbortKind | undefined {
+    return this.#more?.abortReason?.kind
   }
 
   /** Whether {@link signal} aborted (or will be created aborted). */

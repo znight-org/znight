@@ -63,8 +63,13 @@ export interface AdapterRequest {
    * written. When it already happened, the listener is called on the next microtask. Never called
    * after a complete response. Optional: without it, `ctx.signal` only aborts when the response
    * body is cancelled or an event stream is closed by the server.
+   *
+   * May return a function removing the listener (any other return value is ignored): the plugin
+   * calls it when it stops listening (the transport took the connection of a WebSocket handshake,
+   * or the handshake was answered). The plugin ignores a listener called after that, so returning
+   * nothing only keeps the listener attached to the native object until it is collected.
    */
-  onAbort?(listener: () => void): void
+  onAbort?(listener: () => void): unknown
 }
 
 /**
