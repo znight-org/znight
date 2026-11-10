@@ -1142,7 +1142,7 @@ export class Pipeline {
     }
     ctx.commit()
     x.answer(reply)
-    return { tracked, session }
+    return { tracked, session, status: serialized.status }
   }
 
   /** A streamed body was sent or abandoned (`failure`: the stream failed). */
@@ -1151,6 +1151,7 @@ export class Pipeline {
     if (streaming.session !== undefined) this.#streams.delete(streaming.session)
     if (failure !== undefined) {
       this.#logger.error('The response stream failed', { err: failure, requestId: x.requestId, path: ctx.path })
+      this.#report(failure, ctx, streaming.status)
     }
     ctx.releaseBody()
   }
@@ -1556,7 +1557,7 @@ export class Pipeline {
         body = this.#internalBody(bodyError)
       }
       extra = error.headers
-      if (status >= 500) this.#log(original, ctx)
+      if (status >= 500) this.#log(original, ctx, status)
     } else {
       status = 500
       body = this.#internalBody(error)
@@ -1582,7 +1583,8 @@ export class Pipeline {
       : { statusCode: 500, error: 'Internal Server Error' }
   }
 
-  #log(error: unknown, ctx: RequestContext): void {
+  /** Logs an error answered with a 5xx `status`, and reports it (see {@link #report}). */
+  #log(error: unknown, ctx: RequestContext, status = 500): void {
     const route = ctx.route
     this.#logger.error(`Request failed: ${ctx.method} ${route?.path ?? truncate(ctx.path)}`, {
       err: error,
@@ -1592,6 +1594,30 @@ export class Pipeline {
       ...(route === undefined
         ? {}
         : { route: route.path, handler: `${displayName(route.controller)}.${route.handler}` }),
+    })
+    this.#report(error, ctx, status)
+  }
+
+  /**
+   * Emits an error of a request on the `error:report` hook, when it has listeners: the errors the
+   * pipeline logs (answered with a 5xx, or a response stream that failed), once each.
+   */
+  #report(error: unknown, ctx: RequestContext, status: number): void {
+    if (!this.#hooks.hasListeners('error:report')) return
+    const route = ctx.route
+    const tags: Record<string, string | number> = { method: ctx.method, path: ctx.path }
+    if (route !== undefined) {
+      tags['route'] = route.path
+      tags['handler'] = `${displayName(route.controller)}.${route.handler}`
+    }
+    tags['status'] = status
+    this.#hooks.emit('error:report', {
+      error,
+      source: 'http',
+      operation: `${ctx.method} ${route?.path ?? truncate(ctx.path)}`,
+      requestId: ctx.requestId,
+      tags,
+      context: ctx,
     })
   }
 
@@ -1646,6 +1672,8 @@ const NOT_CALLED: unique symbol = Symbol('next() not called')
 interface Streaming {
   readonly tracked: TrackedStream
   readonly session: SseSession | undefined
+  /** Status of the streamed reply (reported with a stream failure). */
+  readonly status: number
 }
 
 /** A request being answered (internal): its context, its target and the promise of its reply. */
