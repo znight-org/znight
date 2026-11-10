@@ -120,7 +120,7 @@ describe('project templates', () => {
     expect(readme).toContain(
       '├─ openapi.ts                 # @OpenApiDocument: title, description, version of openapi.json',
     )
-    expect(readme).not.toContain('api.ts  ')
+    expect(readme).not.toContain('├─ api.ts')
     expect(project.has('src/app/heartbeat.jobs.ts')).toBe(false)
   })
 
@@ -136,7 +136,7 @@ describe('project templates', () => {
 })
 export class Api {}
 `)
-    expect(document).not.toContain('tags')
+    expect(document).not.toContain('tags:')
     // no JSDoc on the class: info gives the title and the description
     expect(document).not.toContain('/**')
     expect(file(files({ name: '@acme/orders', features: ['openapi'] }), 'src/openapi.ts')).toContain(

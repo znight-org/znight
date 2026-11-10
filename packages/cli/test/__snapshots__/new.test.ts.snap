@@ -74,7 +74,7 @@ time** — no \`reflect-metadata\`, errors reported by the compiler with their l
 
 - **HTTP** with \`@znight/http\` (built-in node:http server)
 - **Configuration** with \`@znight/config\` (\`src/app/app.config.ts\`, \`.env\` files)
-- **Observability** with \`@znight/observability\` (structured logs, metrics, traces)
+- **Observability** with \`@znight/observability\` (structured logs, pretty-printed by \`pino-pretty\`; metrics and tracing are off in \`src/main.ts\`)
 
 ## Scripts
 
@@ -170,6 +170,7 @@ Vitest uses \`vite.config.ts\`, so the \`znight()\` plugin regenerates the conta
     "@znight/core": "^0.1.0",
     "@znight/http": "^0.1.0",
     "@znight/observability": "^0.1.0",
+    "pino-pretty": "^13.2.0",
     "zod": "^4.6.0"
   },
   "devDependencies": {
@@ -285,17 +286,15 @@ import { AppConfig } from './app/app.config.js'
 const app = await Application.create({
   metadata: __ZNIGHT_METADATA__,
   plugins: [
-    // first, so that its hooks wrap everything: request logs, metrics (with prom-client), traces
+    // first, so that its hooks wrap everything; metrics (with prom-client) and tracing are off
+    // pretty: human-readable logs for development; JSON logs (pretty: false) are better in production
     ObservabilityPlugin.configure({
       logging: {
         name: 'my-service',
+        pretty: true,
       },
-      // metrics: {
-      //   // options of the metrics registry
-      // },
-      // tracing: {
-      //   // options of the tracer
-      // },
+      metrics: false,
+      tracing: false,
     }),
     // loads .env files and the environment, validates every @Config class before anything starts
     ConfigPlugin.configure(),
@@ -512,7 +511,7 @@ time** — no \`reflect-metadata\`, errors reported by the compiler with their l
 
 - **HTTP** with \`@znight/http\` (fastify adapter)
 - **Configuration** with \`@znight/config\` (\`src/app/app.config.ts\`, \`.env\` files)
-- **Observability** with \`@znight/observability\` (structured logs, metrics, traces)
+- **Observability** with \`@znight/observability\` (structured logs, pretty-printed by \`pino-pretty\`; metrics and tracing are off in \`src/main.ts\`)
 - **Messaging** with \`@znight/messaging\` (in-memory broker in \`src/main.ts\`)
 
 ## Scripts
@@ -625,6 +624,7 @@ preload = ["@znight/compiler/bun"]
     "@znight/messaging": "^0.1.0",
     "@znight/observability": "^0.1.0",
     "fastify": "^5.12.7",
+    "pino-pretty": "^13.2.0",
     "zod": "^4.6.0"
   },
   "devDependencies": {
@@ -780,17 +780,15 @@ import { AppConfig } from './app/app.config.js'
 const app = await Application.create({
   metadata: __ZNIGHT_METADATA__,
   plugins: [
-    // first, so that its hooks wrap everything: request logs, metrics (with prom-client), traces
+    // first, so that its hooks wrap everything; metrics (with prom-client) and tracing are off
+    // pretty: human-readable logs for development; JSON logs (pretty: false) are better in production
     ObservabilityPlugin.configure({
       logging: {
         name: 'my-service',
+        pretty: true,
       },
-      // metrics: {
-      //   // options of the metrics registry
-      // },
-      // tracing: {
-      //   // options of the tracer
-      // },
+      metrics: false,
+      tracing: false,
     }),
     // loads .env files and the environment, validates every @Config class before anything starts
     ConfigPlugin.configure(),
@@ -1797,7 +1795,7 @@ time** — no \`reflect-metadata\`, errors reported by the compiler with their l
 
 - **HTTP** with \`@znight/http\` (built-in node:http server)
 - **Scheduled jobs** with \`@znight/schedule\` (\`src/app/heartbeat.jobs.ts\`)
-- **OpenAPI** with \`@znight/openapi\` (\`/openapi.json\`, Scalar API reference at \`/docs\`, options in \`src/api.ts\`)
+- **OpenAPI** with \`@znight/openapi\` (\`/openapi.json\`, Scalar API reference at \`/docs\`, options in \`src/openapi.ts\`)
 
 ## Scripts
 
@@ -1824,7 +1822,7 @@ curl localhost:3000/openapi.json        # the API reference is at http://localho
 \`\`\`txt
 src/
 ├─ main.ts                    # Application.create() + plugins + start()
-├─ api.ts                     # @OpenApiDocument: title, tags, security of openapi.json
+├─ openapi.ts                 # @OpenApiDocument: title, description, version of openapi.json
 ├─ .znight/                   # generated DI container (git-ignored)
 └─ app/
    ├─ greeting.controller.ts   # @Controller: /greetings routes
@@ -1906,21 +1904,6 @@ Vitest uses \`vite.config.ts\`, so the \`znight()\` plugin regenerates the conta
     "vitest": "^4.1.0"
   }
 }
-"
-,
-  "src/api.ts": 
-"import { OpenApiDocument } from '@znight/openapi'
-
-/**
- * my-service
- *
- * The HTTP API of my-service. Title and description of the OpenAPI document come from this
- * comment, the version from package.json.
- */
-@OpenApiDocument({
-  tags: [{ name: 'Greeting', description: 'Greetings' }],
-})
-export class Api {}
 "
 ,
   "src/app/greeting.controller.ts": 
@@ -2019,13 +2002,28 @@ const app = await Application.create({
     // before HttpPlugin: plugins stop in reverse order, so HTTP stops first, then running jobs drain
     SchedulePlugin.configure(),
     HttpPlugin.configure({ port: Number(process.env.PORT ?? 3000) }),
-    // GET /openapi.json and the API reference at /docs, with Scalar (document options: src/api.ts)
+    // GET /openapi.json and the API reference at /docs, with Scalar (document options: src/openapi.ts)
     OpenApiPlugin.configure({ ui: 'scalar' }),
   ],
 })
 
 // SIGINT / SIGTERM stop the application gracefully (in-flight requests are drained)
 await app.start()
+"
+,
+  "src/openapi.ts": 
+"import { OpenApiDocument } from '@znight/openapi'
+
+// Options of the OpenAPI document (GET /openapi.json, the API reference at /docs), read by the
+// compiler. The class is a marker: it is never instantiated.
+@OpenApiDocument({
+  info: {
+    title: 'my-service',
+    description: 'The HTTP API of my-service.',
+    version: '1.0.0',
+  },
+})
+export class Api {}
 "
 ,
   "test/greeting.controller.test.ts": 
@@ -2246,8 +2244,8 @@ A [Znight](https://github.com/znight-org/znight) application: dependency injecti
 time** — no \`reflect-metadata\`, errors reported by the compiler with their location.
 
 - **HTTP** with \`@znight/http\` (fastify adapter)
-- **Observability** with \`@znight/observability\` (structured logs, metrics, traces)
-- **OpenAPI** with \`@znight/openapi\` (\`/openapi.json\`, Swagger UI API reference at \`/docs\`, options in \`src/api.ts\`)
+- **Observability** with \`@znight/observability\` (structured logs, pretty-printed by \`pino-pretty\`; metrics and tracing are off in \`src/main.ts\`)
+- **OpenAPI** with \`@znight/openapi\` (\`/openapi.json\`, Swagger UI API reference at \`/docs\`, options in \`src/openapi.ts\`)
 - **GraphQL** with \`@znight/graphql\` (code-first: the schema is derived from \`src/app/greeting.resolver.ts\`)
 - **WebSocket** with \`@znight/websocket\` (\`src/app/greeting.gateway.ts\`, on the HTTP port at \`/ws\`)
 
@@ -2277,7 +2275,7 @@ curl localhost:3000/graphql -H 'content-type: application/json' -d '{"query":"{ 
 \`\`\`txt
 src/
 ├─ main.ts                    # Application.create() + plugins + start()
-├─ api.ts                     # @OpenApiDocument: title, tags, security of openapi.json
+├─ openapi.ts                 # @OpenApiDocument: title, description, version of openapi.json
 ├─ .znight/                   # generated DI container (git-ignored)
 └─ app/
    ├─ greeting.controller.ts   # @Controller: /greetings routes
@@ -2350,6 +2348,7 @@ Vitest uses \`vite.config.ts\`, so the \`znight()\` plugin regenerates the conta
     "@znight/websocket": "^0.1.0",
     "fastify": "^5.12.7",
     "graphql": "^17.0.2",
+    "pino-pretty": "^13.2.0",
     "ws": "^8.22.0",
     "zod": "^4.6.0"
   },
@@ -2363,21 +2362,6 @@ Vitest uses \`vite.config.ts\`, so the \`znight()\` plugin regenerates the conta
     "vitest": "^4.1.0"
   }
 }
-"
-,
-  "src/api.ts": 
-"import { OpenApiDocument } from '@znight/openapi'
-
-/**
- * my-service
- *
- * The HTTP API of my-service. Title and description of the OpenAPI document come from this
- * comment, the version from package.json.
- */
-@OpenApiDocument({
-  tags: [{ name: 'Greeting', description: 'Greetings' }],
-})
-export class Api {}
 "
 ,
   "src/app/greeting.controller.ts": 
@@ -2512,20 +2496,18 @@ import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
 const app = await Application.create({
   metadata: __ZNIGHT_METADATA__,
   plugins: [
-    // first, so that its hooks wrap everything: request logs, metrics (with prom-client), traces
+    // first, so that its hooks wrap everything; metrics (with prom-client) and tracing are off
+    // pretty: human-readable logs for development; JSON logs (pretty: false) are better in production
     ObservabilityPlugin.configure({
       logging: {
         name: 'my-service',
+        pretty: true,
       },
-      // metrics: {
-      //   // options of the metrics registry
-      // },
-      // tracing: {
-      //   // options of the tracer
-      // },
+      metrics: false,
+      tracing: false,
     }),
     HttpPlugin.configure({ adapter: fastifyAdapter(), port: Number(process.env.PORT ?? 3000) }),
-    // GET /openapi.json and the API reference at /docs, with Swagger UI (document options: src/api.ts)
+    // GET /openapi.json and the API reference at /docs, with Swagger UI (document options: src/openapi.ts)
     OpenApiPlugin.configure({ ui: 'swagger' }),
     // POST /graphql, GET /graphql (GraphiQL in development): the schema is derived from the resolvers
     GraphQLPlugin.configure(),
@@ -2536,6 +2518,21 @@ const app = await Application.create({
 
 // SIGINT / SIGTERM stop the application gracefully (in-flight requests are drained)
 await app.start()
+"
+,
+  "src/openapi.ts": 
+"import { OpenApiDocument } from '@znight/openapi'
+
+// Options of the OpenAPI document (GET /openapi.json, the API reference at /docs), read by the
+// compiler. The class is a marker: it is never instantiated.
+@OpenApiDocument({
+  info: {
+    title: 'my-service',
+    description: 'The HTTP API of my-service.',
+    version: '1.0.0',
+  },
+})
+export class Api {}
 "
 ,
   "test/greeting.controller.test.ts": 
@@ -2740,7 +2737,6 @@ exports[`znight new creates a project from flags 1`] = `
   "README.md",
   "bunfig.toml",
   "package.json",
-  "src/api.ts",
   "src/app/app.config.ts",
   "src/app/greeting.consumer.ts",
   "src/app/greeting.controller.ts",
@@ -2751,6 +2747,7 @@ exports[`znight new creates a project from flags 1`] = `
   "src/app/health.controller.ts",
   "src/app/heartbeat.jobs.ts",
   "src/main.ts",
+  "src/openapi.ts",
   "test/greeting.controller.test.ts",
   "test/greeting.gateway.test.ts",
   "test/greeting.resolver.test.ts",
