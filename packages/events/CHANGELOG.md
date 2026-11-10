@@ -1,5 +1,12 @@
 # @znight/events
 
+## 0.7.2
+
+### Patch Changes
+
+- @znight/compiler@0.7.2
+  - @znight/core@0.7.2
+
 ## 0.7.1
 
 ### Patch Changes
