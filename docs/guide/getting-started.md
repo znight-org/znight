@@ -47,7 +47,7 @@ npx @znight/cli new my-service --yes --features config,observability,schedule --
 | Feature         | Adds                                                                                                            |
 | --------------- | --------------------------------------------------------------------------------------------------------------- |
 | `config`        | [`@znight/config`](/packages/config): a typed `@Config` class read from the environment                         |
-| `observability` | [`@znight/observability`](/packages/observability): request logs, pretty-printed (`pino-pretty`)                |
+| `observability` | [`@znight/observability`](/packages/observability): request logs, pretty-printed in development (`pino-pretty`) |
 | `messaging`     | [`@znight/messaging`](/packages/messaging): a consumer and an in-memory broker                                  |
 | `schedule`      | [`@znight/schedule`](/packages/schedule): a cron job and its test on a virtual clock                            |
 | `openapi`       | [`@znight/openapi`](/packages/openapi): `/openapi.json`, an API reference on `/docs` (Scalar, Swagger UI, none) |
@@ -62,7 +62,7 @@ my-service/
 │  ├─ main.ts                    # Application.create() with the plugins, then start()
 │  ├─ openapi.ts                 # @OpenApiDocument: title, description, version      (openapi)
 │  └─ app/
-│     ├─ app.config.ts           # @Config('app'): PORT, APP_GREETING                (config)
+│     ├─ app.config.ts           # @Config('app'): PORT, APP_GREETING, NODE_ENV      (config)
 │     ├─ greeting.schemas.ts     # Zod schema of the request body
 │     ├─ greeting.service.ts     # @Injectable
 │     ├─ greeting.controller.ts  # GET /greetings/:name, POST /greetings (validated body)
@@ -82,8 +82,24 @@ my-service/
 
 Bun projects test with `bun test` (the preload regenerates the container), the others with Vitest
 (the Vite plugin does). `ObservabilityPlugin` names its logger after the project and pretty-prints
-it (`pretty: true`; JSON logs, `pretty: false`, suit production better), and the `Dockerfile` builds a production image (see [Deployment](/guide/deployment#docker)). Start it in
-development mode:
+it in development only, JSON logs otherwise:
+
+```ts
+ObservabilityPlugin.configure(container => ({
+  logging: {
+    name: 'my-service',
+    // human-readable logs in development (`znight dev`), JSON logs in production
+    pretty: container.get(AppConfig).environment === 'development',
+  },
+  metrics: false,
+  tracing: false,
+}))
+```
+
+`AppConfig.environment` reads `NODE_ENV` (without `config`, `main.ts` reads `process.env['NODE_ENV']`
+directly). The `Dockerfile` builds a production image (see [Deployment](/guide/deployment#docker))
+with `NODE_ENV=production` and without `pino-pretty`, a dev dependency. Start it in development
+mode:
 
 ```sh
 cd my-service

@@ -100,7 +100,7 @@ my-service/
 │  ├─ main.ts                    # Application.create() with the plugins, then start()
 │  ├─ openapi.ts                 # @OpenApiDocument: info of openapi.json          (openapi)
 │  └─ app/
-│     ├─ app.config.ts           # @Config('app'): PORT, APP_GREETING           (config)
+│     ├─ app.config.ts           # @Config('app'): PORT, APP_GREETING, NODE_ENV (config)
 │     ├─ greeting.schemas.ts     # Zod schema of the request body
 │     ├─ greeting.service.ts     # @Injectable, uses AppConfig and Logger
 │     ├─ greeting.controller.ts  # GET /greetings/:name?excited, POST /greetings (validated body)
@@ -138,10 +138,27 @@ my-service/
 - `schedule` adds `@znight/schedule`, `SchedulePlugin.configure()` **before** `HttpPlugin` (plugins
   stop in reverse order: HTTP stops taking requests first, then running jobs drain), a sample job
   and its test on a virtual clock (`createTestClock()` of `@znight/schedule/testing`).
-- `observability` adds `@znight/observability` and `pino-pretty` (a dependency, so the production
-  image has it too), and `ObservabilityPlugin.configure()` first: its logger is named after the
-  project and pretty-printed (`logging: { name: '<name>', pretty: true }`; JSON logs, `pretty:
-  false`, suit production better), `metrics: false` and `tracing: false`.
+- `observability` adds `@znight/observability`, `pino-pretty` as a dev dependency (it is loaded only
+  in development, so the production image does not ship it) and `ObservabilityPlugin.configure()`
+  first: its logger is named after the project and pretty-printed in development only, JSON
+  otherwise, `metrics: false` and `tracing: false`. With `config`, `AppConfig` gets an `environment`
+  property read from `NODE_ENV` and the options are a function of the container:
+
+  ```ts
+  ObservabilityPlugin.configure(container => ({
+    logging: {
+      name: 'my-service',
+      // human-readable logs in development (`znight dev`), JSON logs in production
+      pretty: container.get(AppConfig).environment === 'development',
+    },
+    metrics: false,
+    tracing: false,
+  }))
+  ```
+
+  Without `config`, the options are an object with `pretty: process.env['NODE_ENV'] ===
+  'development'`. `znight dev` runs the application with `NODE_ENV=development`, `znight start` and
+  the `Dockerfile` with `NODE_ENV=production`.
 - `openapi` adds `@znight/openapi`, `OpenApiPlugin.configure({ ui })` after `HttpPlugin`
   (`/openapi.json` and the API reference at `/docs`, `ui: 'scalar'` or `'swagger'` from
   `--openapi-ui`; `OpenApiPlugin.configure()` and no `/docs` with `--openapi-ui none`),

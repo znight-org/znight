@@ -149,20 +149,19 @@ export class Api {}
     expect(files().has('src/openapi.ts')).toBe(false)
   })
 
-  it('observability: pretty logs named after the service, metrics and tracing off', () => {
+  it('observability: logs named after the service, pretty in development (AppConfig), metrics and tracing off', () => {
     const main = file(files({ name: 'my-service-znight' }), 'src/main.ts')
-    expect(
-      main,
-    ).toContain(`    // pretty: human-readable logs for development; JSON logs (pretty: false) are better in production
-    ObservabilityPlugin.configure({
+    expect(main).toContain(`    ObservabilityPlugin.configure(container => ({
       logging: {
         name: 'my-service-znight',
-        pretty: true,
+        // human-readable logs in development (\`znight dev\`), JSON logs in production
+        pretty: container.get(AppConfig).environment === 'development',
       },
       metrics: false,
       tracing: false,
-    }),
+    })),
 `)
+    expect(main).not.toContain('pretty: true')
     expect(main.indexOf('ObservabilityPlugin.configure(')).toBeLessThan(main.indexOf('HttpPlugin.configure('))
     expect(file(files({ name: '@acme/orders' }), 'src/main.ts')).toContain("        name: '@acme/orders',\n")
     // renderProject() is public: any name is quoted safely
@@ -170,11 +169,37 @@ export class Api {}
     expect(file(files({ features: [] }), 'src/main.ts')).not.toContain('ObservabilityPlugin')
   })
 
-  it('observability: pino-pretty is a dependency, so that pretty logs work out of the box (and in the image)', () => {
-    expect(packageJson(files()).dependencies['pino-pretty']).toBe('^13.2.0')
-    expect(packageJson(files()).devDependencies['pino-pretty']).toBeUndefined()
-    expect(packageJson(files({ features: ['config'] })).dependencies['pino-pretty']).toBeUndefined()
-    expect(file(files(), 'README.md')).toContain('`pino-pretty`')
+  it('config: AppConfig.environment reads NODE_ENV, development by default', () => {
+    expect(file(files(), 'src/app/app.config.ts')).toContain(`
+  /** Runtime environment (NODE_ENV): \`znight dev\` sets "development", the Docker image "production". */
+  @Env('NODE_ENV')
+  environment = 'development'
+}
+`)
+  })
+
+  it('observability without config: pretty when NODE_ENV is development, plain options', () => {
+    const main = file(files({ features: ['observability'] }), 'src/main.ts')
+    expect(main).toContain(`    ObservabilityPlugin.configure({
+      logging: {
+        name: 'my-service',
+        // human-readable logs in development (\`znight dev\`), JSON logs in production
+        pretty: process.env['NODE_ENV'] === 'development',
+      },
+      metrics: false,
+      tracing: false,
+    }),
+`)
+    expect(main).not.toContain('AppConfig')
+  })
+
+  it('observability: pino-pretty is a dev dependency (development only), not shipped in the production image', () => {
+    expect(packageJson(files()).devDependencies['pino-pretty']).toBe('^13.2.0')
+    expect(packageJson(files()).dependencies['pino-pretty']).toBeUndefined()
+    expect(packageJson(files({ features: ['config'] })).devDependencies['pino-pretty']).toBeUndefined()
+    expect(file(files(), 'README.md')).toContain('`pino-pretty` in development')
+    // the image installs the production dependencies only
+    expect(file(files(), 'Dockerfile')).toContain('ENV NODE_ENV=production')
   })
 
   it.each([
@@ -512,9 +537,11 @@ describe('znight new', () => {
     expect(manifest.scripts.test).toBe('vitest run') // npm: not running on Bun in this context
     expect(manifest.dependencies['@znight/config']).toBeDefined()
     expect(manifest.dependencies['@znight/observability']).toBeDefined()
-    expect(manifest.dependencies['pino-pretty']).toBeDefined()
+    expect(manifest.devDependencies['pino-pretty']).toBeDefined()
     expect(manifest.dependencies['@znight/messaging']).toBeUndefined()
-    expect(readFileSync(join(workspace.path, 'svc/src/main.ts'), 'utf8')).toContain('        pretty: true,\n')
+    expect(readFileSync(join(workspace.path, 'svc/src/main.ts'), 'utf8')).toContain(
+      "        pretty: container.get(AppConfig).environment === 'development',\n",
+    )
     // Fastify by default, a Dockerfile, the Scalar UI when openapi is selected
     expect(manifest.dependencies.fastify).toBeDefined()
     expect(readFileSync(join(workspace.path, 'svc/src/main.ts'), 'utf8')).toContain('adapter: fastifyAdapter(),')

@@ -3,9 +3,9 @@
  *
  * znight new → znight g → znight generate (--check) → znight openapi (--check) → tsc --noEmit →
  * znight build --openapi (the `znight()` and `openapi()` Vite plugins) → znight start + HTTP requests
- * (and /openapi.json, /docs, /graphql, the /ws gateway) → bun test (the `@znight/compiler/bun` preload, TestBed / TestApp, as
- * many passing tests as generated) → znight dev (restart on change, last good process kept on a
- * compile error).
+ * (and /openapi.json, /docs, /graphql, the /ws gateway; JSON logs, without pino-pretty) → bun test (the `@znight/compiler/bun` preload, TestBed / TestApp, as
+ * many passing tests as generated) → znight dev (pretty logs, restart on change, last good process
+ * kept on a compile error).
  *
  * The application is created under `test/.tmp/` and its `node_modules` links the workspace packages,
  * which are loaded from their TypeScript sources (`@znight/source` condition, also passed to tsc).
@@ -86,13 +86,13 @@ interface LongRunning {
   readonly exit: Promise<number | null>
 }
 
-/** A long-running `znight <args>` process. */
-function startZnight(args: readonly string[], env: Record<string, string>, cwd = APP): LongRunning {
-  const child = spawn('bun', [SOURCE, CLI, ...args], {
-    cwd,
-    env: { ...process.env, NO_COLOR: '1', NODE_OPTIONS: SOURCE, ...env },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  })
+/** A long-running `znight <args>` process (an `undefined` value removes the variable). */
+function startZnight(args: readonly string[], env: Record<string, string | undefined>, cwd = APP): LongRunning {
+  const variables: Record<string, string> = {}
+  for (const [key, value] of Object.entries({ ...process.env, NO_COLOR: '1', NODE_OPTIONS: SOURCE, ...env })) {
+    if (value !== undefined) variables[key] = value
+  }
+  const child = spawn('bun', [SOURCE, CLI, ...args], { cwd, env: variables, stdio: ['ignore', 'pipe', 'pipe'] })
   let output = ''
   child.stdout?.on('data', chunk => {
     output += chunk
@@ -130,6 +130,37 @@ async function fetchWhenUp(url: string, process: LongRunning, timeoutMs = 60_000
     }
   }
   throw new Error(`${url} did not answer within ${timeoutMs}ms`)
+}
+
+/** The log entries of `output` written as JSON lines (pino's format without `pretty`). */
+function jsonLogs(output: string): { name?: string; msg?: string }[] {
+  return output
+    .split('\n')
+    .filter(line => line.startsWith('{'))
+    .map(line => JSON.parse(line) as { name?: string; msg?: string })
+}
+
+/**
+ * A Node.js `--import` module making `pino-pretty` unresolvable, as in a production install
+ * (it is a dev dependency of the scaffolded project).
+ */
+function withoutPinoPretty(app: string): string {
+  const path = join(app, 'without-pino-pretty.mjs')
+  writeFileSync(
+    path,
+    `import { registerHooks } from 'node:module'
+
+registerHooks({
+  resolve(specifier, context, next) {
+    if (specifier === 'pino-pretty' || specifier.startsWith('pino-pretty/')) {
+      throw Object.assign(new Error(\`Cannot find module '\${specifier}'\`), { code: 'MODULE_NOT_FOUND' })
+    }
+    return next(specifier, context)
+  },
+})
+`,
+  )
+  return path
 }
 
 function countOf(text: string, needle: string): number {
@@ -316,10 +347,21 @@ describe.skipIf(!enabled)('scaffolded application (ZNIGHT_CLI_E2E=1)', () => {
   )
 
   it(
-    'znight start serves HTTP requests and stops on SIGTERM',
+    'znight start serves HTTP requests with JSON logs, without pino-pretty, and stops on SIGTERM',
     async () => {
       const port = await freePort()
-      const app = startZnight(['start', '--runtime', 'node'], { PORT: String(port), LOG_LEVEL: 'warn' })
+      const blocker = withoutPinoPretty(APP)
+      // the blocker works: pino-pretty is linked into node_modules, but cannot be loaded with it
+      const blocked = await run('node', ['--import', blocker, '-e', "require('pino-pretty')"])
+      expect(blocked.code).not.toBe(0)
+      expect(blocked.output).toContain("Cannot find module 'pino-pretty'")
+      // NODE_ENV unset (bun test sets it to "test"): znight start sets "production"
+      const app = startZnight(['start', '--runtime', 'node'], {
+        PORT: String(port),
+        LOG_LEVEL: 'info',
+        NODE_ENV: undefined,
+        NODE_OPTIONS: `${SOURCE} --import ${blocker}`,
+      })
       const base = `http://127.0.0.1:${port}`
       const post = (path: string, body: unknown): Promise<Response> =>
         fetch(`${base}${path}`, {
@@ -349,6 +391,11 @@ describe.skipIf(!enabled)('scaffolded application (ZNIGHT_CLI_E2E=1)', () => {
           id: 1,
           data: { message: 'Hello, Ada.' },
         })
+        // AppConfig.environment is "production": JSON logs, named after the project
+        const logs = jsonLogs(app.output())
+        expect(logs.length).toBeGreaterThan(0)
+        expect(logs.every(entry => entry.name === 'e2e-app')).toBe(true)
+        expect(app.output()).not.toContain('INFO (e2e-app)')
       } catch (error) {
         throw new Error(`${String(error)}\n--- znight start output ---\n${app.output()}`)
       } finally {
@@ -424,16 +471,21 @@ describe.skipIf(!enabled)('scaffolded application (ZNIGHT_CLI_E2E=1)', () => {
   )
 
   it(
-    'znight dev restarts the application after a change',
+    'znight dev runs the application with pretty logs and restarts it after a change',
     async () => {
       const port = await freePort()
+      // NODE_ENV unset (bun test sets it to "test"): znight dev sets "development"
       const dev = startZnight(['dev', '--config', VITE_CONFIG, '--config-loader', 'native', '--runtime', 'node'], {
         PORT: String(port),
-        LOG_LEVEL: 'warn',
+        LOG_LEVEL: 'info',
+        NODE_ENV: undefined,
       })
       const url = `http://127.0.0.1:${port}/greetings/Ada`
       try {
         expect((await fetchWhenUp(url, dev)).status).toBe(200)
+        // AppConfig.environment is "development": pino-pretty output, no JSON lines
+        await waitForOutput(dev, 'INFO (e2e-app)')
+        expect(jsonLogs(dev.output())).toEqual([])
         const file = join(APP, 'src/app/app.config.ts')
         writeFileSync(file, readFileSync(file, 'utf8').replace("greeting = 'Hello'", "greeting = 'Salut'"))
         const started = Date.now()

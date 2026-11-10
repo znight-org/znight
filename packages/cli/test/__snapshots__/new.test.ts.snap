@@ -74,7 +74,7 @@ time** — no \`reflect-metadata\`, errors reported by the compiler with their l
 
 - **HTTP** with \`@znight/http\` (built-in node:http server)
 - **Configuration** with \`@znight/config\` (\`src/app/app.config.ts\`, \`.env\` files)
-- **Observability** with \`@znight/observability\` (structured logs, pretty-printed by \`pino-pretty\`; metrics and tracing are off in \`src/main.ts\`)
+- **Observability** with \`@znight/observability\` (structured logs: pretty-printed by \`pino-pretty\` in development, JSON in production; metrics and tracing are off in \`src/main.ts\`)
 
 ## Scripts
 
@@ -123,9 +123,9 @@ npx znight g controller users/user     # src/users/user.controller.ts
 
 ## Configuration
 
-\`AppConfig\` (\`src/app/app.config.ts\`) reads \`PORT\` and \`APP_GREETING\` from the environment or from
-\`.env\` / \`.env.local\` files. Missing or invalid values stop the application at boot with every
-problem listed.
+\`AppConfig\` (\`src/app/app.config.ts\`) reads \`PORT\`, \`APP_GREETING\` and \`NODE_ENV\` from the environment
+or from \`.env\` / \`.env.local\` files. Missing or invalid values stop the application at boot with
+every problem listed.
 
 ## Docker
 
@@ -170,7 +170,6 @@ Vitest uses \`vite.config.ts\`, so the \`znight()\` plugin regenerates the conta
     "@znight/core": "^0.1.0",
     "@znight/http": "^0.1.0",
     "@znight/observability": "^0.1.0",
-    "pino-pretty": "^13.2.0",
     "zod": "^4.6.0"
   },
   "devDependencies": {
@@ -179,6 +178,7 @@ Vitest uses \`vite.config.ts\`, so the \`znight()\` plugin regenerates the conta
     "@znight/compiler": "^0.1.0",
     "@znight/testing": "^0.1.0",
     "light-my-request": "^6.8.0",
+    "pino-pretty": "^13.2.0",
     "typescript": "^7.0.0",
     "vite": "^8.0.0",
     "vitest": "^4.1.0"
@@ -202,6 +202,10 @@ export class AppConfig {
 
   /** Greeting used by GreetingService (APP_GREETING). */
   greeting = 'Hello'
+
+  /** Runtime environment (NODE_ENV): \`znight dev\` sets "development", the Docker image "production". */
+  @Env('NODE_ENV')
+  environment = 'development'
 }
 "
 ,
@@ -287,15 +291,15 @@ const app = await Application.create({
   metadata: __ZNIGHT_METADATA__,
   plugins: [
     // first, so that its hooks wrap everything; metrics (with prom-client) and tracing are off
-    // pretty: human-readable logs for development; JSON logs (pretty: false) are better in production
-    ObservabilityPlugin.configure({
+    ObservabilityPlugin.configure(container => ({
       logging: {
         name: 'my-service',
-        pretty: true,
+        // human-readable logs in development (\`znight dev\`), JSON logs in production
+        pretty: container.get(AppConfig).environment === 'development',
       },
       metrics: false,
       tracing: false,
-    }),
+    })),
     // loads .env files and the environment, validates every @Config class before anything starts
     ConfigPlugin.configure(),
     HttpPlugin.configure(container => ({
@@ -511,7 +515,7 @@ time** — no \`reflect-metadata\`, errors reported by the compiler with their l
 
 - **HTTP** with \`@znight/http\` (fastify adapter)
 - **Configuration** with \`@znight/config\` (\`src/app/app.config.ts\`, \`.env\` files)
-- **Observability** with \`@znight/observability\` (structured logs, pretty-printed by \`pino-pretty\`; metrics and tracing are off in \`src/main.ts\`)
+- **Observability** with \`@znight/observability\` (structured logs: pretty-printed by \`pino-pretty\` in development, JSON in production; metrics and tracing are off in \`src/main.ts\`)
 - **Messaging** with \`@znight/messaging\` (in-memory broker in \`src/main.ts\`)
 
 ## Scripts
@@ -562,9 +566,9 @@ bunx znight g controller users/user     # src/users/user.controller.ts
 
 ## Configuration
 
-\`AppConfig\` (\`src/app/app.config.ts\`) reads \`PORT\` and \`APP_GREETING\` from the environment or from
-\`.env\` / \`.env.local\` files. Missing or invalid values stop the application at boot with every
-problem listed.
+\`AppConfig\` (\`src/app/app.config.ts\`) reads \`PORT\`, \`APP_GREETING\` and \`NODE_ENV\` from the environment
+or from \`.env\` / \`.env.local\` files. Missing or invalid values stop the application at boot with
+every problem listed.
 
 \`bunfig.toml\` turns Bun's own \`.env\` loading off (\`env = false\`): the files are read by
 \`@znight/config\`, the same way on Node.js and Bun.
@@ -624,7 +628,6 @@ preload = ["@znight/compiler/bun"]
     "@znight/messaging": "^0.1.0",
     "@znight/observability": "^0.1.0",
     "fastify": "^5.12.7",
-    "pino-pretty": "^13.2.0",
     "zod": "^4.6.0"
   },
   "devDependencies": {
@@ -633,6 +636,7 @@ preload = ["@znight/compiler/bun"]
     "@znight/cli": "^0.1.0",
     "@znight/compiler": "^0.1.0",
     "@znight/testing": "^0.1.0",
+    "pino-pretty": "^13.2.0",
     "typescript": "^7.0.0",
     "vite": "^8.0.0"
   }
@@ -655,6 +659,10 @@ export class AppConfig {
 
   /** Greeting used by GreetingService (APP_GREETING). */
   greeting = 'Hello'
+
+  /** Runtime environment (NODE_ENV): \`znight dev\` sets "development", the Docker image "production". */
+  @Env('NODE_ENV')
+  environment = 'development'
 }
 "
 ,
@@ -781,15 +789,15 @@ const app = await Application.create({
   metadata: __ZNIGHT_METADATA__,
   plugins: [
     // first, so that its hooks wrap everything; metrics (with prom-client) and tracing are off
-    // pretty: human-readable logs for development; JSON logs (pretty: false) are better in production
-    ObservabilityPlugin.configure({
+    ObservabilityPlugin.configure(container => ({
       logging: {
         name: 'my-service',
-        pretty: true,
+        // human-readable logs in development (\`znight dev\`), JSON logs in production
+        pretty: container.get(AppConfig).environment === 'development',
       },
       metrics: false,
       tracing: false,
-    }),
+    })),
     // loads .env files and the environment, validates every @Config class before anything starts
     ConfigPlugin.configure(),
     // in-memory broker for development: use rabbitmq(), sqs() or kafka() in production
@@ -2244,7 +2252,7 @@ A [Znight](https://github.com/znight-org/znight) application: dependency injecti
 time** — no \`reflect-metadata\`, errors reported by the compiler with their location.
 
 - **HTTP** with \`@znight/http\` (fastify adapter)
-- **Observability** with \`@znight/observability\` (structured logs, pretty-printed by \`pino-pretty\`; metrics and tracing are off in \`src/main.ts\`)
+- **Observability** with \`@znight/observability\` (structured logs: pretty-printed by \`pino-pretty\` in development, JSON in production; metrics and tracing are off in \`src/main.ts\`)
 - **OpenAPI** with \`@znight/openapi\` (\`/openapi.json\`, Swagger UI API reference at \`/docs\`, options in \`src/openapi.ts\`)
 - **GraphQL** with \`@znight/graphql\` (code-first: the schema is derived from \`src/app/greeting.resolver.ts\`)
 - **WebSocket** with \`@znight/websocket\` (\`src/app/greeting.gateway.ts\`, on the HTTP port at \`/ws\`)
@@ -2348,7 +2356,6 @@ Vitest uses \`vite.config.ts\`, so the \`znight()\` plugin regenerates the conta
     "@znight/websocket": "^0.1.0",
     "fastify": "^5.12.7",
     "graphql": "^17.0.2",
-    "pino-pretty": "^13.2.0",
     "ws": "^8.22.0",
     "zod": "^4.6.0"
   },
@@ -2357,6 +2364,7 @@ Vitest uses \`vite.config.ts\`, so the \`znight()\` plugin regenerates the conta
     "@znight/cli": "^0.1.0",
     "@znight/compiler": "^0.1.0",
     "@znight/testing": "^0.1.0",
+    "pino-pretty": "^13.2.0",
     "typescript": "^7.0.0",
     "vite": "^8.0.0",
     "vitest": "^4.1.0"
@@ -2497,11 +2505,11 @@ const app = await Application.create({
   metadata: __ZNIGHT_METADATA__,
   plugins: [
     // first, so that its hooks wrap everything; metrics (with prom-client) and tracing are off
-    // pretty: human-readable logs for development; JSON logs (pretty: false) are better in production
     ObservabilityPlugin.configure({
       logging: {
         name: 'my-service',
-        pretty: true,
+        // human-readable logs in development (\`znight dev\`), JSON logs in production
+        pretty: process.env['NODE_ENV'] === 'development',
       },
       metrics: false,
       tracing: false,

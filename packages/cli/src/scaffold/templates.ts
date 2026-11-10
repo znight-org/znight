@@ -108,11 +108,7 @@ function packageJson(options: ProjectOptions, flags: Flags): string {
     zod: versionOf('zod'),
   }
   if (flags.config) dependencies['@znight/config'] = znight
-  if (flags.observability) {
-    dependencies['@znight/observability'] = znight
-    // logging.pretty in src/main.ts; a dependency, not a dev one: the production image logs with it too
-    dependencies['pino-pretty'] = versionOf('pino-pretty')
-  }
+  if (flags.observability) dependencies['@znight/observability'] = znight
   if (flags.messaging) dependencies['@znight/messaging'] = znight
   if (flags.schedule) dependencies['@znight/schedule'] = znight
   if (flags.openapi) dependencies['@znight/openapi'] = znight
@@ -141,6 +137,8 @@ function packageJson(options: ProjectOptions, flags: Flags): string {
   }
   if (flags.bun) devDependencies['@types/bun'] = versionOf('@types/bun')
   else devDependencies['vitest'] = versionOf('vitest')
+  // logging.pretty in src/main.ts, loaded only in development: the production image does not ship it
+  if (flags.observability) devDependencies['pino-pretty'] = versionOf('pino-pretty')
   if (flags.adapter === 'express') devDependencies['@types/express'] = versionOf('@types/express')
   // in-memory requests (TestApp.inject) with the node and express adapters
   if (flags.adapter === 'node' || flags.adapter === 'express') {
@@ -429,17 +427,22 @@ function mainTs(flags: Flags): string {
 
   const plugins: string[] = []
   if (flags.observability) {
-    plugins.push(
-      '    // first, so that its hooks wrap everything; metrics (with prom-client) and tracing are off',
-      '    // pretty: human-readable logs for development; JSON logs (pretty: false) are better in production',
-      '    ObservabilityPlugin.configure({',
+    const logging = [
       '      logging: {',
       `        name: ${quote(flags.name)},`,
-      '        pretty: true,',
+      '        // human-readable logs in development (`znight dev`), JSON logs in production',
+      flags.config
+        ? "        pretty: container.get(AppConfig).environment === 'development',"
+        : "        pretty: process.env['NODE_ENV'] === 'development',",
       '      },',
       '      metrics: false,',
       '      tracing: false,',
-      '    }),',
+    ]
+    plugins.push(
+      '    // first, so that its hooks wrap everything; metrics (with prom-client) and tracing are off',
+      ...(flags.config
+        ? ['    ObservabilityPlugin.configure(container => ({', ...logging, '    })),']
+        : ['    ObservabilityPlugin.configure({', ...logging, '    }),']),
     )
   }
   if (flags.config) {
@@ -548,6 +551,10 @@ export class AppConfig {
 
   /** Greeting used by GreetingService (APP_GREETING). */
   greeting = 'Hello'
+
+  /** Runtime environment (NODE_ENV): \`znight dev\` sets "development", the Docker image "production". */
+  @Env('NODE_ENV')
+  environment = 'development'
 }
 `
 }
@@ -1003,7 +1010,7 @@ function readme(options: ProjectOptions, flags: Flags): string {
     `- **HTTP** with \`@znight/http\` (${flags.adapter === 'node' ? 'built-in node:http server' : `${flags.adapter} adapter`})`,
     flags.config ? '- **Configuration** with `@znight/config` (`src/app/app.config.ts`, `.env` files)' : undefined,
     flags.observability
-      ? '- **Observability** with `@znight/observability` (structured logs, pretty-printed by `pino-pretty`; metrics and tracing are off in `src/main.ts`)'
+      ? '- **Observability** with `@znight/observability` (structured logs: pretty-printed by `pino-pretty` in development, JSON in production; metrics and tracing are off in `src/main.ts`)'
       : undefined,
     flags.messaging ? '- **Messaging** with `@znight/messaging` (in-memory broker in `src/main.ts`)' : undefined,
     flags.schedule ? '- **Scheduled jobs** with `@znight/schedule` (`src/app/heartbeat.jobs.ts`)' : undefined,
@@ -1046,9 +1053,9 @@ function readme(options: ProjectOptions, flags: Flags): string {
     ? `
 ## Configuration
 
-\`AppConfig\` (\`src/app/app.config.ts\`) reads \`PORT\` and \`APP_GREETING\` from the environment or from
-\`.env\` / \`.env.local\` files. Missing or invalid values stop the application at boot with every
-problem listed.${
+\`AppConfig\` (\`src/app/app.config.ts\`) reads \`PORT\`, \`APP_GREETING\` and \`NODE_ENV\` from the environment
+or from \`.env\` / \`.env.local\` files. Missing or invalid values stop the application at boot with
+every problem listed.${
         flags.bun
           ? `
 
