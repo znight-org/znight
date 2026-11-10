@@ -183,7 +183,7 @@ export function awsSecretsManager(options: AwsSecretsManagerLoaderOptions): Conf
         }
         const text = secretText(output ?? {})
         if (text === undefined) throw new ConfigLoaderError(LOADER, `secret "${ref.secretId}" has no value`)
-        return { origin: `aws-secrets-manager:${ref.secretId}`, values: secretValues(ref, text) }
+        return { origin: `aws-secrets-manager:${ref.secretId}`, values: secretValues(ref, text), secret: true }
       }
       try {
         const layers = await readAll(refs, read)

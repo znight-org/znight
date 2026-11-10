@@ -2649,6 +2649,11 @@ interface ConfigLoader {
   name: string
   load(ctx: { cwd; env; source: ConfigSource }): ConfigLayer | ConfigLayer[] | undefined | Promise<...>
 }
+interface ConfigLayer {
+  origin: string // shown in messages: 'process.env', '.env.local', 'vault:secret/app'...
+  values: Record<string, unknown>
+  secret?: boolean // values masked in messages, as for @Secret fields
+}
 ```
 
 Loaders: `env({ prefix?, keepPrefix?, env? })`; `dotenv({ path?, nodeEnv?, optional?, populate?,
@@ -2658,15 +2663,27 @@ untouched unless `populate`); `json(path, { optional?, key? })`, `yaml(...)` (op
 `vault({ path, address?, token?, tokenFile?, mount?, kvVersion?: 1 | 2, namespace?, key?, optional?,
 timeoutMs?, retries?, retryDelayMs?, fetch? })` (KV, token auth); `awsSecretsManager({ secretId,
 region?, client?, clientConfig?, optional?, timeoutMs? })` (optional peer
-`@aws-sdk/client-secrets-manager`); `inline(values, { name? })`. A failing loader throws
+`@aws-sdk/client-secrets-manager`); `gcpSecretManager({ secrets?, labels?, filter?, projectId?,
+location?, version? = 'latest', stripPrefix?, mapKey?, json? = false, optional?, client?,
+clientOptions?, timeoutMs? })` (optional peer `@google-cloud/secret-manager`: `accessSecretVersion`
+for each secret, `listSecrets` with `labels.<k>=<v>` and/or `filter` to discover them, read before the
+named `secrets`; one value per secret under its `key`, else its id minus `stripPrefix` through
+`mapKey`; two discovered secrets with the same key are a `ConfigLoaderError`; the project is
+`projectId`, `GOOGLE_CLOUD_PROJECT` / `GCLOUD_PROJECT`, then the client's; `NOT_FOUND` is skipped
+when `optional`; one location per loader, `location` or global, whose endpoint the default client
+uses: a resource name of another location is rejected when the loader is created, ZNIGHT012); `inline(values, { name? })`. A failing loader throws
 `ConfigLoaderError` (ZNIGHT006); invalid options or metadata are ZNIGHT012. Loader errors never
 quote values: a JSON or YAML syntax error gives the file, the line, the column and a fixed reason
 (the YAML error code), never the parser message, which quotes the input (a secret, maybe), and the
 parser error is not kept as `cause`; YAML warnings are re-emitted the same way (`YAMLWarning`).
-`vault()` and `awsSecretsManager()` reject, when created, a `timeoutMs` that is not an integer from 1
+`vault()`, `awsSecretsManager()` and `gcpSecretManager()` reject, when created, a `timeoutMs` that is not an integer from 1
 to 2^31 − 1, and `vault()` a `retries` or `retryDelayMs` that is not a finite number >= 0 (ZNIGHT012);
-the backoff between retries is capped at 30 s. Both read their secrets concurrently and, once one
-read fails, abort the requests and retry waits of the others. `vault()` checks the token and the namespace before any request: a value `fetch` would refuse as a
+the backoff between retries is capped at 30 s. They read their secrets concurrently and, once one
+read fails, abort the requests and retry waits of the others (`gcpSecretManager()` stops waiting for
+them). The layers of these three loaders are flagged `secret: true` (`ConfigLayer.secret`, also
+available to custom loaders): a field whose value comes from such a layer is masked like a `@Secret`
+field (in validation messages and on the instance, below) even without `@Secret`; `resolveFields`
+returns those properties in `secrets`. `vault()` checks the token and the namespace before any request: a value `fetch` would refuse as a
 header (line break, NUL, a character above U+00FF) is a `ConfigLoaderError` naming its origin
 (option, token file, `VAULT_TOKEN`, `VAULT_NAMESPACE`), never the value.
 
@@ -2679,8 +2696,8 @@ and are reported as `process.env`. On Bun, `env()` (reading the default `process
 (`env = false` in `bunfig.toml`, `bun --no-env-file`, `--env-file`); `env({ env: process.env })`
 skips the check.
 
-Secrets: `@Secret` values are masked (`[REDACTED]`) by non-enumerable `toJSON`, `toString` and
-`util.inspect.custom` installed on the instance (methods the class defines are kept) and in error
+Secrets: `@Secret` values, and values read from a `secret` layer, are masked (`[REDACTED]`) by
+non-enumerable `toJSON`, `toString` and `util.inspect.custom` installed on the instance (methods the class defines are kept) and in error
 messages; the property itself keeps the real value. A `ConfigSource` never prints its values.
 
 ### 9.4 Observability (`@znight/observability`)

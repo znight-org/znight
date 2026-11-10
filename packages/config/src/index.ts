@@ -1,6 +1,6 @@
 /**
  * `@znight/config`: type-safe configuration classes loaded from the environment, `.env` files,
- * JSON/YAML files and secret stores (Vault, AWS Secrets Manager).
+ * JSON/YAML files and secret stores (Vault, AWS Secrets Manager, Google Cloud Secret Manager).
  *
  * The compiler extension (`@znight/config/compiler`) turns every `@Config` class into a singleton
  * provider whose factory calls {@link loadConfig}; {@link ConfigPlugin} loads the sources and
@@ -45,6 +45,15 @@ export {
 export { type DotenvLoaderOptions, dotenv, dotenvFiles } from './loaders/dotenv.ts'
 export { type EnvLoaderOptions, env } from './loaders/env.ts'
 export { type FileLoaderOptions, json, yaml } from './loaders/files.ts'
+export {
+  type AccessSecretVersionResponseLike,
+  type GcpSecretLike,
+  type GcpSecretManagerLoaderOptions,
+  type GcpSecretPayloadLike,
+  type GcpSecretRef,
+  gcpSecretManager,
+  type SecretManagerServiceClientLike,
+} from './loaders/gcp.ts'
 export { type InlineLoaderOptions, inline } from './loaders/inline.ts'
 export { type LoadConfigSourceOptions, loadConfigSource } from './loaders/run.ts'
 export { type VaultLoaderOptions, vault } from './loaders/vault.ts'

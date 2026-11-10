@@ -16,6 +16,11 @@ import { sourceEntry } from './source.ts'
 export interface ResolvedFields {
   /** Coerced values to assign, by property (properties left to their initializer are absent). */
   readonly values: ReadonlyMap<string, unknown>
+  /**
+   * Properties whose value comes from a `ConfigLayer.secret` layer (a secret store): masked
+   * like `@Secret` properties, even when the field is not `@Secret`.
+   */
+  readonly secrets: ReadonlySet<string>
   readonly problems: readonly ConfigProblem[]
 }
 
@@ -75,7 +80,8 @@ function definitionProblem(field: ConfigFieldDefinition | null | undefined, seen
  * 3. `field.default` (`@Default` or statically evaluated initializer);
  * 4. the instance initializer, when `hasInitializer(property)` (left untouched).
  *
- * `undefined`, `null` and blank strings (except for `string` fields) count as not set. A field
+ * `undefined`, `null` and blank strings (except for `string` fields) count as not set. A value
+ * found in a secret layer is masked in problems and listed in `secrets`. A field
  * without value is a `missing` problem when `required`; a value that cannot be coerced (or is not
  * in `enum`) is an `invalid` problem.
  */
@@ -87,6 +93,7 @@ export function resolveFields(
 ): ResolvedFields {
   assertFieldDefinitions(config, fields)
   const values = new Map<string, unknown>()
+  const secrets = new Set<string>()
   const problems: ConfigProblem[] = []
   for (const field of fields) {
     const secret = field.secret === true
@@ -97,9 +104,14 @@ export function resolveFields(
       const entry = sourceEntry(source, name)
       if (entry === undefined || isUnset(entry.value, field.type)) continue
       found = true
-      const result = coerceConfigValue(entry.value, field.type, { enum: field.enum, secret })
-      if (result.ok) values.set(field.property, result.value)
-      else problems.push({ ...base, kind: 'invalid', message: result.message, name, origin: entry.origin })
+      const result = coerceConfigValue(entry.value, field.type, {
+        enum: field.enum,
+        secret: secret || entry.secret === true,
+      })
+      if (result.ok) {
+        values.set(field.property, result.value)
+        if (entry.secret === true) secrets.add(field.property)
+      } else problems.push({ ...base, kind: 'invalid', message: result.message, name, origin: entry.origin })
       break
     }
     if (found) continue
@@ -120,5 +132,5 @@ export function resolveFields(
     if (hasInitializer(field.property)) continue
     if (field.required === true) problems.push({ ...base, kind: 'missing', message: 'missing required value' })
   }
-  return { values, problems }
+  return { values, secrets, problems }
 }
