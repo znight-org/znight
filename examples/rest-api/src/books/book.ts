@@ -57,6 +57,14 @@ export interface Cover {
   readonly updatedAt: Date
 }
 
+/** What is known about a cover without reading its bytes. */
+export interface CoverInfo {
+  readonly contentType: string
+  /** Size of the image, in bytes. */
+  readonly size: number
+  readonly updatedAt: Date
+}
+
 /** Thrown when a book does not exist: mapped to `404 Not Found` by `DomainErrorMapper`. */
 export class BookNotFoundError extends Error {
   readonly bookId: number
@@ -84,6 +92,20 @@ export class UnsupportedCoverError extends Error {
   constructor() {
     super('The cover must be a PNG, JPEG or WebP image')
     this.name = 'UnsupportedCoverError'
+  }
+}
+
+/**
+ * Thrown when a cover was replaced or deleted between the read of its metadata and the read of its
+ * bytes: mapped to `503 Service Unavailable` with `Retry-After`, a retry sees the new version.
+ */
+export class CoverChangedError extends Error {
+  readonly bookId: number
+
+  constructor(bookId: number) {
+    super(`The cover of book ${bookId} changed while it was being sent`)
+    this.name = 'CoverChangedError'
+    this.bookId = bookId
   }
 }
 

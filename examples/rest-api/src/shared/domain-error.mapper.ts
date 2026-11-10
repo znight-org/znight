@@ -4,10 +4,17 @@ import {
   type ExceptionMapper,
   type ExceptionMapperResult,
   NotFoundException,
+  ServiceUnavailableException,
   UnsupportedMediaTypeException,
 } from '@znight/http'
 
-import { BookNotFoundError, CoverNotFoundError, DuplicateIsbnError, UnsupportedCoverError } from '../books/book.js'
+import {
+  BookNotFoundError,
+  CoverChangedError,
+  CoverNotFoundError,
+  DuplicateIsbnError,
+  UnsupportedCoverError,
+} from '../books/book.js'
 
 /**
  * Turns the domain errors into HTTP errors, so that services throw meaningful errors without
@@ -23,6 +30,9 @@ export class DomainErrorMapper implements ExceptionMapper {
     }
     if (error instanceof DuplicateIsbnError) return new ConflictException(error.message, { isbn: error.isbn })
     if (error instanceof UnsupportedCoverError) return new UnsupportedMediaTypeException(error.message)
+    if (error instanceof CoverChangedError) {
+      return new ServiceUnavailableException(error.message, undefined, { headers: { 'retry-after': '1' } })
+    }
     return undefined
   }
 }

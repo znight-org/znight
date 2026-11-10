@@ -2,7 +2,7 @@
  * Download primitives: media types, byte sizes, `Range` parsing, `Content-Disposition`, file
  * resolution (preconditions, ranges, `root` confinement) and the stream helpers.
  */
-import type { FileRequest, ResolvedFile } from '../src/files.ts'
+import type { FileRequest, LazyFile, LazyFileContent, ResolvedFile } from '../src/files.ts'
 import type { FilesDir } from './files-app.ts'
 
 import fs from 'node:fs'
@@ -399,7 +399,7 @@ describe('resolveFile', () => {
     for (let index = 0; index < 20; index++) {
       const resolved = await resolveFile(new FileBody(dir.sample), get())
       expect(resolved.body).toBeInstanceOf(Blob)
-      expect(resolved.body?.size).toBe(300)
+      expect((resolved.body as Blob).size).toBe(300)
       if (index % 2 === 0) unread.push(resolved)
       else await text(resolved)
     }
@@ -428,6 +428,297 @@ describe('resolveFile', () => {
     expect(await caught(() => new FileBody('a', { dotfiles: 'ignore' as never }))).toBeInstanceOf(TypeError)
     expect(isFileBody(HttpResponse.file('a').body)).toBe(true)
     expect(isFileBody({ source: 'a' })).toBe(false)
+  })
+})
+
+describe('lazy files', () => {
+  const CONTENT = '0123456789'.repeat(30)
+  const BYTES = new TextEncoder().encode(CONTENT)
+  const MODIFIED = Date.parse('2024-05-06T07:08:09Z')
+  const LAST_MODIFIED = 'Mon, 06 May 2024 07:08:09 GMT'
+  const get = (headers: Record<string, string> = {}): FileRequest => ({ method: 'GET', headers })
+  const head = (headers: Record<string, string> = {}): FileRequest => ({ method: 'HEAD', headers })
+  const text = async (resolved: ResolvedFile): Promise<string> =>
+    resolved.body === null ? '' : DECODER.decode(new Uint8Array(await new Response(resolved.body).arrayBuffer()))
+
+  /** A Web stream of `bytes` in chunks of `size` bytes, recording its reads and its cancellation. */
+  function chunked(bytes: Uint8Array, size: number, state = { cancelled: false, pulled: 0 }) {
+    let offset = 0
+    return new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          state.pulled++
+          if (offset >= bytes.byteLength) {
+            controller.close()
+            return
+          }
+          controller.enqueue(bytes.slice(offset, offset + size))
+          offset += size
+        },
+        cancel() {
+          state.cancelled = true
+        },
+      },
+      { highWaterMark: 0 },
+    )
+  }
+
+  /** A lazy file of the sample content counting its loads. */
+  function lazy(content: () => LazyFileContent | Promise<LazyFileContent> = () => BYTES, extra: object = {}) {
+    const calls = { loads: 0 }
+    const file = {
+      size: BYTES.byteLength,
+      etag: '"v1"',
+      lastModified: new Date(MODIFIED),
+      type: 'text/plain; charset=utf-8',
+      ...extra,
+      load: () => {
+        calls.loads++
+        return content()
+      },
+    } as LazyFile
+    return { body: new FileBody(file), calls }
+  }
+
+  it('answers 304 and 412 without loading the content', async () => {
+    const notModified: FileRequest[] = [
+      get({ 'if-none-match': '"v1"' }),
+      get({ 'if-none-match': '"other", W/"v1"' }),
+      get({ 'if-none-match': '*' }),
+      get({ 'if-modified-since': LAST_MODIFIED }),
+      head({ 'if-none-match': '"v1"' }),
+      get({ 'if-none-match': '"v1"', range: 'bytes=0-4' }),
+    ]
+    for (const request of notModified) {
+      const { body, calls } = lazy()
+      const resolved = await resolveFile(body, request)
+      expect(resolved.status).toBe(304)
+      expect(resolved.body).toBeNull()
+      expect({ ...resolved.headers }).toEqual({ etag: '"v1"', 'last-modified': LAST_MODIFIED })
+      expect(calls.loads).toBe(0)
+    }
+    const failing: FileRequest[] = [
+      get({ 'if-match': '"other"' }),
+      get({ 'if-unmodified-since': 'Sun, 05 May 2024 00:00:00 GMT' }),
+      { method: 'PUT', headers: { 'if-none-match': '*' } },
+    ]
+    for (const request of failing) {
+      const { body, calls } = lazy()
+      const error = await caught(() => resolveFile(body, request))
+      expect((error as HttpException).status).toBe(412)
+      expect(calls.loads).toBe(0)
+    }
+  })
+
+  it('answers HEAD, unsatisfiable ranges and empty files without loading the content', async () => {
+    const plain = lazy()
+    const resolved = await resolveFile(plain.body, head())
+    expect(resolved.status).toBe(200)
+    expect(resolved.body).toBeNull()
+    expect({ ...resolved.headers }).toEqual({
+      'content-type': 'text/plain; charset=utf-8',
+      'accept-ranges': 'bytes',
+      etag: '"v1"',
+      'last-modified': LAST_MODIFIED,
+      'content-length': '300',
+    })
+    const unsatisfiable = lazy()
+    const error = await caught(() => resolveFile(unsatisfiable.body, get({ range: 'bytes=300-' })))
+    expect((error as HttpException).status).toBe(416)
+    const empty = lazy(() => new Uint8Array(0), { size: 0 })
+    const nothing = await resolveFile(empty.body, get())
+    expect(nothing.status).toBe(200)
+    expect(nothing.body).toBeNull()
+    expect(nothing.headers['content-length']).toBe('0')
+    expect(plain.calls.loads + unsatisfiable.calls.loads + empty.calls.loads).toBe(0)
+  })
+
+  it('loads the content once for 200 and 206 (bytes, Blob, streams, Node.js readables, async iterables)', async () => {
+    const sources: Record<string, () => LazyFileContent> = {
+      bytes: () => BYTES,
+      buffer: () => BYTES.slice().buffer,
+      blob: () => new Blob([BYTES]),
+      'web stream': () => chunked(BYTES, 7),
+      'node readable': () => Readable.from([BYTES.slice(0, 100), BYTES.slice(100)]),
+      'async iterable': () =>
+        (async function* () {
+          for (let offset = 0; offset < BYTES.byteLength; offset += 11) {
+            yield await Promise.resolve(BYTES.slice(offset, offset + 11))
+          }
+        })(),
+    }
+    for (const [kind, source] of Object.entries(sources)) {
+      for (const [range, status, expected] of [
+        [undefined, 200, CONTENT],
+        ['bytes=10-14', 206, '01234'],
+        ['bytes=5-23', 206, CONTENT.slice(5, 24)],
+        ['bytes=-3', 206, '789'],
+        ['bytes=290-', 206, '0123456789'],
+      ] as const) {
+        const { body, calls } = lazy(source)
+        const resolved = await resolveFile(body, get(range === undefined ? {} : { range }))
+        expect({ kind, range, status: resolved.status }).toEqual({ kind, range, status })
+        expect({ kind, range, text: await text(resolved) }).toEqual({ kind, range, text: expected })
+        expect({ kind, range, loads: calls.loads }).toEqual({ kind, range, loads: 1 })
+      }
+    }
+    // an asynchronous load()
+    const later = lazy(async () => new Blob([BYTES]))
+    expect(await text(await resolveFile(later.body, get()))).toBe(CONTENT)
+    expect(later.calls.loads).toBe(1)
+  })
+
+  it('uses the entity tag as given (weak tags never match strongly)', async () => {
+    const weak = { etag: 'W/"v1"' }
+    expect((await resolveFile(lazy(undefined, weak).body, get({ 'if-none-match': 'W/"v1"' }))).status).toBe(304)
+    expect((await resolveFile(lazy(undefined, weak).body, get({ 'if-none-match': '"v1"' }))).status).toBe(304)
+    const ifMatch = lazy(undefined, weak)
+    const error = await caught(() => resolveFile(ifMatch.body, get({ 'if-match': 'W/"v1"' })))
+    expect((error as HttpException).status).toBe(412)
+    // If-Range needs a strong match: the whole content
+    const ranged = await resolveFile(lazy(undefined, weak).body, get({ range: 'bytes=0-1', 'if-range': 'W/"v1"' }))
+    expect(ranged.status).toBe(200)
+    const strong = await resolveFile(lazy().body, get({ range: 'bytes=0-1', 'if-range': '"v1"' }))
+    expect(strong.status).toBe(206)
+    expect(await text(strong)).toBe('01')
+    const stale = await resolveFile(lazy().body, get({ range: 'bytes=0-1', 'if-range': '"v0"' }))
+    expect(stale.status).toBe(200)
+  })
+
+  it('matches entity tags containing commas in If-None-Match / If-Match lists', async () => {
+    const comma = { etag: '"3,7"' }
+    for (const header of ['"3,7"', '"other", "3,7"', '"3,7" , W/"x"', 'W/"3,7"']) {
+      const { body, calls } = lazy(undefined, comma)
+      expect((await resolveFile(body, get({ 'if-none-match': header }))).status).toBe(304)
+      expect(calls.loads).toBe(0)
+    }
+    for (const header of ['"3"', '"7"', '"3", "7"']) {
+      expect((await resolveFile(lazy(undefined, comma).body, get({ 'if-none-match': header }))).status).toBe(200)
+    }
+    const matched = lazy(undefined, comma)
+    const resolved = await resolveFile(matched.body, get({ 'if-match': '"a", "3,7"' }))
+    expect(resolved.status).toBe(200)
+    expect(await text(resolved)).toBe(CONTENT)
+    expect(matched.calls.loads).toBe(1)
+    const error = await caught(() => resolveFile(lazy(undefined, comma).body, get({ 'if-match': '"3", "7"' })))
+    expect((error as HttpException).status).toBe(412)
+    const ranged = await resolveFile(lazy(undefined, comma).body, get({ range: 'bytes=0-1', 'if-range': '"3,7"' }))
+    expect(ranged.status).toBe(206)
+  })
+
+  it('loads the content for a body sent to a method other than GET and HEAD (whole content, no range)', async () => {
+    for (const method of ['POST', 'PUT', 'DELETE']) {
+      const { body, calls } = lazy()
+      const resolved = await resolveFile(body, { method, headers: { range: 'bytes=0-1' } })
+      expect(resolved.status).toBe(200)
+      expect(await text(resolved)).toBe(CONTENT)
+      expect(calls.loads).toBe(1)
+    }
+  })
+
+  it('derives the validators from the size and date when no entity tag is given', async () => {
+    const dated = await resolveFile(lazy(undefined, { etag: undefined }).body, get())
+    expect(dated.headers['etag']).toBe(`"${MODIFIED.toString(16)}-12c"`)
+    expect(dated.headers['last-modified']).toBe(LAST_MODIFIED)
+    const numeric = await resolveFile(lazy(undefined, { etag: undefined, lastModified: MODIFIED }).body, get())
+    expect(numeric.headers['etag']).toBe(dated.headers['etag'] as string)
+    // no validator at all: no conditional answer but `*`
+    const bare = lazy(undefined, { etag: undefined, lastModified: undefined })
+    const resolved = await resolveFile(bare.body, get({ 'if-none-match': '"x"', 'if-modified-since': LAST_MODIFIED }))
+    expect(resolved.status).toBe(200)
+    expect(resolved.headers['etag']).toBeUndefined()
+    expect(resolved.headers['last-modified']).toBeUndefined()
+    expect((await resolveFile(bare.body, get({ 'if-none-match': '*' }))).status).toBe(304)
+  })
+
+  it('takes the content type and file name from the metadata, under the options', async () => {
+    const named = new FileBody(
+      { size: 3, name: 'données.json', load: () => new Uint8Array([1, 2, 3]) },
+      { disposition: 'inline' },
+    )
+    const resolved = await resolveFile(named, get())
+    expect(resolved.headers['content-type']).toBe('application/json; charset=utf-8')
+    expect(resolved.headers['content-disposition']).toBe(
+      `inline; filename="donn_es.json"; filename*=UTF-8''donn%C3%A9es.json`,
+    )
+    const typed = new FileBody(
+      { size: 3, type: 'image/png', name: 'x.json', load: () => new Uint8Array(3) },
+      { contentType: 'image/webp', filename: 'cover.webp' },
+    )
+    const overridden = await resolveFile(typed, get())
+    expect(overridden.headers['content-type']).toBe('image/webp')
+    expect(overridden.headers['content-disposition']).toBe('attachment; filename="cover.webp"')
+    const bare = await resolveFile(new FileBody({ size: 1, load: () => new Uint8Array(1) }), get())
+    expect(bare.headers['content-type']).toBe('application/octet-stream')
+    expect(bare.headers['content-disposition']).toBeUndefined()
+  })
+
+  it('rejects content that does not match the declared size', async () => {
+    const short = lazy(() => BYTES.slice(1))
+    expect(String(await caught(() => resolveFile(short.body, get())))).toContain('299 bytes')
+    const blob = lazy(() => new Blob([BYTES, 'x']))
+    expect(String(await caught(() => resolveFile(blob.body, get())))).toContain('301 bytes')
+    // a stream is checked while it is read
+    const shortStream = await resolveFile(lazy(() => chunked(BYTES.slice(10), 50)).body, get())
+    expect(String(await caught(() => text(shortStream)))).toContain('290 bytes')
+    const longState = { cancelled: false, pulled: 0 }
+    const longStream = await resolveFile(lazy(() => chunked(new Uint8Array(400), 50, longState)).body, get())
+    expect(String(await caught(() => text(longStream)))).toContain('more than')
+    expect(longState.cancelled).toBe(true)
+  })
+
+  it('stops reading the loaded stream after the range, and cancels it with the response', async () => {
+    const ranged = { cancelled: false, pulled: 0 }
+    const partial = await resolveFile(lazy(() => chunked(BYTES, 10, ranged)).body, get({ range: 'bytes=12-25' }))
+    expect(await text(partial)).toBe(CONTENT.slice(12, 26))
+    expect(ranged.pulled).toBe(3)
+    expect(ranged.cancelled).toBe(true)
+    // the client leaves: the response body is cancelled, and the loaded stream with it
+    const state = { cancelled: false, pulled: 0 }
+    const resolved = await resolveFile(lazy(() => chunked(BYTES, 10, state)).body, get())
+    const reader = (resolved.body as ReadableStream<Uint8Array>).getReader()
+    expect(DECODER.decode((await reader.read()).value)).toBe('0123456789')
+    await reader.cancel()
+    expect(state.cancelled).toBe(true)
+    expect(state.pulled).toBe(1)
+  })
+
+  it('rejects with the error of load()', async () => {
+    const failure = new Error('storage down')
+    for (const load of [
+      () => {
+        throw failure
+      },
+      () => Promise.reject(failure),
+    ]) {
+      expect(await caught(() => resolveFile(new FileBody({ size: 3, load }), get()))).toBe(failure)
+    }
+    const invalid = new FileBody({ size: 3, load: () => 42 as never })
+    expect(await caught(() => resolveFile(invalid, get()))).toBeInstanceOf(TypeError)
+  })
+
+  it('validates the metadata', async () => {
+    const load = (): Uint8Array => new Uint8Array(0)
+    for (const file of [
+      { size: -1, load },
+      { size: 1.5, load },
+      { size: Number.NaN, load },
+      { size: '3', load },
+      { size: 3, etag: 'v1', load },
+      { size: 3, etag: '"a"b"', load },
+      { size: 3, etag: 'W/v1', load },
+      { size: 3, lastModified: new Date('nope'), load },
+      { size: 3, lastModified: 'yesterday', load },
+      { size: 3, type: 42, load },
+      { size: 3, name: 42, load },
+      { size: 3, load: 'not a function' },
+    ]) {
+      expect({ file, error: await caught(() => HttpResponse.file(file as never)) }).toEqual({
+        file,
+        error: expect.any(TypeError),
+      })
+    }
+    expect(isFileBody(HttpResponse.file({ size: 0, load }).body)).toBe(true)
   })
 })
 

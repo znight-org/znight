@@ -4,8 +4,19 @@
  */
 import type { FilesDir } from './files-app.ts'
 
-import { createFilesDir, filesMetadata, filesOptions, filesState, streamLog } from './files-app.ts'
-import { ADAPTERS, createApp, type Send, type TestApp, TRANSPORTS } from './helpers.ts'
+import http from 'node:http'
+
+import {
+  createFilesDir,
+  filesMetadata,
+  filesOptions,
+  filesState,
+  LAZY_ETAG,
+  LAZY_MODIFIED,
+  lazyState,
+  streamLog,
+} from './files-app.ts'
+import { ADAPTERS, createApp, type Send, sleep, type TestApp, TRANSPORTS } from './helpers.ts'
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
 
 function form(entries: Record<string, string | File | readonly (string | File)[]>): FormData {
@@ -26,6 +37,9 @@ function rawMultipart(boundary: string, parts: readonly string[]): string {
 }
 
 let dir: FilesDir
+
+/** Whether the Hono adapter serves with `Bun.serve()` (tests running on Bun). */
+const BUN_SERVE = typeof (globalThis as { Bun?: unknown }).Bun !== 'undefined'
 
 beforeAll(() => {
   dir = createFilesDir()
@@ -54,6 +68,8 @@ for (const adapter of ADAPTERS) {
         beforeAll(() => {
           send = transport.create(app.http)
         })
+        /** Whether streamed bodies reach the client chunked: `Bun.serve()` ignores their `Content-Length`. */
+        const chunkedStreams = adapter.name === 'hono' && transport.name === 'fetch' && BUN_SERVE
 
         describe('uploads', () => {
           it('injects the file and the validated text fields', async () => {
@@ -406,6 +422,87 @@ for (const adapter of ADAPTERS) {
           })
         })
 
+        describe('lazy files', () => {
+          const loads = async (request: Parameters<Send>[0]) => {
+            const before = lazyState.loads
+            const res = await send(request)
+            return { res, loads: lazyState.loads - before }
+          }
+
+          it('answers 304 and 412 without loading the content', async () => {
+            for (const headers of [
+              { 'if-none-match': LAZY_ETAG },
+              { 'if-modified-since': LAZY_MODIFIED.toUTCString() },
+              { 'if-none-match': LAZY_ETAG, range: 'bytes=0-4' },
+            ] as Record<string, string>[]) {
+              for (const kind of ['bytes', 'blob', 'stream']) {
+                const { res, loads: count } = await loads({ method: 'GET', url: `/lazy/${kind}`, headers })
+                expect({ kind, headers, status: res.status, loads: count }).toEqual({
+                  kind,
+                  headers,
+                  status: 304,
+                  loads: 0,
+                })
+                expect(res.body).toBe('')
+                expect(res.headers['etag']).toBe(LAZY_ETAG)
+              }
+            }
+            const failed = await loads({ method: 'GET', url: '/lazy/stream', headers: { 'if-match': '"other"' } })
+            expect(failed.res.status).toBe(412)
+            expect(failed.loads).toBe(0)
+          })
+
+          it('loads the content once for 200 and 206', async () => {
+            for (const kind of ['bytes', 'blob', 'stream']) {
+              // Bun.serve() (Hono on Bun) sends a stream chunked, whatever its Content-Length, unless it
+              // could read the whole stream at once (a short range)
+              const length = (value: string) => (chunkedStreams && kind === 'stream' ? undefined : value)
+              const full = await loads({ method: 'GET', url: `/lazy/${kind}` })
+              expect({ kind, status: full.res.status, loads: full.loads }).toEqual({ kind, status: 200, loads: 1 })
+              expect(full.res.body).toBe('0123456789'.repeat(30))
+              expect(full.res.headers['content-length']).toBe(length('300') as string)
+              expect(full.res.headers).toMatchObject({
+                'content-type': 'text/plain; charset=utf-8',
+                'accept-ranges': 'bytes',
+                etag: LAZY_ETAG,
+                'last-modified': 'Mon, 06 May 2024 07:08:09 GMT',
+              })
+              const partial = await loads({ method: 'GET', url: `/lazy/${kind}`, headers: { range: 'bytes=60-69' } })
+              expect({ kind, status: partial.res.status, loads: partial.loads }).toEqual({
+                kind,
+                status: 206,
+                loads: 1,
+              })
+              expect(partial.res.body).toBe('0123456789')
+              expect(partial.res.headers['content-range']).toBe('bytes 60-69/300')
+              expect([length('10'), '10']).toContain(partial.res.headers['content-length'] as string)
+            }
+          })
+
+          it('answers HEAD without loading the content', async () => {
+            const { res, loads: count } = await loads({ method: 'HEAD', url: '/lazy/stream' })
+            expect(res.status).toBe(200)
+            expect(res.body).toBe('')
+            expect(res.headers['content-length']).toBe('300')
+            expect(count).toBe(0)
+          })
+
+          it('answers the errors of load() through the exception mappers', async () => {
+            const failing = await loads({ method: 'GET', url: '/lazy/failing' })
+            expect(failing.res.status).toBe(500)
+            expect(failing.res.json()).toEqual({ statusCode: 500, error: 'Internal Server Error' })
+            expect(failing.loads).toBe(1)
+            const logged = app.logger.entries.some(
+              entry => (entry.context?.['err'] as Error | undefined)?.message === 'storage down',
+            )
+            expect(logged).toBe(true)
+            const mapped = await loads({ method: 'GET', url: '/lazy/mapped' })
+            expect(mapped.res.status).toBe(503)
+            expect(mapped.res.json()).toEqual({ unavailable: true })
+            expect(mapped.res.headers['content-length']).not.toBe('10')
+          })
+        })
+
         describe('streams', () => {
           it('streams Node.js readables, Web streams and async iterables', async () => {
             const readable = await send({ method: 'GET', url: '/download/stream/readable' })
@@ -448,5 +545,28 @@ for (const adapter of ADAPTERS) {
         })
       })
     }
+
+    it('cancels the stream of a lazy file when the client disconnects', async () => {
+      lazyState.pulled = 0
+      lazyState.cancelled = false
+      const port = app.http.address?.port as number
+      let received = false
+      const request = http.get({ host: '127.0.0.1', port, path: '/lazy/endless' }, response => {
+        const length = adapter.name === 'hono' && BUN_SERVE ? undefined : String(1024 * 1024 * 1024)
+        expect(response.headers['content-length']).toBe(length as string)
+        response.once('data', () => {
+          received = true
+          response.pause()
+        })
+      })
+      request.on('error', () => undefined)
+      while (!received) await sleep(10)
+      await sleep(100)
+      // backpressure: the stream is read as the client receives the data
+      expect(lazyState.pulled).toBeLessThan(200)
+      request.destroy()
+      for (let index = 0; index < 300 && !lazyState.cancelled; index++) await sleep(10)
+      expect(lazyState.cancelled).toBe(true)
+    })
   })
 }

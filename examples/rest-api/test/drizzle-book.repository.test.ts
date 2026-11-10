@@ -96,12 +96,17 @@ describe('DrizzleBookRepository', () => {
     expect(await repository.saveCover(created.id, { contentType: 'image/png', data: PNG_BYTES })).toBe(true)
     expect(await repository.saveCover(999, { contentType: 'image/png', data: PNG_BYTES })).toBe(false)
 
-    const cover = await repository.findCover(created.id)
-    expect(cover).toMatchObject({ contentType: 'image/png', data: PNG_BYTES })
+    const cover = await repository.findCoverInfo(created.id)
+    expect(cover).toMatchObject({ contentType: 'image/png', size: PNG_BYTES.byteLength })
+    const version = cover?.updatedAt ?? new Date(0)
+    expect(await repository.findCoverData(created.id, version)).toEqual(PNG_BYTES)
     expect((await repository.findById(created.id))?.coverUpdatedAt).toEqual(cover?.updatedAt ?? null)
+    // another version: no bytes
+    expect(await repository.findCoverData(created.id, new Date(version.getTime() - 1))).toBeUndefined()
 
     expect(await repository.delete(created.id)).toBe(true)
     expect(await repository.delete(created.id)).toBe(false)
-    expect(await repository.findCover(created.id)).toBeUndefined()
+    expect(await repository.findCoverInfo(created.id)).toBeUndefined()
+    expect(await repository.findCoverData(created.id, version)).toBeUndefined()
   })
 })

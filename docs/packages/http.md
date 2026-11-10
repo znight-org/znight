@@ -252,13 +252,37 @@ async invoice(@Param('id') id: string) {
 }
 ```
 
-`HttpResponse.file(path | URL | Blob, { root?, dotfiles?, filename?, disposition?, contentType? })` streams the
+`HttpResponse.file(path | URL | Blob | LazyFile, { root?, dotfiles?, filename?, disposition?, contentType? })` streams the
 file with `Content-Type` (from the extension), `Content-Length`, `Last-Modified`, `ETag` and
 `Accept-Ranges`, and handles conditional requests (`If-None-Match` / `If-Modified-Since` → `304`,
 `If-Match` / `If-Unmodified-Since` → `412`) and single byte ranges (`206`, `416` when unsatisfiable).
 `Content-Disposition` follows RFC 6266 with a UTF-8 `filename*` for non-ASCII names. Missing files
 and paths leaving `root` (`..`, absolute paths, symbolic links) or naming dotfiles (`.env`, `.git/`)
 answer `404`.
+
+Content stored elsewhere (a database row, an object storage) is passed as a **lazy file**: its
+metadata up front, its bytes behind `load()`. The preconditions and the range are evaluated from the
+metadata; `load()` runs only when a body is sent (`200` / `206`), never for a `304`, a `412` or a
+`HEAD` request:
+
+```ts
+@Get('/books/:id/cover')
+async cover(@Param('id') id: number) {
+  const cover = await this.covers.info(id) // type, size and date, without the bytes
+  return HttpResponse.file({
+    size: cover.size,
+    lastModified: cover.updatedAt, // or etag: '"v42"'
+    type: cover.contentType,
+    load: () => this.covers.bytes(id, cover.updatedAt), // Uint8Array, Blob or stream: the whole content
+  })
+}
+```
+
+An error of `load()` goes through the exception mappers like an error of the handler; a stream it
+returns is read as the client receives it and cancelled when the client disconnects. The content
+must have the declared `size`, and `load()` should read the version the metadata describes (it runs
+later, after a concurrent update the bytes may belong to another version). See the
+[package README](../../packages/http/README.md#lazy-files) for the details.
 
 ### Streaming responses
 
