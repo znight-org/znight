@@ -2354,7 +2354,14 @@ reads Fastify's internal route context and reply state, and takes the lifecycle 
 found); otherwise the request goes through Fastify's lifecycle, where a `content-type` Fastify
 cannot parse is hidden from its parsers on Znight routes (restored for the plugin), so they answer
 like the other adapters instead of Fastify's 415; Express answers 500 with an explicit log entry
-when a body parser already consumed the body; `honoAdapter({ app?, serveOptions? })` passes
+when a body parser already consumed the body; `fastifyAdapter({ instance })` registers the Znight
+routes in an encapsulated context without a prefix, which shares the root instance's not-found
+handler in Fastify 5: with `notFound: 'instance'` (the default when the instance already has a
+not-found handler once that context loads) the instance's handler answers unknown URLs, and a
+root `onRequest` hook passes to the fallback handler the requests Fastify routed to the not-found
+handler on the path of a Znight route (`405`, automatic `OPTIONS`, CORS preflights), without
+adding routes;
+`honoAdapter({ app?, serveOptions? })` passes
 `serveOptions` to `Bun.serve()` with
 `maxRequestBodySize` unlimited by default (the plugin enforces the body limits) and lifts Bun's
 `idleTimeout` while a streamed response is sent; on `Bun.serve()` a file is handed to Bun, which
