@@ -189,6 +189,13 @@ read. One that throws instead is tolerated: the frame is answered with `BAD_FRAM
 logged at `warn`, once per connection (the client chooses its frames). An `encode` failure of a
 reply is a server bug: it is logged at `error` every time (the reply is then not sent).
 
+Error reporters listen to the `error:report` hook of `@znight/core` (see the
+[Sentry recipe](https://github.com/znight-org/znight/blob/main/docs/guide/plugins.md#report-errors-error-report)): the plugin emits it, when it has listeners, for an unexpected failure of a
+handler (not a `WsException`, a 4xx `HttpException` or a timeout), of `@OnConnect` or of
+`@OnDisconnect`, with `source: 'websocket'`, `operation` (`ChatGateway.send`), the handshake's
+`requestId`, the tags `gateway`, `path`, `event`, `handler` and `connectionId`, and the
+`WsMessageContext` (the `WsConnection` for `@OnConnect` / `@OnDisconnect`).
+
 The instance exposes `server` (`WsServer`), `transport`, `gateways`, `connections`, `stats()`
 (`{ connections, opened, closed, messagesIn, messagesOut, bytesIn, bytesOut, dropped,
 slowConsumerCloses }`), `connect(path, options?)` and `initRoots()`. `connect()` takes `query`,

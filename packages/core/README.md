@@ -384,6 +384,7 @@ without depending on each other:
 | `websocket:connection` | `WebSocketConnectionEvent` | `@znight/websocket`, a connection opened or closed (emitted only)            |
 | `events:publish`       | `EventPublishEvent`        | `@znight/events` (RFC 0011), one publication with at least one listener      |
 | `events:listener`      | `EventListenerEvent`       | `@znight/events`, one listener invocation, inline or detached                |
+| `error:report`         | `ErrorReportEvent`         | every package above and core, one error turned into a failure (emitted only) |
 
 `ScheduledRunEvent` carries `job`, `kind` (`cron` / `interval` / `timeout`), `host`, `method`,
 `runId`, `trigger` (`schedule` / `start` / `manual` / `queued`), `scheduledAt` (epoch ms),
@@ -406,6 +407,21 @@ transport and direct calls, `yoga`...), `requestId`, `context` (the `GraphQLCont
 and, once settled, `outcome` (`success` / `partial` / `error` /
 `rejected`) and `errors` (`{ message, code, path? }`, as sent to the client). A subscription is one
 operation from its start to its end.
+
+`ErrorReportEvent` is the hook of error reporters (Sentry...): `error` (as thrown; a `ZnightError`
+with the original `cause` for `lifecycle`), `source` (`http` / `messaging` / `schedule` / `graphql` /
+`websocket` / `events` / `lifecycle`), `operation` (`GET /users/:id`, `orders order.created`,
+`digest.daily`, `query Shelf`, `ChatGateway.send`, `UserCreated WelcomeMail.send`,
+`Application.start()`...), `requestId`, flat `tags` (route, status, queue, job...) and `context`
+(`HttpContext`, `InboundMessage`, `JobContext`, `GraphQLContext`, `WsMessageContext`, the published
+event). Each package emits it once per error it turns into a failure (a 5xx, a dead-lettered
+delivery, a failed run, an unexpected GraphQL or WebSocket error, a failed detached listener), where
+it logs that error, and only when the hook has listeners; expected errors (4xx, validation, retried
+attempts) are not reported. Core reports a failed `create()` (before the rollback) or `start()` and
+each failed shutdown step (`tags.phase`: `bootstrap` / `start` / `stop`), before the plugins'
+`onDispose`, so that a reporter plugin registered first flushes after the others stopped. The
+sources, tags and rules are in the specification (§8.3), a Sentry recipe in the
+[plugins guide](https://github.com/znight-org/znight/blob/main/docs/guide/plugins.md#report-errors-error-report).
 
 Other packages declare their hooks by augmenting `ZnightHooks`:
 

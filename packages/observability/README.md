@@ -853,3 +853,12 @@ What the compiler emits, and what the runtime relies on:
 
 Instrumentation never changes the outcome of your code: a failing log destination, metric or span is
 reported once (process warning) and the request, message or method proceeds normally.
+
+### Error reporters (Sentry...)
+
+The plugin logs each failure of a request, delivery, run, operation or listener once; it does not
+listen to the `error:report` hook of `@znight/core`, which the packages emit for the same failures
+without logging them again. An error reporter (the Sentry recipe of the
+[plugins guide](https://github.com/znight-org/znight/blob/main/docs/guide/plugins.md#report-errors-error-report))
+listens to that hook next to this plugin: no failure is logged twice, and the report runs in the
+async context of the failure, so the active span of the request or delivery is current.

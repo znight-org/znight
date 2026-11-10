@@ -465,6 +465,12 @@ it into one log entry per run, `schedule_*` metrics and a span per run; its logg
 `err`; when a `schedule:run` wrapper is installed, with the message only (the observer logs the
 stack once).
 
+Error reporters listen to the `error:report` hook of `@znight/core` (see the
+[Sentry recipe](https://github.com/znight-org/znight/blob/main/docs/guide/plugins.md#report-errors-error-report)): the scheduler emits it, when it has listeners, once per failed run (the job
+threw, a wrapper failed before it, the lock store failed), with `source: 'schedule'`, the job name as
+`operation`, the tags `job`, `kind`, `host`, `method`, `runId`, `trigger` and `aborted`, and the
+`JobContext` (`undefined` for a lock store failure).
+
 ## Testing
 
 ```ts

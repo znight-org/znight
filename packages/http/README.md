@@ -1616,6 +1616,14 @@ app.hooks.wrap('http:request', async (event, next) => {
 stream, `run` resolves when the stream opens (`status: 200`): durations measure the time to open.
 A stream-lifetime hook is not provided.
 
+Error reporters listen to the `error:report` hook of `@znight/core` (see the
+[Sentry recipe](https://github.com/znight-org/znight/blob/main/docs/guide/plugins.md#report-errors-error-report)): the plugin emits it, when it has listeners, for each error it logs as
+`Request failed` (an unmapped error, a 5xx `HttpException`, the original error of a mapper returning
+a 5xx exception, an invalid response header or cookie) and for a response stream that failed, with
+`source: 'http'`, `operation` (`GET /users/:id`), `requestId`, the tags `method`, `path`, `route`,
+`handler` and `status`, and the `HttpContext`. Client errors (4xx) and the replies of exception
+mappers answering with their own `HttpResponse` are not reported.
+
 When CORS is off, routes (other than `@All`) without guards, interceptors, `@Sse`, `@Res()` or
 `@Header` take a fast lane: the plugin decides at boot what the pipeline would do for them, runs a
 synchronous handler without creating a promise and builds the headers of a JSON reply from a
