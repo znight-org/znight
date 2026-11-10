@@ -599,6 +599,7 @@
         "@platformatic/kafka": "^2.0.0",
         "@znight/compiler": "workspace:^",
         "amqplib": "^2.0.0",
+        "ioredis": "^5.4.0 || ^6.0.0",
       },
       "optionalPeers": [
         "@aws-sdk/client-sqs",
@@ -606,6 +607,7 @@
         "@platformatic/kafka",
         "@znight/compiler",
         "amqplib",
+        "ioredis",
       ],
     },
     "packages/observability": {
