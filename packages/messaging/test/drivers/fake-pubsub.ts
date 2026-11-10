@@ -249,7 +249,12 @@ export class FakePubSub {
         }
         return [resource]
       }),
-    createSubscription: (request: { name: string; topic: string; ackDeadlineSeconds?: number }) =>
+    createSubscription: (request: {
+      name: string
+      topic: string
+      ackDeadlineSeconds?: number
+      deadLetterPolicy?: { deadLetterTopic: string; maxDeliveryAttempts: number }
+    }) =>
       this.#call('createSubscription', request, () => {
         if (!this.topics.has(request.topic)) throw grpcError(NOT_FOUND, `Topic not found (${request.topic})`)
         if (this.subscriptions.has(request.name)) {
@@ -259,7 +264,7 @@ export class FakePubSub {
           name: request.name,
           topic: request.topic,
           ackDeadlineSeconds: request.ackDeadlineSeconds ?? 10,
-          deadLetterPolicy: undefined,
+          deadLetterPolicy: request.deadLetterPolicy,
           enableMessageOrdering: false,
           messages: [],
         }

@@ -44,15 +44,16 @@ afterEach(async () => {
 })
 
 async function startApp(driver: MessagingDriver, consumers: readonly TestConsumer[], logger = memoryLogger()) {
+  const plugin = MessagingPlugin.configure({ driver, defaults: { requeueDelay: 20 } })
   const app = await Application.create({
     metadata: messagingMetadata(consumers),
-    plugins: [MessagingPlugin.configure({ driver, defaults: { requeueDelay: 20 } })],
+    plugins: [plugin],
     logger,
     shutdown: { signals: false },
   })
   apps.push(app)
   await app.start()
-  return { app, broker: app.get(MessageBroker), logs: logger.entries }
+  return { app, plugin, broker: app.get(MessageBroker), logs: logger.entries }
 }
 
 async function waitFor(predicate: () => boolean, label: string, timeoutMs = 5000): Promise<void> {
@@ -592,6 +593,57 @@ describe('retries: subscription', () => {
   })
 })
 
+describe('retries: subscription, terminal failures and overrides', () => {
+  it('reports a terminal failure as rejected, never as dead-lettered to a topic it does not publish to', async () => {
+    const fake = new FakePubSub()
+    fake.createTopic('orders')
+    fake.createQueue('orders-dead', false)
+    fake.createSubscription('orders', 'orders', {
+      deadLetterPolicy: { deadLetterTopic: 'orders-dead', maxDeliveryAttempts: 5 },
+    })
+    class Consumer {
+      handle() {
+        throw new NonRetryableError('bad order')
+      }
+    }
+    const { broker, logs, plugin } = await startApp(driverFor(fake, { retries: 'subscription' }), [
+      {
+        class: Consumer,
+        queue: 'orders',
+        handlers: [handler('handle', { retry: { attempts: 5, backoff: 'fixed', delay: 0 } })],
+      },
+    ])
+    expect(plugin.consumers()[0]?.deadLetterQueue).toBeUndefined()
+    await broker.publish('orders', 1)
+    await waitFor(() => fake.received('orders-dead').length === 1, 'the forwarded message')
+    expect(logs.some(entry => entry.message.includes('dead-lettered to'))).toBe(false)
+    expect(logs.filter(entry => entry.message.includes('rejected (non-retryable)'))).toHaveLength(5)
+    // nothing published by Znight: the subscription forwarded the message
+    expect(fake.callsOf('publish')).toHaveLength(1)
+  })
+
+  it("refuses @Consumer({ retries: 'subscription' }) under a driver whose retries are 'znight'", async () => {
+    const fake = new FakePubSub()
+    fake.createTopic('orders')
+    fake.createQueue('orders-dead', false)
+    fake.createSubscription('orders', 'orders', {
+      deadLetterPolicy: { deadLetterTopic: 'orders-dead', maxDeliveryAttempts: 5 },
+    })
+    class Consumer {
+      handle() {}
+    }
+    const error = await caught(
+      startApp(driverFor(fake), [
+        { class: Consumer, queue: 'orders', options: { retries: 'subscription' }, handlers: [handler('handle')] },
+      ]),
+    )
+    expect(messageOf(error)).toContain(
+      "Consumer: @Consumer({ retries: 'subscription' }) needs a driver created with pubsub({ retries: 'subscription' })",
+    )
+    expect(fake.callsOf('pull')).toHaveLength(0)
+  })
+})
+
 describe('provisioning', () => {
   it('creates nothing by default, and the missing topology with provision: true', async () => {
     const fake = new FakePubSub()
@@ -613,6 +665,50 @@ describe('provisioning', () => {
     await broker.publish('fresh', 2)
     await waitFor(() => received.length === 1, 'the message')
     expect(fake.topics.has(fake.topicPath('fresh'))).toBe(true)
+    expect(fake.subscriptions.get(fake.subscriptionPath('orders'))?.deadLetterPolicy).toBeUndefined()
+  })
+
+  it("creates the subscription with a dead-letter policy under retries: 'subscription'", async () => {
+    const fake = new FakePubSub()
+    const attempts: number[] = []
+    class FailingConsumer {
+      handle(_payload: unknown, message: InboundMessage) {
+        attempts.push(message.attempt)
+        throw new Error('fail')
+      }
+    }
+    const { broker, logs } = await startApp(driverFor(fake, { retries: 'subscription', provision: true }), [
+      {
+        class: FailingConsumer,
+        queue: 'orders',
+        handlers: [handler('handle', { retry: { attempts: 6, backoff: 'fixed', delay: 0 } })],
+      },
+    ])
+    expect(fake.subscriptions.get(fake.subscriptionPath('orders'))?.deadLetterPolicy).toEqual({
+      deadLetterTopic: fake.topicPath('orders-dlq'),
+      maxDeliveryAttempts: 6,
+    })
+    expect(fake.subscriptions.has(fake.subscriptionPath('orders-dlq'))).toBe(true)
+    expect(logs.some(entry => entry.level === 'warn' && entry.message.includes('delivery attempt(s)'))).toBe(false)
+    await broker.publish('orders', 1)
+    await waitFor(() => fake.received('orders-dlq').length === 1, 'the forwarded message')
+    expect(attempts).toEqual([1, 2, 3, 4, 5, 6])
+  })
+
+  it('gives a provisioned dead-letter policy at least 5 delivery attempts (the Pub/Sub minimum)', async () => {
+    const fake = new FakePubSub()
+    class Consumer {
+      handle() {}
+    }
+    const { logs } = await startApp(driverFor(fake, { retries: 'subscription', provision: true }), [
+      { class: Consumer, queue: 'orders', handlers: [handler('handle')] },
+    ])
+    expect(fake.subscriptions.get(fake.subscriptionPath('orders'))?.deadLetterPolicy?.maxDeliveryAttempts).toBe(5)
+    expect(
+      logs.some(
+        entry => entry.level === 'warn' && entry.message.includes('after 5 delivery attempt(s), but Consumer allows 3'),
+      ),
+    ).toBe(true)
   })
 })
 
@@ -674,6 +770,46 @@ describe('leases and shutdown', () => {
         .filter(call => call.method === 'modifyAckDeadline')
         .map(call => call.request.ackDeadlineSeconds)
       expect(deadlines).toEqual([10, 10, 300])
+      await subscription.cancel()
+      await advance(200)
+      await subscription.close()
+      await driver.close()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it('extends older leases on time while the initial deadline of a new batch is in flight', async () => {
+    jest.useFakeTimers()
+    try {
+      const fake = new FakePubSub()
+      fake.createQueue('orders', false)
+      await fake.publisher.publish({ topic: fake.topicPath('orders'), messages: [{ data: Buffer.from('1') }] })
+      // the initial deadline of the second message (ack-2) takes 3 s to land
+      fake.latency = (method, request) =>
+        method === 'modifyAckDeadline' && request.ackIds.length === 1 && request.ackIds[0] === 'ack-2' ? 3000 : 0
+      const driver = driverFor(fake, { ackDeadlineSeconds: 10, pullTimeoutMs: 50 })
+      const { received, subscription } = await deliveries(driver, 'orders', { concurrency: 2 })
+      const advance = async (ms: number) => {
+        for (let elapsed = 0; elapsed < ms; elapsed += 10) {
+          jest.advanceTimersByTime(10)
+          for (let tick = 0; tick < 20; tick++) await Promise.resolve()
+        }
+      }
+      await advance(100)
+      expect(received).toHaveLength(1)
+      await advance(3900)
+      await fake.publisher.publish({ topic: fake.topicPath('orders'), messages: [{ data: Buffer.from('2') }] })
+      await advance(600)
+      expect(received).toHaveLength(2)
+      // the tick at 5 s runs while the initial deadline of ack-2 (sent after 4 s) is still in flight
+      await advance(700)
+      const extensionsOfFirst = fake.applied.filter(
+        call => call.method === 'modifyAckDeadline' && call.request.ackIds.includes('ack-1'),
+      )
+      expect(extensionsOfFirst).toHaveLength(2)
+      await advance(3000)
+      for (const delivery of received) await delivery.ack()
       await subscription.cancel()
       await advance(200)
       await subscription.close()

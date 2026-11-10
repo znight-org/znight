@@ -158,6 +158,45 @@ describe.skipIf(!integration)('Pub/Sub (emulator testcontainers)', () => {
     expect(dlq.topic).toBe(topicPath(`${queue}-dlq`))
   })
 
+  it("provisions a subscription with a dead-letter policy under retries: 'subscription'", async () => {
+    const queue = `provisioned-owned-${Date.now()}`
+    const attempts: number[] = []
+    const dead: InboundMessage[] = []
+    class FailingConsumer {
+      handle(_payload: unknown, message: InboundMessage) {
+        attempts.push(message.attempt)
+        throw new Error('fail')
+      }
+    }
+    class Collector {
+      collect(_payload: unknown, message: InboundMessage) {
+        dead.push(message)
+      }
+    }
+    const driver = pubsub({ clientConfig: config, provision: true, pullTimeoutMs: 1000, retries: 'subscription' })
+    const app = await startApp(driver, [
+      {
+        class: FailingConsumer,
+        queue,
+        handlers: [handler('handle', { retry: { attempts: 5, backoff: 'fixed', delay: 0 } })],
+      },
+      {
+        class: Collector,
+        queue: `${queue}-dlq`,
+        options: { deadLetter: false, retries: 'znight' },
+        handlers: [handler('collect')],
+      },
+    ])
+    const [subscription] = await subscriber.getSubscription({ subscription: subscriptionPath(queue) })
+    expect(subscription.deadLetterPolicy).toMatchObject({
+      deadLetterTopic: topicPath(`${queue}-dlq`),
+      maxDeliveryAttempts: 5,
+    })
+    await app.get(MessageBroker).publish(queue, { provisioned: true })
+    await waitFor(() => dead.length === 1, 60_000, 'the message forwarded by the provisioned policy')
+    expect(attempts).toEqual([1, 2, 3, 4, 5])
+  })
+
   it('handles the messages of an ordering key in order', async () => {
     const queue = `ordered-${Date.now()}`
     await createQueue(`${queue}-dlq`)

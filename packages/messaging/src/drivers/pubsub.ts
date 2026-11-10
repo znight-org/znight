@@ -45,6 +45,7 @@ import { deadLetterHeaders, durationOption } from './shared.ts'
 type PubsubMessage = protos.google.pubsub.v1.IPubsubMessage
 type ReceivedMessage = protos.google.pubsub.v1.IReceivedMessage
 type SubscriptionResource = protos.google.pubsub.v1.ISubscription
+type DeadLetterPolicy = protos.google.pubsub.v1.IDeadLetterPolicy
 
 /** Names of topics or subscriptions by queue: a record (unlisted queues keep their name) or a function. */
 export type PubSubNames = Readonly<Record<string, string>> | ((queue: string) => string)
@@ -78,8 +79,8 @@ export interface PubSubDriverOptions {
   /** Subscription of each `@Consumer` queue. Default: the queue name. */
   readonly subscriptions?: PubSubNames
   /**
-   * Who retries and dead-letters (RFC 0012 §5). Default: `'znight'`. A consumer can override it with
-   * `@Consumer({ queue, retries })`.
+   * Who retries and dead-letters (RFC 0012 §5). Default: `'znight'`. Under `'subscription'`, a
+   * consumer can take the ownership back with `@Consumer({ queue, retries: 'znight' })`.
    */
   readonly retries?: PubSubRetries
   /** Ack deadline kept on messages while they are handled, in seconds (10–600). Default: 60. */
@@ -95,7 +96,8 @@ export interface PubSubDriverOptions {
   readonly deadLetterName?: (queue: string) => string
   /**
    * Creates the missing topics and subscriptions: the topic and subscription of a consumer, the
-   * dead-letter topic with a subscription of the same name, and the topics published to. For
+   * dead-letter topic with a subscription of the same name, and the topics published to. With
+   * `retries: 'subscription'`, a created subscription gets a dead-letter policy to that topic. For
    * development and the emulator. Default: `false`.
    */
   readonly provision?: boolean
@@ -119,6 +121,8 @@ const MAX_ATTRIBUTE_VALUE_BYTES = 1024
 const MAX_REMEMBERED_ATTEMPTS = 10_000
 /** Default `maxDeliveryAttempts` of a dead-letter policy. */
 const DEFAULT_MAX_DELIVERY_ATTEMPTS = 5
+/** Largest `maxDeliveryAttempts` of a dead-letter policy. */
+const MAX_DELIVERY_ATTEMPTS = 100
 /** Trace context written by the Google client library's OpenTelemetry instrumentation. */
 const GOOGLE_TRACEPARENT = 'googclient_traceparent'
 const TRACEPARENT = 'traceparent'
@@ -154,8 +158,10 @@ interface PullSubscription {
   wake: (() => void) | undefined
   loop: Promise<void> | undefined
   timer: ReturnType<typeof setInterval> | undefined
-  /** Deadline modifications of the lease in flight. */
+  /** Deadline modifications of the lease in flight (initial and periodic), awaited by settlements. */
   extending: Promise<void> | undefined
+  /** Periodic extension in flight: the next tick is skipped only while it has not landed. */
+  periodic: Promise<void> | undefined
 }
 
 /** Google Cloud Pub/Sub {@link MessagingDriver}. See the module documentation. */
@@ -349,12 +355,13 @@ export class PubSubDriver implements MessagingDriver {
     }
   }
 
-  async #ensureSubscription(subscription: string, topic: string): Promise<void> {
+  async #ensureSubscription(subscription: string, topic: string, deadLetterPolicy?: DeadLetterPolicy): Promise<void> {
     try {
       await this.#sub(`create the subscription ${subscription}`).createSubscription({
         name: subscription,
         topic,
         ackDeadlineSeconds: this.#ackDeadline,
+        ...(deadLetterPolicy === undefined ? {} : { deadLetterPolicy }),
       })
       this.#logger.info(`Pub/Sub: created subscription ${subscription} on ${topic}`)
     } catch (error) {
@@ -369,7 +376,7 @@ export class PubSubDriver implements MessagingDriver {
   async subscribe(queue: string, handler: DeliveryHandler, options: SubscribeOptions): Promise<Subscription> {
     const retries = this.#consumerRetries(options)
     const path = this.#subscriptionPath(queue)
-    const resource = await this.#readSubscription(queue, path)
+    const resource = await this.#readSubscription(queue, path, retries, options)
     const policy = resource?.deadLetterPolicy ?? undefined
     const policyTopic = policy?.deadLetterTopic ?? ''
     const hasPolicy = resource === undefined ? undefined : policyTopic !== ''
@@ -437,19 +444,25 @@ export class PubSubDriver implements MessagingDriver {
       loop: undefined,
       timer: undefined,
       extending: undefined,
+      periodic: undefined,
     }
     this.#subscriptions.add(subscription)
     subscription.timer = setInterval(
       () => {
-        if (subscription.extending === undefined && subscription.leased.size > 0) {
-          this.#extend(subscription, [...subscription.leased])
-        }
+        // the initial deadlines of new batches never delay this extension: only a periodic one in flight does
+        if (subscription.periodic !== undefined || subscription.leased.size === 0) return
+        const periodic = this.#extend(subscription, [...subscription.leased])
+        subscription.periodic = periodic
+        void periodic.finally(() => {
+          if (subscription.periodic === periodic) subscription.periodic = undefined
+        })
       },
       (this.#ackDeadline * 1000) / 2,
     )
     subscription.timer.unref?.()
     subscription.loop = this.#pull(subscription)
     return {
+      nativeDeadLetter: retries === 'subscription',
       cancel: async (): Promise<void> => {
         this.#stopPulling(subscription)
         await subscription.loop
@@ -471,11 +484,26 @@ export class PubSubDriver implements MessagingDriver {
         `${options.consumer}: the Pub/Sub option retries must be 'znight' or 'subscription', got ${String(value)}`,
       )
     }
+    if (value === 'subscription' && this.#retries === 'znight') {
+      // the in-process retry budget and the @Retry checks are driver-wide: they follow pubsub({ retries })
+      throw consumerError(
+        `${options.consumer}: @Consumer({ retries: 'subscription' }) needs a driver created with pubsub({ retries: 'subscription' })`,
+        [
+          "Set pubsub({ retries: 'subscription' }), and give the ownership back to Znight where needed with @Consumer({ queue, retries: 'znight' })",
+          "Or remove retries: 'subscription' from the consumer",
+        ],
+      )
+    }
     return value
   }
 
   /** The subscription's configuration, `undefined` when it cannot be read. */
-  async #readSubscription(queue: string, path: string): Promise<SubscriptionResource | undefined> {
+  async #readSubscription(
+    queue: string,
+    path: string,
+    retries: PubSubRetries,
+    options: SubscribeOptions,
+  ): Promise<SubscriptionResource | undefined> {
     const subscriber = this.#sub(`subscribe to "${queue}"`)
     try {
       const [resource] = await subscriber.getSubscription({ subscription: path })
@@ -483,12 +511,7 @@ export class PubSubDriver implements MessagingDriver {
     } catch (error) {
       const status = statusOf(error)
       if (status === Status.NotFound) {
-        if (this.#options.provision === true) {
-          const topic = this.#topicPath(queue)
-          await this.#ensureTopic(topic)
-          await this.#ensureSubscription(path, topic)
-          return { name: path, topic, ackDeadlineSeconds: this.#ackDeadline, enableMessageOrdering: false }
-        }
+        if (this.#options.provision === true) return await this.#provision(queue, path, retries, options)
         throw consumerError(`Pub/Sub: subscription "${queue}" not found (${path})`, [
           'Create the subscription, or map the queue to an existing one with pubsub({ subscriptions })',
           'Or set pubsub({ provision: true }) in development',
@@ -501,6 +524,38 @@ export class PubSubDriver implements MessagingDriver {
         return undefined
       }
       throw brokerUnavailableError(`Pub/Sub: cannot read subscription "${queue}" (${errorMessage(error)})`, error)
+    }
+  }
+
+  /**
+   * Creates the topic and the subscription of a consumer. With `retries: 'subscription'`, which
+   * requires a dead-letter policy, the subscription gets one to the consumer's dead-letter topic
+   * (created with a subscription of the same name).
+   */
+  async #provision(
+    queue: string,
+    path: string,
+    retries: PubSubRetries,
+    options: SubscribeOptions,
+  ): Promise<SubscriptionResource> {
+    const topic = this.#topicPath(queue)
+    await this.#ensureTopic(topic)
+    let deadLetterPolicy: DeadLetterPolicy | undefined
+    if (retries === 'subscription') {
+      const dlq = options.deadLetterQueue ?? this.deadLetterName(queue)
+      const deadLetterTopic = this.#topicPath(dlq)
+      await this.#ensureTopic(deadLetterTopic)
+      await this.#ensureSubscription(this.#subscriptionPath(dlq), deadLetterTopic)
+      const attempts = Math.max(DEFAULT_MAX_DELIVERY_ATTEMPTS, options.maxAttempts)
+      deadLetterPolicy = { deadLetterTopic, maxDeliveryAttempts: Math.min(MAX_DELIVERY_ATTEMPTS, attempts) }
+    }
+    await this.#ensureSubscription(path, topic, deadLetterPolicy)
+    return {
+      name: path,
+      topic,
+      ackDeadlineSeconds: this.#ackDeadline,
+      enableMessageOrdering: false,
+      deadLetterPolicy: deadLetterPolicy ?? null,
     }
   }
 
@@ -599,13 +654,16 @@ export class PubSubDriver implements MessagingDriver {
       }
       const ackIds = received.map(message => message.ackId).filter((ackId): ackId is string => !!ackId)
       for (const ackId of ackIds) subscription.leased.add(ackId)
-      this.#extend(subscription, ackIds)
+      void this.#extend(subscription, ackIds)
       for (const message of received) this.#deliver(subscription, message)
     }
   }
 
-  /** Sets the lease deadline of `ackIds` (tracked in `subscription.extending`, failures logged). */
-  #extend(subscription: PullSubscription, ackIds: readonly string[]): void {
+  /**
+   * Sets the lease deadline of `ackIds` (tracked in `subscription.extending`, failures logged).
+   * Resolves once this extension landed.
+   */
+  #extend(subscription: PullSubscription, ackIds: readonly string[]): Promise<void> {
     const run = this.#modifyDeadline(subscription, ackIds, this.#ackDeadline).catch((error: unknown) => {
       this.#logger.warn(`Pub/Sub: failed to extend the ack deadline of ${ackIds.length} message(s)`, { err: error })
     })
@@ -615,6 +673,7 @@ export class PubSubDriver implements MessagingDriver {
     void all.finally(() => {
       if (subscription.extending === all) subscription.extending = undefined
     })
+    return run
   }
 
   async #modifyDeadline(subscription: PullSubscription, ackIds: readonly string[], seconds: number): Promise<void> {

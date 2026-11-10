@@ -488,8 +488,7 @@ in memory (exact for a single replica, approximate across replicas and restarts)
 subscribe time when a consumer retries.
 
 **Who retries.** Pub/Sub can own retries and dead letters (subscription retry policy and dead-letter
-policy). To never stack both layers, pick one owner with `retries` (or per consumer,
-`@Consumer({ queue, retries })`):
+policy). To never stack both layers, pick one owner with `retries`:
 
 - `'znight'` (default): `@Retry` applies and Znight publishes dead letters (with the
   `x-znight-dead-letter-reason`... attributes) to the topic `<q>-dlq`. When the subscription also has
@@ -500,7 +499,18 @@ policy). To never stack both layers, pick one owner with `retries` (or per consu
   `maxDeliveryAttempts`; Znight publishes no dead-letter copy. The subscription must have a dead-letter
   policy (the boot fails otherwise). Set the `@Retry` attempts (or `defaults.retry.attempts`) to
   `maxDeliveryAttempts` so that the handler runs on every delivery (a warning when they differ).
-  Non-retryable failures are nacked too, and redelivered until the policy forwards them.
+  Terminal failures (a `NonRetryableError`, a validation or decoding failure, a message without
+  handler, exhausted attempts) are nacked too and logged as rejected, without a dead-letter queue
+  name since Znight publishes nothing: they are redelivered until the policy forwards them, and the
+  handler, `@OnError` and the `dead-letter` delivery outcome (logs, metrics, traces) repeat on each
+  of these deliveries. The `@Retry` delays are ignored but still checked: each must fit within 600 s.
+
+The in-process budget and the `@Retry` checks are driver-wide, so the mode is chosen on the driver.
+Under `pubsub({ retries: 'subscription' })`, a consumer can take the ownership back with
+`@Consumer({ queue, retries: 'znight' })`, typically the collector of a dead-letter topic, whose
+subscription has no dead-letter policy: it keeps `@Retry` and Znight dead letters, with no in-process
+budget (every retry delay becomes an ack deadline, in whole seconds). The opposite,
+`@Consumer({ retries: 'subscription' })` under a `'znight'` driver, fails the boot (ZNIGHT011).
 
 ```ts
 MessagingPlugin.configure({
@@ -522,7 +532,9 @@ fails the boot) and checks the Znight dead-letter topic. Without the `pubsub.sub
 `pubsub.topics.get` permissions (`roles/pubsub.viewer`), it logs a warning and skips these checks.
 `provision: true` creates the missing topic and subscription of a consumer, the dead-letter topic with
 a subscription of the same name (a topic without subscription drops its messages), and the topics
-published to. `PUBSUB_EMULATOR_HOST` (or `clientConfig.apiEndpoint`) targets the emulator.
+published to. Under `retries: 'subscription'`, a created subscription gets a dead-letter policy to that
+topic, with the consumer's attempts as `maxDeliveryAttempts` (between 5 and 100, the Pub/Sub bounds).
+`PUBSUB_EMULATOR_HOST` (or `clientConfig.apiEndpoint`) targets the emulator.
 
 On stop, the driver stops pulling (a Pull in flight is abandoned and the messages it may still return
 are released), keeps extending the deadline of the messages in flight until the runtime settles them,

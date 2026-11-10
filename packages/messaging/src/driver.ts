@@ -115,6 +115,13 @@ export interface SubscribeOptions {
 
 /** An active subscription. */
 export interface Subscription {
+  /**
+   * The broker dead-letters the messages of this subscription by its own policy (Pub/Sub with
+   * `retries: 'subscription'`): the runtime then requests dead letters with `queue: undefined` (the
+   * driver rejects the message) and logs them as rejected, never naming a destination the driver
+   * does not publish to. Default: `false`.
+   */
+  readonly nativeDeadLetter?: boolean
   /** Stops receiving new deliveries. Deliveries already handed to the runtime can still be settled. */
   cancel(): Promise<void>
   /** Releases the subscription's resources, once in-flight deliveries settled. Idempotent. */

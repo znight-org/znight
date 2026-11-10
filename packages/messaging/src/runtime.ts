@@ -65,15 +65,25 @@ export class ConsumerRuntime {
   readonly #inflight = new Set<Promise<void>>()
   #subscription: Subscription | undefined
   #state: ConsumerState = 'created'
+  #deadLetterQueue: string | undefined
 
   constructor(consumer: PreparedConsumer, services: RuntimeServices) {
     this.consumer = consumer
     this.#services = services
     this.#slots = new Semaphore(consumer.concurrency)
+    this.#deadLetterQueue = consumer.deadLetterQueue
   }
 
   get state(): ConsumerState {
     return this.#state
+  }
+
+  /**
+   * Dead-letter destination of the consumer: `undefined` when dead-lettering is disabled, or once
+   * subscribed to a subscription the broker dead-letters itself (`Subscription.nativeDeadLetter`).
+   */
+  get deadLetterQueue(): string | undefined {
+    return this.#deadLetterQueue
   }
 
   /** Deliveries currently handled (including those waiting for a slot or an in-process retry delay). */
@@ -99,6 +109,7 @@ export class ConsumerRuntime {
       this.#state = 'stopped'
       throw error
     }
+    if (this.#subscription?.nativeDeadLetter === true) this.#deadLetterQueue = undefined
     this.#state = 'running'
   }
 
@@ -323,7 +334,7 @@ export class ConsumerRuntime {
 
   async #deadLetter(context: DeliveryContext, error: unknown, reason: DeadLetterReason): Promise<void> {
     const { message, delivery, event } = context
-    const queue = this.consumer.deadLetterQueue
+    const queue = this.#deadLetterQueue
     event.outcome = 'dead-letter'
     try {
       await delivery.deadLetter({ queue, reason, error, attempt: message.attempt })
