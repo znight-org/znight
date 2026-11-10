@@ -94,8 +94,13 @@ function isForbidden(error: unknown): boolean {
   return error instanceof HttpException && (error.status === 401 || error.status === 403)
 }
 
+/**
+ * Whether a failure is an expected refusal, neither logged as an error nor reported: a
+ * `WsException` other than `INTERNAL` (the equivalent of a 5xx), a 4xx `HttpException`, a timeout.
+ */
 function isExpected(error: unknown): boolean {
-  if (error instanceof WsException || error instanceof TimeoutError) return true
+  if (error instanceof TimeoutError) return true
+  if (error instanceof WsException) return error.code !== WsErrorCode.Internal
   return error instanceof HttpException && error.status < 500
 }
 
@@ -105,6 +110,12 @@ export function connectFailureCode(error: unknown): { readonly code: number; rea
   if (error instanceof WsException) return { code: error.close ?? WsCloseCode.PolicyViolation, reason: error.message }
   if (error instanceof HttpException) return { code: 4000 + error.status, reason: error.message }
   return { code: WsCloseCode.InternalError, reason: 'Internal error' }
+}
+
+/** What the exception mappers made of a failure (`failed`: a mapper threw `error`). */
+interface Mapping {
+  readonly error: unknown
+  readonly failed: boolean
 }
 
 /** One gateway's message pipeline, shared by its connections. */
@@ -282,10 +293,13 @@ export class GatewayDispatcher implements ConnectionDriver {
       }
       return OK
     } catch (thrown) {
-      const error = await this.#map(thrown, ctx, conn)
-      if (!isExpected(error)) {
-        this.#options.logError(`Handler ${plan.definition.method} failed`, error, conn)
-        this.#report(error, conn, plan.definition.method, ctx.event, ctx)
+      const mapping = await this.#map(thrown, ctx, conn)
+      const error = mapping.error
+      // the mapped error decides the answer, the original one is logged and reported (a failing
+      // mapper, logged on its own, leaves the decision to the original error)
+      if (!isExpected(mapping.failed ? thrown : error)) {
+        this.#options.logError(`Handler ${plan.definition.method} failed`, thrown, conn)
+        this.#report(thrown, conn, plan.definition.method, ctx.event, ctx)
       }
       if (!this.raw) this.#fail(conn, ctx.id, ctx.event, toWireError(error, this.#options.exposeErrors))
       if (error instanceof WsException && error.close !== undefined) conn.close(error.close, error.message)
@@ -326,20 +340,23 @@ export class GatewayDispatcher implements ConnectionDriver {
     report(method, event)
   }
 
-  /** Runs the plugin exception mappers, in order: the first `WsException` wins. */
-  async #map(error: unknown, ctx: WsMessageContext, conn: WsConnectionImpl): Promise<unknown> {
+  /**
+   * Runs the plugin exception mappers, in order: the first `WsException` wins. A failing mapper is
+   * logged and its failure answered (`failed`: an internal error on the wire).
+   */
+  async #map(error: unknown, ctx: WsMessageContext, conn: WsConnectionImpl): Promise<Mapping> {
     const mappers = this.#options.mappers
-    if (mappers === undefined || mappers.length === 0 || error instanceof TimeoutError) return error
+    if (mappers === undefined || mappers.length === 0 || error instanceof TimeoutError) return { error, failed: false }
     for (const mapper of mappers) {
       try {
         const mapped = await mapper.map(error, ctx)
-        if (mapped !== undefined) return mapped
+        if (mapped !== undefined) return { error: mapped, failed: false }
       } catch (failure) {
         this.#options.logError('A WebSocket exception mapper failed', failure, conn)
-        return failure
+        return { error: failure, failed: true }
       }
     }
-    return error
+    return { error, failed: false }
   }
 
   async #run(plan: HandlerPlan, conn: WsConnectionImpl, ctx: WsMessageContext, refused: () => void): Promise<unknown> {

@@ -191,10 +191,13 @@ reply is a server bug: it is logged at `error` every time (the reply is then not
 
 Error reporters listen to the `error:report` hook of `@znight/core` (see the
 [Sentry recipe](https://github.com/znight-org/znight/blob/main/docs/guide/plugins.md#report-errors-error-report)): the plugin emits it, when it has listeners, for an unexpected failure of a
-handler (not a `WsException`, a 4xx `HttpException` or a timeout), of `@OnConnect` or of
-`@OnDisconnect`, with `source: 'websocket'`, `operation` (`ChatGateway.send`), the handshake's
+handler (not a `WsException` other than `INTERNAL`, a 4xx `HttpException` or a timeout), of
+`@OnConnect` or of `@OnDisconnect`, with `source: 'websocket'`, `operation` (`ChatGateway.send`), the handshake's
 `requestId`, the tags `gateway`, `path`, `event`, `handler` and `connectionId`, and the
-`WsMessageContext` (the `WsConnection` for `@OnConnect` / `@OnDisconnect`).
+`WsMessageContext` (the `WsConnection` for `@OnConnect` / `@OnDisconnect`). When an exception
+mapper handles the failure, its `WsException` decides (an `INTERNAL` one is reported, another code is
+an expected refusal) and the original error is the one logged and reported; a mapper that throws is
+logged, and the original error is reported unless it was expected.
 
 The instance exposes `server` (`WsServer`), `transport`, `gateways`, `connections`, `stats()`
 (`{ connections, opened, closed, messagesIn, messagesOut, bytesIn, bytesOut, dropped,

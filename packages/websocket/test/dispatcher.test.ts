@@ -356,4 +356,72 @@ describe('error:report', () => {
       [disconnectFailure, 'ChatGateway.gone'],
     ])
   })
+
+  it('reports the original error of a mapped failure, when the mapper answers INTERNAL or throws', async () => {
+    const { hooks, reports } = reporting()
+    const internal = new Error('database down')
+    const handled = new Error('quota exceeded')
+    const unmappable = new Error('cache down')
+    const mapperFailure = new Error('mapper bug')
+    const { client, received, errors } = await connect(
+      [
+        handler('internal', 'internal', () => {
+          throw internal
+        }),
+        handler('handled', 'handled', () => {
+          throw handled
+        }),
+        handler('broken', 'broken', () => {
+          throw unmappable
+        }),
+        handler('refused', 'refused', () => {
+          throw new ForbiddenException('nope')
+        }),
+        handler('direct', 'direct', () => {
+          throw new WsException('INTERNAL', 'thrown as is')
+        }),
+      ],
+      {
+        hooks,
+        name: 'ChatGateway',
+        mappers: [
+          {
+            map: (error, ctx) => {
+              if (error === handled) return new WsException('BAD_REQUEST', 'over quota')
+              if (error === unmappable || ctx.event === 'refused') throw mapperFailure
+              if (error === internal) return new WsException('INTERNAL', 'try again later')
+              return undefined
+            },
+          },
+        ],
+      },
+    )
+    client.send('{"event":"internal","id":1}')
+    client.send('{"event":"handled","id":2}')
+    client.send('{"event":"broken","id":3}')
+    client.send('{"event":"refused","id":4}')
+    client.send('{"event":"direct","id":5}')
+    const frames = await received()
+    expect(frames).toEqual([
+      { id: 1, error: { code: 'INTERNAL', message: 'try again later' } },
+      { id: 2, error: { code: 'BAD_REQUEST', message: 'over quota' } },
+      { id: 3, error: { code: 'INTERNAL', message: 'Internal error' } },
+      { id: 4, error: { code: 'INTERNAL', message: 'Internal error' } },
+      { id: 5, error: { code: 'INTERNAL', message: 'thrown as is' } },
+    ])
+    // a mapper answering INTERNAL is an unexpected failure (the 5xx of WebSocket): the original error
+    // is reported; a failing mapper falls back to the original error, not reported when expected
+    expect(reports.map(report => [report.operation, report.error])).toEqual([
+      ['ChatGateway.internal', internal],
+      ['ChatGateway.broken', unmappable],
+      ['ChatGateway.direct', expect.any(WsException)],
+    ])
+    expect(errors).toEqual([
+      'Handler internal failed',
+      'A WebSocket exception mapper failed',
+      'Handler broken failed',
+      'A WebSocket exception mapper failed',
+      'Handler direct failed',
+    ])
+  })
 })
