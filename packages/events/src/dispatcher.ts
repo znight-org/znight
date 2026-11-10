@@ -330,6 +330,7 @@ export class Dispatcher {
       detached: listener?.detached ?? false,
       mode,
     }
+    this.#emitReport(error, info)
     const handler = this.#onError
     if (handler === undefined) {
       this.#logger.error(`Event listener failed: ${info.listener ?? 'emit'} on ${info.eventName}`, {
@@ -352,6 +353,28 @@ export class Dispatcher {
       this.#onErrorFailed(failure, error)
     }
     return undefined
+  }
+
+  /**
+   * Emits an error of a detached listener or of `emit()` on the `error:report` hook, when it has
+   * listeners (whatever `onError` does). Inline errors of `publish()` are not reported: they reject
+   * `publish()`, and the caller (an HTTP request, a delivery...) reports them if they fail it.
+   */
+  #emitReport(error: unknown, info: EventErrorInfo): void {
+    const hooks = this.#hooks
+    if (!hooks.hasListeners('error:report')) return
+    const tags: Record<string, string | boolean> = { event: info.eventName }
+    if (info.listener !== undefined) tags['listener'] = info.listener
+    tags['detached'] = info.detached
+    tags['mode'] = info.mode
+    hooks.emit('error:report', {
+      error,
+      source: 'events',
+      operation: info.listener === undefined ? info.eventName : `${info.eventName} ${info.listener}`,
+      requestId: undefined,
+      tags,
+      context: info.event,
+    })
   }
 
   #onErrorFailed(failure: unknown, original: unknown): void {

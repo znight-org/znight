@@ -73,19 +73,19 @@ export interface ErrorReportEvent {
   readonly error: unknown
   readonly source: ErrorReportSource
   /**
-   * Name of the failed operation, suitable as a transaction name: `GET /users/:id`, `orders`
-   * (queue), `digest.daily` (job), `query Viewer`, `/chat message`, `UserCreated → Mail.send`,
-   * `Plugin "db" onStop()`.
+   * Name of the failed operation, suitable as a transaction name: `GET /users/:id`,
+   * `orders order.created` (queue and type), `digest.daily` (job), `query Viewer`,
+   * `ChatGateway.message`, `UserCreated WelcomeMail.send`, `Plugin "db" onStop()`.
    */
   readonly operation: string
   /** Request id of the HTTP request, GraphQL operation or WebSocket handshake; `undefined` otherwise. */
   readonly requestId: string | undefined
   /** Flat tags describing the operation; the keys of each source are listed in the specification (§8.3). */
-  readonly tags: Readonly<Record<string, string | number>>
+  readonly tags: Readonly<Record<string, string | number | boolean>>
   /**
    * The producer's context: `HttpContext` (`http`), `InboundMessage` (`messaging`), `JobContext`
-   * (`schedule`), `GraphQLContext` (`graphql`), `WsMessageContext` (`websocket`); `undefined` for
-   * `events` and `lifecycle`.
+   * (`schedule`, `undefined` for a lock store failure), `GraphQLContext` (`graphql`),
+   * `WsMessageContext` (`websocket`), the published object (`events`); `undefined` for `lifecycle`.
    */
   readonly context: unknown
 }
