@@ -1,7 +1,7 @@
 {
   "name": "@znight/messaging",
   "version": "0.7.2",
-  "description": "Znight messaging plugin: consumers, retries and dead-letter queues with RabbitMQ, SQS or Kafka",
+  "description": "Znight messaging plugin: consumers, retries and dead-letter queues with RabbitMQ, SQS, Kafka or Google Cloud Pub/Sub",
   "license": "MIT",
   "author": "Ugho STEPHAN",
   "homepage": "https://znight-org.github.io/znight/packages/messaging",
@@ -18,6 +18,8 @@
     "amqp",
     "sqs",
     "kafka",
+    "pubsub",
+    "google-cloud-pubsub",
     "consumer",
     "queue",
     "dead-letter-queue",
@@ -54,6 +56,11 @@
       "types": "./dist/kafka.d.mts",
       "default": "./dist/kafka.mjs"
     },
+    "./pubsub": {
+      "@znight/source": "./src/drivers/pubsub.ts",
+      "types": "./dist/pubsub.d.mts",
+      "default": "./dist/pubsub.mjs"
+    },
     "./compiler": {
       "@znight/source": "./src/compiler/index.ts",
       "types": "./dist/compiler.d.mts",
@@ -77,12 +84,16 @@
   },
   "peerDependencies": {
     "@aws-sdk/client-sqs": "^3.600.0",
+    "@google-cloud/pubsub": "^6.0.0",
     "@platformatic/kafka": "^2.0.0",
     "amqplib": "^2.0.0",
     "@znight/compiler": "workspace:^"
   },
   "peerDependenciesMeta": {
     "@aws-sdk/client-sqs": {
+      "optional": true
+    },
+    "@google-cloud/pubsub": {
       "optional": true
     },
     "@platformatic/kafka": {

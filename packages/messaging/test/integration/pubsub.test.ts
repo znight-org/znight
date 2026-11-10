@@ -26,7 +26,7 @@ describe.skipIf(!integration)('Pub/Sub (emulator testcontainers)', () => {
     project = container.getProjectId()
     config = { apiEndpoint: container.getEmulatorEndpoint(), projectId: project }
     client = new PubSub(config)
-    const clientConfig = await client.getClientConfig()
+    const clientConfig = (await client.getClientConfig()) as ConstructorParameters<typeof v1.PublisherClient>[0]
     publisher = new v1.PublisherClient(clientConfig)
     subscriber = new v1.SubscriberClient(clientConfig)
   }, 180_000)
