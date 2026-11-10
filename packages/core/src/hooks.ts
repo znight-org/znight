@@ -51,6 +51,43 @@ export interface ZnightHooks {
    * `hooks.run` when wrappers exist, then emitted when listeners exist.
    */
   'events:listener': EventListenerEvent
+  /**
+   * An error the framework turned into a failure (a 5xx response, a failed delivery or run, a
+   * detached listener or lifecycle failure): the cross-cutting hook of error reporters (Sentry...).
+   * Emitted only (never wrapped), once per error, and only when listeners exist. Expected client
+   * errors (4xx, validation, rejected GraphQL operations) are not reported.
+   */
+  'error:report': ErrorReportEvent
+}
+
+/** Where a reported error comes from (`ErrorReportEvent.source`). */
+export type ErrorReportSource = 'http' | 'messaging' | 'schedule' | 'graphql' | 'websocket' | 'events' | 'lifecycle'
+
+/**
+ * Event of the `error:report` hook: one error the framework turned into a failure, reported by the
+ * package that produced the failure. Each package already logs these errors: the hook adds no log
+ * entry, it lets a reporter (Sentry, Bugsnag, Rollbar...) capture them with their context.
+ */
+export interface ErrorReportEvent {
+  /** What was thrown or rejected with (the original error, not a wrapper, except for `lifecycle`). */
+  readonly error: unknown
+  readonly source: ErrorReportSource
+  /**
+   * Name of the failed operation, suitable as a transaction name: `GET /users/:id`, `orders`
+   * (queue), `digest.daily` (job), `query Viewer`, `/chat message`, `UserCreated → Mail.send`,
+   * `Plugin "db" onStop()`.
+   */
+  readonly operation: string
+  /** Request id of the HTTP request, GraphQL operation or WebSocket handshake; `undefined` otherwise. */
+  readonly requestId: string | undefined
+  /** Flat tags describing the operation; the keys of each source are listed in the specification (§8.3). */
+  readonly tags: Readonly<Record<string, string | number>>
+  /**
+   * The producer's context: `HttpContext` (`http`), `InboundMessage` (`messaging`), `JobContext`
+   * (`schedule`), `GraphQLContext` (`graphql`), `WsMessageContext` (`websocket`); `undefined` for
+   * `events` and `lifecycle`.
+   */
+  readonly context: unknown
 }
 
 /**

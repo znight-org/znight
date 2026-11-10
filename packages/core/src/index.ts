@@ -38,6 +38,8 @@ export {
 export { isProviderDefinition } from './definition.ts'
 export * from './errors.ts'
 export {
+  type ErrorReportEvent,
+  type ErrorReportSource,
   type EventListenerEvent,
   type EventPublishEvent,
   type EventPublishMode,
