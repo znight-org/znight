@@ -9,7 +9,16 @@ import type { InjectRequest, InjectResponse } from '../../src/index.ts'
 import http from 'node:http'
 import net from 'node:net'
 
-import { createFilesDir, endless, filesMetadata, filesOptions, filesState, streamLog } from '../files-app.ts'
+import {
+  createFilesDir,
+  endless,
+  filesMetadata,
+  filesOptions,
+  filesState,
+  LAZY_ETAG,
+  lazyState,
+  streamLog,
+} from '../files-app.ts'
 import { ADAPTERS, createApp, sleep, viaFetch, viaInject } from '../helpers.ts'
 
 const ETAG = `"${Date.parse('2024-05-06T07:08:09Z').toString(16)}-12c"`
@@ -77,6 +86,11 @@ function requests(): InjectRequest[] {
     { method: 'GET', url: '/download/stream/iterable' },
     { method: 'GET', url: '/download/stream/readable' },
     { method: 'GET', url: '/scoped/chunks' },
+    { method: 'GET', url: '/lazy/stream' },
+    { method: 'GET', url: '/lazy/stream', headers: { 'if-none-match': LAZY_ETAG } },
+    { method: 'GET', url: '/lazy/blob', headers: { range: 'bytes=60-69' } },
+    { method: 'HEAD', url: '/lazy/bytes' },
+    { method: 'GET', url: '/lazy/mapped' },
   ]
 }
 
@@ -135,6 +149,26 @@ async function abort(port: number): Promise<{ bounded: boolean; order: string[] 
   return { bounded, order: streamLog.slice(before).map(event => event.split(' ')[0] as string) }
 }
 
+/** A client that reads one chunk of an endless lazy file, then disconnects: the loaded stream is cancelled. */
+async function abortLazy(port: number): Promise<{ bounded: boolean; cancelled: boolean }> {
+  lazyState.pulled = 0
+  lazyState.cancelled = false
+  let received = false
+  const request = http.get({ host: '127.0.0.1', port, path: '/lazy/endless' }, response => {
+    response.once('data', () => {
+      received = true
+      response.pause()
+    })
+  })
+  request.on('error', () => undefined)
+  while (!received) await sleep(10)
+  await sleep(100)
+  const bounded = lazyState.pulled < 200
+  request.destroy()
+  for (let index = 0; index < 300 && !lazyState.cancelled; index++) await sleep(10)
+  return { bounded, cancelled: lazyState.cancelled }
+}
+
 /** Announces a 10 MiB upload and returns the status line received after sending 1 KiB of it. */
 function announceLargeUpload(port: number): Promise<string> {
   return new Promise(resolve => {
@@ -167,10 +201,19 @@ for (const adapter of ADAPTERS) {
   const app = await createApp(filesMetadata(), { ...filesOptions(), adapter: adapter.create() })
   const network: Observed[] = []
   const inject: Observed[] = []
+  lazyState.loads = 0
   for (const request of requests()) network.push(observe(request, await viaFetch(app.http)(request)))
   for (const request of requests()) inject.push(observe(request, await viaInject(app.http)(request)))
+  const lazyLoads = lazyState.loads
   const port = app.http.address?.port as number
-  results[adapter.name] = { network, inject, abort: await abort(port), early: await announceLargeUpload(port) }
+  results[adapter.name] = {
+    network,
+    inject,
+    lazyLoads,
+    abort: await abort(port),
+    lazyAbort: await abortLazy(port),
+    early: await announceLargeUpload(port),
+  }
   await app.stop()
 }
 dir.cleanup()

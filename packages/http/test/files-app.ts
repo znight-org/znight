@@ -5,7 +5,13 @@
  * the Node.js / Bun runtime check.
  */
 import type { ZnightMetadata } from '@znight/core'
-import type { HttpContext, HttpPluginOptions } from '../src/index.ts'
+import type {
+  ExceptionMapper,
+  ExceptionMapperResult,
+  HttpContext,
+  HttpPluginOptions,
+  LazyFileContent,
+} from '../src/index.ts'
 
 import fs from 'node:fs'
 import os from 'node:os'
@@ -236,6 +242,122 @@ const download = controller(t('DownloadController'), '/download', [
 ])
 
 // -------------------------------------------------------------------------------------------------
+// Lazy files (metadata known up front, content loaded only when a body is sent)
+// -------------------------------------------------------------------------------------------------
+
+/** Entity tag and date of the lazy files. */
+export const LAZY_ETAG = '"lazy-1"'
+export const LAZY_MODIFIED = new Date('2024-05-06T07:08:09Z')
+
+/** Loads of the lazy routes, and whether the endless stream they loaded was cancelled. */
+export const lazyState: { loads: number; pulled: number; cancelled: boolean } = {
+  loads: 0,
+  pulled: 0,
+  cancelled: false,
+}
+
+/** Thrown by `/download/lazy-mapped`: answered 503 by {@link lazyMapper}. */
+export class StorageUnavailableError extends Error {}
+
+/** The exception mapper of the files application. */
+export const lazyMapper: ExceptionMapper = {
+  map(error: unknown): ExceptionMapperResult {
+    return error instanceof StorageUnavailableError
+      ? new HttpResponse({ unavailable: true }, { status: 503 })
+      : undefined
+  },
+}
+
+const LAZY_TEXT = '0123456789'.repeat(30)
+
+function lazyContent(kind: string): LazyFileContent {
+  const bytes = new TextEncoder().encode(LAZY_TEXT)
+  if (kind === 'blob') return new Blob([bytes])
+  if (kind !== 'stream') return bytes
+  let offset = 0
+  return new ReadableStream<Uint8Array>(
+    {
+      pull(controller) {
+        if (offset >= bytes.byteLength) {
+          controller.close()
+          return
+        }
+        controller.enqueue(bytes.slice(offset, offset + 64))
+        offset += 64
+      },
+    },
+    { highWaterMark: 0 },
+  )
+}
+
+export class LazyController {
+  /** The sample text, loaded as bytes, a `Blob` or a stream. */
+  file(kind: string) {
+    return HttpResponse.file({
+      size: LAZY_TEXT.length,
+      etag: LAZY_ETAG,
+      lastModified: LAZY_MODIFIED,
+      type: 'text/plain; charset=utf-8',
+      name: 'lazy.txt',
+      load: async () => {
+        lazyState.loads++
+        await Promise.resolve()
+        return lazyContent(kind)
+      },
+    })
+  }
+  failing() {
+    return HttpResponse.file({
+      size: 10,
+      load: () => {
+        lazyState.loads++
+        throw new Error('storage down')
+      },
+    })
+  }
+  mapped() {
+    return HttpResponse.file({
+      size: 10,
+      load: () => {
+        lazyState.loads++
+        return Promise.reject(new StorageUnavailableError('try later'))
+      },
+    })
+  }
+  /** A 1 GiB file whose stream is produced as the client reads it. */
+  endless() {
+    const chunk = new Uint8Array(ENDLESS_CHUNK).fill(121)
+    return HttpResponse.file({
+      size: 1024 * 1024 * 1024,
+      load: () => {
+        lazyState.loads++
+        return new ReadableStream<Uint8Array>(
+          {
+            pull(controller) {
+              lazyState.pulled++
+              controller.enqueue(chunk.slice())
+            },
+            cancel() {
+              lazyState.cancelled = true
+            },
+          },
+          { highWaterMark: 0 },
+        )
+      },
+    })
+  }
+}
+
+const lazyFiles = controller(t('LazyController'), '/lazy', [
+  route('failing', '/failing', (c: LazyController) => c.failing()),
+  route('mapped', '/mapped', (c: LazyController) => c.mapped()),
+  route('endless', '/endless', (c: LazyController) => c.endless()),
+  route('file', '/:kind', (c: LazyController, ctx) => c.file(ctx.params['kind'] ?? ''), {
+    params: [{ index: 0, source: 'param', name: 'kind', type: 'string' }],
+  }),
+])
+
+// -------------------------------------------------------------------------------------------------
 // Streams and request scopes
 // -------------------------------------------------------------------------------------------------
 
@@ -325,12 +447,17 @@ export function filesMetadata(): ZnightMetadata {
       [t('DownloadController')]: provider(DownloadController),
       [t('StreamState')]: provider(StreamState, [], 'request'),
       [t('ScopedStreamController')]: provider(ScopedStreamController, [t('StreamState')], 'request'),
+      [t('LazyController')]: provider(LazyController),
     },
-    [upload, download, scoped],
+    [upload, download, lazyFiles, scoped],
   )
 }
 
 /** Plugin options of the files application. */
 export function filesOptions(): HttpPluginOptions {
-  return { bodyLimit: 2048, uploads: { maxFileSize: 1024, maxFiles: 3, maxParts: 20, maxFieldSize: 256 } }
+  return {
+    bodyLimit: 2048,
+    uploads: { maxFileSize: 1024, maxFiles: 3, maxParts: 20, maxFieldSize: 256 },
+    exceptionMappers: [lazyMapper],
+  }
 }
