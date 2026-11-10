@@ -70,8 +70,9 @@ znight new . --yes --no-install             # in the current (empty) directory
 ```
 
 In a terminal, the CLI asks for the name, the package manager, the HTTP adapter (Fastify first, and
-the default), the features, the OpenAPI reference UI (when `openapi` is selected), whether to add a
-Dockerfile, and whether to install the dependencies and initialise git. Flags answer the questions up
+the default), the features (`config` and `observability` preselected), the OpenAPI reference UI
+(Scalar, Swagger UI or no UI, when `openapi` is selected), whether to add a Dockerfile, and whether
+to install the dependencies and initialise git. Flags answer the questions up
 front; with `--yes` (or without a terminal, e.g. in CI) the defaults are used.
 
 | Option                                     | Default                                       | Description                                                                                              |
@@ -81,7 +82,7 @@ front; with `--yes` (or without a terminal, e.g. in CI) the defaults are used.
 | `--pm <bun\|npm\|pnpm\|yarn>`              | the one running the CLI, else bun on Bun, npm | Package manager                                                                                          |
 | `--adapter <fastify\|node\|express\|hono>` | `fastify`                                     | HTTP adapter (`node`: the built-in `node:http` server)                                                   |
 | `--features <list>`                        | `config,observability`                        | `config`, `observability`, `messaging`, `schedule`, `openapi`, `graphql`, `websocket`, or `all` / `none` |
-| `--openapi-ui <scalar\|swagger>`           | `scalar`                                      | API reference UI served at `/docs` by the `openapi` feature (Scalar or Swagger UI)                       |
+| `--openapi-ui <scalar\|swagger\|none>`     | `scalar`                                      | API reference UI served at `/docs` by the `openapi` feature (Scalar, Swagger UI, or `none`)              |
 | `--no-docker`                              | Dockerfile                                    | Do not generate the `Dockerfile` and `.dockerignore`                                                     |
 | `--no-install`                             | install                                       | Do not install the dependencies                                                                          |
 | `--no-git`                                 | init                                          | Do not run `git init` (skipped anyway inside a git repository)                                           |
@@ -97,7 +98,7 @@ The package manager defaults to the one that launched the CLI (`npx`, `pnpm dlx`
 my-service/
 ├─ src/
 │  ├─ main.ts                    # Application.create() with the plugins, then start()
-│  ├─ api.ts                     # @OpenApiDocument: title, tags of openapi.json   (openapi)
+│  ├─ openapi.ts                 # @OpenApiDocument: info of openapi.json          (openapi)
 │  └─ app/
 │     ├─ app.config.ts           # @Config('app'): PORT, APP_GREETING           (config)
 │     ├─ greeting.schemas.ts     # Zod schema of the request body
@@ -137,13 +138,16 @@ my-service/
 - `schedule` adds `@znight/schedule`, `SchedulePlugin.configure()` **before** `HttpPlugin` (plugins
   stop in reverse order: HTTP stops taking requests first, then running jobs drain), a sample job
   and its test on a virtual clock (`createTestClock()` of `@znight/schedule/testing`).
-- `observability` adds `@znight/observability` and `ObservabilityPlugin.configure()` first, its
-  logger named after the project (`logging: { name: '<name>' }`), with the `metrics` and `tracing`
-  options as commented-out placeholders.
+- `observability` adds `@znight/observability` and `pino-pretty` (a dependency, so the production
+  image has it too), and `ObservabilityPlugin.configure()` first: its logger is named after the
+  project and pretty-printed (`logging: { name: '<name>', pretty: true }`; JSON logs, `pretty:
+  false`, suit production better), `metrics: false` and `tracing: false`.
 - `openapi` adds `@znight/openapi`, `OpenApiPlugin.configure({ ui })` after `HttpPlugin`
   (`/openapi.json` and the API reference at `/docs`, `ui: 'scalar'` or `'swagger'` from
-  `--openapi-ui`), `src/api.ts` (`@OpenApiDocument`) and the `openapi` / `openapi:check` scripts
-  (commit `openapi.json`, check it in CI).
+  `--openapi-ui`; `OpenApiPlugin.configure()` and no `/docs` with `--openapi-ui none`),
+  `src/openapi.ts` (`@OpenApiDocument({ info: { title, description, version } })`, the title being
+  the project name) and the `openapi` / `openapi:check` scripts (commit `openapi.json`, check it in
+  CI).
 - `graphql` adds `@znight/graphql` and `graphql`, `GraphQLPlugin.configure()` after `HttpPlugin`
   (`POST /graphql`, GraphiQL on `GET /graphql` in development), a code-first resolver
   (`src/app/greeting.resolver.ts`: the schema is derived from its types) and its test
