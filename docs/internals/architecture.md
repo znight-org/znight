@@ -39,7 +39,7 @@ packages/
   core/           runtime: container, application, plugins, hooks, AOP, scopes, decorators, errors
   compiler/       programmatic API (+ Vite plugin, Bun preload): analysis, binding, validation, codegen
   http/           decorators, compiler extension, HttpPlugin, adapters (node, fastify, express, hono)
-  messaging/      decorators, compiler extension, MessagingPlugin, drivers (memory, rabbitmq, sqs, kafka)
+  messaging/      decorators, compiler extension, MessagingPlugin, drivers (memory, rabbitmq, sqs, kafka, pubsub)
   config/         decorators, compiler extension, ConfigPlugin, loaders (env, dotenv, json, yaml, vault, aws, inline)
   observability/  Logger (pino), metrics (prom-client), tracing (OpenTelemetry), interceptors, ObservabilityPlugin
   openapi/        decorators, compiler extension, OpenApiPlugin, OpenAPI 3.1 assembly (buildOpenApiDocument),
@@ -1389,7 +1389,7 @@ Manifests of the `@znight/*` packages:
 
 `@znight/compiler`, `@znight/testing` and `@znight/cli` have no manifest. Subpath exports:
 `@znight/http` (`/node`, `/fastify`, `/express`, `/hono`, `/path`, `/compiler`), `@znight/messaging`
-(`/memory`, `/rabbitmq`, `/sqs`, `/kafka`, `/compiler`), `@znight/config` (`/compiler`),
+(`/memory`, `/rabbitmq`, `/sqs`, `/kafka`, `/pubsub`, `/compiler`), `@znight/config` (`/compiler`),
 `@znight/openapi` (`/compiler`, `/emit`, `/vite`, `/testing`; RFC 0002), `@znight/schedule`
 (`/compiler`, `/testing`; RFC 0004), `@znight/graphql` (`/compiler`, `/testing`, `/yoga`; RFCs 0005,
 0009), `@znight/events` (`/compiler`, `/testing`; RFC 0011), `@znight/websocket` (`/ws`, `/bun`,
@@ -2456,7 +2456,7 @@ interface MessagingMetadata {
 }
 interface ConsumerDefinition {
   token
-  queue // queue (RabbitMQ, SQS) or topic (Kafka)
+  queue // queue (RabbitMQ, SQS), topic (Kafka) or subscription (Pub/Sub; published to as a topic)
   options?: { concurrency?: number; deadLetter?: string | false; [driverOption: string]: unknown }
   handlers: MessageHandlerDefinition[] // declaration order
   errorHandler?: string // @OnError method: consumer[name](error, message)
@@ -2496,7 +2496,8 @@ Delivery state machine (at-least-once; handlers must be idempotent and may dedup
   for `exponential`, capped by `maxDelay`) is waited in-process when ≤ the driver's
   `maxInProcessDelayMs` (the message stays locked) and the message is then **redelivered through the
   broker** (never re-invoked locally); longer delays use the driver-native delayed redelivery. The
-  attempt count comes from the broker (SQS `ApproximateReceiveCount`, RabbitMQ `x-delivery-count`)
+  attempt count comes from the broker (SQS `ApproximateReceiveCount`, RabbitMQ `x-delivery-count`,
+  Pub/Sub `deliveryAttempt`)
   or the `x-znight-attempt` header. When the driver cannot schedule the retry, the message is
   released after `defaults.requeueDelay`. Boot fails (ZNIGHT011) if a `@Retry` cannot be honoured;
 - terminal failure (last attempt, non-retryable, validation, decode, no handler) → `@OnError`:
@@ -2506,7 +2507,8 @@ Delivery state machine (at-least-once; handlers must be idempotent and may dedup
 - dead-letter: publish with confirmation, then ack the original; when the publication fails, the
   message is released after `defaults.requeueDelay` (1 s) and redelivered. The destination is
   `@Consumer({ deadLetter })` > `defaults.deadLetter(queue)` > `driver.deadLetterName(queue)`;
-  `false` disables dead-lettering (RabbitMQ rejects natively, SQS/Kafka discard). The copy keeps
+  `false` disables dead-lettering (RabbitMQ rejects natively, SQS/Kafka discard, Pub/Sub nacks so
+  that a subscription dead-letter policy applies, or acks when the subscription has none). The copy keeps
   body, type, id and headers (minus `x-znight-attempt`) and adds `x-znight-dead-letter-reason`,
   `x-znight-error`, `x-znight-original-queue`, `x-znight-attempts`;
 - nothing is dropped: every path ends with the broker owning the message (acked, republished,
@@ -2567,18 +2569,21 @@ interface MessagingDriver {
 //   exactly one settlement: ack() | retry({ attempt, delayMs, error }) | deadLetter({ queue, reason,
 //   error, attempt }) | release(), possibly followed by release() when it failed
 // SubscribeOptions: consumer, concurrency, deadLetterQueue, maxAttempts, retryDelays, options (driver options)
-// Subscription: cancel() (stop receiving), close() (after in-flight settlements)
+// Subscription: cancel() (stop receiving), close() (after in-flight settlements), nativeDeadLetter?
+//   (true: the broker dead-letters by its own policy; the runtime then requests dead letters with
+//   queue: undefined, logs them as rejected and reports no dead-letter queue for the consumer)
 ```
 
 Drivers verify their topology (and native DLQ configuration) at subscribe time. **Impl.** driver
 specifics:
 
-| Driver                         | Attempts                                                                                  | Native delay                                                                                     | In-process budget | Dead letters                        | Notes                                                                                                                                                                                                                                                  |
-| ------------------------------ | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | ----------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `/memory`                      | native                                                                                    | timers (longer than 2^31 − 1 ms: chained)                                                        | 1 s               | `<q>.dlq`                           | deterministic test broker (`send`, `idle`, `settlements`, `deadLetters`, `published`, `fail`...)                                                                                                                                                       |
-| `/rabbitmq` (amqplib)          | `x-znight-attempt` + redeliveries (quorum `x-delivery-count`, classic `redelivered` flag) | retries: delay queues `<q>.delay.<ms>` (TTL + DLX); delayed publications: 32 shared delay levels | 5 s               | `<q>.dlq`, publish confirmed + ack  | quorum queues by default (`queueType`), confirm channel + `mandatory`, `prefetch = concurrency`, publishes through the default exchange (and the delay levels), topology declared or verified, `x-delivery-limit: -1` (RabbitMQ ≥ 4), recovery (below) |
-| `/sqs` (client-sqs ^3.600)     | `ApproximateReceiveCount`                                                                 | visibility timeout (≤ 12 h)                                                                      | 1 s               | `<q>-dlq` or `RedrivePolicy` target | queues never created; `maxReceiveCount` ≥ attempts checked; lease extension (stopped before each settlement); FIFO groups by `key`                                                                                                                     |
-| `/kafka` (@platformatic/kafka) | `x-znight-attempt`                                                                        | retry topic `<group>.retry` (`x-znight-not-before`, ≤ 15 min: `maxRetryDelayMs`)                 | 0                 | `<topic>.dlq`                       | one consumer group per `@Consumer` (`<groupId>.<topic>`, override with `groupId`), manual commits (never moving back), partitions sequential, deduplication after a rebalance, back-pressure per stream, no delayed publish                            |
+| Driver                              | Attempts                                                                                               | Native delay                                                                                     | In-process budget                      | Dead letters                                    | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ | -------------------------------------- | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/memory`                           | native                                                                                                 | timers (longer than 2^31 − 1 ms: chained)                                                        | 1 s                                    | `<q>.dlq`                                       | deterministic test broker (`send`, `idle`, `settlements`, `deadLetters`, `published`, `fail`...)                                                                                                                                                                                                                                                                                                                                                                                             |
+| `/rabbitmq` (amqplib)               | `x-znight-attempt` + redeliveries (quorum `x-delivery-count`, classic `redelivered` flag)              | retries: delay queues `<q>.delay.<ms>` (TTL + DLX); delayed publications: 32 shared delay levels | 5 s                                    | `<q>.dlq`, publish confirmed + ack              | quorum queues by default (`queueType`), confirm channel + `mandatory`, `prefetch = concurrency`, publishes through the default exchange (and the delay levels), topology declared or verified, `x-delivery-limit: -1` (RabbitMQ ≥ 4), recovery (below)                                                                                                                                                                                                                                       |
+| `/sqs` (client-sqs ^3.600)          | `ApproximateReceiveCount`                                                                              | visibility timeout (≤ 12 h)                                                                      | 1 s                                    | `<q>-dlq` or `RedrivePolicy` target             | queues never created; `maxReceiveCount` ≥ attempts checked; lease extension (stopped before each settlement); FIFO groups by `key`                                                                                                                                                                                                                                                                                                                                                           |
+| `/kafka` (@platformatic/kafka)      | `x-znight-attempt`                                                                                     | retry topic `<group>.retry` (`x-znight-not-before`, ≤ 15 min: `maxRetryDelayMs`)                 | 0                                      | `<topic>.dlq`                                   | one consumer group per `@Consumer` (`<groupId>.<topic>`, override with `groupId`), manual commits (never moving back), partitions sequential, deduplication after a rebalance, back-pressure per stream, no delayed publish                                                                                                                                                                                                                                                                  |
+| `/pubsub` (@google-cloud/pubsub ^6) | `deliveryAttempt` (subscriptions with a dead-letter policy), else the retries it requested (in memory) | ack deadline (`ModifyAckDeadline`, ≤ 600 s)                                                      | 1 s (0 with `retries: 'subscription'`) | topic `<q>-dlq` or the dead-letter policy topic | `@Consumer` queue = subscription, published queue = topic (`topics` / `subscriptions` maps); unary Pull, at most `concurrency` messages leased, lease extension (stopped before each settlement); `retries: 'subscription'` nacks every failure (subscription retry and dead-letter policies own redelivery; a dead-letter policy is required); `maxDeliveryAttempts` ≥ attempts checked otherwise; ordering keys serialised; no delayed publish; topology verified (`provision` creates it) |
 
 More on the drivers:
 
@@ -2639,6 +2644,30 @@ More on the drivers:
   Closing a subscription, or the driver, waits for every received message, those of a FIFO group
   still queued behind their predecessor included (handed to the stopped runtime, which releases
   them), before the client is destroyed.
+- **Pub/Sub** (RFC 0012). Short names are resolved in the driver's project, full resource names
+  (`projects/<p>/...`) are used as they are; `InboundMessage.queue` and `x-znight-original-queue`
+  keep the `@Consumer` queue. Received messages get `ackDeadlineSeconds` at once and every half of
+  it while leased; a settlement removes the message from the lease and awaits the extension in
+  flight before its own call (ack: `Acknowledge`; release: deadline 0; retry: deadline
+  `ceil(delayMs / 1000)`). Without a dead-letter policy, `deliveryAttempt` is 0 and the attempt is
+  the one of the last retry the driver requested for that message id (bounded, per process).
+  `retries` (driver option; under `'subscription'`, `@Consumer({ retries: 'znight' })` takes the
+  ownership back, while `@Consumer({ retries: 'subscription' })` under `'znight'` is ZNIGHT011, since
+  the in-process budget is driver-wide): `'znight'` publishes dead letters (attributes truncated to
+  Pub/Sub limits) then acknowledges, and with `deadLetter: false` nacks (dead-letter policy present
+  or unknown) or acknowledges (known to have none); `'subscription'` answers every retry and
+  dead-letter request with a zero deadline (in-process budget 0), reports `nativeDeadLetter`, refuses
+  a subscription known to have no dead-letter policy (ZNIGHT011) and warns when
+  `maxDeliveryAttempts` differs from the consumer's attempts. A lease extension is sent every half
+  deadline whatever the initial deadlines of new batches in flight (a tick is only skipped while the
+  previous periodic extension is in flight). `NOT_FOUND` on the subscription or the Znight
+  dead-letter topic fails the subscription (ZNIGHT011) unless `provision` (under `'subscription'`, a
+  provisioned subscription gets a dead-letter policy to the consumer's dead-letter topic,
+  `maxDeliveryAttempts` = its attempts clamped to 5–100); `PERMISSION_DENIED`
+  logs a warning and skips the checks (ordering then assumed). Attributes (≤ 100, keys ≤ 256 bytes,
+  values ≤ 1024 bytes, no `goog` prefix) are checked before publishing; `googclient_traceparent` is
+  exposed as `traceparent` when absent. A Pull in flight when the subscription stops is abandoned
+  (unary calls cannot be cancelled) and the messages it returns are released.
 
 ### 9.3 Config (`@znight/config`)
 

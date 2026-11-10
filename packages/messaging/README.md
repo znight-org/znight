@@ -1,11 +1,11 @@
 # @znight/messaging
 
 Message consumers and publishing for [Znight](../../README.md), checked at build time and run on
-RabbitMQ, Amazon SQS, Kafka or in memory.
+RabbitMQ, Amazon SQS, Kafka, Google Cloud Pub/Sub or in memory.
 
 Retries with backoff, dead-letter queues, per-consumer concurrency and graceful shutdown, the same
-on **RabbitMQ**, **Amazon SQS** and **Kafka**; the in-memory broker serves tests and local
-development.
+on **RabbitMQ**, **Amazon SQS**, **Kafka** and **Google Cloud Pub/Sub**; the in-memory broker serves
+tests and local development.
 
 Like the rest of Znight, consumers are discovered **at build time**: `@znight/compiler` (with the
 `@znight/messaging/compiler` extension) reads the decorators and generates the consumer metadata. At
@@ -18,6 +18,7 @@ bun add -d @znight/compiler vite
 bun add amqplib              # optional: RabbitMQ driver
 bun add @aws-sdk/client-sqs  # optional: SQS driver
 bun add @platformatic/kafka  # optional: Kafka driver
+bun add @google-cloud/pubsub # optional: Pub/Sub driver
 
 # npm
 npm install @znight/core @znight/messaging
@@ -25,6 +26,7 @@ npm install -D @znight/compiler vite
 npm install amqplib              # optional: RabbitMQ driver
 npm install @aws-sdk/client-sqs  # optional: SQS driver
 npm install @platformatic/kafka  # optional: Kafka driver
+npm install @google-cloud/pubsub # optional: Pub/Sub driver
 ```
 
 Runs on Node.js >= 24 and Bun >= 1.3. Broker clients are optional peer dependencies: install only the
@@ -141,7 +143,7 @@ receive ─► wait for a concurrency slot ─► request scope (InboundMessage)
    └─► decode ─► select handler by type ─► invoke (validate → handler)
          ├─ success ───────────────────────────────────────────────► ack
          ├─ failure, attempts left ─► wait in-process (≤ driver budget) ─► redeliver as attempt + 1
-         │                          └─ or native delayed redelivery (SQS visibility, RabbitMQ delay queue, Kafka retry topic)
+         │                          └─ or native delayed redelivery (SQS visibility, RabbitMQ delay queue, Kafka retry topic, Pub/Sub ack deadline)
          └─ NonRetryableError / invalid payload / undecodable body / no handler / last attempt
               └─► @OnError ─ 'ack' ─► ack
                            └─ otherwise (or throws) ─► dead-letter: publish (confirmed) then ack
@@ -152,11 +154,12 @@ receive ─► wait for a concurrency slot ─► request scope (InboundMessage)
   republished, dead-lettered or released). A settlement failure (connection loss) leaves the message
   unacknowledged, so the broker redelivers it.
 - **Attempts** are counted by the broker (SQS `ApproximateReceiveCount`, RabbitMQ quorum
-  `x-delivery-count`) and/or the `x-znight-attempt` header of republished retries
+  `x-delivery-count`, Pub/Sub `deliveryAttempt`) and/or the `x-znight-attempt` header of republished retries
   (`message.attempt`, 1-based). A redelivery beyond the last attempt is dead-lettered without calling
   the handler.
 - **Ordering** is not guaranteed across retries. Kafka keeps the order of a partition (records of a
-  partition are handled one at a time); SQS FIFO keeps the order of a message group.
+  partition are handled one at a time); SQS FIFO keeps the order of a message group, Pub/Sub the order
+  of an ordering key on ordered subscriptions.
 
 | Outcome (`event.outcome`) | When                                                                                       |
 | ------------------------- | ------------------------------------------------------------------------------------------ |
@@ -178,7 +181,7 @@ receive ─► wait for a concurrency slot ─► request scope (InboundMessage)
 Handlers without `@Retry` use `defaults.retry` (3 attempts, exponential from 1 s, capped at 30 s).
 
 A delay shorter than the driver's `maxInProcessDelayMs` is waited **in-process** (the message stays
-locked: prefetch slot, SQS lease) then the message is redelivered; longer delays use the broker's
+locked: prefetch slot, SQS or Pub/Sub lease) then the message is redelivered; longer delays use the broker's
 **native** delayed redelivery. **The application fails to start (ZNIGHT011)** if a policy needs a delay
 the driver cannot honour (e.g. more than 12 h on SQS).
 
@@ -195,7 +198,8 @@ the driver cannot honour (e.g. more than 12 h on SQS).
 
 The dead-letter destination of a queue is, by priority: `@Consumer({ deadLetter })`,
 `defaults.deadLetter(queue)`, the driver naming (`orders.dlq`; SQS `orders-dlq` or the target of the
-queue's `RedrivePolicy`). The copy keeps the body, type, id and headers (without `x-znight-attempt`, so
+queue's `RedrivePolicy`; Pub/Sub the topic `orders-dlq` or the topic of the subscription's dead-letter
+policy). The copy keeps the body, type, id and headers (without `x-znight-attempt`, so
 that a redrive starts over) and adds:
 
 | Header                        | Value                                                                   |
@@ -208,12 +212,14 @@ that a redrive starts over) and adds:
 
 The original is acknowledged only once the copy is confirmed; if the publication fails, the message
 is released after `defaults.requeueDelay` and redelivered. `deadLetter: false` disables
-dead-lettering: RabbitMQ rejects the message (a queue DLX policy applies), SQS and Kafka discard it.
+dead-lettering: RabbitMQ rejects the message (a queue DLX policy applies), SQS and Kafka discard it,
+Pub/Sub nacks it (the subscription's dead-letter policy applies) or acknowledges it when the
+subscription is known to have no dead-letter policy.
 
 ### Concurrency and graceful shutdown
 
 `concurrency` (default `defaults.concurrency`, 1) bounds the messages a consumer handles at once
-(RabbitMQ prefetch, SQS receive batches, Kafka partitions handled in parallel).
+(RabbitMQ prefetch, SQS receive batches, Kafka partitions handled in parallel, Pub/Sub leased messages).
 
 `app.stop()` (or SIGTERM) stops receiving, aborts in-process retry delays (those messages are released
 to the broker, never dropped), aborts `message.signal`, waits for the handlers in flight, then closes
@@ -242,7 +248,7 @@ interface InboundMessage<T = unknown> {
   type: string | undefined
   payload: T
   headers: Readonly<Record<string, string>>
-  key: string | undefined // Kafka key, SQS FIFO group
+  key: string | undefined // Kafka key, SQS FIFO group, Pub/Sub ordering key
   attempt: number // 1-based
   maxAttempts: number
   redelivered: boolean
@@ -251,7 +257,7 @@ interface InboundMessage<T = unknown> {
   contentType: string | undefined
   body: Uint8Array | string // raw body
   driver: string
-  raw: unknown // amqplib ConsumeMessage, SQS Message, Kafka Message...
+  raw: unknown // amqplib ConsumeMessage, SQS Message, Kafka Message, Pub/Sub ReceivedMessage...
   signal: AbortSignal // aborted on shutdown
 }
 ```
@@ -264,14 +270,14 @@ interface InboundMessage<T = unknown> {
 const { id } = await broker.publish('orders', order, {
   type: 'order.placed', // handler selection
   headers: { 'x-tenant': 'acme' }, // string values
-  key: order.customerId, // Kafka partition key / SQS FIFO group
-  delay: 5_000, // ms (RabbitMQ, SQS ≤ 15 min, memory; not Kafka)
+  key: order.customerId, // Kafka partition key / SQS FIFO group / Pub/Sub ordering key
+  delay: 5_000, // ms (RabbitMQ, SQS ≤ 15 min, memory; not Kafka nor Pub/Sub)
   id: order.id, // default: random UUID
 })
 ```
 
 `publish()` resolves once the broker **confirmed** the message (publisher confirms, SQS response, Kafka
-acks from all in-sync replicas). Payloads are JSON-encoded; `Uint8Array` is sent as
+acks from all in-sync replicas, Pub/Sub `Publish` response). Payloads are JSON-encoded; `Uint8Array` is sent as
 `application/octet-stream`; a string with a `contentType` is sent as is. It works from the plugin's
 bootstrap until the application is disposed (providers' `onStart` and `onStop` included).
 
@@ -286,15 +292,15 @@ MessagingPlugin.configure({
 MessagingPlugin.configure(c => ({ driver: rabbitmq({ url: c.get(AmqpConfig).url }) }))
 ```
 
-| Option                  | Default                      | Description                                                           |
-| ----------------------- | ---------------------------- | --------------------------------------------------------------------- |
-| `driver`                | —                            | `memory()`, `rabbitmq()`, `sqs()` or `kafka()` (from their subpaths). |
-| `defaults.retry`        | 3 attempts, 1 s exp., ≤ 30 s | Policy of handlers without `@Retry`; `false` disables retries.        |
-| `defaults.concurrency`  | `1`                          | Concurrency of consumers without `concurrency`.                       |
-| `defaults.deadLetter`   | driver naming                | `(queue) => name`, or `false` to disable dead-lettering.              |
-| `defaults.requeueDelay` | `1000`                       | Pause (ms) before releasing a message whose settlement failed.        |
-| `codec`                 | `jsonCodec`                  | `{ encode(payload, contentType), decode(body, contentType) }`.        |
-| `consume`               | `true`                       | `false` for publish-only processes (consumers are not subscribed).    |
+| Option                  | Default                      | Description                                                                       |
+| ----------------------- | ---------------------------- | --------------------------------------------------------------------------------- |
+| `driver`                | —                            | `memory()`, `rabbitmq()`, `sqs()`, `kafka()` or `pubsub()` (from their subpaths). |
+| `defaults.retry`        | 3 attempts, 1 s exp., ≤ 30 s | Policy of handlers without `@Retry`; `false` disables retries.                    |
+| `defaults.concurrency`  | `1`                          | Concurrency of consumers without `concurrency`.                                   |
+| `defaults.deadLetter`   | driver naming                | `(queue) => name`, or `false` to disable dead-lettering.                          |
+| `defaults.requeueDelay` | `1000`                       | Pause (ms) before releasing a message whose settlement failed.                    |
+| `codec`                 | `jsonCodec`                  | `{ encode(payload, contentType), decode(body, contentType) }`.                    |
+| `consume`               | `true`                       | `false` for publish-only processes (consumers are not subscribed).                |
 
 The plugin (`name: 'messaging'`) exposes `broker`, `driver` and `consumers()` (state, in-flight count,
 dead-letter queue of each consumer).
@@ -305,17 +311,17 @@ a `defaults.concurrency` that is not a positive integer...) make `Application.cr
 
 ## Drivers
 
-| Capability             | memory    | RabbitMQ                                | SQS                              | Kafka                                |
-| ---------------------- | --------- | --------------------------------------- | -------------------------------- | ------------------------------------ |
-| Subpath                | `/memory` | `/rabbitmq`                             | `/sqs`                           | `/kafka`                             |
-| Client (optional peer) | —         | `amqplib` ^2                            | `@aws-sdk/client-sqs` ^3         | `@platformatic/kafka` ^2             |
-| Attempt counting       | native    | `x-znight-attempt` + `x-delivery-count` | `ApproximateReceiveCount`        | `x-znight-attempt`                   |
-| Native retry delay     | timers    | delay queues (TTL + DLX), ≤ 49 days     | visibility timeout, ≤ 12 h       | retry topic, ≤ `maxRetryDelayMs`     |
-| In-process budget      | 1 s       | 5 s                                     | 1 s                              | 0 (always the retry topic)           |
-| Delayed publish        | yes       | yes (32 shared delay levels), ≤ 49 days | ≤ 15 min (not FIFO)              | no                                   |
-| Dead letters           | `<q>.dlq` | `<q>.dlq` (publish confirmed + ack)     | `<q>-dlq` / RedrivePolicy target | `<topic>.dlq` (acks all + commit)    |
-| Ordering               | FIFO      | none across retries                     | FIFO groups                      | per partition                        |
-| Topology               | implicit  | declared (`assertTopology`) or verified | verified (queues must exist)     | verified or created (`createTopics`) |
+| Capability             | memory    | RabbitMQ                                | SQS                              | Kafka                                | Pub/Sub                                          |
+| ---------------------- | --------- | --------------------------------------- | -------------------------------- | ------------------------------------ | ------------------------------------------------ |
+| Subpath                | `/memory` | `/rabbitmq`                             | `/sqs`                           | `/kafka`                             | `/pubsub`                                        |
+| Client (optional peer) | —         | `amqplib` ^2                            | `@aws-sdk/client-sqs` ^3         | `@platformatic/kafka` ^2             | `@google-cloud/pubsub` ^6                        |
+| Attempt counting       | native    | `x-znight-attempt` + `x-delivery-count` | `ApproximateReceiveCount`        | `x-znight-attempt`                   | `deliveryAttempt` (in memory without DLQ policy) |
+| Native retry delay     | timers    | delay queues (TTL + DLX), ≤ 49 days     | visibility timeout, ≤ 12 h       | retry topic, ≤ `maxRetryDelayMs`     | ack deadline, ≤ 600 s                            |
+| In-process budget      | 1 s       | 5 s                                     | 1 s                              | 0 (always the retry topic)           | 1 s (0 with `retries: 'subscription'`)           |
+| Delayed publish        | yes       | yes (32 shared delay levels), ≤ 49 days | ≤ 15 min (not FIFO)              | no                                   | no                                               |
+| Dead letters           | `<q>.dlq` | `<q>.dlq` (publish confirmed + ack)     | `<q>-dlq` / RedrivePolicy target | `<topic>.dlq` (acks all + commit)    | topic `<q>-dlq` / dead-letter policy topic       |
+| Ordering               | FIFO      | none across retries                     | FIFO groups                      | per partition                        | ordering keys (ordered subscriptions)            |
+| Topology               | implicit  | declared (`assertTopology`) or verified | verified (queues must exist)     | verified or created (`createTopics`) | verified or created (`provision`)                |
 
 ### Memory
 
@@ -441,6 +447,101 @@ failure (throttling, KMS, permissions) releases the message instead, for a full 
 settlement is sent, so that it never overrides the visibility set by a retry or a release. IAM
 permissions: `sqs:ReceiveMessage`, `sqs:DeleteMessage`, `sqs:ChangeMessageVisibility`,
 `sqs:SendMessage`, `sqs:GetQueueUrl`, `sqs:GetQueueAttributes`.
+
+### Google Cloud Pub/Sub
+
+```ts
+import { pubsub } from '@znight/messaging/pubsub'
+
+pubsub({ projectId: 'acme-prod', subscriptions: { notifications: 'events-notifications' } })
+```
+
+| Option                | Default              | Description                                                                                |
+| --------------------- | -------------------- | ------------------------------------------------------------------------------------------ |
+| `projectId`           | the client's project | Project of short names (`GOOGLE_CLOUD_PROJECT`, credentials, `PUBSUB_PROJECT_ID`...).      |
+| `client`              | —                    | An existing `PubSub` whose configuration the driver reuses (not closed).                   |
+| `clientConfig`        | `{}`                 | Configuration of the `PubSub` client created by the driver (`credentials`, `apiEndpoint`). |
+| `publisherClient`     | —                    | An existing `v1.PublisherClient` (not closed).                                             |
+| `subscriberClient`    | —                    | An existing `v1.SubscriberClient` (not closed).                                            |
+| `topics`              | the queue name       | Topic of each published queue: `{ queue: name }` or `(queue) => name`.                     |
+| `subscriptions`       | the queue name       | Subscription of each `@Consumer` queue: `{ queue: name }` or `(queue) => name`.            |
+| `retries`             | `'znight'`           | Who retries and dead-letters: `'znight'` or `'subscription'` (below).                      |
+| `ackDeadlineSeconds`  | `60`                 | Ack deadline kept on messages while handlers run (10–600, extended every half).            |
+| `maxInProcessDelayMs` | `1000`               | Longest retry delay waited in-process (`0` with `retries: 'subscription'`).                |
+| `pullTimeoutMs`       | `30000`              | Longest wait of a Pull for messages.                                                       |
+| `deadLetterName`      | `<q>-dlq`            | Default dead-letter queue (a topic).                                                       |
+| `provision`           | `false`              | Create missing topics and subscriptions (development, emulator).                           |
+
+`publish(queue)` publishes to a **topic** and `@Consumer(queue)` pulls a **subscription**. Both are
+named after the queue by default (a topic and a subscription with the same name behave like a
+queue); map them with `topics` and `subscriptions` (a short name in `projectId`, or a full resource
+name `projects/<p>/subscriptions/<s>`). For a fan-out, publish to the topic and give each consumer its
+subscription. `message.queue` and `x-znight-original-queue` keep the `@Consumer` queue.
+
+The driver pulls with unary Pull, never more messages than the consumer `concurrency`, keeps their ack
+deadline at `ackDeadlineSeconds` while they are handled (the extension stops, once any extension in
+flight landed, before a settlement), acknowledges with `Acknowledge` and releases with a zero
+deadline. A retry sets the ack deadline to the delay (whole seconds, at most 600 s): Pub/Sub
+redelivers the message after it. Attempts come from `deliveryAttempt`, which Pub/Sub only sets on
+subscriptions with a **dead-letter policy**; without one, the driver counts the retries it requested
+in memory (exact for a single replica, approximate across replicas and restarts) and warns at
+subscribe time when a consumer retries.
+
+**Who retries.** Pub/Sub can own retries and dead letters (subscription retry policy and dead-letter
+policy). To never stack both layers, pick one owner with `retries`:
+
+- `'znight'` (default): `@Retry` applies and Znight publishes dead letters (with the
+  `x-znight-dead-letter-reason`... attributes) to the topic `<q>-dlq`. When the subscription also has
+  a dead-letter policy, its `maxDeliveryAttempts` must allow every attempt of the consumer (the boot
+  fails otherwise) and the default destination becomes the policy's topic.
+- `'subscription'`: every failure is an immediate nack, so the subscription's retry policy sets the
+  backoff (the `@Retry` delays are ignored) and its dead-letter policy forwards the message after
+  `maxDeliveryAttempts`; Znight publishes no dead-letter copy. The subscription must have a dead-letter
+  policy (the boot fails otherwise). Set the `@Retry` attempts (or `defaults.retry.attempts`) to
+  `maxDeliveryAttempts` so that the handler runs on every delivery (a warning when they differ).
+  Terminal failures (a `NonRetryableError`, a validation or decoding failure, a message without
+  handler, exhausted attempts) are nacked too and logged as rejected, without a dead-letter queue
+  name since Znight publishes nothing: they are redelivered until the policy forwards them, and the
+  handler, `@OnError`, the `dead-letter` delivery outcome (logs, metrics, traces) and the
+  `error:report` event repeat on each of these deliveries. The `@Retry` delays are ignored but still
+  checked: each must fit within 600 s.
+
+The in-process budget and the `@Retry` checks are driver-wide, so the mode is chosen on the driver.
+Under `pubsub({ retries: 'subscription' })`, a consumer can take the ownership back with
+`@Consumer({ queue, retries: 'znight' })`, typically the collector of a dead-letter topic, whose
+subscription has no dead-letter policy: it keeps `@Retry` and Znight dead letters, with no in-process
+budget (every retry delay becomes an ack deadline, in whole seconds). The opposite,
+`@Consumer({ retries: 'subscription' })` under a `'znight'` driver, fails the boot (ZNIGHT011).
+
+```ts
+MessagingPlugin.configure({
+  driver: pubsub({ retries: 'subscription' }),
+  defaults: { retry: { attempts: 5, backoff: 'fixed', delay: 0 } }, // maxDeliveryAttempts: 5
+})
+```
+
+Headers are message attributes (Pub/Sub allows 100 per message, keys up to 256 bytes, values up to
+1024 bytes, no `goog` prefix: checked before publishing) and Znight uses 3 (`x-znight-id`,
+`x-znight-type`, `content-type`); the body is the message data. Trace context (`traceparent`,
+`tracestate`) travels as attributes; the `googclient_traceparent` of messages published by the Google
+client library with OpenTelemetry is exposed as `traceparent`. `key` is the ordering key: on
+subscriptions with message ordering (or whose configuration cannot be read), messages of a key are
+handled one after the other. Delayed publishing is not supported.
+
+Nothing is created by default: at subscribe time the driver reads the subscription (a missing one
+fails the boot) and checks the Znight dead-letter topic. Without the `pubsub.subscriptions.get` and
+`pubsub.topics.get` permissions (`roles/pubsub.viewer`), it logs a warning and skips these checks.
+`provision: true` creates the missing topic and subscription of a consumer, the dead-letter topic with
+a subscription of the same name (a topic without subscription drops its messages), and the topics
+published to. Under `retries: 'subscription'`, a created subscription gets a dead-letter policy to that
+topic, with the consumer's attempts as `maxDeliveryAttempts` (between 5 and 100, the Pub/Sub bounds).
+`PUBSUB_EMULATOR_HOST` (or `clientConfig.apiEndpoint`) targets the emulator.
+
+On stop, the driver stops pulling (a Pull in flight is abandoned and the messages it may still return
+are released), keeps extending the deadline of the messages in flight until the runtime settles them,
+then closes the clients it created. A long drain needs `shutdown.hookTimeoutMs` above it. Permissions:
+`pubsub.subscriptions.consume`, `pubsub.topics.publish`, and `pubsub.subscriptions.get` /
+`pubsub.topics.get` for the checks. Design notes: [RFC 0012](../../rfcs/0012-messaging-pubsub.md).
 
 ### Kafka
 

@@ -15,6 +15,7 @@ Design documents for significant changes. Each RFC is discussed before implement
 | [0009](./0009-graphql-drivers.md)             | GraphQL drivers (`@znight/graphql`)       | M1–M2 implemented (0.3.0), M3 planned |
 | [0010](./0010-custom-parameter-decorators.md) | Custom parameter decorators               | Implemented (0.4.0)                   |
 | [0011](./0011-application-events.md)          | Application events (`@znight/events`)     | Implemented (0.5.0)                   |
+| [0012](./0012-messaging-pubsub.md)            | Pub/Sub driver (`@znight/messaging`)      | Accepted (implemented, unreleased)    |
 
 ## Error code allocation
 

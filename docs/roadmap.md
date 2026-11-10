@@ -23,6 +23,7 @@ and the release that brought it. Until 1.0, minor versions may change APIs; each
 | [0009](https://github.com/znight-org/znight/blob/main/rfcs/0009-graphql-drivers.md)             | GraphQL drivers (`@znight/graphql`)       | M1–M2 implemented (0.3.0), M3 planned |
 | [0010](https://github.com/znight-org/znight/blob/main/rfcs/0010-custom-parameter-decorators.md) | Custom parameter decorators               | Implemented (0.4.0)                   |
 | [0011](https://github.com/znight-org/znight/blob/main/rfcs/0011-application-events.md)          | Application events (`@znight/events`)     | Implemented (0.5.0)                   |
+| [0012](https://github.com/znight-org/znight/blob/main/rfcs/0012-messaging-pubsub.md)            | Pub/Sub driver (`@znight/messaging`)      | Accepted (implemented, unreleased)    |
 
 ## Released {#released}
 

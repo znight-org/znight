@@ -50,6 +50,7 @@ export interface ConsumerStatus {
   readonly state: ConsumerState
   readonly concurrency: number
   readonly inFlight: number
+  /** Dead-letter destination, `undefined` when disabled or left to the broker's own policy. */
   readonly deadLetterQueue: string | undefined
 }
 
@@ -122,7 +123,7 @@ function createPlugin(rawOptions: PluginOptions<MessagingPluginOptions>): Messag
         state: runtime.state,
         concurrency: runtime.consumer.concurrency,
         inFlight: runtime.inFlight,
-        deadLetterQueue: runtime.consumer.deadLetterQueue,
+        deadLetterQueue: runtime.deadLetterQueue,
       }))
     },
 
