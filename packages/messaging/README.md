@@ -502,8 +502,9 @@ policy). To never stack both layers, pick one owner with `retries`:
   Terminal failures (a `NonRetryableError`, a validation or decoding failure, a message without
   handler, exhausted attempts) are nacked too and logged as rejected, without a dead-letter queue
   name since Znight publishes nothing: they are redelivered until the policy forwards them, and the
-  handler, `@OnError` and the `dead-letter` delivery outcome (logs, metrics, traces) repeat on each
-  of these deliveries. The `@Retry` delays are ignored but still checked: each must fit within 600 s.
+  handler, `@OnError`, the `dead-letter` delivery outcome (logs, metrics, traces) and the
+  `error:report` event repeat on each of these deliveries. The `@Retry` delays are ignored but still
+  checked: each must fit within 600 s.
 
 The in-process budget and the `@Retry` checks are driver-wide, so the mode is chosen on the driver.
 Under `pubsub({ retries: 'subscription' })`, a consumer can take the ownership back with

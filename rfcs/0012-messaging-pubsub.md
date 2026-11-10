@@ -125,9 +125,9 @@ subscription ignores.
   `NonRetryableError`, a validation failure or a message without handler is nacked like any failure:
   it is redelivered until the dead-letter policy forwards it. The subscription reports
   `nativeDeadLetter` to the runtime, which then requests dead letters with `queue: undefined` and
-  logs them as rejected (never naming `<queue>-dlq`, which receives nothing); the handler, `@OnError`
-  and the `dead-letter` delivery outcome repeat on each such delivery. The `@Retry` delays are still
-  checked against the native limit (600 s).
+  logs them as rejected (never naming `<queue>-dlq`, which receives nothing); the handler,
+  `@OnError`, the `dead-letter` delivery outcome and the `error:report` event repeat on each such
+  delivery. The `@Retry` delays are still checked against the native limit (600 s).
 
 ## 6. Messages: body, attributes, trace context
 
