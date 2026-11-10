@@ -937,12 +937,199 @@ export function addressKey(ip: string | undefined): string {
   password sign-in (5 attempts per minute and address) and the webhook.
 - Anonymous callers are keyed by address, IPv6 ones by `/64` prefix (`addressKey`): a client
   usually holds a whole `/64`, and keyed by full address it would get a fresh budget per address.
-  A per-address limit still lets a botnet spread its guesses against one account; add a
-  per-account budget (with the lockout trade-off it brings) when that matters.
+  A per-address limit still lets a botnet spread its guesses against one account: the sign-in
+  route adds a [per-account throttle](#sign-in-throttling).
 - The memory store is per process. With several instances, use `RateLimiterRedis` (or another
   shared store of the library) so that the limit holds across the fleet.
 - Behind a load balancer, `ctx.ip` is the load balancer unless `trustProxy` is set: every anonymous
   client would share one budget.
+
+### Sign-in throttling {#sign-in-throttling}
+
+The per-address limit does not protect one account: a botnet sends a few guesses from each of
+thousands of addresses, and none of them reaches its limit. Counting failures per account instead
+brings the opposite problem: refusing an account after N failures lets anyone who knows a username
+lock its owner out. Following the OWASP
+[Authentication](https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html#protect-against-automated-attacks)
+and
+[Credential Stuffing](https://cheatsheetseries.owasp.org/cheatsheets/Credential_Stuffing_Prevention_Cheat_Sheet.html)
+cheat sheets, the example combines two counters, neither of which refuses the real user:
+
+```ts [src/security/sign-in-throttle.ts]
+import { setTimeout as sleep } from 'node:timers/promises'
+import { Injectable } from '@znight/core'
+import { TooManyRequestsException } from '@znight/http'
+
+import { addressKey } from './rate-limit.js'
+
+export const WINDOW_MS = 15 * 60_000 // failures are forgotten 15 minutes after the last one
+export const PAIR_BUDGET = 5 // failed attempts per account and address, then that address is refused
+export const FREE_FAILURES = 3 // failures on an account before its attempts are slowed down
+export const BASE_DELAY_MS = 250 // then 250 ms, 500 ms, 1 s, 2 s...
+export const MAX_DELAY_MS = 4000 // ...up to 4 s per attempt: slowed down, never refused
+export const MAX_ENTRIES = 10_000 // pairs and accounts kept in memory, each (least recently failed out first)
+
+/**
+ * Counters that expire `windowMs` after their last increment, at most `capacity` of them: beyond,
+ * the least recently incremented key is dropped. A Map keeps insertion order, and an increment moves
+ * its key to the end: the first keys are the oldest, so expired keys are swept from the start.
+ */
+export class AttemptCounters {
+  readonly #entries = new Map<string, { count: number; expiresAt: number }>()
+
+  constructor(
+    readonly windowMs: number,
+    readonly capacity: number,
+  ) {}
+
+  get size(): number {
+    return this.#entries.size
+  }
+
+  count(key: string): number {
+    const entry = this.#entries.get(key)
+    return entry !== undefined && entry.expiresAt > Date.now() ? entry.count : 0
+  }
+
+  msBeforeReset(key: string): number {
+    const entry = this.#entries.get(key)
+    return entry === undefined ? 0 : Math.max(0, entry.expiresAt - Date.now())
+  }
+
+  increment(key: string): number {
+    const now = Date.now()
+    const count = this.count(key) + 1
+    this.#entries.delete(key)
+    for (const [oldest, entry] of this.#entries) {
+      if (entry.expiresAt > now && this.#entries.size < this.capacity) break
+      this.#entries.delete(oldest) // expired, or the least recently incremented one past the capacity
+    }
+    this.#entries.set(key, { count, expiresAt: now + this.windowMs })
+    return count
+  }
+
+  /** Gives back an increment, without extending the expiry. */
+  decrement(key: string): void {
+    const entry = this.#entries.get(key)
+    if (entry !== undefined) entry.count = Math.max(0, entry.count - 1)
+  }
+
+  delete(key: string): void {
+    this.#entries.delete(key)
+  }
+}
+
+/**
+ * Protects password sign-in against guessing on one account (OWASP Authentication and Credential
+ * Stuffing cheat sheets), on top of the per-address `@RateLimit` of the route:
+ *
+ * - **per account and address**: after 5 failures, that address is refused on that account (429)
+ *   until 15 minutes after the last one. Other addresses, the real user's included, are not.
+ * - **per account**: past 3 failures from any address, each attempt waits before the password is
+ *   checked, twice as long each time, up to 4 seconds. A botnet spreading its guesses is slowed
+ *   down, and the account is never locked: a username is all it takes to lock someone out.
+ *
+ * Both are keyed by the submitted name, whether an account has it or not: the answers and their
+ * timing do not tell which names exist. A successful sign-in resets the budget of its address; the
+ * account's failures stay, or an attacker would start afresh each time the user signs in.
+ */
+@Injectable()
+export class SignInThrottle {
+  readonly #pairs = new AttemptCounters(WINDOW_MS, MAX_ENTRIES)
+  readonly #accounts = new AttemptCounters(WINDOW_MS, MAX_ENTRIES)
+
+  /**
+   * Runs `verify` (the password check, resolving to `undefined` for wrong credentials) unless the
+   * address spent its budget on this account, after the delay of the account. `signal`: the client
+   * left (`ctx.signal`), stop waiting.
+   */
+  async attempt<T>(
+    username: string,
+    ip: string | undefined,
+    verify: () => Promise<T | undefined>,
+    signal?: AbortSignal,
+  ): Promise<T | undefined> {
+    const pair = `${addressKey(ip)}\n${username}`
+    // counted when it starts, before any await: a burst of parallel attempts cannot overspend
+    if (this.#pairs.count(pair) >= PAIR_BUDGET) {
+      throw new TooManyRequestsException('Too many failed sign-ins', undefined, {
+        headers: { 'retry-after': String(Math.ceil(this.#pairs.msBeforeReset(pair) / 1000)) },
+      })
+    }
+    this.#pairs.increment(pair)
+    let result: T | undefined
+    try {
+      await this.pause(this.delayFor(username), signal)
+      result = await verify()
+    } catch (error) {
+      this.#pairs.decrement(pair) // not a failed guess (hasher busy, client gone): no charge
+      throw error
+    }
+    if (result === undefined) this.#accounts.increment(username)
+    else this.#pairs.delete(pair)
+    return result
+  }
+
+  /** The wait before the next attempt on this account, in milliseconds. */
+  delayFor(username: string): number {
+    const failures = this.#accounts.count(username)
+    return failures < FREE_FAILURES ? 0 : Math.min(BASE_DELAY_MS * 2 ** (failures - FREE_FAILURES), MAX_DELAY_MS)
+  }
+
+  /** Pairs and accounts with recent failures (bounded by `MAX_ENTRIES` each). */
+  get stats(): { readonly pairs: number; readonly accounts: number } {
+    return { pairs: this.#pairs.size, accounts: this.#accounts.size }
+  }
+
+  protected pause(ms: number, signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted()
+    return ms > 0 ? sleep(ms, undefined, signal === undefined ? undefined : { signal }) : Promise.resolve()
+  }
+}
+```
+
+```ts [src/session/session.controller.ts (excerpt)]
+  @Post()
+  @Public()
+  @RateLimit({ points: 5, duration: 60 }) // per client address, whatever the account
+  @HttpCode(200)
+  async signIn(@Body(SignIn) input: SignIn, @Ctx() ctx: HttpContext): Promise<SessionResponse> {
+    const principal = await this.throttle.attempt(
+      input.username,
+      ctx.ip,
+      () => this.accounts.signIn(input.username, input.password, ctx.signal),
+      ctx.signal,
+    )
+    if (principal === undefined) throw new UnauthorizedException('Invalid username or password')
+    return toResponse(this.sessions.open(ctx, principal))
+  }
+```
+
+- **Per account and address**, a hard budget: 5 failures, then `429` with `retry-after` for that
+  address on that account, until 15 minutes after the last failure. The attacker loses that address
+  for that account; the real user, from their own address, is not affected. A successful sign-in
+  resets the budget of its address. An attempt is counted when it starts, so a burst of parallel
+  requests cannot overspend the budget, and given back when it fails for another reason (hasher
+  busy, client gone).
+- **Per account**, a soft slow-down: past 3 failures from any address, each attempt waits before
+  the password is checked, 250 ms doubling up to 4 seconds. It never refuses, so it cannot lock
+  anyone out; every guess on the account takes longer and holds a connection longer (the attacker
+  can still wait in parallel, as many times as the per-address limits of its addresses allow), while
+  the real user still signs in a few seconds later. A success does not reset it: otherwise the attacker would
+  start afresh each time the user signs in. The wait happens before the hash, so it holds no hasher
+  slot, and it stops when the client leaves.
+- The keys are the **submitted name**, whether an account has it or not, and the throttle never
+  looks the account up: an unknown name gets the same `401`, the same `429` and the same delays as a
+  known one (the decoy hash of `Accounts` covers the hash itself).
+- Memory is bounded: each counter expires 15 minutes after its last failure, and each store keeps at
+  most 10,000 keys, dropping the least recently failed one first. Under a flood of names, an evicted
+  pair gets a fresh budget; an attacker able to cause that already holds enough addresses to ignore
+  the pair budget.
+- This does not stop a large botnet: it slows it down. Monitor failed sign-ins (logs, metrics), and
+  add a second factor, or a challenge on accounts under attack, when that matters.
+- The counters live in the memory of one process. With several instances, keep them in a shared
+  store such as Redis (`INCR` and `PEXPIRE` per key, or `RateLimiterRedis` of
+  `rate-limiter-flexible`), or each instance gives the attacker a budget of its own.
 
 ## Webhook signatures {#webhooks}
 

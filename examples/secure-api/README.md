@@ -31,6 +31,7 @@ dependencies. Notes are kept in memory: the data layer is the subject of the
 | Cookie sessions on signed `__Host-` cookies                                                               | [`session/session-cookies.ts`](src/session/session-cookies.ts), [`session/session.controller.ts`](src/session/session.controller.ts)                         |
 | CSRF: fetch metadata, then a double-submit token bound to the session                                     | [`security/csrf.guard.ts`](src/security/csrf.guard.ts)                                                                                                       |
 | Rate limiting as a decision of its own (`@RateLimit`, `RateLimitGuard`)                                   | [`security/rate-limit.ts`](src/security/rate-limit.ts)                                                                                                       |
+| Sign-in throttling per account without lockout: a budget per account and address, a capped slow-down      | [`security/sign-in-throttle.ts`](src/security/sign-in-throttle.ts)                                                                                           |
 | Webhook signatures over the raw body, idempotent processing                                               | [`security/webhook-signature.guard.ts`](src/security/webhook-signature.guard.ts), [`webhooks/`](src/webhooks)                                                |
 | CORS with credentials, security headers, trusted proxies, cookie secrets                                  | [`http.ts`](src/http.ts)                                                                                                                                     |
 | `@Secret` configuration, redacted logs                                                                    | [`config/`](src/config), [`main.ts`](src/main.ts)                                                                                                            |
@@ -153,7 +154,7 @@ curl -i -b jar.txt -H 'content-type: application/json' -X POST $API/notes -d '{"
 curl -i -b jar.txt -H "x-csrf-token: $CSRF" -H 'content-type: application/json' -X POST $API/notes -d '{"text":"x"}' # 201
 curl -i -b jar.txt -H "x-csrf-token: $CSRF" -X DELETE $API/session                                                # 204, cookies cleared
 for i in 1 2 3 4 5 6; do curl -s -o /dev/null -w '%{http_code} ' -H 'content-type: application/json' \
-  -X POST $API/session -d '{"username":"ada","password":"wrong"}'; done   # 401 401 401 401 429 429 (5 attempts a minute per address, the sign-in above included)
+  -X POST $API/session -d '{"username":"ada","password":"wrong"}'; done   # 401 401 401 401 429 429 (5 attempts a minute per address, the sign-in above included; the 4th failure waits 250 ms)
 
 # the billing webhook: HMAC-SHA256 of "<timestamp>.<raw body>"
 BODY='{"id":"evt_1","type":"subscription.created","data":{"customerId":"cus_42","plan":"pro"}}'
@@ -184,7 +185,7 @@ Elsewhere, serve the API over HTTPS: the `__Host-` cookies require it.
 | `DELETE` | `/notes/:id`        | authenticated                    | `NoteOwnerPolicy`                               | `204`; `404`, `403` for an administrator                |
 | `GET`    | `/admin/notes`      | `admin`                          | —                                               | every note                                              |
 | `GET`    | `/admin/export`     | `admin` or `exporter`            | —                                               | `{exportedAt, notes}` as an attachment                  |
-| `POST`   | `/session`          | public                           | `@RateLimit` 5 / min                            | `{id, roles, csrfToken, expiresAt}` + cookies, `401`    |
+| `POST`   | `/session`          | public                           | `@RateLimit` 5 / min, `SignInThrottle`          | `{id, roles, csrfToken, expiresAt}` + cookies, `401`    |
 | `GET`    | `/session`          | authenticated                    | —                                               | the session (CSRF token again), `404` without a session |
 | `DELETE` | `/session`          | authenticated                    | —                                               | `204`, cookies cleared                                  |
 | `POST`   | `/webhooks/billing` | public                           | `WebhookSignatureGuard`, `@RateLimit` 120 / min | `204`, `401`, `400`                                     |
@@ -209,7 +210,7 @@ src/
 │  ├─ api-keys.ts                  # hashed keys, timingSafeEqual
 │  ├─ principal.ts, request-user.ts, current-user.ts, me.controller.ts
 ├─ session/                        # accounts (password sign-in), signed session cookies, /session routes
-├─ security/                       # PasswordHasher, RateLimit + RateLimitGuard, CsrfGuard, WebhookSignatureGuard
+├─ security/                       # PasswordHasher, RateLimit + RateLimitGuard, SignInThrottle, CsrfGuard, WebhookSignatureGuard
 ├─ notes/                          # NoteController, NoteOwnerPolicy, NoteService, NoteRepository (in memory)
 ├─ admin/  status/  health/  webhooks/
 └─ .znight/                        # generated container (git-ignored)
@@ -310,6 +311,16 @@ tests:
 decision of its own, enforced by `RateLimitGuard` (`static enforces`): per route, per principal (or
 per client address), `429` with `retry-after`. It runs after `AuthGuard`, so refused requests never
 consume a budget. The memory store is per process: use `RateLimiterRedis` with several instances.
+
+A per-address limit does not protect one account from a botnet, and a per-account lockout lets
+anyone lock a user out. `POST /session` adds [`SignInThrottle`](src/security/sign-in-throttle.ts)
+(OWASP): after 5 failures on an account from one address (or IPv6 `/64`), that address gets `429`
+with `retry-after` on that account until 15 minutes after its last failure, while other addresses
+still sign in, and a success resets the budget of its address. Past 3 failures on an account from
+any address, each attempt waits before the password check, 250 ms doubling up to 4 s: slowed down,
+never refused. Both are keyed by the submitted name, known or not, so they reveal no account. The
+counters expire 15 minutes after the last failure and keep at most 10,000 keys each, in the memory
+of the process: keep them in a shared store such as Redis with several instances.
 
 `POST /webhooks/billing` is public (there is no user): [`WebhookSignatureGuard`](src/security/webhook-signature.guard.ts)
 checks `x-signature: t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<raw body>">` with
