@@ -203,9 +203,9 @@ export class AppConfig {
   /** Greeting used by GreetingService (APP_GREETING). */
   greeting = 'Hello'
 
-  /** Runtime environment (NODE_ENV): \`znight dev\` sets "development", the Docker image "production". */
+  /** Runtime environment (NODE_ENV): \`znight dev\` sets "development"; unset, the application runs as in production. */
   @Env('NODE_ENV')
-  environment = 'development'
+  environment = 'production'
 }
 "
 ,
@@ -660,9 +660,9 @@ export class AppConfig {
   /** Greeting used by GreetingService (APP_GREETING). */
   greeting = 'Hello'
 
-  /** Runtime environment (NODE_ENV): \`znight dev\` sets "development", the Docker image "production". */
+  /** Runtime environment (NODE_ENV): \`znight dev\` sets "development"; unset, the application runs as in production. */
   @Env('NODE_ENV')
-  environment = 'development'
+  environment = 'production'
 }
 "
 ,

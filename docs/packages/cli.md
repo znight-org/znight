@@ -55,7 +55,7 @@ and `znight generate`. Bun projects run the application on Bun: their `dev` and 
 `ObservabilityPlugin` names its logger after the project, metrics and tracing off; it pretty-prints
 in development only (`znight dev` sets `NODE_ENV=development`) and logs JSON in production
 (`znight start` and the `Dockerfile` set `NODE_ENV=production`). With `config`, `pretty` reads
-`AppConfig.environment` (`@Env('NODE_ENV')`):
+`AppConfig.environment` (`@Env('NODE_ENV')`, `'production'` when unset):
 `ObservabilityPlugin.configure(container => ({ logging: { name, pretty: container.get(AppConfig).environment === 'development' }, ... }))`;
 without it, `process.env['NODE_ENV']`. `pino-pretty` is a dev dependency, so the production image
 does not ship it.

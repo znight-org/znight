@@ -169,11 +169,11 @@ export class Api {}
     expect(file(files({ features: [] }), 'src/main.ts')).not.toContain('ObservabilityPlugin')
   })
 
-  it('config: AppConfig.environment reads NODE_ENV, development by default', () => {
+  it('config: AppConfig.environment reads NODE_ENV, production by default', () => {
     expect(file(files(), 'src/app/app.config.ts')).toContain(`
-  /** Runtime environment (NODE_ENV): \`znight dev\` sets "development", the Docker image "production". */
+  /** Runtime environment (NODE_ENV): \`znight dev\` sets "development"; unset, the application runs as in production. */
   @Env('NODE_ENV')
-  environment = 'development'
+  environment = 'production'
 }
 `)
   })
