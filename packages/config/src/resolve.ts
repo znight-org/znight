@@ -97,7 +97,10 @@ export function resolveFields(
       const entry = sourceEntry(source, name)
       if (entry === undefined || isUnset(entry.value, field.type)) continue
       found = true
-      const result = coerceConfigValue(entry.value, field.type, { enum: field.enum, secret })
+      const result = coerceConfigValue(entry.value, field.type, {
+        enum: field.enum,
+        secret: secret || entry.secret === true,
+      })
       if (result.ok) values.set(field.property, result.value)
       else problems.push({ ...base, kind: 'invalid', message: result.message, name, origin: entry.origin })
       break

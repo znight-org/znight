@@ -471,11 +471,13 @@
       },
       "peerDependencies": {
         "@aws-sdk/client-secrets-manager": "^3.0.0",
+        "@google-cloud/secret-manager": "^6.0.0 || ^7.0.0 || ^8.0.0",
         "@znight/compiler": "workspace:^",
         "yaml": "^2.0.0",
       },
       "optionalPeers": [
         "@aws-sdk/client-secrets-manager",
+        "@google-cloud/secret-manager",
         "@znight/compiler",
         "yaml",
       ],
