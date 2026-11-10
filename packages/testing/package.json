@@ -4,7 +4,7 @@
   "description": "Znight testing utilities: TestBed with auto-mocking and TestApp for end-to-end tests",
   "license": "MIT",
   "author": "Ugho STEPHAN",
-  "homepage": "https://github.com/znight-org/znight/tree/main/packages/testing#readme",
+  "homepage": "https://znight-org.github.io/znight/packages/testing",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/znight-org/znight.git",

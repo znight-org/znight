@@ -4,7 +4,7 @@
   "description": "Znight config plugin: type-safe configuration classes loaded from env, files and secret stores",
   "license": "MIT",
   "author": "Ugho STEPHAN",
-  "homepage": "https://github.com/znight-org/znight/tree/main/packages/config#readme",
+  "homepage": "https://znight-org.github.io/znight/packages/config",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/znight-org/znight.git",

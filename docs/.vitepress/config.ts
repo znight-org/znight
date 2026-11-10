@@ -48,6 +48,8 @@ export default defineConfig({
     ['link', { rel: 'icon', type: 'image/png', sizes: '32x32', href: `${base}favicon-32.png` }],
     ['link', { rel: 'apple-touch-icon', sizes: '512x512', href: `${base}mark-512.png` }],
     ['meta', { name: 'theme-color', content: '#3E7BFA' }],
+    // Google Search Console ownership of https://znight-org.github.io/znight/ (a public token)
+    ['meta', { name: 'google-site-verification', content: 'c7L3QAq2LB23ZR08l7tCM8GvxlaEIIgTdWPZO9-FUUc' }],
     ['meta', { property: 'og:type', content: 'website' }],
     ['meta', { property: 'og:site_name', content: TITLE }],
     ['meta', { property: 'og:image', content: socialImage }],
@@ -69,7 +71,9 @@ export default defineConfig({
     ]
     if (siteUrl !== undefined) {
       const page = pageData.relativePath.replace(/(^|\/)index\.md$/, '$1').replace(/\.md$/, '')
-      head.push(['meta', { property: 'og:url', content: `${siteUrl}${base}${page}` }])
+      const url = `${siteUrl}${base}${page}`
+      // one URL per page for search engines (cleanUrls also serves `page.html`)
+      head.push(['link', { rel: 'canonical', href: url }], ['meta', { property: 'og:url', content: url }])
     }
     return head
   },

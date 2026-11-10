@@ -4,7 +4,7 @@
   "description": "Znight GraphQL: code-first GraphQL whose schema is derived from TypeScript types at build time, on graphql-js 17",
   "license": "MIT",
   "author": "Ugho STEPHAN",
-  "homepage": "https://github.com/znight-org/znight/tree/main/packages/graphql#readme",
+  "homepage": "https://znight-org.github.io/znight/packages/graphql",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/znight-org/znight.git",

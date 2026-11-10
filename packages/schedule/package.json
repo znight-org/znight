@@ -4,7 +4,7 @@
   "description": "Znight schedule: cron, interval and timeout jobs validated at build time, with distributed locks and graceful shutdown",
   "license": "MIT",
   "author": "Ugho STEPHAN",
-  "homepage": "https://github.com/znight-org/znight/tree/main/packages/schedule#readme",
+  "homepage": "https://znight-org.github.io/znight/packages/schedule",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/znight-org/znight.git",

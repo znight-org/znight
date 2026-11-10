@@ -4,7 +4,7 @@
   "description": "Znight CLI: scaffold projects, generate code, run dev server and builds",
   "license": "MIT",
   "author": "Ugho STEPHAN",
-  "homepage": "https://github.com/znight-org/znight/tree/main/packages/cli#readme",
+  "homepage": "https://znight-org.github.io/znight/packages/cli",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/znight-org/znight.git",
