@@ -20,6 +20,7 @@
     "secrets",
     "vault",
     "aws-secrets-manager",
+    "gcp-secret-manager",
     "yaml",
     "twelve-factor"
   ],
@@ -55,11 +56,15 @@
   },
   "peerDependencies": {
     "@aws-sdk/client-secrets-manager": "^3.0.0",
+    "@google-cloud/secret-manager": "^6.0.0 || ^7.0.0 || ^8.0.0",
     "yaml": "^2.0.0",
     "@znight/compiler": "workspace:^"
   },
   "peerDependenciesMeta": {
     "@aws-sdk/client-secrets-manager": {
+      "optional": true
+    },
+    "@google-cloud/secret-manager": {
       "optional": true
     },
     "yaml": {
@@ -71,6 +76,7 @@
   },
   "devDependencies": {
     "@aws-sdk/client-secrets-manager": "3.1164.0",
+    "@google-cloud/secret-manager": "7.2.0",
     "yaml": "2.9.1",
     "@znight/compiler": "workspace:*"
   },

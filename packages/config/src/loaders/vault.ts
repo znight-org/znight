@@ -244,7 +244,7 @@ export function vault(options: VaultLoaderOptions): ConfigLoader {
                 `unexpected response for ${location.label}: no secret data (is kvVersion ${kv2 ? 2 : 1} correct?)`,
               )
             }
-            return { origin: `vault:${location.label}`, values: nestUnder(data, options.key) }
+            return { origin: `vault:${location.label}`, values: nestUnder(data, options.key), secret: true }
           } catch (error) {
             if (error instanceof ConfigLoaderError) throw error
             lastError = error

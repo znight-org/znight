@@ -19,7 +19,7 @@ what you use.
 | [`@znight/events`](./events)               | In-process application events: `@OnEvent` listeners checked at build time, inline or detached dispatch            | dependency    | <Badge type="tip" text="available" /> |
 | [`@znight/messaging`](./messaging)         | Consumers, retries, dead-letter queues; RabbitMQ, SQS, Kafka, in-memory                                           | dependency    | <Badge type="tip" text="available" /> |
 | [`@znight/schedule`](./schedule)           | Cron, interval and timeout jobs checked at build time; locks across instances                                     | dependency    | <Badge type="tip" text="available" /> |
-| [`@znight/config`](./config)               | Typed config classes from env, `.env`, JSON/YAML, Vault, AWS Secrets Manager                                      | dependency    | <Badge type="tip" text="available" /> |
+| [`@znight/config`](./config)               | Typed config classes from env, `.env`, JSON/YAML, Vault, AWS/GCP secret managers                                  | dependency    | <Badge type="tip" text="available" /> |
 | [`@znight/observability`](./observability) | Pino logger, Prometheus metrics, OpenTelemetry tracing                                                            | dependency    | <Badge type="tip" text="available" /> |
 | [`@znight/testing`](./testing)             | `TestBed` with auto-mocks, `TestApp` for in-memory end-to-end tests                                               | devDependency | <Badge type="tip" text="available" /> |
 | [`@znight/cli`](./cli)                     | `znight new`, `generate`, `dev`, `build`, `start`, `openapi`, code generators                                     | devDependency | <Badge type="tip" text="available" /> |
