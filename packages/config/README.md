@@ -3,7 +3,7 @@
 Type-safe configuration for [Znight](../../README.md): declare a class, get a validated singleton.
 
 Values are loaded from environment variables, `.env` files, JSON/YAML files, HashiCorp Vault, AWS
-Secrets Manager or Google Cloud Secret Manager.
+Secrets Manager, Google Cloud Secret Manager, Azure Key Vault or OCI Vault.
 
 - **Compile-time metadata.** The compiler reads your config classes (property names, TypeScript
   types, decorators) and generates their field definitions. No reflection at runtime.
@@ -22,6 +22,8 @@ bun add -d @znight/compiler vite
 bun add yaml                               # optional, for yaml()
 bun add @aws-sdk/client-secrets-manager    # optional, for awsSecretsManager()
 bun add @google-cloud/secret-manager       # optional, for gcpSecretManager()
+bun add @azure/keyvault-secrets @azure/identity  # optional, for azureKeyVault()
+bun add oci-secrets oci-common             # optional, for ociVault()
 
 # npm
 npm install @znight/core @znight/config
@@ -29,6 +31,8 @@ npm install -D @znight/compiler vite
 npm install yaml                               # optional, for yaml()
 npm install @aws-sdk/client-secrets-manager    # optional, for awsSecretsManager()
 npm install @google-cloud/secret-manager       # optional, for gcpSecretManager()
+npm install @azure/keyvault-secrets @azure/identity  # optional, for azureKeyVault()
+npm install oci-secrets oci-common             # optional, for ociVault()
 ```
 
 Runs on Node.js >= 24 and Bun >= 1.3 (ESM only).
@@ -161,7 +165,7 @@ Error messages show `[REDACTED]` instead of secret values. Spreading (`{ ...conf
 property gives the real value, of course. The `ConfigSource` itself never prints its values either,
 and neither do loader errors: a JSON or YAML syntax error gives the line and column, not the parser
 message (which quotes the file content). Values loaded from a secret store (`vault()`,
-`awsSecretsManager()`, `gcpSecretManager()`) are masked like `@Secret` values, in `JSON.stringify`,
+`awsSecretsManager()`, `gcpSecretManager()`, `azureKeyVault()`, `ociVault()`) are masked like `@Secret` values, in `JSON.stringify`,
 `console.log`, `toString()` and error messages, even when the field is not `@Secret`: their layers
 are flagged `secret: true`, which a custom loader can set too. A field whose value comes from
 another layer (an `env()` override, say) is not masked unless it is `@Secret`.
@@ -204,11 +208,50 @@ The plugin is optional. Without it, each config class reads `process.env` when i
 caused by `ZNIGHT006`). On Bun, `process.env` also holds the `.env` files Bun loads by itself unless
 that is disabled (see [Bun's automatic `.env` loading](#buns-automatic-env-loading)).
 
-## Loaders
+## Sources
+
+A source is read by a **loader**. `ConfigPlugin.configure({ loaders })` runs the loaders in order
+when the application starts; each one returns one or more layers of values, and later layers
+override earlier ones. Every loader is an export of `@znight/config`; the secret stores use the SDK
+of their provider, an optional peer dependency imported only when the loader runs.
+
+| Source                      | Loader                                                     | Values                                | Peer dependency                              |
+| --------------------------- | ---------------------------------------------------------- | ------------------------------------- | -------------------------------------------- |
+| Environment variables       | [`env()`](#envoptions)                                     | one per variable                      | —                                            |
+| `.env` files                | [`dotenv()`](#dotenvoptions)                               | one per entry                         | —                                            |
+| JSON and YAML files         | [`json()` / `yaml()`](#jsonpath-options--yamlpath-options) | the structure of the file             | `yaml` for `yaml()`                          |
+| HashiCorp Vault             | [`vault()`](#vaultoptions)                                 | the key/value pairs of each KV secret | — (`fetch`)                                  |
+| AWS Secrets Manager         | [`awsSecretsManager()`](#awssecretsmanageroptions)         | one per secret, or one per JSON entry | `@aws-sdk/client-secrets-manager`            |
+| Google Cloud Secret Manager | [`gcpSecretManager()`](#gcpsecretmanageroptions)           | one per secret, or one per JSON entry | `@google-cloud/secret-manager`               |
+| Azure Key Vault             | [`azureKeyVault()`](#azurekeyvaultoptions)                 | one per secret, or one per JSON entry | `@azure/keyvault-secrets`, `@azure/identity` |
+| OCI Vault                   | [`ociVault()`](#ocivaultoptions)                           | one per secret, or one per JSON entry | `oci-secrets`, `oci-common`                  |
+| Fixed values                | [`inline()`](#inlinevalues-options)                        | the object given                      | —                                            |
+
+What every source has in common:
+
+- **Keys.** A value is found by the environment name of a field (`DB_PASSWORD`) or by its key path
+  (`database.password`), see [Precedence](#precedence). Flat sources (environment, `.env`) provide
+  names; structured sources (files, JSON secrets) provide both: a top-level `DB_PASSWORD` entry
+  matches the name, nested objects match key paths.
+- **Loading and refresh.** Loaders run once, in `ConfigPlugin.register()`, before any provider is
+  created; config instances are singletons. Nothing is cached between starts and nothing is
+  refreshed while the application runs: a changed file or a rotated secret is picked up by the
+  next start (a restart or a rolling deployment).
+- **Settings from previous loaders.** A loader reads its own settings (`VAULT_ADDR`, `AWS_REGION`,
+  `AZURE_KEY_VAULT_URL`...) from its options, then from the values loaded before it (a `.env`
+  file works), then from the environment.
+- **Errors.** Invalid options fail when the loader is created (`ZNIGHT012`); a failure while loading
+  stops the start with a `ConfigLoaderError` (`ZNIGHT006`) naming the loader, with hints and the
+  original error as `cause`. Loader errors never quote values: not the content of a file that does
+  not parse, not a secret.
 
 ### `env(options?)`
 
-A snapshot of `process.env`, taken when the loader runs.
+**Reads** a snapshot of `process.env` (or the `env` of `ConfigPlugin`), taken when the loader runs.
+
+```ts
+ConfigPlugin.configure({ loaders: [dotenv(), env({ prefix: 'APP_' })] }) // APP_DB_HOST → DB_HOST
+```
 
 | Option       | Default       | Description                                                                 |
 | ------------ | ------------- | --------------------------------------------------------------------------- |
@@ -216,14 +259,27 @@ A snapshot of `process.env`, taken when the loader runs.
 | `keepPrefix` | `false`       | Keep the prefix in the names (filter only)                                  |
 | `env`        | context `env` | Variables to read                                                           |
 
-On Bun, `env()` warns when `process.env` holds `.env` files loaded by Bun itself (see below).
+**Keys.** One value per variable, under its name (without `prefix`): `DB_PASSWORD` fills
+`@Secret('DB_PASSWORD')`, `DATABASE_HOST` the field `host` of `@Config('database')`. Values are
+strings, coerced to the declared type of the field. Origin: `process.env`, or
+`process.env (prefix APP_)`.
+
+**Refresh.** A variable set after the start is not seen.
+
+**Errors.** None at load time; a `prefix` that is not a string is `ZNIGHT012`. On Bun, `env()` warns
+when `process.env` holds `.env` files loaded by Bun itself (see below).
 
 ### `dotenv(options?)`
 
-`.env` files parsed with `node:util` `parseEnv` (comments, quotes, multi-line values, `export`).
-Without `path`, loads the conventional files, from the lowest to the highest precedence:
+**Reads** `.env` files parsed with `node:util` `parseEnv` (comments, quotes, multi-line values,
+`export`). Without `path`, loads the conventional files, from the lowest to the highest precedence:
 
 `.env` → `.env.local` (skipped when `NODE_ENV=test`) → `.env.<NODE_ENV>` → `.env.<NODE_ENV>.local`
+
+```ts
+ConfigPlugin.configure({ loaders: [dotenv(), env()] }) // the default: the files, then the real environment
+ConfigPlugin.configure({ loaders: [dotenv({ path: ['config/base.env', 'config/local.env'] }), env()] })
+```
 
 | Option     | Default               | Description                                                                |
 | ---------- | --------------------- | -------------------------------------------------------------------------- |
@@ -233,10 +289,16 @@ Without `path`, loads the conventional files, from the lowest to the highest pre
 | `populate` | `false`               | Also write the variables to `process.env`, without replacing existing ones |
 | `override` | `false`               | Write to `process.env` replacing existing variables: the files win         |
 
-By default `process.env` is left untouched and, with `[dotenv(), env()]`, the real environment wins
-over the files. Variables are not expanded (`${OTHER}` stays as is).
+**Keys.** One value per entry, under its name, like `env()`; each file is a layer whose origin is
+its path (`.env.local`). By default `process.env` is left untouched and, with `[dotenv(), env()]`,
+the real environment wins over the files. Variables are not expanded (`${OTHER}` stays as is).
 
-### Bun's automatic `.env` loading
+**Refresh.** The files are read once, at start.
+
+**Errors.** A missing explicit `path` (without `optional: true`) fails with `file not found`; an
+empty `path` is `ZNIGHT012`.
+
+#### Bun's automatic `.env` loading
 
 Bun loads `.env`, `.env.<mode>`, `.env.local` (not in `test`) and `.env.<mode>.local` from the
 working directory into `process.env` before your code runs, with its own rules: the mode is
@@ -261,20 +323,29 @@ and finds variables of these files in it, it emits a warning once per process
 
 ### `json(path, options?)` / `yaml(path, options?)`
 
-Structured files. Nested objects are read with key paths; top-level names can also match
-environment names (`{ "DB_PASSWORD": "..." }`). `yaml()` needs the optional peer `yaml`.
+**Reads** a structured file, relative to `cwd`. `yaml()` needs the optional peer `yaml`.
+
+```ts
+ConfigPlugin.configure({
+  loaders: [yaml('config/app.yaml'), json('config/local.json', { optional: true }), dotenv(), env()],
+})
+```
 
 | Option     | Default | Description                                                              |
 | ---------- | ------- | ------------------------------------------------------------------------ |
 | `optional` | `false` | Skip the file when it does not exist                                     |
 | `key`      | root    | Mount the content under a key path (`key: 'database'` → `database.host`) |
 
-```ts
-ConfigPlugin.configure({ loaders: [yaml('config/app.yaml'), dotenv(), env()] })
-```
+**Keys.** Nested objects are read with key paths (`{ "database": { "host": "db" } }` fills
+`database.host`); top-level names can also match environment names (`{ "DB_PASSWORD": "..." }`).
+Numbers, booleans, arrays and objects keep their type and are checked against the field type. The
+origin is the path of the file.
 
-A syntax error fails with the position and, for YAML, the `yaml` error code, never the parser message:
-JSON and YAML parsers quote the offending input, which can be a secret.
+**Refresh.** Read once, like `.env` files.
+
+**Errors.** A missing file (unless `optional`), a root that is not an object (without `key`) and a
+syntax error fail. A syntax error gives the position and, for YAML, the `yaml` error code, never the
+parser message: JSON and YAML parsers quote the offending input, which can be a secret.
 
 ```
 ZnightError: ZNIGHT006: Config loader "json" failed: invalid JSON in config/secrets.json at line 2, column 16: unexpected character
@@ -284,147 +355,289 @@ The parser error is not kept as `cause` either (`util.inspect` and uncaught erro
 YAML warnings (an unknown tag, for instance) are emitted the same way: `process.emitWarning` with type
 `YAMLWarning`, the file, the position and the code.
 
+### Secret stores
+
+The five secret-store loaders share one contract ([RFC 0013](../../rfcs/0013-config-secret-managers.md)):
+
+```ts
+vault({ path: 'secret/myapp' })
+awsSecretsManager({ secretId: ['prod/myapp', { secretId: 'prod/db-password', key: 'DB_PASSWORD' }] })
+gcpSecretManager({ secretId: ['DB_PASSWORD', { secretId: 'smtp', key: 'mail' }] })
+azureKeyVault({ vaultUrl: 'https://acme.vault.azure.net', secretId: ['DB-PASSWORD', 'smtp'] })
+ociVault({ vaultId: 'ocid1.vault.oc1.eu-frankfurt-1.example', secretId: ['DB_PASSWORD', 'smtp'] })
+```
+
+- **Which secrets.** One option lists them, in precedence order (later secrets override earlier
+  ones): `path` for Vault, `secretId` for the others. Each entry is an identifier or an object with
+  the identifier and per-secret options: `key`, `json` (cloud stores), `optional`, and the version
+  fields of the provider.
+- **Keys.** A JSON object secret (`{"DB_PASSWORD": "...", "database": { "host": "..." }}`) provides
+  one value per entry, merged at the root, or mounted under the secret's `key`. Any other value (text,
+  a JSON array, invalid JSON) is one value under the secret's `key`, by default the identifier as
+  the provider names it (Azure names, which cannot hold `_`, are mapped: see below). `json: false`
+  (per secret or for the loader) keeps a JSON object as one text value, a service account key for
+  instance. Vault secrets are always key/value maps.
+- **Missing secrets.** A secret that does not exist fails the start, unless `optional` (per secret,
+  or for every secret of the loader): it is then skipped. Other errors (permissions, credentials,
+  network) always fail, `optional` or not.
+- **Requests.** Secrets are read concurrently, each request with a timeout (`timeoutMs`, an integer
+  from 1 to 2^31 − 1). Once one read fails, the others are cancelled (or, when the SDK cannot cancel,
+  no longer awaited). Retries are those of the SDK (Vault: `retries`).
+- **Masking.** Their layers are flagged `secret: true`: their values are masked like `@Secret`
+  values (see [Secrets](#secrets)), even for fields without `@Secret`.
+- **Refresh.** Secrets are read once, at start; a rotated secret is read by the next start. Nothing
+  is cached on disk.
+- **Errors.** `cannot read secret "<id>": <provider status>: <message>`, with hints for missing
+  permissions, credentials and missing secrets; `secret "<id>" has no value` when the store answers
+  without a payload.
+- **Testing.** Each loader takes its client (`client`, Vault: `fetch`), so tests need no network.
+
 ### `vault(options)`
 
-Reads KV secrets from HashiCorp Vault over its HTTP API (`fetch`, no dependency). Each secret's
-key/value pairs become values (`{ DB_PASSWORD: '...' }` matches `@Secret('DB_PASSWORD')`).
+**Reads** KV secrets (KV v1 or v2) from HashiCorp Vault over its HTTP API (`fetch`, no dependency).
 
 ```ts
 ConfigPlugin.configure({
-  loaders: [dotenv(), env(), vault({ path: ['secret/shared', 'secret/myapp'] })],
+  loaders: [dotenv(), env(), vault({ path: ['secret/shared', { path: 'secret/myapp/db', key: 'database' }] })],
 })
 ```
 
-| Option         | Default                         | Description                                                                      |
-| -------------- | ------------------------------- | -------------------------------------------------------------------------------- |
-| `path`         | (required)                      | `<mount>/<path>` (`secret/myapp` → `GET /v1/secret/data/myapp`), or an array     |
-| `address`      | `VAULT_ADDR`                    | Server address                                                                   |
-| `token`        | `tokenFile`, then `VAULT_TOKEN` | Token                                                                            |
-| `tokenFile`    | —                               | File containing the token (agent sink, Kubernetes), relative to `cwd`            |
-| `mount`        | first path segment              | Mount of the secrets engine (for mounts containing `/`); `path` is then relative |
-| `kvVersion`    | `2`                             | KV engine version (`1` or `2`)                                                   |
-| `namespace`    | `VAULT_NAMESPACE`               | Enterprise namespace (`X-Vault-Namespace`)                                       |
-| `key`          | root                            | Mount the secret data under a key path                                           |
-| `optional`     | `false`                         | Skip secrets that do not exist (404)                                             |
-| `timeoutMs`    | `5000`                          | Timeout of each request                                                          |
-| `retries`      | `2`                             | Retries on network errors, timeouts, 429, 5xx and bodies that are not JSON       |
-| `retryDelayMs` | `200`                           | Base delay between retries (doubled each time, at most 30 s)                     |
-| `fetch`        | global `fetch`                  | Custom `fetch` (proxies, tests)                                                  |
+| Option         | Default                         | Description                                                                                                            |
+| -------------- | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `path`         | (required)                      | `<mount>/<path>` (`secret/myapp` → `GET /v1/secret/data/myapp`), `{ path, key?, optional? }`, or an array (later wins) |
+| `address`      | `VAULT_ADDR`                    | Server address                                                                                                         |
+| `token`        | `tokenFile`, then `VAULT_TOKEN` | Token                                                                                                                  |
+| `tokenFile`    | —                               | File containing the token (agent sink, Kubernetes), relative to `cwd`                                                  |
+| `mount`        | first path segment              | Mount of the secrets engine (for mounts containing `/`); `path` is then relative                                       |
+| `kvVersion`    | `2`                             | KV engine version (`1` or `2`)                                                                                         |
+| `namespace`    | `VAULT_NAMESPACE`               | Enterprise namespace (`X-Vault-Namespace`)                                                                             |
+| `key`          | root                            | Key path of every secret's data (a secret's own `key` wins)                                                            |
+| `optional`     | `false`                         | Skip secrets that do not exist (404)                                                                                   |
+| `timeoutMs`    | `5000`                          | Timeout of each request                                                                                                |
+| `retries`      | `2`                             | Retries on network errors, timeouts, 429, 5xx and bodies that are not JSON                                             |
+| `retryDelayMs` | `200`                           | Base delay between retries (doubled each time, at most 30 s)                                                           |
+| `fetch`        | global `fetch`                  | Custom `fetch` (proxies, tests)                                                                                        |
 
-`timeoutMs` must be an integer from 1 to 2^31 − 1, `retries` and `retryDelayMs` finite numbers
-from 0: other values fail when the loader is created (ZNIGHT012), and so does an invalid `timeoutMs`
-of `awsSecretsManager()` or `gcpSecretManager()`. Paths are read concurrently; once one fails, the
-requests and retry waits of the others are cancelled (`awsSecretsManager()` does the same with its
-secrets; `gcpSecretManager()` stops waiting for them, since the SDK's promises cannot be cancelled).
+**Authentication.** A token: `token`, the content of `tokenFile` (the sink of a Vault agent, a
+Kubernetes secret), or `VAULT_TOKEN`. Other auth methods (AppRole, Kubernetes, cloud IAM) are a
+Vault agent writing the token file. `VAULT_*` settings are read from the values loaded by the
+previous loaders first, then from the environment.
 
-`VAULT_*` settings are read from the values loaded by the previous loaders first (a `.env` file
-works), then from the environment. A token or namespace loses its leading and trailing white space
-(as `fetch` does: `readFileSync(path, 'utf8')` keeps a final newline); one that is still not a valid
-header value (a token file with several lines, an inner line break, NUL or a character above
-U+00FF) fails before any request, naming its origin. The token never appears in error messages, and neither does
-the content of a response that is not valid JSON (a truncated body may hold a secret): only its
-length and content type are reported.
+**Keys.** Each secret's key/value pairs become values (`{ DB_PASSWORD: '...' }` matches
+`@Secret('DB_PASSWORD')`, nested values match key paths), at the root or under `key`. Origin:
+`vault:<mount>/<path>`.
+
+**Refresh.** Read once at start; Vault leases and token renewal are not involved (KV secrets).
+
+**Errors.** `secret <path> not found (HTTP 404)` unless optional; `cannot read secret <path>: HTTP
+403` (check the token policies); after the retries, `cannot read secret <path> after <n>
+attempt(s)`. `timeoutMs` must be an integer from 1 to 2^31 − 1, `retries` and `retryDelayMs` finite
+numbers from 0 (`ZNIGHT012` otherwise). A token or namespace loses its leading and trailing white
+space (as `fetch` does: `readFileSync(path, 'utf8')` keeps a final newline); one that is still not a
+valid header value (a token file with several lines, an inner line break, NUL or a character above
+U+00FF) fails before any request, naming its origin. The token never appears in error messages, and
+neither does the content of a response that is not valid JSON (a truncated body may hold a secret):
+only its length and content type are reported.
 
 ### `awsSecretsManager(options)`
 
-Reads secrets from AWS Secrets Manager with the optional peer `@aws-sdk/client-secrets-manager`. A
-JSON object secret provides one value per entry; a plain secret provides a single value under its
-`key` (default: the secret id).
+**Reads** secrets from AWS Secrets Manager (`GetSecretValue`) with the optional peer
+`@aws-sdk/client-secrets-manager`.
 
 ```ts
 awsSecretsManager({
-  secretId: ['prod/myapp', { secretId: 'prod/db-password', key: 'DB_PASSWORD' }],
+  secretId: ['prod/myapp', { secretId: 'prod/db-password', key: 'DB_PASSWORD', versionStage: 'AWSCURRENT' }],
 })
 ```
 
-| Option         | Default                             | Description                                                                                  |
-| -------------- | ----------------------------------- | -------------------------------------------------------------------------------------------- |
-| `secretId`     | (required)                          | Id/ARN, `{ secretId, key?, versionStage?, versionId?, optional? }`, or an array (later wins) |
-| `region`       | `AWS_REGION` / `AWS_DEFAULT_REGION` | Region (else the SDK chain)                                                                  |
-| `client`       | a new `SecretsManagerClient`        | Your client: `SecretsManager` (`getSecretValue`) or `SecretsManagerClient` (`send`)          |
-| `clientConfig` | —                                   | Extra options of the default client (`endpoint`, `credentials`...)                           |
-| `optional`     | `false`                             | Skip secrets that do not exist (`ResourceNotFoundException`)                                 |
-| `timeoutMs`    | `10000`                             | Timeout of each request                                                                      |
+| Option         | Default                             | Description                                                                                           |
+| -------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `secretId`     | (required)                          | Name/ARN, `{ secretId, versionStage?, versionId?, key?, json?, optional? }`, or an array (later wins) |
+| `region`       | `AWS_REGION` / `AWS_DEFAULT_REGION` | Region (else the SDK chain)                                                                           |
+| `client`       | a new `SecretsManagerClient`        | Your client: `SecretsManager` (`getSecretValue`) or `SecretsManagerClient` (`send`)                   |
+| `clientConfig` | —                                   | Extra options of the default client (`endpoint`, `credentials`, `maxAttempts`...)                     |
+| `json`         | `true`                              | Expand JSON object secrets into one value per entry                                                   |
+| `optional`     | `false`                             | Skip secrets that do not exist (`ResourceNotFoundException`)                                          |
+| `timeoutMs`    | `10000`                             | Timeout of each request                                                                               |
+
+**Authentication.** The default credential provider chain of the AWS SDK (environment, shared config
+and SSO profiles, web identity, ECS and EC2 roles), or `clientConfig.credentials`. Reading needs
+`secretsmanager:GetSecretValue` (and `kms:Decrypt` for a customer managed key).
+
+**Keys.** A JSON object secret (the key/value pairs of the console) provides one value per entry; a
+plain secret (or a binary one, decoded as UTF-8) is one value under its `key`, default the
+`secretId` as written. Origin: `aws-secrets-manager:<secretId>`.
+
+**Refresh.** Read once at start, version `AWSCURRENT` unless `versionStage` or `versionId` is set.
+
+**Errors.** `cannot read secret "<secretId>": <exception>: <message>` (`ResourceNotFoundException`,
+`AccessDeniedException`, `DecryptionFailure`...). LocalStack works with
+`clientConfig: { endpoint: 'http://localhost:4566' }`.
 
 ### `gcpSecretManager(options)`
 
-Reads secrets from Google Cloud Secret Manager with the optional peer `@google-cloud/secret-manager`,
-by name and/or by label. Each secret provides one value, under its id by default
-(`DB_PASSWORD` matches `@Secret('DB_PASSWORD')`), read from the version `latest` by default.
+**Reads** secrets from Google Cloud Secret Manager (`accessSecretVersion`) with the optional peer
+`@google-cloud/secret-manager`.
 
 ```ts
-ConfigPlugin.configure({
-  loaders: [
-    dotenv(),
-    env(),
-    // every secret labelled app=api and env=prod; PROD_DB_PASSWORD is stored as DB_PASSWORD
-    gcpSecretManager({ labels: { app: 'api', env: 'prod' }, stripPrefix: 'PROD_' }),
-  ],
-})
-
 gcpSecretManager({
   projectId: 'acme-prod',
-  secrets: ['DB_PASSWORD', { name: 'smtp-credentials', json: true }, { name: 'API_KEY', version: '3' }],
+  secretId: ['DB_PASSWORD', { secretId: 'smtp', key: 'mail' }, { secretId: 'API_KEY', version: '3' }],
 })
 ```
 
-| Option          | Default                                   | Description                                                                                          |
-| --------------- | ----------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `secrets`       | —                                         | Id, resource name, `{ name, version?, key?, json?, optional? }`, or an array (later wins)            |
-| `labels`        | —                                         | Read every secret carrying these labels (`{ app: 'api' }` → filter `labels.app=api`)                 |
-| `filter`        | —                                         | Read every secret matching this `listSecrets` filter (`name:PROD_`), and-ed with `labels`            |
-| `projectId`     | `GOOGLE_CLOUD_PROJECT` / `GCLOUD_PROJECT` | Project of secret ids and listings (else the client's: credentials, metadata server)                 |
-| `location`      | — (global secrets)                        | Regional secrets: `projects/<p>/locations/<l>/secrets/...` on `secretmanager.<l>.rep.googleapis.com` |
-| `version`       | `latest`                                  | Version or alias of every secret                                                                     |
-| `stripPrefix`   | —                                         | Removed from the start of secret ids to build keys (`PROD_DB_PASSWORD` → `DB_PASSWORD`)              |
-| `mapKey`        | the id                                    | `(secretId) => key`, after `stripPrefix` (`constantCase`, `` id => `secrets.${id}` ``...)            |
-| `json`          | `false`                                   | Expand JSON object values into one value per entry, like `awsSecretsManager()`                       |
-| `optional`      | `false`                                   | Skip secrets that do not exist or have no version (`NOT_FOUND`)                                      |
-| `client`        | a new `SecretManagerServiceClient`        | Your client (custom credentials, tests): `accessSecretVersion`, `listSecrets` for labels             |
-| `clientOptions` | —                                         | Options of the default client (`credentials`, `keyFilename`, `apiEndpoint`, `port`, `fallback`...)   |
-| `timeoutMs`     | `10000`                                   | Timeout of each request                                                                              |
+| Option         | Default                                   | Description                                                                                          |
+| -------------- | ----------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `secretId`     | (required)                                | Id, resource name, `{ secretId, version?, key?, json?, optional? }`, or an array (later wins)        |
+| `projectId`    | `GOOGLE_CLOUD_PROJECT` / `GCLOUD_PROJECT` | Project of secret ids (else the client's: credentials, metadata server)                              |
+| `location`     | — (global secrets)                        | Regional secrets: `projects/<p>/locations/<l>/secrets/...` on `secretmanager.<l>.rep.googleapis.com` |
+| `client`       | a new `SecretManagerServiceClient`        | Your client (custom credentials, tests): `accessSecretVersion`                                       |
+| `clientConfig` | —                                         | Options of the default client (`credentials`, `keyFilename`, `apiEndpoint`, `port`, `fallback`...)   |
+| `json`         | `true`                                    | Expand JSON object secrets into one value per entry                                                  |
+| `optional`     | `false`                                   | Skip secrets that do not exist or have no version (`NOT_FOUND`)                                      |
+| `timeoutMs`    | `10000`                                   | Timeout of each request                                                                              |
 
-`secrets`, `labels` or `filter` is required. A secret name is an id of the loader's project
-(`DB_PASSWORD`) or a resource name (`projects/<project>/secrets/<id>`, optionally
-`/versions/<version>`), which needs no project. Each location has its own endpoint, so a loader reads
-the secrets of one location: a resource name must be in the loader's `location`
+A `secretId` is an id of the loader's project (`DB_PASSWORD`) or a resource name
+(`projects/<project>/secrets/<id>`, optionally `/versions/<version>`), which needs no project; the
+version is `latest` unless the name or `version` sets one. Each location has its own endpoint, so a
+loader reads the secrets of one location: a resource name must be in the loader's `location`
 (`projects/<project>/locations/<location>/secrets/<id>`), or global without it, otherwise the loader
-fails when created (ZNIGHT012); use one `gcpSecretManager()` per location. Listed secrets are read in the order of their ids,
-then the `secrets` in their order: an explicit secret overrides a listed one, and two listed secrets
-mapping to the same key fail (narrow the labels or use `mapKey`). Secrets are read concurrently;
-once one read fails, the loader stops waiting for the others.
+fails when created (`ZNIGHT012`); use one `gcpSecretManager()` per location.
 
-Values are kept as text, JSON included: a service account key stored as a secret stays one value.
-With `json` (globally or per secret), a JSON object secret provides one value per entry, merged at
-the root, or under the secret's `key` when it sets one. Values are masked like `@Secret` values
-(see [Secrets](#secrets)), even for fields without `@Secret`.
+**Authentication.** Application Default Credentials (`gcloud auth application-default login`
+locally, the attached service account or workload identity in Google Cloud,
+`GOOGLE_APPLICATION_CREDENTIALS`), or `clientConfig.credentials` / `keyFilename`. Reading needs
+`roles/secretmanager.secretAccessor` on the secret or the project.
 
-Authentication is the client's: Application Default Credentials (`gcloud auth application-default
-login` locally, the attached service account or workload identity in Google Cloud,
-`GOOGLE_APPLICATION_CREDENTIALS`), or `clientOptions.credentials` / `keyFilename`. Reading needs
-`roles/secretmanager.secretAccessor`, listing by label `roles/secretmanager.viewer` (permission
-`secretmanager.secrets.list`) on the project. Errors are `ConfigLoaderError`s (`ZNIGHT006`) naming
-the secret and the gRPC status, with a hint for `PERMISSION_DENIED`, `UNAUTHENTICATED` or missing
-credentials, `NOT_FOUND` and disabled versions (`FAILED_PRECONDITION`); invalid options fail when the
-loader is created (`ZNIGHT012`).
+**Keys.** A JSON object secret provides one value per entry; a plain secret is one value under its
+`key`, default the secret id (`DB_PASSWORD` fills `@Secret('DB_PASSWORD')`, the id of a resource
+name too). Origin: `gcp-secret-manager:<secretId>`.
 
-There is no official Secret Manager emulator. For tests, pass a `client` implementing
-`SecretManagerServiceClientLike` (no network), or point the default client to your own endpoint
-with `clientOptions` (`apiEndpoint`, `port`, and `fallback: true` with `protocol: 'http'` for the
-REST transport).
+**Refresh.** Read once at start, version `latest` by default: pin a version to keep reading it after
+a rotation.
+
+**Errors.** `cannot read secret "<secretId>": <gRPC status>: <message>`, with a hint for
+`PERMISSION_DENIED`, `UNAUTHENTICATED` or missing credentials, `NOT_FOUND` and disabled versions
+(`FAILED_PRECONDITION`); `cannot determine the Google Cloud project` without a project. There is no
+official Secret Manager emulator: pass a `client` implementing `SecretManagerServiceClientLike`, or
+point the default client to your own endpoint with `clientConfig` (`apiEndpoint`, `port`, and
+`fallback: true` with `protocol: 'http'` for the REST transport).
+
+### `azureKeyVault(options)`
+
+**Reads** secrets from Azure Key Vault (`getSecret`) with the optional peers `@azure/keyvault-secrets`
+and `@azure/identity`.
+
+```ts
+azureKeyVault({
+  vaultUrl: 'https://acme.vault.azure.net',
+  secretId: ['DB-PASSWORD', 'database--host', { secretId: 'smtp', key: 'mail' }],
+})
+```
+
+| Option         | Default                        | Description                                                                             |
+| -------------- | ------------------------------ | --------------------------------------------------------------------------------------- |
+| `secretId`     | (required)                     | Secret name, `{ secretId, version?, key?, json?, optional? }`, or an array (later wins) |
+| `vaultUrl`     | `AZURE_KEY_VAULT_URL`          | Vault URL, `https://<vault>.vault.azure.net` (the "Vault URI" of the vault)             |
+| `credential`   | a new `DefaultAzureCredential` | `TokenCredential` of the default client                                                 |
+| `client`       | a new `SecretClient`           | Your client (tests, wrappers): `getSecret(name, { version, abortSignal })`              |
+| `clientConfig` | —                              | Options of the default client (`retryOptions`, `serviceVersion`, `httpClient`...)       |
+| `json`         | `true`                         | Expand JSON object secrets into one value per entry                                     |
+| `optional`     | `false`                        | Skip secrets that do not exist (HTTP 404)                                               |
+| `timeoutMs`    | `10000`                        | Timeout of each request                                                                 |
+
+**Authentication.** `DefaultAzureCredential`: environment variables (`AZURE_TENANT_ID`,
+`AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET` or a certificate), workload identity (AKS), managed
+identity, then the Azure CLI, Azure Developer CLI and Azure PowerShell sign-ins; or any
+`TokenCredential` of `@azure/identity` as `credential`. Reading needs the "Key Vault Secrets User"
+role on the vault (RBAC), or a "Get" secret access policy.
+
+**Keys.** Key Vault secret names hold only letters, digits and `-` (1 to 127 characters), so the
+default key of a plain value is the name mapped by `azureSecretKey()`: `--` becomes `.` and `-`
+becomes `_`. Name the secrets after the keys:
+
+| Secret name          | Key                 | Fills                               |
+| -------------------- | ------------------- | ----------------------------------- |
+| `DB-PASSWORD`        | `DB_PASSWORD`       | `@Secret('DB_PASSWORD')`            |
+| `database--password` | `database.password` | `password` of `@Config('database')` |
+| `mail--smtp-host`    | `mail.smtp_host`    | `@Key('mail.smtp_host')`            |
+
+A secret's `key` replaces the mapping; a JSON object secret provides one value per entry. Origin:
+`azure-key-vault:<name>`.
+
+**Refresh.** Read once at start, the current version unless `version` is set.
+
+**Errors.** `cannot read secret "<name>": <error code>: <message>` (`SecretNotFound`, `Forbidden`...),
+with a hint for 403 (role or access policy, firewall), 401 and credential errors; `no vault URL`
+without `vaultUrl`. A name with other characters (`DB_PASSWORD`) is `ZNIGHT012`, with the name to use.
+
+### `ociVault(options)`
+
+**Reads** secrets from Oracle Cloud Infrastructure Vault (`getSecretBundle`, `getSecretBundleByName`)
+with the optional peers `oci-secrets` and `oci-common`.
+
+```ts
+ociVault({
+  vaultId: 'ocid1.vault.oc1.eu-frankfurt-1.example',
+  secretId: ['DB_PASSWORD', { secretId: 'ocid1.vaultsecret.oc1.eu-frankfurt-1.example', key: 'API_KEY' }],
+})
+```
+
+| Option                          | Default                                 | Description                                                                                                   |
+| ------------------------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `secretId`                      | (required)                              | Secret OCID or name, `{ secretId, versionNumber?, stage?, key?, json?, optional? }`, or an array (later wins) |
+| `vaultId`                       | `OCI_VAULT_ID`                          | Vault OCID of the secrets read by name                                                                        |
+| `auth`                          | `resource-principal` or `config-file`   | `config-file`, `resource-principal` or `instance-principal` (see below)                                       |
+| `configFile`                    | `OCI_CONFIG_FILE`, then `~/.oci/config` | Config file of `config-file`                                                                                  |
+| `profile`                       | `OCI_CLI_PROFILE`, then `DEFAULT`       | Profile of `config-file`                                                                                      |
+| `authenticationDetailsProvider` | —                                       | Any provider of `oci-common` instead of `auth` (session token, OKE workload identity...)                      |
+| `region`                        | the region of the authentication        | Region (`eu-frankfurt-1`)                                                                                     |
+| `endpoint`                      | the region's endpoint                   | Service endpoint (private endpoint, tests)                                                                    |
+| `client`                        | a new `SecretsClient`                   | Your client (tests, wrappers): `getSecretBundle`, `getSecretBundleByName`                                     |
+| `clientConfig`                  | —                                       | Client configuration of the default client (`retryConfiguration`, `circuitBreaker`)                           |
+| `json`                          | `true`                                  | Expand JSON object secrets into one value per entry                                                           |
+| `optional`                      | `false`                                 | Skip secrets that are not found (HTTP 404)                                                                    |
+| `timeoutMs`                     | `10000`                                 | Timeout of each request                                                                                       |
+
+**Authentication.** `auth` picks the provider of `oci-common`: `resource-principal` (OCI Functions,
+Container Instances, Data Flow: the default when `OCI_RESOURCE_PRINCIPAL_VERSION` is set),
+`instance-principal` (compute instances, through the instance metadata), or `config-file` (an API
+signing key in `~/.oci/config`, created by `oci setup config`: the default otherwise). Reading needs
+a policy such as `allow dynamic-group <group> to read secret-bundles in compartment <compartment>`.
+
+**Keys.** A `secretId` starting with `ocid1.` is a secret OCID; anything else is a secret name in
+`vaultId`. A JSON object secret provides one value per entry; a plain secret is one value under its
+`key`, default the `secretId` as written: name the secrets after the keys (`DB_PASSWORD`), or set
+`key` for secrets read by OCID. Contents are decoded from base64 as UTF-8. Origin:
+`oci-vault:<secretId>`.
+
+**Refresh.** Read once at start, the `CURRENT` version unless `versionNumber` or `stage` (`CURRENT`,
+`PENDING`, `LATEST`, `PREVIOUS`, `DEPRECATED`) is set.
+
+**Errors.** `cannot read secret "<secretId>": <service code> (HTTP <status>): <message>`. OCI answers
+`NotAuthorizedOrNotFound` (404) both for a missing secret and a missing policy, so `optional` skips
+both: the hint names the two causes. A name without `vaultId` fails at load time; an unusable
+config file or principal fails with `cannot set up the <auth> authentication`.
 
 ### `inline(values, options?)`
 
-Fixed values: defaults before the other loaders, overrides after them (scripts, tests).
+**Reads** fixed values: defaults before the other loaders, overrides after them (scripts, tests).
 
 ```ts
 ConfigPlugin.configure({ loaders: [inline({ PORT: '3000' }, { name: 'defaults' }), dotenv(), env()] })
 ```
 
+| Option | Default  | Description                    |
+| ------ | -------- | ------------------------------ |
+| `name` | `inline` | Origin shown in error messages |
+
+**Keys.** Names and key paths, flat or nested, like a JSON file. **Errors.** Values that are not an
+object are `ZNIGHT012`.
+
 ### Custom loaders
 
 A loader is an object with a `name` and a `load(context)` method returning a layer
-(`{ origin, values }`), several layers, or `undefined`:
+(`{ origin, values, secret? }`), several layers, or `undefined`:
 
 ```ts
 import type { ConfigLoader } from '@znight/config'
@@ -442,8 +655,9 @@ export function consul(prefix: string): ConfigLoader {
 }
 ```
 
-`origin` is shown in error messages. A thrown error aborts the start with a `ConfigLoaderError`
-(`ZNIGHT006`) naming the loader, with the original error as `cause`.
+`origin` is shown in error messages; `secret: true` masks the values of the layer like `@Secret`
+values. A thrown error aborts the start with a `ConfigLoaderError` (`ZNIGHT006`) naming the loader,
+with the original error as `cause`.
 
 ## Testing
 
