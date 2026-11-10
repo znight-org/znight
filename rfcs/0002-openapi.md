@@ -8,6 +8,11 @@
 | Interplay | Works without RFC 0001 (security) and RFC 0006 (cookies, SSE). When they land, `decisions` follows the RFC 0001 "nearest decision" rule, the docs routes carry an `access` decision, and `@Cookie` / `@Sse` are documented (§5.4)                                                                                                     |
 | Decision  | **Ship `@znight/openapi` in v0.1.** The compiler builds the whole operation model and every JSON Schema it can derive from TypeScript, and checks it. Standard Schemas are converted by their own library, through Standard JSON Schema, when the document is assembled (at boot, at build time, in tests), never inside the compiler |
 
+**Amended (2026-11-10):** `OpenApiPlugin`'s `ui` option has no default anymore. Without it (or with
+`ui: false`), the plugin serves the document only: no `uiPath` page and no asset route. Scalar and
+Swagger UI stay optional peers, never bundled, chosen with `ui: 'scalar'` or `ui: 'swagger'`. This
+changes goal G7, decision D8, the `ui` default of §8.2 and the answer to Q2 for the UI.
+
 ## 1. Summary
 
 `@znight/openapi` turns a Znight HTTP application into an **OpenAPI 3.1 document** without asking
@@ -33,9 +38,10 @@ anyone to describe the API twice. It works in three steps, each with one owner:
    `znight build --openapi`, the `openapi()` Vite plugin) and in tests. So the served document and
    the committed `openapi.json` are byte-identical, and that is tested.
 3. **Serving.** `OpenApiPlugin` serves `GET /openapi.json` (precomputed bytes, strong ETag), an
-   optional YAML twin and an API reference UI (Scalar by default, Swagger UI as an option). It plugs
-   into `@znight/http` through a new generic **plugin routes** contract, so it behaves the same on the
-   node, Fastify, Express and Hono adapters, on Node.js 24 and Bun. In production it can serve the
+   optional YAML twin and an API reference UI (Scalar or Swagger UI, opt-in since the 2026-11-10
+   amendment). It plugs into `@znight/http` through a new generic **plugin routes** contract, so it
+   behaves the same on the node, Fastify, Express and Hono adapters, on Node.js 24 and Bun. In
+   production it can serve the
    file emitted at build time instead: then no conversion code runs at boot.
 
 The compiler never executes user code, so `compile()` stays pure, deterministic and incremental.
@@ -83,7 +89,8 @@ does know it (Zod), in one well-tested function.
   4.2, ArkType ≥ 2.1.28...), Valibot through its official package, anything else through a
   converter.
 - **G6. Portable.** The same behaviour on the four adapters, on Node.js 24 and Bun ≥ 1.3.
-- **G7. Easy.** `OpenApiPlugin.configure()` alone gives `/openapi.json` and `/docs`.
+- **G7. Easy.** `OpenApiPlugin.configure()` alone gives `/openapi.json` and `/docs`. *Amended
+  (2026-11-10): `configure()` alone gives `/openapi.json`; `configure({ ui: 'scalar' })` adds `/docs`.*
 
 **Non-goals for v0.1**
 
@@ -112,7 +119,7 @@ does know it (Zod), in one well-tested function.
 | D5  | Document options live in the sources (`@OpenApiDocument`, `securityScheme()`), not in a config file                                                       | The compiler resolves them by identity and checks them. Typos in scheme names are impossible                                                                                                               |
 | D6  | `@znight/http` gets a generic, pull-based plugin routes contract                                                                                          | It is identical on every adapter and independent of plugin order. Health and metrics endpoints can use it later                                                                                            |
 | D7  | Codes 030–039 are reserved for this package. Generic problems reuse ZNIGHT005/007/017/018                                                                 | It follows the precedent of messaging (011) and config (012), each with its own catch-all                                                                                                                  |
-| D8  | The default UI is Scalar. Its assets are served locally when installed, otherwise from a pinned CDN with SRI, under a strict CSP                          | It supports OpenAPI 3.1 natively, has a built-in client, needs one script, and leaks nothing by default                                                                                                    |
+| D8  | Scalar first (amended 2026-11-10: the UI is opt-in). Assets are served locally when installed, otherwise from a pinned CDN with SRI, under a strict CSP   | It supports OpenAPI 3.1 natively, has a built-in client, needs one script, and leaks nothing by default                                                                                                    |
 
 ## 5. User-facing API
 
@@ -553,7 +560,7 @@ evaluated once, after `container.init()` (architecture §8.2).
 | `enabled`         | `true`            | `false` serves nothing and builds nothing (the `OpenApi` external still works)                                                                                                  |
 | `path`            | `'/openapi.json'` | JSON document, relative to the HTTP prefix like controller routes                                                                                                               |
 | `yaml`            | `false`           | A path (`'/openapi.yaml'`) serves YAML (`application/yaml`). Needs the optional peer `yaml`                                                                                     |
-| `ui`              | `'scalar'`        | `'scalar'`, `'swagger'`, `false`, or `{ scalar: ScalarConfig }` / `{ swagger: SwaggerUiConfig }`. The config must be JSON-serialisable                                          |
+| `ui`              | none (amended)    | `'scalar'`, `'swagger'`, `false`, or `{ scalar: ScalarConfig }` / `{ swagger: SwaggerUiConfig }`. The config must be JSON-serialisable                                          |
 | `uiPath`          | `'/docs'`         | HTML page of the UI. Local assets are under `${uiPath}/_assets/`                                                                                                                |
 | `assets`          | `'auto'`          | `'local'` serves the UI package from `node_modules`. `'cdn'` uses the jsDelivr URL pinned by this release, with SRI. `'auto'` is local when the package resolves, CDN otherwise |
 | `document`        | `'build'`         | `'build'` assembles the document from the metadata. `{ file: string \| URL }` serves a prebuilt `openapi.json` (§5.8), with the options below applied to it                     |

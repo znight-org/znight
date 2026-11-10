@@ -38,6 +38,8 @@ export function httpOptions(server: ServerConfig): HttpPluginOptions {
 /**
  * Options of `OpenApiPlugin`: `GET /openapi.json` (the document) and `GET /docs` (Scalar).
  *
+ * - `ui: 'scalar'`: the API reference page. `ui` has no default: without it, only the document is
+ *   served.
  * - `meta: [Public.meta()]`: the docs routes are plugin routes of `HttpPlugin`; they go through the
  *   global guards, and the `access` group is required: they need a decision too.
  * - `converters`: the module that `vite.config.ts` and `znight openapi` get too.
@@ -53,6 +55,7 @@ export function openApiOptions(
 ): OpenApiPluginOptions {
   return {
     enabled: server.docs, // DOCS=false: an internal deployment serves no documentation
+    ui: 'scalar', // the API reference page on /docs (no UI is served without it)
     meta: [Public.meta()],
     converters,
     document,

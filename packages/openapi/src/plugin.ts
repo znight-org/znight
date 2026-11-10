@@ -52,13 +52,17 @@ export interface OpenApiPluginOptions {
   readonly path?: string
   /** A path (`'/openapi.yaml'`) also serves YAML (`application/yaml`, optional peer `yaml`). Default `false`. */
   readonly yaml?: string | false
-  /** `'scalar'` (default), `'swagger'`, `false`, or `{ scalar: config }` / `{ swagger: config }`. */
+  /**
+   * The API reference page: `'scalar'`, `'swagger'`, or `{ scalar: config }` / `{ swagger: config }`.
+   * No default: without it (or with `false`) only the document is served, no page and no assets.
+   * The UI packages are optional peers, never installed for you (see `assets`).
+   */
   readonly ui?: OpenApiUiOption
-  /** Path of the UI page. Local assets are under `${uiPath}/_assets/`. Default `'/docs'`. */
+  /** Path of the UI page (with `ui`). Local assets are under `${uiPath}/_assets/`. Default `'/docs'`. */
   readonly uiPath?: string
   /**
-   * `'local'` serves the UI package from `node_modules`, `'cdn'` the jsDelivr copy pinned by this
-   * release (with SRI), `'auto'` (default) local when the package is installed.
+   * With `ui`: `'local'` serves the UI package from `node_modules`, `'cdn'` the jsDelivr copy pinned
+   * by this release (with SRI), `'auto'` (default) local when the package is installed. Ignored without `ui`.
    */
   readonly assets?: 'auto' | 'local' | 'cdn'
   /** `'build'` (default) assembles the document from the metadata; `{ file }` serves a prebuilt `openapi.json`. */
@@ -718,7 +722,7 @@ export function resolvePluginOptions(options: OpenApiPluginOptions): Resolved {
     throw invalid('yaml', "false or a path ('/openapi.yaml')", yamlOption)
   }
   const yaml = yamlOption === false ? undefined : yamlOption
-  const uiOption = options.ui ?? 'scalar'
+  const uiOption = options.ui ?? false
   let ui: Resolved['ui']
   if (uiOption === 'scalar' || uiOption === 'swagger') ui = { kind: uiOption, config: {} }
   else if (uiOption === false) ui = undefined

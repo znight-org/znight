@@ -92,6 +92,23 @@ describe('serving', () => {
     ).toEqual(['HEAD /docs ui', 'HEAD /openapi.json document', 'GET /docs ui', 'GET /openapi.json document'])
   })
 
+  it('serves the document but no API reference page without ui (no default UI), or with ui: false', async () => {
+    for (const options of [{}, { ui: false }] as const) {
+      const logger = recordingLogger()
+      await using app = await create(OpenApiPlugin.configure(options), {}, logger)
+      const http = app.app.getPlugin<HttpPlugin>('http')
+      expect(
+        http?.routes
+          .filter(route => route.source === 'openapi')
+          .map(route => `${route.method} ${route.path} ${route.handler}`),
+      ).toEqual(['HEAD /openapi.json document', 'GET /openapi.json document'])
+      expect((await app.inject({ method: 'GET', url: '/openapi.json' })).status).toBe(200)
+      expect((await app.inject({ method: 'GET', url: '/docs' })).status).toBe(404)
+      expect((await app.inject({ method: 'GET', url: '/docs/_assets/scalar@1.0.0/standalone.js' })).status).toBe(404)
+      expect(logger.lines.filter(line => line.includes('API reference'))).toEqual([])
+    }
+  })
+
   it('serves the UI page with a CSP allowing its inline script by hash', async () => {
     await using app = await create(OpenApiPlugin.configure({ ui: { scalar: { theme: 'purple' } }, assets: 'cdn' }))
     const page = await app.inject({ method: 'GET', url: '/docs' })
@@ -121,7 +138,7 @@ describe('serving', () => {
     for (const build of ['boot', 'first-request'] as const) {
       await using app = await TestApp.create({
         metadata: declared,
-        plugins: [HttpPlugin.configure({ port: 0 }), OpenApiPlugin.configure({ build, assets: 'cdn' })],
+        plugins: [HttpPlugin.configure({ port: 0 }), OpenApiPlugin.configure({ build, ui: 'scalar', assets: 'cdn' })],
         logger: silentLogger,
       })
       const page = await app.inject({ method: 'GET', url: '/docs' })
@@ -133,6 +150,7 @@ describe('serving', () => {
   it('allows the origins of templated servers, their variables expanded, in the CSP of the UI', async () => {
     await using app = await create(
       OpenApiPlugin.configure({
+        ui: 'scalar',
         assets: 'cdn',
         servers: [
           { url: 'https://{region}.api.example.com', variables: { region: { default: 'eu', enum: ['eu', 'us'] } } },
@@ -448,7 +466,9 @@ describe('lifecycle and options', () => {
   it('rejects invalid options (ZNIGHT030) and docs paths colliding with routes (ZNIGHT007)', async () => {
     await expect(create(OpenApiPlugin.configure({ path: 'openapi.json' }))).rejects.toMatchObject({ code: 'ZNIGHT030' })
     await expect(create(OpenApiPlugin.configure({ ui: 'redoc' as never }))).rejects.toMatchObject({ code: 'ZNIGHT030' })
-    await expect(create(OpenApiPlugin.configure({ yaml: '/docs' }))).rejects.toMatchObject({ code: 'ZNIGHT030' })
+    await expect(create(OpenApiPlugin.configure({ yaml: '/docs', ui: 'scalar' }))).rejects.toMatchObject({
+      code: 'ZNIGHT030',
+    })
     await expect(create(OpenApiPlugin.configure({ unknown: 1 } as never))).rejects.toMatchObject({ code: 'ZNIGHT030' })
     await expect(create(OpenApiPlugin.configure({ path: '/books/report' }))).rejects.toMatchObject({
       code: 'ZNIGHT007',
@@ -501,6 +521,31 @@ describe('local UI assets', () => {
   })
 
   it("fails with assets: 'local' when the package is not installed", async () => {
-    await expect(create(OpenApiPlugin.configure({ assets: 'local' }))).rejects.toMatchObject({ code: 'ZNIGHT030' })
+    await expect(create(OpenApiPlugin.configure({ ui: 'scalar', assets: 'local' }))).rejects.toMatchObject({
+      code: 'ZNIGHT030',
+    })
+  })
+
+  it('serves no UI assets without ui, even when a UI package is installed', async () => {
+    const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'znight-openapi-no-ui-')))
+    const cwd = process.cwd()
+    try {
+      const pkg = path.join(directory, 'node_modules/@scalar/api-reference')
+      fs.mkdirSync(path.join(pkg, 'dist/browser'), { recursive: true })
+      fs.writeFileSync(path.join(directory, 'package.json'), '{"name":"app"}')
+      fs.writeFileSync(path.join(pkg, 'package.json'), '{"name":"@scalar/api-reference","version":"1.0.0"}')
+      fs.writeFileSync(path.join(pkg, 'dist/browser/standalone.js'), 'window.Scalar = {}')
+      process.chdir(directory)
+      await using app = await create(OpenApiPlugin.configure())
+      const http = app.app.getPlugin<HttpPlugin>('http')
+      expect(http?.routes.filter(route => route.source === 'openapi').map(route => route.handler)).not.toContain(
+        'assets',
+      )
+      expect((await app.inject({ method: 'GET', url: '/docs' })).status).toBe(404)
+      expect((await app.inject({ method: 'GET', url: '/docs/_assets/scalar@1.0.0/standalone.js' })).status).toBe(404)
+    } finally {
+      process.chdir(cwd)
+      fs.rmSync(directory, { recursive: true, force: true })
+    }
   })
 })

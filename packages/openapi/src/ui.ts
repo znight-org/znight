@@ -1,7 +1,8 @@
 /**
- * API reference pages (Scalar by default, Swagger UI as an option, §8.3 of RFC 0002): an HTML page
- * whose inline script is fixed at boot (allowed by hash in its own Content-Security-Policy), with
- * the UI assets served from `node_modules` or from a pinned CDN with Subresource Integrity.
+ * API reference pages (Scalar or Swagger UI, opt-in through the `ui` option, §8.3 of RFC 0002): an
+ * HTML page whose inline script is fixed at boot (allowed by hash in its own
+ * Content-Security-Policy), with the UI assets served from `node_modules` or from a pinned CDN with
+ * Subresource Integrity.
  */
 import type { JsonValue } from './types.ts'
 
