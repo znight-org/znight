@@ -1,5 +1,11 @@
 # @znight/core
 
+## 0.7.1
+
+### Patch Changes
+
+- 3cbfd77: The `homepage` of every package points to its page of the documentation site.
+
 ## 0.7.0
 
 No changes in this release.

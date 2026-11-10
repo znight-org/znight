@@ -1,5 +1,15 @@
 # @znight/openapi
 
+## 0.7.1
+
+### Patch Changes
+
+- 3cbfd77: The `homepage` of every package points to its page of the documentation site.
+- Updated dependencies [3cbfd77]
+  - @znight/compiler@0.7.1
+  - @znight/core@0.7.1
+  - @znight/http@0.7.1
+
 ## 0.7.0
 
 ### Minor Changes
