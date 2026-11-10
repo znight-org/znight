@@ -14,6 +14,26 @@ import { describe, expect, it } from 'bun:test'
 class DatabaseDown extends Error {}
 class Overloaded extends Error {}
 
+/** A 4xx exception whose body cannot be rendered. */
+class BrokenBadRequest extends BadRequestException {
+  override toBody(): never {
+    throw new Error('toBody failure')
+  }
+}
+
+/** A 5xx exception whose body cannot be rendered. */
+class BrokenUnavailable extends ServiceUnavailableException {
+  override toBody(): never {
+    throw new Error('toBody failure')
+  }
+}
+
+async function* failingEvents(): AsyncGenerator<{ data: string }> {
+  yield { data: 'first' }
+  await sleep(1)
+  throw new Error('sse failure')
+}
+
 class ItemsController {
   get(ctx: HttpContext): unknown {
     switch (ctx.params['id']) {
@@ -31,6 +51,14 @@ class ItemsController {
         throw new DatabaseDown('db down')
       case 'answered':
         throw new Overloaded('overloaded')
+      case 'broken-4xx':
+        throw new BrokenBadRequest('bad id')
+      case 'broken-5xx':
+        throw new BrokenUnavailable('maintenance')
+      case 'sse':
+        return HttpResponse.sse(failingEvents())
+      case 'sse-invalid':
+        return HttpResponse.sse([{ data: 'first' }, { event: 'bad\nname', data: 'x' }])
       case 'stream':
         return new ReadableStream({
           pull(controller) {
@@ -132,6 +160,47 @@ describe('error:report hook (HTTP)', () => {
     expect((report.error as Error).message).toBe('stream failure')
     expect(report.operation).toBe('GET /items/:id')
     expect(report.tags['status']).toBe(200)
+    await app.stop()
+  })
+
+  it('reports an event stream whose source fails mid-stream, once', async () => {
+    const app = await reportingApp()
+    const res = await app.http.injectStream({ method: 'GET', url: '/items/sse' })
+    expect(res.status).toBe(200)
+    expect(await new Response(res.body).text()).toContain('data: first')
+    await sleep(20)
+    expect(app.reports).toHaveLength(1)
+    const report = app.reports[0] as ErrorReportEvent
+    expect((report.error as Error).message).toBe('sse failure')
+    expect(report.source).toBe('http')
+    expect(report.operation).toBe('GET /items/:id')
+    expect(report.requestId).toBe(res.headers['x-request-id'] as string)
+    expect(report.tags['status']).toBe(200)
+    await app.stop()
+  })
+
+  it('reports an event stream whose source yields an invalid event', async () => {
+    const app = await reportingApp()
+    const res = await app.http.injectStream({ method: 'GET', url: '/items/sse-invalid' })
+    expect(res.status).toBe(200)
+    await new Response(res.body).text()
+    await sleep(20)
+    expect(app.reports).toHaveLength(1)
+    expect(app.reports[0]?.error).toBeInstanceOf(TypeError)
+    await app.stop()
+  })
+
+  it('reports the failure of toBody() once, and the exception itself only when it is a 5xx', async () => {
+    const app = await reportingApp()
+    expect((await app.http.inject({ method: 'GET', url: '/items/broken-4xx' })).status).toBe(500)
+    expect(app.reports.map(report => (report.error as Error).message)).toEqual(['toBody failure'])
+    expect(app.reports[0]?.tags['status']).toBe(500)
+    app.reports.length = 0
+    expect((await app.http.inject({ method: 'GET', url: '/items/broken-5xx' })).status).toBe(500)
+    expect(app.reports.map(report => [(report.error as Error).message, report.tags['status']])).toEqual([
+      ['toBody failure', 500],
+      ['maintenance', 503],
+    ])
     await app.stop()
   })
 })

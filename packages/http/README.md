@@ -1619,7 +1619,8 @@ A stream-lifetime hook is not provided.
 Error reporters listen to the `error:report` hook of `@znight/core` (see the
 [Sentry recipe](https://github.com/znight-org/znight/blob/main/docs/guide/plugins.md#report-errors-error-report)): the plugin emits it, when it has listeners, for each error it logs as
 `Request failed` (an unmapped error, a 5xx `HttpException`, the original error of a mapper returning
-a 5xx exception, an invalid response header or cookie) and for a response stream that failed, with
+a 5xx exception, an invalid response header or cookie), for a response stream that failed and for an
+event stream whose source failed or yielded an invalid event (`The SSE stream failed`), with
 `source: 'http'`, `operation` (`GET /users/:id`), `requestId`, the tags `method`, `path`, `route`,
 `handler` and `status`, and the `HttpContext`. Client errors (4xx) and the replies of exception
 mappers answering with their own `HttpResponse` are not reported.

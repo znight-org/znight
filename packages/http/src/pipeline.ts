@@ -1438,7 +1438,8 @@ export class Pipeline {
           `@Sse handler ${displayName(plan.info.controller)}.${definition.handler} must return an AsyncIterable, an Iterable or a ReadableStream of SseEvent (received ${describeResult(result)})`,
         )
       }
-      return this.#finish(event, serializeSseReply(this.#openStream(result, sseOptions(sse), ctx), undefined, options))
+      const stream = this.#openStream(result, sseOptions(sse), ctx, options.status ?? 200)
+      return this.#finish(event, serializeSseReply(stream, undefined, options))
     }
     if (!isHttpResponse(result)) return this.#finish(event, serializeResult(result, options))
     return this.#serialize(result, ctx, options, sse).then(reply => this.#finish(event, reply))
@@ -1457,14 +1458,18 @@ export class Pipeline {
         const body = result.body
         // HttpResponse.sse() options win over the @Sse options of the route
         const merged = { ...(route === undefined ? {} : sseOptions(route)), ...definedOptions(body.options) }
-        return serializeSseReply(this.#openStream(body.source, merged, ctx), result, options)
+        const status = options.status ?? result.status ?? 200
+        return serializeSseReply(this.#openStream(body.source, merged, ctx, status), result, options)
       }
     }
     return serializeResult(result, options)
   }
 
-  /** An event stream reading `source` in the request (route options over the plugin `sse` option). */
-  #openStream(source: SseSource, options: SseOptions, ctx: RequestContext): SseSession {
+  /**
+   * An event stream reading `source` in the request (route options over the plugin `sse` option). A
+   * failure of the source (or of an event it yields) is logged and reported with the reply `status`.
+   */
+  #openStream(source: SseSource, options: SseOptions, ctx: RequestContext, status: number): SseSession {
     const settings = this.#options.sse ?? DEFAULT_SSE_SETTINGS
     const heartbeat = options.heartbeat === undefined ? settings.heartbeat : options.heartbeat || 0
     const retry = options.retry ?? settings.retry
@@ -1479,7 +1484,10 @@ export class Pipeline {
       },
       {
         abort: kind => ctx.abort(kind),
-        error: (message, error) => logger.error(message, { err: error, requestId: ctx.requestId, path: ctx.path }),
+        error: (message, error) => {
+          logger.error(message, { err: error, requestId: ctx.requestId, path: ctx.path })
+          this.#report(error, ctx, status)
+        },
         warn: message => logger.warn(message, { requestId: ctx.requestId, path: ctx.path }),
       },
     )
@@ -1557,7 +1565,8 @@ export class Pipeline {
         body = this.#internalBody(bodyError)
       }
       extra = error.headers
-      if (status >= 500) this.#log(original, ctx, status)
+      // the declared status, not the 500 of a failing toBody(): a 4xx exception is never reported
+      if (error.status >= 500) this.#log(original, ctx, error.status)
     } else {
       status = 500
       body = this.#internalBody(error)
