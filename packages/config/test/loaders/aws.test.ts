@@ -5,8 +5,8 @@ import type { GetSecretValueInputLike, GetSecretValueOutputLike, SecretsManagerC
 import { createServer } from 'node:http'
 import { ErrorCode, type ZnightError } from '@znight/core'
 
-import { awsSecretsManager, ConfigLoaderError, inline, loadConfigSource } from '../../src/index.ts'
-import { caught } from '../helpers.ts'
+import { awsSecretsManager, ConfigLoaderError, inline, loadConfigSource, resolveFields } from '../../src/index.ts'
+import { caught, field } from '../helpers.ts'
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
 
 const SECRETS: Record<string, GetSecretValueOutputLike> = {
@@ -50,6 +50,14 @@ describe('awsSecretsManager() with a client', () => {
     expect(source.get('DB_PASSWORD')).toBe('json-password')
     expect(source.get('database.user')).toBe('app')
     expect(source.origin('DB_PASSWORD')).toBe('aws-secrets-manager:prod/app')
+  })
+
+  it('marks its values as secrets: masked in validation messages', async () => {
+    const source = await loadConfigSource([awsSecretsManager({ secretId: 'prod/app', client: fakeClient() })], {
+      env: {},
+    })
+    const { problems } = resolveFields('Db', [field('dbPassword', 'number')], source)
+    expect(problems[0]?.message).toBe('expected a number but got [REDACTED]')
   })
 
   it('stores plain secrets under their key (default: the secret id)', async () => {

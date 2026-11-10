@@ -5,9 +5,9 @@ import type { VaultLoaderOptions } from '../../src/index.ts'
 import { createServer } from 'node:http'
 import { ErrorCode, type ZnightError } from '@znight/core'
 
-import { ConfigLoaderError, dotenv, inline, loadConfigSource, vault } from '../../src/index.ts'
+import { ConfigLoaderError, dotenv, inline, loadConfigSource, resolveFields, vault } from '../../src/index.ts'
 import { MAX_RETRY_DELAY_MS, retryDelay } from '../../src/loaders/shared.ts'
-import { caught, tempDir } from '../helpers.ts'
+import { caught, field, tempDir } from '../helpers.ts'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test'
 
 const TOKEN = 'test-token'
@@ -108,6 +108,12 @@ describe('vault()', () => {
     expect(source.get('database.host')).toBe('vault-host')
     expect(source.origin('DB_PASSWORD')).toBe('vault:secret/myapp')
     expect(requests).toEqual([{ url: '/v1/secret/data/myapp', token: TOKEN, namespace: undefined, request: 'true' }])
+  })
+
+  it('marks its values as secrets: masked in validation messages', async () => {
+    const source = await loadConfigSource([vault({ address, token: TOKEN, path: 'secret/myapp' })], { env: {} })
+    const { problems } = resolveFields('Db', [field('dbPassword', 'number')], source)
+    expect(problems[0]?.message).toBe('expected a number but got [REDACTED]')
   })
 
   it('reads KV v1 secrets', async () => {

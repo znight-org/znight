@@ -239,6 +239,23 @@ describe('loadConfig', () => {
       expect(error.message).toContain('Db.port: expected a number but got "nope" (PORT from env)')
     })
 
+    it('masks values of secret layers, even for fields without @Secret', async () => {
+      class Server {
+        port!: number
+        host!: string
+      }
+      const layered = createConfigSource([
+        { origin: 'file', values: { HOST: 'not-a-number' } },
+        { origin: 'gcp-secret-manager:PORT', values: { PORT: 'hunter2' }, secret: true },
+      ])
+      const error = await caught(() => loadConfig(Server, layered, [field('port', 'number'), field('host', 'number')]))
+      expect(error.message).toContain(
+        `Server.port: expected a number but got ${SECRET_MASK} (PORT from gcp-secret-manager:PORT)`,
+      )
+      expect(error.message).toContain('Server.host: expected a number but got "not-a-number" (HOST from file)')
+      expect(error.message).not.toContain('hunter2')
+    })
+
     it('reports invalid defaults', async () => {
       class Broken {
         port!: number
