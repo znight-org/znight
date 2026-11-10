@@ -213,6 +213,7 @@ const THIRD_PARTY: readonly (readonly [name: string, from: string])[] = [
   ['fastify', 'http'],
   ['graphql', 'graphql'],
   ['ws', 'websocket'],
+  ['pino-pretty', 'observability'],
 ]
 
 describe.skipIf(!enabled)('scaffolded application (ZNIGHT_CLI_E2E=1)', () => {
@@ -286,8 +287,10 @@ describe.skipIf(!enabled)('scaffolded application (ZNIGHT_CLI_E2E=1)', () => {
     'znight openapi writes openapi.json, --check confirms it',
     async () => {
       expectSuccess(await znight(['openapi', '--config-loader', 'native']), 'znight openapi')
-      const document = JSON.parse(readFileSync(join(APP, 'openapi.json'), 'utf8')) as { paths?: object }
+      const document = JSON.parse(readFileSync(join(APP, 'openapi.json'), 'utf8')) as { info?: object; paths?: object }
       expect(Object.keys(document.paths ?? {})).toContain('/greetings/{name}')
+      // src/openapi.ts
+      expect(document.info).toEqual({ title: 'e2e-app', description: 'The HTTP API of e2e-app.', version: '1.0.0' })
       expectSuccess(await znight(['openapi', '--check', '--config-loader', 'native']), 'znight openapi --check')
     },
     TIMEOUT,

@@ -101,7 +101,7 @@ describe('project templates', () => {
     expect(file(project, 'README.md')).toContain('g job reports/digest')
   })
 
-  it('openapi: the plugin after HttpPlugin, src/api.ts and the openapi scripts', () => {
+  it('openapi: the plugin after HttpPlugin, src/openapi.ts and the openapi scripts', () => {
     const project = files({ features: ['openapi'] })
     const manifest = packageJson(project)
     expect(manifest.dependencies['@znight/openapi']).toBe('^0.1.0')
@@ -111,23 +111,56 @@ describe('project templates', () => {
     expect(main.indexOf("OpenApiPlugin.configure({ ui: 'scalar' })")).toBeGreaterThan(
       main.indexOf('HttpPlugin.configure('),
     )
-    expect(file(project, 'src/api.ts')).toContain('@OpenApiDocument({')
-    expect(file(project, 'README.md')).toContain('| `npm run openapi` | Write `openapi.json`')
+    expect(main).toContain('(document options: src/openapi.ts)')
+    expect(project.has('src/api.ts')).toBe(false)
+    expect(file(project, 'src/openapi.ts')).toContain('@OpenApiDocument({')
+    const readme = file(project, 'README.md')
+    expect(readme).toContain('| `npm run openapi` | Write `openapi.json`')
+    expect(readme).toContain('options in `src/openapi.ts`')
+    expect(readme).toContain(
+      '├─ openapi.ts                 # @OpenApiDocument: title, description, version of openapi.json',
+    )
+    expect(readme).not.toContain('api.ts  ')
     expect(project.has('src/app/heartbeat.jobs.ts')).toBe(false)
   })
 
-  it('observability: ObservabilityPlugin is named after the service, metrics and tracing options commented out', () => {
-    const main = file(files({ name: 'my-service' }), 'src/main.ts')
-    expect(main).toContain(`    ObservabilityPlugin.configure({
+  it('openapi: src/openapi.ts sets the title, description and version of the document', () => {
+    const document = file(files({ name: 'my-service-znight', features: ['openapi'] }), 'src/openapi.ts')
+    expect(document).toStartWith("import { OpenApiDocument } from '@znight/openapi'\n")
+    expect(document).toContain(`@OpenApiDocument({
+  info: {
+    title: 'my-service-znight',
+    description: 'The HTTP API of my-service-znight.',
+    version: '1.0.0',
+  },
+})
+export class Api {}
+`)
+    expect(document).not.toContain('tags')
+    // no JSDoc on the class: info gives the title and the description
+    expect(document).not.toContain('/**')
+    expect(file(files({ name: '@acme/orders', features: ['openapi'] }), 'src/openapi.ts')).toContain(
+      "    title: '@acme/orders',\n    description: 'The HTTP API of @acme/orders.',\n",
+    )
+    // renderProject() is public: any name is quoted safely
+    expect(file(files({ name: "it's\\a\nname", features: ['openapi'] }), 'src/openapi.ts')).toContain(
+      "    title: 'it\\'s\\\\a\\nname',\n    description: 'The HTTP API of it\\'s\\\\a\\nname.',\n",
+    )
+    expect(files().has('src/openapi.ts')).toBe(false)
+  })
+
+  it('observability: pretty logs named after the service, metrics and tracing off', () => {
+    const main = file(files({ name: 'my-service-znight' }), 'src/main.ts')
+    expect(
+      main,
+    ).toContain(`    // pretty: human-readable logs for development; JSON logs (pretty: false) are better in production
+    ObservabilityPlugin.configure({
       logging: {
-        name: 'my-service',
+        name: 'my-service-znight',
+        pretty: true,
       },
-      // metrics: {
-      //   // options of the metrics registry
-      // },
-      // tracing: {
-      //   // options of the tracer
-      // },
+      metrics: false,
+      tracing: false,
     }),
 `)
     expect(main.indexOf('ObservabilityPlugin.configure(')).toBeLessThan(main.indexOf('HttpPlugin.configure('))
@@ -135,6 +168,13 @@ describe('project templates', () => {
     // renderProject() is public: any name is quoted safely
     expect(file(files({ name: "it's\\a\nname" }), 'src/main.ts')).toContain("        name: 'it\\'s\\\\a\\nname',\n")
     expect(file(files({ features: [] }), 'src/main.ts')).not.toContain('ObservabilityPlugin')
+  })
+
+  it('observability: pino-pretty is a dependency, so that pretty logs work out of the box (and in the image)', () => {
+    expect(packageJson(files()).dependencies['pino-pretty']).toBe('^13.2.0')
+    expect(packageJson(files()).devDependencies['pino-pretty']).toBeUndefined()
+    expect(packageJson(files({ features: ['config'] })).dependencies['pino-pretty']).toBeUndefined()
+    expect(file(files(), 'README.md')).toContain('`pino-pretty`')
   })
 
   it.each([
@@ -147,6 +187,20 @@ describe('project templates', () => {
     expect(main).toContain(`    OpenApiPlugin.configure({ ui: '${ui}' }),`)
     expect(main).toContain(`the API reference at /docs, with ${label}`)
     expect(file(project, 'README.md')).toContain(`${label} API reference at \`/docs\``)
+  })
+
+  it('openapi: no UI configures no ui option and mentions no /docs', () => {
+    const project = files({ features: ['openapi'], openapiUi: 'none' })
+    const main = file(project, 'src/main.ts')
+    expect(main).toContain('    // GET /openapi.json, no API reference UI (document options: src/openapi.ts)\n')
+    expect(main).toContain('    OpenApiPlugin.configure(),\n')
+    expect(main).not.toContain('ui:')
+    expect(main).not.toContain('/docs')
+    const readme = file(project, 'README.md')
+    expect(readme).not.toContain('/docs')
+    expect(readme).toContain('- **OpenAPI** with `@znight/openapi` (`/openapi.json`, options in `src/openapi.ts`)')
+    expect(readme).toContain('curl localhost:3000/openapi.json\n')
+    expect(file(project, 'src/openapi.ts')).toContain('@OpenApiDocument({')
   })
 
   it('graphql: @znight/graphql and graphql, GraphQLPlugin after HttpPlugin, a code-first resolver and its test', () => {
@@ -458,7 +512,9 @@ describe('znight new', () => {
     expect(manifest.scripts.test).toBe('vitest run') // npm: not running on Bun in this context
     expect(manifest.dependencies['@znight/config']).toBeDefined()
     expect(manifest.dependencies['@znight/observability']).toBeDefined()
+    expect(manifest.dependencies['pino-pretty']).toBeDefined()
     expect(manifest.dependencies['@znight/messaging']).toBeUndefined()
+    expect(readFileSync(join(workspace.path, 'svc/src/main.ts'), 'utf8')).toContain('        pretty: true,\n')
     // Fastify by default, a Dockerfile, the Scalar UI when openapi is selected
     expect(manifest.dependencies.fastify).toBeDefined()
     expect(readFileSync(join(workspace.path, 'svc/src/main.ts'), 'utf8')).toContain('adapter: fastifyAdapter(),')
@@ -488,6 +544,16 @@ describe('znight new', () => {
     expect(main).toContain("OpenApiPlugin.configure({ ui: 'swagger' })")
     expect(main).not.toContain('Adapter')
     expect(existsSync(join(workspace.path, 'ui/Dockerfile'))).toBe(false)
+
+    const none = await runCli(
+      ['new', 'no-ui', '--features', 'openapi', '--openapi-ui', 'none', '--no-install', '--no-git'],
+      { cwd: workspace.path },
+    )
+    expect(none.code).toBe(0)
+    const noUi = readFileSync(join(workspace.path, 'no-ui/src/main.ts'), 'utf8')
+    expect(noUi).toContain('    OpenApiPlugin.configure(),\n')
+    expect(noUi).not.toContain('/docs')
+    expect(existsSync(join(workspace.path, 'no-ui/src/openapi.ts'))).toBe(true)
 
     const invalid = await runCli(['new', 'bad-ui', '--openapi-ui', 'redoc', '--no-install', '--no-git'], {
       cwd: workspace.path,
@@ -657,6 +723,7 @@ describe('znight new', () => {
   it('offers Fastify first and by default, every feature but events, and the OpenAPI UI when openapi is chosen', async () => {
     const selects: { message: string; values: string[]; initialValue: unknown }[] = []
     let featureChoices: string[] = []
+    let initialFeatures: readonly string[] | undefined
     const prompts: Prompts = {
       intro: () => undefined,
       outro: () => undefined,
@@ -674,6 +741,7 @@ describe('znight new', () => {
       },
       multiselect: options => {
         featureChoices = options.choices.map(choice => choice.value)
+        initialFeatures = options.initialValues
         return Promise.resolve(['observability', 'openapi', 'graphql', 'websocket'] as never)
       },
       confirm: options => Promise.resolve(options.message.startsWith('Add a Dockerfile')),
@@ -687,7 +755,11 @@ describe('znight new', () => {
     expect(run.code).toBe(0)
     expect(selects).toEqual([
       { message: 'HTTP adapter?', values: ['fastify', 'node', 'express', 'hono'], initialValue: 'fastify' },
-      { message: 'OpenAPI reference UI (served at /docs)?', values: ['scalar', 'swagger'], initialValue: 'scalar' },
+      {
+        message: 'OpenAPI reference UI (served at /docs)?',
+        values: ['scalar', 'swagger', 'none'],
+        initialValue: 'scalar',
+      },
     ])
     expect(featureChoices).toEqual([
       'config',
@@ -698,6 +770,8 @@ describe('znight new', () => {
       'graphql',
       'websocket',
     ])
+    // observability is selected by default
+    expect(initialFeatures).toEqual(['config', 'observability'])
     const root = join(workspace.path, 'ui-app')
     const main = readFileSync(join(root, 'src/main.ts'), 'utf8')
     expect(main).toContain('adapter: fastifyAdapter()')
@@ -706,6 +780,34 @@ describe('znight new', () => {
     expect(main).toContain('GraphQLPlugin.configure()')
     expect(main).toContain('WebSocketPlugin.configure()')
     expect(existsSync(join(root, 'Dockerfile'))).toBe(true)
+  })
+
+  it('offers "No UI" for OpenAPI: the plugin gets no ui option', async () => {
+    const labels: string[] = []
+    const prompts: Prompts = {
+      intro: () => undefined,
+      outro: () => undefined,
+      note: () => undefined,
+      text: () => Promise.resolve('bare-api'),
+      select: options => {
+        if (!options.message.startsWith('OpenAPI')) return Promise.resolve(options.initialValue as never)
+        labels.push(...options.choices.map(choice => choice.label))
+        return Promise.resolve('none' as never)
+      },
+      multiselect: () => Promise.resolve(['openapi'] as never),
+      confirm: () => Promise.resolve(false),
+      spinner: () => ({ start: () => undefined, stop: () => undefined }),
+    }
+    const run = await runCli(['new', '--pm', 'npm'], {
+      cwd: workspace.path,
+      interactive: true,
+      services: { processes: new FakeProcesses(), loadPrompts: () => Promise.resolve(prompts) },
+    })
+    expect(run.code).toBe(0)
+    expect(labels).toEqual(['Scalar', 'Swagger UI', 'No UI (openapi.json only)'])
+    const main = readFileSync(join(workspace.path, 'bare-api/src/main.ts'), 'utf8')
+    expect(main).toContain('    OpenApiPlugin.configure(),\n')
+    expect(main).not.toContain('ui:')
   })
 
   it('does not ask what the flags answer, and --yes disables the prompts', async () => {
