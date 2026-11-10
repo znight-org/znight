@@ -135,8 +135,14 @@ export class GatewayDispatcher implements ConnectionDriver {
   async connect(conn: WsConnectionImpl): Promise<void> {
     const lifecycle = this.#options.definition.onConnect
     if (lifecycle === undefined) return
-    const gateway = await this.#options.instance(conn)
-    await this.#bounded(Promise.resolve(lifecycle.invoke(gateway, conn)), undefined)
+    try {
+      const gateway = await this.#options.instance(conn)
+      await this.#bounded(Promise.resolve(lifecycle.invoke(gateway, conn)), undefined)
+    } catch (error) {
+      // an expected refusal (WsException, 4xx HttpException, timeout) closes the connection quietly
+      if (!isExpected(error)) this.#report(error, conn, lifecycle.method, undefined, conn)
+      throw error
+    }
   }
 
   connectFailure(error: unknown): { readonly code: number; readonly reason: string } {
@@ -150,6 +156,7 @@ export class GatewayDispatcher implements ConnectionDriver {
       await lifecycle.invoke(await this.#options.instance(conn), conn)
     } catch (error) {
       this.#options.logError(`@OnDisconnect ${lifecycle.method} failed`, error, conn)
+      this.#report(error, conn, lifecycle.method, undefined, conn)
     }
   }
 
@@ -276,7 +283,10 @@ export class GatewayDispatcher implements ConnectionDriver {
       return OK
     } catch (thrown) {
       const error = await this.#map(thrown, ctx, conn)
-      if (!isExpected(error)) this.#options.logError(`Handler ${plan.definition.method} failed`, error, conn)
+      if (!isExpected(error)) {
+        this.#options.logError(`Handler ${plan.definition.method} failed`, error, conn)
+        this.#report(error, conn, plan.definition.method, ctx.event, ctx)
+      }
       if (!this.raw) this.#fail(conn, ctx.id, ctx.event, toWireError(error, this.#options.exposeErrors))
       if (error instanceof WsException && error.close !== undefined) conn.close(error.close, error.message)
       let outcome: WebSocketMessageOutcome = 'error'
@@ -284,6 +294,29 @@ export class GatewayDispatcher implements ConnectionDriver {
       else if (rejected && isForbidden(error)) outcome = 'rejected'
       return { outcome, error: thrown }
     }
+  }
+
+  /**
+   * Emits an unexpected failure of a handler or of `@OnConnect` / `@OnDisconnect` on the
+   * `error:report` hook, when it has listeners. `context`: the `WsMessageContext` of a message, the
+   * connection for the lifecycle methods.
+   */
+  #report(error: unknown, conn: WsConnectionImpl, method: string, event: string | undefined, context: unknown): void {
+    const hooks = this.#options.hooks
+    if (hooks === undefined || !hooks.hasListeners('error:report')) return
+    const gateway = this.#options.name ?? String(this.#options.definition.token)
+    const tags: Record<string, string> = { gateway, path: this.#options.path }
+    if (event !== undefined) tags['event'] = event
+    tags['handler'] = method
+    tags['connectionId'] = conn.id
+    hooks.emit('error:report', {
+      error,
+      source: 'websocket',
+      operation: `${gateway}.${method}`,
+      requestId: conn.requestId,
+      tags,
+      context,
+    })
   }
 
   #ignoredResult(method: string, event: string | undefined): void {

@@ -1,3 +1,4 @@
+import type { ErrorReportEvent } from '@znight/core'
 import type { HttpContext } from '@znight/http'
 import type { ConnectionLimits } from '../src/connection.ts'
 import type { DispatcherOptions, HandlerPlan } from '../src/dispatcher.ts'
@@ -250,5 +251,109 @@ describe('GatewayDispatcher', () => {
       { id: 1, data: 'good' },
     ])
     expect(seen).toEqual([undefined, 'good'])
+  })
+})
+
+describe('error:report', () => {
+  function reporting() {
+    const hooks = new Hooks()
+    const reports: ErrorReportEvent[] = []
+    hooks.on('error:report', report => {
+      reports.push(report)
+    })
+    return { hooks, reports }
+  }
+
+  function lifecycle(hook: 'onConnect' | 'onDisconnect', method: string, error: Error): GatewayDefinition {
+    return {
+      [hook]: {
+        method,
+        invoke: () => {
+          throw error
+        },
+      },
+    } as Partial<GatewayDefinition> as GatewayDefinition
+  }
+
+  it('reports an unexpected handler failure once, with the message context', async () => {
+    const { hooks, reports } = reporting()
+    const failure = new Error('database down')
+    const { client, received, errors } = await connect(
+      [
+        handler('send', 'send', () => {
+          throw failure
+        }),
+        handler('denied', 'denied', () => {
+          throw new ForbiddenException('nope')
+        }),
+        handler('invalid', 'invalid', () => {
+          throw new WsValidationException([{ message: 'bad', path: [] }])
+        }),
+        handler('slow', 'slow', () => new Promise(() => undefined)),
+        handler('ok', 'ok', () => 1),
+      ],
+      { hooks, name: 'ChatGateway' },
+    )
+    client.send('{"event":"send","data":1,"id":1}')
+    client.send('{"event":"denied","id":2}')
+    client.send('{"event":"invalid","id":3}')
+    client.send('{"event":"unknown","id":4}')
+    client.send('{"event":"ok","id":5}')
+    client.send('{"event":"slow","id":6}')
+    await Bun.sleep(80)
+    expect(await received()).toHaveLength(6)
+    expect(errors).toEqual(['Handler send failed'])
+    expect(reports).toHaveLength(1)
+    const report = reports[0] as ErrorReportEvent
+    expect(report.error).toBe(failure)
+    expect(report.source).toBe('websocket')
+    expect(report.operation).toBe('ChatGateway.send')
+    expect(report.requestId).toBe('r1')
+    expect(report.tags).toEqual({
+      gateway: 'ChatGateway',
+      path: '/api/chat',
+      event: 'send',
+      handler: 'send',
+      connectionId: 'c1',
+    })
+    expect((report.context as { event: string }).event).toBe('send')
+  })
+
+  it('reports unexpected @OnConnect and @OnDisconnect failures, not expected refusals', async () => {
+    const connectFailure = new Error('session store down')
+    const failing = reporting()
+    const opened = await connect([], {
+      hooks: failing.hooks,
+      name: 'ChatGateway',
+      definition: lifecycle('onConnect', 'connected', connectFailure),
+    })
+    await opened.conn.finished
+    expect(failing.reports.map(report => [report.error, report.operation, report.tags['handler']])).toEqual([
+      [connectFailure, 'ChatGateway.connected', 'connected'],
+    ])
+    expect(failing.reports[0]?.context).toBe(opened.conn)
+
+    const refused = reporting()
+    const rejected = await connect([], {
+      hooks: refused.hooks,
+      name: 'ChatGateway',
+      definition: lifecycle('onConnect', 'connected', new WsException('UNAUTHORIZED', 'who are you')),
+    })
+    await rejected.conn.finished
+    expect(refused.reports).toEqual([])
+
+    const disconnectFailure = new Error('presence store down')
+    const leaving = reporting()
+    const left = await connect([], {
+      hooks: leaving.hooks,
+      name: 'ChatGateway',
+      definition: lifecycle('onDisconnect', 'gone', disconnectFailure),
+    })
+    await Bun.sleep(1)
+    left.conn.close()
+    await left.conn.finished
+    expect(leaving.reports.map(report => [report.error, report.operation])).toEqual([
+      [disconnectFailure, 'ChatGateway.gone'],
+    ])
   })
 })
