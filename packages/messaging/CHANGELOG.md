@@ -1,5 +1,13 @@
 # @znight/messaging
 
+## 0.6.6
+
+### Patch Changes
+
+- Updated dependencies [d85b11b]
+  - @znight/compiler@0.6.6
+  - @znight/core@0.6.6
+
 ## 0.6.5
 
 ### Patch Changes
