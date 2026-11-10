@@ -1,5 +1,16 @@
 # @znight/websocket
 
+## 0.6.5
+
+### Patch Changes
+
+- 1a2b15c: A handshake whose client left is no longer completed, and `connect()` takes a `signal` that disconnects the in-memory client before the connection opens.
+- Updated dependencies [1a2b15c]
+- Updated dependencies [ad31655]
+  - @znight/http@0.6.5
+  - @znight/compiler@0.6.5
+  - @znight/core@0.6.5
+
 ## 0.6.4
 
 ### Patch Changes
