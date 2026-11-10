@@ -215,12 +215,12 @@ ObservabilityPlugin.configure({
 })
 ```
 
-| Transport                       | Use it for                                                                                                                                                                                                                                             |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `consoleTransport(options?)`    | The default: newline-delimited JSON on stdout (`fd: 1 \| 2`, `sync`, `level`). What Docker, Kubernetes and log shippers expect.                                                                                                                        |
-| `prettyTransport(options?)`     | Development: colored, human-readable output via the optional `pino-pretty` peer (`colorize`, `translateTime`, `ignore`, `singleLine`, `options`). Runs in the main thread (no worker), identical on Node.js and Bun. Also `logging: { pretty: true }`. |
-| `cloudwatchTransport(options?)` | Amazon CloudWatch Logs and AWS Lambda (see below).                                                                                                                                                                                                     |
-| `datadogTransport(options?)`    | Shipping directly to the Datadog HTTP logs intake (see below).                                                                                                                                                                                         |
+| Transport                       | Use it for                                                                                                                                                                                                                                                     |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `consoleTransport(options?)`    | The default: newline-delimited JSON on stdout (`fd: 1 \| 2`, `sync`, `level`). What Docker, Kubernetes and log shippers expect.                                                                                                                                |
+| `prettyTransport(options?)`     | Development: colored, one line per entry via the optional `pino-pretty` peer (`colorize`, `translateTime`, `ignore`, `singleLine`, `options`; see below). Runs in the main thread (no worker), identical on Node.js and Bun. Also `logging: { pretty: true }`. |
+| `cloudwatchTransport(options?)` | Amazon CloudWatch Logs and AWS Lambda (see below).                                                                                                                                                                                                             |
+| `datadogTransport(options?)`    | Shipping directly to the Datadog HTTP logs intake (see below).                                                                                                                                                                                                 |
 
 A transport is a plain object (`{ name, stream, level?, loggerOptions?, flush?, close? }`): write your
 own by implementing `LogTransport`. The `level` of a transport only raises the logger level.
@@ -228,6 +228,53 @@ own by implementing `LogTransport`. The `level` of a transport only raises the l
 Asynchronous writes to stdout (the console default) stay in order, even when the output is slow (a
 pipe, a busy CI runner, a log collector): `flush()` waits for the writes in flight instead of forcing
 the queued entries out ahead of them, and the process does not exit before they are written.
+
+#### Pretty output (development)
+
+`logging: { pretty: true }` (or `prettyTransport()`) prints one line per entry through `pino-pretty`,
+colored when the output is a terminal:
+
+```txt
+[14:38:00.038] DEBUG (users-api): [znight] Application started
+[14:38:00.040] INFO (users-api): [UserService] User created {"requestId":"req-7f3a","userId":42}
+[14:38:00.041] INFO (users-api): [GET] [/users/42] - [200] 3.3ms {"requestId":"req-7f3a"}
+[14:38:00.041] WARN (users-api): [GET] [/nope] - [404] 0.4ms {"requestId":"req-7f3a"}
+[14:38:00.041] ERROR (users-api): [POST] [/orders] - [500] 18ms {"requestId":"req-7f3a"}
+    err: {
+      "type": "Error",
+      "message": "database unavailable",
+      "stack":
+          Error: database unavailable
+              at OrderService.create (src/orders/order.service.ts:21:11)
+    }
+[14:38:00.041] INFO (users-api): Cache warmed {"entries":120,"region":"eu-west-1"}
+[14:38:00.041] INFO (users-api): [queue orders] message processed 12ms {"type":"order.created","messageId":"msg-1","attempt":1,"consumer":"OrderConsumer","handler":"onCreated"}
+[14:38:00.042] INFO (users-api): [job cleanup] run completed 40ms {"runId":"run-1","trigger":"schedule","scheduledAt":"2026-11-10T08:00:00.000Z"}
+[14:38:00.042] INFO (users-api): [GraphQL query GetUser] 5ms {"transport":"http","documentId":"a1b2c3","requestId":"req-7f3a"}
+[14:38:00.042] DEBUG (users-api): [WebSocket /chat] message.send handled 2ms {"gateway":"ChatGateway","handler":"send","connectionId":"c-1","requestId":"req-7f3a","bytes":42}
+[14:38:00.042] INFO (users-api): [WebSocket /chat] connection closed 1.50s {"gateway":"ChatGateway","connectionId":"c-1","requestId":"req-7f3a","code":1000,"reason":"","initiator":"client"}
+[14:38:00.042] DEBUG (users-api): [event UserCreated] published 1ms {"mode":"publish","inline":1,"detached":0}
+```
+
+- The entries of the instrumentation get a short message: `[GET] [/users/42] - [200] 3.3ms` (HTTP
+  requests), `[queue orders] message processed 12ms`, `[job cleanup] run completed 40ms`,
+  `[GraphQL query GetUser] 5ms`, `[WebSocket /chat] message.send handled 2ms`,
+  `[event UserCreated] published 1ms`. The fields the message shows are not repeated (nor the
+  `route` template of a request, next to its path); the others stay in the trailing `{...}`.
+- An entry of a named logger starts with its name: `[UserService]` for `getLogger('UserService')`
+  (the `logger` field), `[znight]` for the framework (the `component` field, also usable in
+  `logger.child({ component: 'billing' })`).
+- The logger `name` is shown once, in parentheses; `pid`, `hostname`, `traceId` and `spanId` are
+  hidden (`requestId` already ties the entries of a request together).
+- Errors keep their message and stack on the following lines.
+- Durations: one decimal under 10 ms, whole milliseconds under a second, seconds above.
+
+Only the pretty output changes: the JSON entries (console, CloudWatch, Datadog) keep every field.
+`PrettyOptions` override the defaults: `ignore` (default `'pid,hostname,traceId,spanId'`),
+`singleLine` (default `true`; `false` prints each trailing field on its own line), `colorize`,
+`translateTime` (default `'SYS:HH:MM:ss.l'`), and `options` for any other `pino-pretty` option,
+applied last: a `messageFormat` there replaces the format above (`messageFormat: false` restores
+pino-pretty's plain message).
 
 #### CloudWatch and AWS Lambda
 

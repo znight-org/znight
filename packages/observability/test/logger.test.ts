@@ -443,7 +443,7 @@ describe('Logger', () => {
       const output = chunks.join('')
       expect(output).toContain('INFO')
       expect(output).toContain('pretty hello')
-      expect(output).toContain('userId: 7')
+      expect(output).toContain('pretty hello {"userId":7}')
       expect(output).not.toContain('"level"')
     })
 
