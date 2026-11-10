@@ -113,8 +113,11 @@
   },
   "devDependencies": {
     "@aws-sdk/client-sqs": "3.1164.0",
+    "@azure/identity": "4.14.1",
+    "@azure/service-bus": "7.10.0",
     "@google-cloud/pubsub": "6.3.2",
     "@platformatic/kafka": "2.15.0",
+    "@testcontainers/azureservicebus": "12.2.1",
     "@testcontainers/gcloud": "12.2.1",
     "@testcontainers/kafka": "12.2.1",
     "@testcontainers/localstack": "12.2.1",
