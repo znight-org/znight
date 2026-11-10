@@ -4,9 +4,18 @@ import type { SecretManagerServiceClient } from '@google-cloud/secret-manager'
 import type { AccessSecretVersionResponseLike, GcpSecretLike, SecretManagerServiceClientLike } from '../../src/index.ts'
 
 import { createServer } from 'node:http'
+import { inspect } from 'node:util'
 import { ErrorCode, type ZnightError } from '@znight/core'
 
-import { ConfigLoaderError, gcpSecretManager, inline, loadConfigSource, resolveFields } from '../../src/index.ts'
+import {
+  ConfigLoaderError,
+  gcpSecretManager,
+  inline,
+  loadConfig,
+  loadConfigSource,
+  resolveFields,
+  SECRET_MASK,
+} from '../../src/index.ts'
 import { caught, field } from '../helpers.ts'
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
 
@@ -182,6 +191,48 @@ describe('gcpSecretManager() by name', () => {
     )
   })
 
+  it('reads regional resource names of its location', async () => {
+    const calls: Calls = { access: [], list: [] }
+    const source = await load({
+      location: 'europe-west1',
+      secrets: 'projects/acme-prod/locations/europe-west1/secrets/DB_PASSWORD/versions/2',
+      client: fakeClient(calls),
+    })
+    expect(source.get('DB_PASSWORD')).toBe('db-password')
+    expect(calls.access.map(call => call.name)).toEqual([
+      'projects/acme-prod/locations/europe-west1/secrets/DB_PASSWORD/versions/2',
+    ])
+  })
+
+  it('rejects resource names outside its location, which its endpoint cannot serve', async () => {
+    const regionalWithoutLocation = await caught(() =>
+      gcpSecretManager({ secrets: 'projects/acme-prod/locations/europe-west1/secrets/DB_PASSWORD' }),
+    )
+    expect((regionalWithoutLocation as ZnightError).code).toBe(ErrorCode.InvalidConfig)
+    expect(regionalWithoutLocation.message).toContain(
+      'secret "projects/acme-prod/locations/europe-west1/secrets/DB_PASSWORD" is not in the loader\'s location: it reads global secrets',
+    )
+    expect((regionalWithoutLocation as ZnightError).hints.join('\n')).toContain(
+      "Set location: 'europe-west1' (endpoint secretmanager.europe-west1.rep.googleapis.com)",
+    )
+
+    const globalWithLocation = await caught(() =>
+      gcpSecretManager({ location: 'europe-west1', secrets: ['DB_PASSWORD', 'projects/acme-prod/secrets/API_KEY'] }),
+    )
+    expect((globalWithLocation as ZnightError).code).toBe(ErrorCode.InvalidConfig)
+    expect(globalWithLocation.message).toContain('it reads secrets of location "europe-west1"')
+    expect((globalWithLocation as ZnightError).hints.join('\n')).toContain('Remove "location"')
+
+    const otherLocation = await caught(() =>
+      gcpSecretManager({
+        location: 'europe-west1',
+        secrets: { name: 'projects/acme-prod/locations/us-east1/secrets/DB_PASSWORD', optional: true },
+      }),
+    )
+    expect((otherLocation as ZnightError).code).toBe(ErrorCode.InvalidConfig)
+    expect((otherLocation as ZnightError).hints.join('\n')).toContain("Set location: 'us-east1'")
+  })
+
   it('later secrets override earlier ones', async () => {
     const source = await load({
       projectId: PROJECT,
@@ -316,6 +367,19 @@ describe('gcpSecretManager() values', () => {
     const { problems } = resolveFields('ServerConfig', [field('port', 'number')], source)
     expect(problems[0]?.message).toBe('expected a number but got [REDACTED]')
     expect(problems[0]?.origin).toBe('gcp-secret-manager:DB_PASSWORD')
+  })
+
+  it('marks its values as secrets: masked when a config instance is printed, without @Secret', async () => {
+    class Db {
+      dbPassword!: string
+    }
+    const loaded = await loadConfigSource([
+      gcpSecretManager({ projectId: PROJECT, secrets: 'DB_PASSWORD', client: fakeClient() }),
+    ])
+    const db = loadConfig(Db, loaded, [field('dbPassword')])
+    expect(db.dbPassword).toBe('db-password')
+    expect(JSON.stringify(db)).toBe(`{"dbPassword":"${SECRET_MASK}"}`)
+    expect(inspect(db)).toBe(`Db { dbPassword: '${SECRET_MASK}' }`)
   })
 
   it('reports secrets without value', async () => {
@@ -556,6 +620,39 @@ describe('gcpSecretManager() with the Google Cloud SDK', () => {
     expect(requests.every(request => request.method === 'GET' && request.authorization === 'Bearer test-token')).toBe(
       true,
     )
+  })
+
+  it('sends the requests of a location to its regional endpoint', async () => {
+    const urls: string[] = []
+    const options = clientOptions()
+    const { apiEndpoint: _endpoint, port: _port, ...regional } = options
+    await load({
+      projectId: PROJECT,
+      location: 'europe-west1',
+      secrets: ['DB_PASSWORD', 'projects/acme-prod/locations/europe-west1/secrets/API_KEY'],
+      clientOptions: {
+        ...regional,
+        authClient: {
+          ...options.authClient,
+          // records the URL the SDK built, then sends the request to the local server
+          fetch: (url: string, init: RequestInit) => {
+            urls.push(url)
+            const local = new URL(url)
+            local.protocol = 'http:'
+            local.host = `127.0.0.1:${port}`
+            return options.authClient.fetch(local.href, init)
+          },
+        },
+      },
+    })
+    expect(urls.map(url => new URL(url).hostname)).toEqual([
+      'secretmanager.europe-west1.rep.googleapis.com',
+      'secretmanager.europe-west1.rep.googleapis.com',
+    ])
+    expect(urls.map(url => new URL(url).pathname).sort()).toEqual([
+      '/v1/projects/acme-prod/locations/europe-west1/secrets/API_KEY/versions/latest:access',
+      '/v1/projects/acme-prod/locations/europe-west1/secrets/DB_PASSWORD/versions/latest:access',
+    ])
   })
 
   it('maps SDK errors', async () => {

@@ -161,8 +161,10 @@ Error messages show `[REDACTED]` instead of secret values. Spreading (`{ ...conf
 property gives the real value, of course. The `ConfigSource` itself never prints its values either,
 and neither do loader errors: a JSON or YAML syntax error gives the line and column, not the parser
 message (which quotes the file content). Values loaded from a secret store (`vault()`,
-`awsSecretsManager()`, `gcpSecretManager()`) are masked in error messages even when the field is not
-`@Secret`: their layers are flagged `secret: true`, which a custom loader can set too.
+`awsSecretsManager()`, `gcpSecretManager()`) are masked like `@Secret` values, in `JSON.stringify`,
+`console.log`, `toString()` and error messages, even when the field is not `@Secret`: their layers
+are flagged `secret: true`, which a custom loader can set too. A field whose value comes from
+another layer (an `env()` override, say) is not masked unless it is `@Secret`.
 
 ## ConfigPlugin
 
@@ -312,8 +314,8 @@ ConfigPlugin.configure({
 `timeoutMs` must be an integer from 1 to 2^31 − 1, `retries` and `retryDelayMs` finite numbers
 from 0: other values fail when the loader is created (ZNIGHT012), and so does an invalid `timeoutMs`
 of `awsSecretsManager()` or `gcpSecretManager()`. Paths are read concurrently; once one fails, the
-requests and retry waits of the others are cancelled (`awsSecretsManager()` and `gcpSecretManager()`
-do the same with their secrets).
+requests and retry waits of the others are cancelled (`awsSecretsManager()` does the same with its
+secrets; `gcpSecretManager()` stops waiting for them, since the SDK's promises cannot be cancelled).
 
 `VAULT_*` settings are read from the values loaded by the previous loaders first (a `.env` file
 works), then from the environment. A token or namespace loses its leading and trailing white space
@@ -372,7 +374,7 @@ gcpSecretManager({
 | `labels`        | —                                         | Read every secret carrying these labels (`{ app: 'api' }` → filter `labels.app=api`)                 |
 | `filter`        | —                                         | Read every secret matching this `listSecrets` filter (`name:PROD_`), and-ed with `labels`            |
 | `projectId`     | `GOOGLE_CLOUD_PROJECT` / `GCLOUD_PROJECT` | Project of secret ids and listings (else the client's: credentials, metadata server)                 |
-| `location`      | —                                         | Regional secrets: `projects/<p>/locations/<l>/secrets/...` on `secretmanager.<l>.rep.googleapis.com` |
+| `location`      | — (global secrets)                        | Regional secrets: `projects/<p>/locations/<l>/secrets/...` on `secretmanager.<l>.rep.googleapis.com` |
 | `version`       | `latest`                                  | Version or alias of every secret                                                                     |
 | `stripPrefix`   | —                                         | Removed from the start of secret ids to build keys (`PROD_DB_PASSWORD` → `DB_PASSWORD`)              |
 | `mapKey`        | the id                                    | `(secretId) => key`, after `stripPrefix` (`constantCase`, `` id => `secrets.${id}` ``...)            |
@@ -384,14 +386,18 @@ gcpSecretManager({
 
 `secrets`, `labels` or `filter` is required. A secret name is an id of the loader's project
 (`DB_PASSWORD`) or a resource name (`projects/<project>/secrets/<id>`, optionally
-`/versions/<version>`), which needs no project. Listed secrets are read in the order of their ids,
+`/versions/<version>`), which needs no project. Each location has its own endpoint, so a loader reads
+the secrets of one location: a resource name must be in the loader's `location`
+(`projects/<project>/locations/<location>/secrets/<id>`), or global without it, otherwise the loader
+fails when created (ZNIGHT012); use one `gcpSecretManager()` per location. Listed secrets are read in the order of their ids,
 then the `secrets` in their order: an explicit secret overrides a listed one, and two listed secrets
 mapping to the same key fail (narrow the labels or use `mapKey`). Secrets are read concurrently;
 once one read fails, the loader stops waiting for the others.
 
 Values are kept as text, JSON included: a service account key stored as a secret stays one value.
 With `json` (globally or per secret), a JSON object secret provides one value per entry, merged at
-the root, or under the secret's `key` when it sets one. Values are masked in error messages.
+the root, or under the secret's `key` when it sets one. Values are masked like `@Secret` values
+(see [Secrets](#secrets)), even for fields without `@Secret`.
 
 Authentication is the client's: Application Default Credentials (`gcloud auth application-default
 login` locally, the attached service account or workload identity in Google Cloud,

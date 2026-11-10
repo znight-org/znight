@@ -136,8 +136,9 @@ the parser message (which quotes the content: a secret, maybe), and the parser e
 ZnightError: ZNIGHT006: Config loader "json" failed: invalid JSON in config/secrets.json at line 2, column 16: unexpected character
 ```
 
-Values from a secret store (`vault()`, `awsSecretsManager()`, `gcpSecretManager()`) are masked in
-validation messages too, even for a field without `@Secret`.
+Values from a secret store (`vault()`, `awsSecretsManager()`, `gcpSecretManager()`) are masked like
+`@Secret` values, in validation messages and when the config instance is printed or serialised, even
+for a field without `@Secret`.
 
 ### Google Cloud Secret Manager
 
@@ -164,7 +165,8 @@ credentials; authentication uses Application Default Credentials unless you pass
 your own `client`. Values stay text unless `json` is set (then a JSON object secret provides one
 value per entry), and errors name the secret and the gRPC status, with a hint for missing roles
 (`roles/secretmanager.secretAccessor`, `roles/secretmanager.viewer` to list by label) or credentials.
-All the options are in the [package README](../../packages/config/README.md#gcpsecretmanageroptions).
+A loader reads the secrets of one location, global by default or `location` for regional secrets
+(each location has its own endpoint): use one loader per location. All the options are in the [package README](../../packages/config/README.md#gcpsecretmanageroptions).
 
 ## Bun's automatic `.env` loading {#bun-env-loading}
 

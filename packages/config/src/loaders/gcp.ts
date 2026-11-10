@@ -10,7 +10,8 @@ export interface GcpSecretRef {
   /**
    * Secret id (`DB_PASSWORD`, in the loader's project) or resource name
    * (`projects/<project>/secrets/<id>`, `projects/<project>/locations/<location>/secrets/<id>`,
-   * optionally followed by `/versions/<version>`).
+   * optionally followed by `/versions/<version>`). A resource name is in the loader's `location`
+   * (global without it): each location has its own endpoint.
    */
   readonly name: string
   /** Version or alias. Default: the version of the name, then the loader `version` (`latest`). */
@@ -71,7 +72,10 @@ export interface GcpSecretManagerLoaderOptions {
   readonly filter?: string
   /** Project of secret ids and listings. Default: `GOOGLE_CLOUD_PROJECT` / `GCLOUD_PROJECT`, then the client's. */
   readonly projectId?: string
-  /** Location of regional secrets (`europe-west1`): regional names and endpoint. Default: global secrets. */
+  /**
+   * Location of regional secrets (`europe-west1`): regional names and endpoint. Every resource name
+   * of `secrets` must be in this location (global without it). Default: global secrets.
+   */
   readonly location?: string
   /** Version or alias of every secret. Default: `latest`. */
   readonly version?: string
@@ -103,6 +107,8 @@ interface Target {
   readonly id: string
   /** `projects/<project>[/locations/<location>]/secrets/<id>`, `undefined` for an id of the loader's project. */
   readonly secret: string | undefined
+  /** Location of a regional resource name, `undefined` for a global one or an id. */
+  readonly location: string | undefined
   readonly version: string
   readonly key: string | undefined
   readonly json: boolean
@@ -122,7 +128,7 @@ const LOADER = 'gcp-secret-manager'
 const WHERE = 'gcpSecretManager()'
 
 const SECRET_ID = /^[\w-]{1,255}$/
-const RESOURCE_NAME = /^(projects\/[^/]+\/(?:locations\/[^/]+\/)?secrets\/([\w-]{1,255}))(?:\/versions\/([^/]+))?$/
+const RESOURCE_NAME = /^(projects\/[^/]+\/(?:locations\/([^/]+)\/)?secrets\/([\w-]{1,255}))(?:\/versions\/([^/]+))?$/
 const VERSION = /^[\w-]+$/
 const SEGMENT = /^[^/\s]+$/
 const LABEL_KEY = /^[\p{Ll}\p{Lo}][\p{Ll}\p{Lo}\p{N}_-]{0,62}$/u
@@ -186,14 +192,15 @@ function normalizeTarget(item: unknown, options: GcpSecretManagerLoaderOptions):
     )
   }
   const refVersion = optionalString(`version" of "${name}`, ref.version, VERSION)
-  if (refVersion !== undefined && resource?.[3] !== undefined) {
+  if (refVersion !== undefined && resource?.[4] !== undefined) {
     throw invalidConfig(`${WHERE}: secret "${name}" names a version and sets "version"`)
   }
   return {
     label: name,
-    id: resource?.[2] ?? name,
+    id: resource?.[3] ?? name,
     secret: resource?.[1],
-    version: resource?.[3] ?? refVersion ?? options.version ?? 'latest',
+    location: resource?.[2],
+    version: resource?.[4] ?? refVersion ?? options.version ?? 'latest',
     key: optionalString(`key" of "${name}`, ref.key),
     json: optionalBoolean(`json" of "${name}`, ref.json) ?? options.json === true,
     optional: optionalBoolean(`optional" of "${name}`, ref.optional) ?? options.optional === true,
@@ -206,7 +213,30 @@ function normalizeTargets(
 ): Target[] {
   if (secrets === undefined) return []
   const items: readonly unknown[] = Array.isArray(secrets) ? secrets : [secrets]
-  return items.map(item => normalizeTarget(item, options))
+  const targets = items.map(item => normalizeTarget(item, options))
+  for (const target of targets) {
+    if (target.secret !== undefined && target.location !== options.location) {
+      throw locationMismatch(target, options.location)
+    }
+  }
+  return targets
+}
+
+/**
+ * A resource name outside the loader's location: a regional secret is only served by the endpoint
+ * of its location, a global one by the global endpoint, and a loader talks to one endpoint.
+ */
+function locationMismatch(target: Target, location: string | undefined): Error {
+  const where = (value: string | undefined): string =>
+    value === undefined ? 'global secrets' : `secrets of location "${value}"`
+  const fix =
+    target.location === undefined
+      ? 'Remove "location" to read global secrets'
+      : `Set location: '${target.location}' (endpoint secretmanager.${target.location}.rep.googleapis.com)`
+  return invalidConfig(
+    `${WHERE}: secret "${target.label}" is not in the loader's location: it reads ${where(location)}`,
+    [`${fix}, and read the secrets of each location with its own gcpSecretManager()`],
+  )
 }
 
 /** The `listSecrets` filter of the `labels` and `filter` options, `undefined` without discovery. */
@@ -396,7 +426,7 @@ export function gcpSecretManager(options: GcpSecretManagerLoaderOptions): Config
     }
     const targets = (secrets ?? []).map(secret => {
       const name = typeof secret?.name === 'string' ? RESOURCE_NAME.exec(secret.name) : null
-      if (name === null || name[3] !== undefined) {
+      if (name === null || name[4] !== undefined) {
         throw new ConfigLoaderError(LOADER, `unexpected secret name ${JSON.stringify(secret?.name)} in the listing`)
       }
       return normalizeTarget({ name: name[1] }, options)
