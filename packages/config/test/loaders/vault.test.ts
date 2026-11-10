@@ -155,6 +155,27 @@ describe('vault()', () => {
     expect(source.has('DB_PASSWORD')).toBe(false)
   })
 
+  it('accepts { path, key, optional } refs, whose key and optional override the loader ones', async () => {
+    const source = await loadConfigSource(
+      [
+        vault({
+          address,
+          token: TOKEN,
+          key: 'vault',
+          path: [
+            'secret/myapp',
+            { path: 'secret/myapp/override', key: 'override' },
+            { path: 'secret/nope', optional: true },
+          ],
+        }),
+      ],
+      { env: {} },
+    )
+    expect(source.get('vault.DB_PASSWORD')).toBe('kv2-password')
+    expect(source.get('override.DB_PASSWORD')).toBe('override-password')
+    expect(source.origin('override.DB_PASSWORD')).toBe('vault:secret/myapp/override')
+  })
+
   it('sends the namespace header', async () => {
     await loadConfigSource([vault({ address, token: TOKEN, path: 'secret/myapp', namespace: 'team-a' })], { env: {} })
     expect(requests[0]?.namespace).toBe('team-a')

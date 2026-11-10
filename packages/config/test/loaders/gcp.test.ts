@@ -1,7 +1,7 @@
 import type { Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import type { SecretManagerServiceClient } from '@google-cloud/secret-manager'
-import type { AccessSecretVersionResponseLike, GcpSecretLike, SecretManagerServiceClientLike } from '../../src/index.ts'
+import type { AccessSecretVersionResponseLike, SecretManagerServiceClientLike } from '../../src/index.ts'
 
 import { createServer } from 'node:http'
 import { inspect } from 'node:util'
@@ -30,12 +30,12 @@ class GrpcError extends Error {
 
 const PROJECT = 'acme-prod'
 
-/** Secrets of the fake project, by short id: the value and the labels. */
-const SECRETS: Record<string, { value?: string | Uint8Array; labels?: Record<string, string> }> = {
-  DB_PASSWORD: { value: 'db-password', labels: { app: 'api' } },
-  PROD_API_TOKEN: { value: new TextEncoder().encode('token-bytes'), labels: { app: 'api', env: 'prod' } },
-  PROD_DB_PASSWORD: { value: 'prod-db-password', labels: { app: 'api', env: 'prod' } },
-  APP_JSON: { value: JSON.stringify({ SMTP_PASSWORD: 'smtp', mail: { user: 'bot' } }), labels: { app: 'worker' } },
+/** Secrets of the fake project, by short id. */
+const SECRETS: Record<string, { value?: string | Uint8Array }> = {
+  DB_PASSWORD: { value: 'db-password' },
+  PROD_API_TOKEN: { value: new TextEncoder().encode('token-bytes') },
+  PROD_DB_PASSWORD: { value: 'prod-db-password' },
+  APP_JSON: { value: JSON.stringify({ SMTP_PASSWORD: 'smtp', mail: { user: 'bot' } }) },
   NOT_JSON: { value: '{not json' },
   SERVICE_ACCOUNT: { value: '{"type":"service_account","private_key":"-----BEGIN"}' },
   EMPTY: {},
@@ -43,10 +43,9 @@ const SECRETS: Record<string, { value?: string | Uint8Array; labels?: Record<str
 
 interface Calls {
   access: { name: string; options: unknown }[]
-  list: { parent: string; filter?: string; options: unknown }[]
 }
 
-function fakeClient(calls: Calls = { access: [], list: [] }): SecretManagerServiceClientLike {
+function fakeClient(calls: Calls = { access: [] }): SecretManagerServiceClientLike {
   return {
     accessSecretVersion: async (request, options) => {
       calls.access.push({ name: request.name, options })
@@ -71,23 +70,6 @@ function fakeClient(calls: Calls = { access: [], list: [] }): SecretManagerServi
       }
       return [response, undefined, undefined]
     },
-    listSecrets: async (request, options) => {
-      calls.list.push({ ...request, options })
-      await Promise.resolve()
-      if (request.parent === 'projects/forbidden') {
-        throw new GrpcError(7, "7 PERMISSION_DENIED: Permission 'secretmanager.secrets.list' denied")
-      }
-      const wanted = [...(request.filter ?? '').matchAll(/labels\.([\w-]+)=([\w-]+)/g)].map(([, key, value]) => ({
-        key: key as string,
-        value: value as string,
-      }))
-      // the project number, as the API returns it
-      const secrets: GcpSecretLike[] = Object.entries(SECRETS)
-        .filter(([, secret]) => wanted.every(({ key, value }) => secret.labels?.[key] === value))
-        .map(([id]) => ({ name: `projects/123456/secrets/${id}` }))
-        .reverse()
-      return [secrets, null, undefined]
-    },
   }
 }
 
@@ -96,10 +78,10 @@ const load = (options: Parameters<typeof gcpSecretManager>[0], env: Record<strin
 
 describe('gcpSecretManager() by name', () => {
   it('reads secrets by id, version "latest", under their id', async () => {
-    const calls: Calls = { access: [], list: [] }
+    const calls: Calls = { access: [] }
     const source = await load({
       projectId: PROJECT,
-      secrets: ['DB_PASSWORD', 'PROD_API_TOKEN'],
+      secretId: ['DB_PASSWORD', 'PROD_API_TOKEN'],
       client: fakeClient(calls),
     })
     expect(source.get('DB_PASSWORD')).toBe('db-password')
@@ -113,14 +95,13 @@ describe('gcpSecretManager() by name', () => {
   })
 
   it('accepts refs with a key, a version, or a full resource name', async () => {
-    const calls: Calls = { access: [], list: [] }
+    const calls: Calls = { access: [] }
     const ok = await load({
       projectId: PROJECT,
-      version: '3',
-      secrets: [
-        { name: 'DB_PASSWORD', key: 'database.password' },
-        { name: 'PROD_API_TOKEN', version: '12' },
-        { name: 'projects/123456/secrets/PROD_DB_PASSWORD/versions/5', key: 'PINNED' },
+      secretId: [
+        { secretId: 'DB_PASSWORD', key: 'database.password', version: '3' },
+        { secretId: 'PROD_API_TOKEN', version: '12' },
+        { secretId: 'projects/123456/secrets/PROD_DB_PASSWORD/versions/5', key: 'PINNED' },
       ],
       client: fakeClient(calls),
     })
@@ -133,19 +114,19 @@ describe('gcpSecretManager() by name', () => {
   })
 
   it('reads the project from previous loaders, the environment, then the client', async () => {
-    const calls: Calls = { access: [], list: [] }
+    const calls: Calls = { access: [] }
     const fromLoaders = await loadConfigSource(
       [
         inline({ GOOGLE_CLOUD_PROJECT: PROJECT }),
-        gcpSecretManager({ secrets: 'DB_PASSWORD', client: fakeClient(calls) }),
+        gcpSecretManager({ secretId: 'DB_PASSWORD', client: fakeClient(calls) }),
       ],
       { env: { GOOGLE_CLOUD_PROJECT: 'ignored' } },
     )
     expect(fromLoaders.get('DB_PASSWORD')).toBe('db-password')
-    const fromEnv = await load({ secrets: 'DB_PASSWORD', client: fakeClient(calls) }, { GCLOUD_PROJECT: PROJECT })
+    const fromEnv = await load({ secretId: 'DB_PASSWORD', client: fakeClient(calls) }, { GCLOUD_PROJECT: PROJECT })
     expect(fromEnv.get('DB_PASSWORD')).toBe('db-password')
     const fromClient = await load({
-      secrets: 'DB_PASSWORD',
+      secretId: 'DB_PASSWORD',
       client: { ...fakeClient(calls), getProjectId: () => Promise.resolve(PROJECT) },
     })
     expect(fromClient.get('DB_PASSWORD')).toBe('db-password')
@@ -155,7 +136,7 @@ describe('gcpSecretManager() by name', () => {
   })
 
   it('fails when the project cannot be determined', async () => {
-    const error = await caught(() => load({ secrets: 'DB_PASSWORD', client: fakeClient() }))
+    const error = await caught(() => load({ secretId: 'DB_PASSWORD', client: fakeClient() }))
     expect(error).toBeInstanceOf(ConfigLoaderError)
     expect(error.message).toBe(
       'ZNIGHT006: Config loader "gcp-secret-manager" failed: cannot determine the Google Cloud project',
@@ -163,7 +144,7 @@ describe('gcpSecretManager() by name', () => {
     expect((error as ZnightError).hints.join('\n')).toContain('GOOGLE_CLOUD_PROJECT')
     const failing = await caught(() =>
       load({
-        secrets: 'DB_PASSWORD',
+        secretId: 'DB_PASSWORD',
         client: { ...fakeClient(), getProjectId: () => Promise.reject(new Error('metadata server unreachable')) },
       }),
     )
@@ -171,31 +152,29 @@ describe('gcpSecretManager() by name', () => {
   })
 
   it('does not need a project for full resource names', async () => {
-    const source = await load({ secrets: 'projects/acme-prod/secrets/DB_PASSWORD', client: fakeClient() })
+    const source = await load({ secretId: 'projects/acme-prod/secrets/DB_PASSWORD', client: fakeClient() })
     expect(source.get('DB_PASSWORD')).toBe('db-password')
     expect(source.origin('DB_PASSWORD')).toBe('gcp-secret-manager:projects/acme-prod/secrets/DB_PASSWORD')
   })
 
   it('uses regional resource names with a location', async () => {
-    const calls: Calls = { access: [], list: [] }
+    const calls: Calls = { access: [] }
     await load({
       projectId: PROJECT,
       location: 'europe-west1',
-      secrets: 'DB_PASSWORD',
-      labels: { app: 'worker' },
+      secretId: 'DB_PASSWORD',
       client: fakeClient(calls),
     })
-    expect(calls.list[0]?.parent).toBe('projects/acme-prod/locations/europe-west1')
-    expect(calls.access.map(call => call.name)).toContain(
+    expect(calls.access.map(call => call.name)).toEqual([
       'projects/acme-prod/locations/europe-west1/secrets/DB_PASSWORD/versions/latest',
-    )
+    ])
   })
 
   it('reads regional resource names of its location', async () => {
-    const calls: Calls = { access: [], list: [] }
+    const calls: Calls = { access: [] }
     const source = await load({
       location: 'europe-west1',
-      secrets: 'projects/acme-prod/locations/europe-west1/secrets/DB_PASSWORD/versions/2',
+      secretId: 'projects/acme-prod/locations/europe-west1/secrets/DB_PASSWORD/versions/2',
       client: fakeClient(calls),
     })
     expect(source.get('DB_PASSWORD')).toBe('db-password')
@@ -206,7 +185,7 @@ describe('gcpSecretManager() by name', () => {
 
   it('rejects resource names outside its location, which its endpoint cannot serve', async () => {
     const regionalWithoutLocation = await caught(() =>
-      gcpSecretManager({ secrets: 'projects/acme-prod/locations/europe-west1/secrets/DB_PASSWORD' }),
+      gcpSecretManager({ secretId: 'projects/acme-prod/locations/europe-west1/secrets/DB_PASSWORD' }),
     )
     expect((regionalWithoutLocation as ZnightError).code).toBe(ErrorCode.InvalidConfig)
     expect(regionalWithoutLocation.message).toContain(
@@ -217,7 +196,7 @@ describe('gcpSecretManager() by name', () => {
     )
 
     const globalWithLocation = await caught(() =>
-      gcpSecretManager({ location: 'europe-west1', secrets: ['DB_PASSWORD', 'projects/acme-prod/secrets/API_KEY'] }),
+      gcpSecretManager({ location: 'europe-west1', secretId: ['DB_PASSWORD', 'projects/acme-prod/secrets/API_KEY'] }),
     )
     expect((globalWithLocation as ZnightError).code).toBe(ErrorCode.InvalidConfig)
     expect(globalWithLocation.message).toContain('it reads secrets of location "europe-west1"')
@@ -226,7 +205,7 @@ describe('gcpSecretManager() by name', () => {
     const otherLocation = await caught(() =>
       gcpSecretManager({
         location: 'europe-west1',
-        secrets: { name: 'projects/acme-prod/locations/us-east1/secrets/DB_PASSWORD', optional: true },
+        secretId: { secretId: 'projects/acme-prod/locations/us-east1/secrets/DB_PASSWORD', optional: true },
       }),
     )
     expect((otherLocation as ZnightError).code).toBe(ErrorCode.InvalidConfig)
@@ -236,132 +215,50 @@ describe('gcpSecretManager() by name', () => {
   it('later secrets override earlier ones', async () => {
     const source = await load({
       projectId: PROJECT,
-      secrets: ['DB_PASSWORD', { name: 'PROD_DB_PASSWORD', key: 'DB_PASSWORD' }],
+      secretId: ['DB_PASSWORD', { secretId: 'PROD_DB_PASSWORD', key: 'DB_PASSWORD' }],
       client: fakeClient(),
     })
     expect(source.get('DB_PASSWORD')).toBe('prod-db-password')
   })
 })
 
-describe('gcpSecretManager() by label', () => {
-  it('lists the secrets matching the labels and reads them, in name order', async () => {
-    const calls: Calls = { access: [], list: [] }
-    const source = await load({ projectId: PROJECT, labels: { app: 'api', env: 'prod' }, client: fakeClient(calls) })
-    expect(calls.list).toEqual([
-      {
-        parent: 'projects/acme-prod',
-        filter: 'labels.app=api AND labels.env=prod',
-        options: { timeout: 10_000, autoPaginate: true },
-      },
-    ])
-    expect(source.keys()).toEqual(['PROD_API_TOKEN', 'PROD_DB_PASSWORD'])
-    expect(source.get('PROD_DB_PASSWORD')).toBe('prod-db-password')
-    // listed names carry the project number
-    expect(calls.access.map(call => call.name).sort()).toEqual([
-      'projects/123456/secrets/PROD_API_TOKEN/versions/latest',
-      'projects/123456/secrets/PROD_DB_PASSWORD/versions/latest',
-    ])
-  })
-
-  it('combines a raw filter with the labels', async () => {
-    const calls: Calls = { access: [], list: [] }
-    await load({
-      projectId: PROJECT,
-      labels: { app: 'api' },
-      filter: 'name:PROD_ OR name:DB_',
-      client: fakeClient(calls),
-    })
-    expect(calls.list[0]?.filter).toBe('labels.app=api AND (name:PROD_ OR name:DB_)')
-  })
-
-  it('strips a prefix and maps names to keys', async () => {
-    const stripped = await load({
-      projectId: PROJECT,
-      labels: { env: 'prod' },
-      stripPrefix: 'PROD_',
-      client: fakeClient(),
-    })
-    expect(stripped.get('DB_PASSWORD')).toBe('prod-db-password')
-    expect(stripped.get('API_TOKEN')).toBe('token-bytes')
-    expect(stripped.has('PROD_DB_PASSWORD')).toBe(false)
-
-    const mapped = await load({
-      projectId: PROJECT,
-      labels: { env: 'prod' },
-      stripPrefix: 'PROD_',
-      mapKey: id => `secrets.${id.toLowerCase()}`,
-      client: fakeClient(),
-    })
-    expect(mapped.get('secrets.db_password')).toBe('prod-db-password')
-    expect(mapped.keys()).toEqual(['secrets.api_token', 'secrets.db_password'])
-  })
-
-  it('explicit secrets override discovered ones', async () => {
-    const source = await load({
-      projectId: PROJECT,
-      labels: { env: 'prod' },
-      stripPrefix: 'PROD_',
-      secrets: [{ name: 'DB_PASSWORD', key: 'DB_PASSWORD' }],
-      client: fakeClient(),
-    })
-    expect(source.get('DB_PASSWORD')).toBe('db-password')
-    expect(source.origin('DB_PASSWORD')).toBe('gcp-secret-manager:DB_PASSWORD')
-  })
-
-  it('fails when two discovered secrets map to the same key', async () => {
-    const error = await caught(() =>
-      load({ projectId: PROJECT, labels: { app: 'api' }, stripPrefix: 'PROD_', client: fakeClient() }),
-    )
-    expect(error).toBeInstanceOf(ConfigLoaderError)
-    expect(error.message).toContain('secrets "DB_PASSWORD" and "PROD_DB_PASSWORD" both map to the key "DB_PASSWORD"')
-  })
-
-  it('loads nothing when no secret matches', async () => {
-    const source = await load({ projectId: PROJECT, labels: { app: 'nothing' }, client: fakeClient() })
-    expect(source.keys()).toEqual([])
-  })
-
-  it('reports listing errors with a hint', async () => {
-    const error = await caught(() => load({ projectId: 'forbidden', labels: { app: 'api' }, client: fakeClient() }))
-    expect(error.message).toBe(
-      'ZNIGHT006: Config loader "gcp-secret-manager" failed: cannot list the secrets of "projects/forbidden" (filter "labels.app=api"): PERMISSION_DENIED: Permission \'secretmanager.secrets.list\' denied',
-    )
-    expect((error as ZnightError).hints.join('\n')).toContain('roles/secretmanager.viewer')
-  })
-})
-
 describe('gcpSecretManager() values', () => {
-  it('keeps JSON values as text unless json is set', async () => {
-    const source = await load({ projectId: PROJECT, secrets: ['APP_JSON', 'SERVICE_ACCOUNT'], client: fakeClient() })
-    expect(source.get('APP_JSON')).toBe(SECRETS.APP_JSON?.value as string)
-    expect(source.get('SERVICE_ACCOUNT')).toBe('{"type":"service_account","private_key":"-----BEGIN"}')
-    expect(source.has('SMTP_PASSWORD')).toBe(false)
+  it('expands JSON object secrets into one value per entry, like the other secret loaders', async () => {
+    const source = await load({ projectId: PROJECT, secretId: ['APP_JSON', 'NOT_JSON'], client: fakeClient() })
+    expect(source.get('SMTP_PASSWORD')).toBe('smtp')
+    expect(source.get('mail.user')).toBe('bot')
+    expect(source.origin('SMTP_PASSWORD')).toBe('gcp-secret-manager:APP_JSON')
+    expect(source.get('NOT_JSON')).toBe('{not json')
+    const nested = await load({
+      projectId: PROJECT,
+      secretId: { secretId: 'APP_JSON', key: 'app' },
+      client: fakeClient(),
+    })
+    expect(nested.get('app.SMTP_PASSWORD')).toBe('smtp')
   })
 
-  it('expands JSON object secrets into keys with json: true (globally or per secret)', async () => {
+  it('keeps JSON values as text with json: false (globally or per secret)', async () => {
     const global = await load({
       projectId: PROJECT,
-      secrets: ['APP_JSON', 'NOT_JSON'],
-      json: true,
+      secretId: ['APP_JSON', 'SERVICE_ACCOUNT'],
+      json: false,
       client: fakeClient(),
     })
-    expect(global.get('SMTP_PASSWORD')).toBe('smtp')
-    expect(global.get('mail.user')).toBe('bot')
-    expect(global.origin('SMTP_PASSWORD')).toBe('gcp-secret-manager:APP_JSON')
-    expect(global.get('NOT_JSON')).toBe('{not json')
+    expect(global.get('APP_JSON')).toBe(SECRETS.APP_JSON?.value as string)
+    expect(global.has('SMTP_PASSWORD')).toBe(false)
     const perSecret = await load({
       projectId: PROJECT,
-      secrets: [{ name: 'APP_JSON', json: true, key: 'app' }, 'SERVICE_ACCOUNT'],
+      secretId: ['APP_JSON', { secretId: 'SERVICE_ACCOUNT', json: false }],
       client: fakeClient(),
     })
-    expect(perSecret.get('app.SMTP_PASSWORD')).toBe('smtp')
+    expect(perSecret.get('SMTP_PASSWORD')).toBe('smtp')
     expect(perSecret.get('SERVICE_ACCOUNT')).toBe('{"type":"service_account","private_key":"-----BEGIN"}')
   })
 
-  it('marks its values as secrets: masked in validation messages', async () => {
+  it('marks its values as secretId: masked in validation messages', async () => {
     const source = await load({
       projectId: PROJECT,
-      secrets: { name: 'DB_PASSWORD', key: 'PORT' },
+      secretId: { secretId: 'DB_PASSWORD', key: 'PORT' },
       client: fakeClient(),
     })
     const { problems } = resolveFields('ServerConfig', [field('port', 'number')], source)
@@ -369,12 +266,12 @@ describe('gcpSecretManager() values', () => {
     expect(problems[0]?.origin).toBe('gcp-secret-manager:DB_PASSWORD')
   })
 
-  it('marks its values as secrets: masked when a config instance is printed, without @Secret', async () => {
+  it('marks its values as secretId: masked when a config instance is printed, without @Secret', async () => {
     class Db {
       dbPassword!: string
     }
     const loaded = await loadConfigSource([
-      gcpSecretManager({ projectId: PROJECT, secrets: 'DB_PASSWORD', client: fakeClient() }),
+      gcpSecretManager({ projectId: PROJECT, secretId: 'DB_PASSWORD', client: fakeClient() }),
     ])
     const db = loadConfig(Db, loaded, [field('dbPassword')])
     expect(db.dbPassword).toBe('db-password')
@@ -383,14 +280,14 @@ describe('gcpSecretManager() values', () => {
   })
 
   it('reports secrets without value', async () => {
-    const error = await caught(() => load({ projectId: PROJECT, secrets: 'EMPTY', client: fakeClient() }))
+    const error = await caught(() => load({ projectId: PROJECT, secretId: 'EMPTY', client: fakeClient() }))
     expect(error.message).toContain('secret "EMPTY" has no value')
   })
 })
 
 describe('gcpSecretManager() errors', () => {
   it('fails on missing secrets unless optional (per secret or globally)', async () => {
-    const error = await caught(() => load({ projectId: PROJECT, secrets: 'UNKNOWN', client: fakeClient() }))
+    const error = await caught(() => load({ projectId: PROJECT, secretId: 'UNKNOWN', client: fakeClient() }))
     expect(error).toBeInstanceOf(ConfigLoaderError)
     expect(error.message).toBe(
       'ZNIGHT006: Config loader "gcp-secret-manager" failed: cannot read secret "UNKNOWN": NOT_FOUND: Secret [projects/acme-prod/secrets/UNKNOWN/versions/latest] not found or has no versions.',
@@ -399,23 +296,23 @@ describe('gcpSecretManager() errors', () => {
     expect((error as ZnightError).hints.join('\n')).toContain('optional')
     const perSecret = await load({
       projectId: PROJECT,
-      secrets: [{ name: 'UNKNOWN', optional: true }, 'DB_PASSWORD'],
+      secretId: [{ secretId: 'UNKNOWN', optional: true }, 'DB_PASSWORD'],
       client: fakeClient(),
     })
     expect(perSecret.keys()).toEqual(['DB_PASSWORD'])
-    const global = await load({ projectId: PROJECT, secrets: ['UNKNOWN'], optional: true, client: fakeClient() })
+    const global = await load({ projectId: PROJECT, secretId: ['UNKNOWN'], optional: true, client: fakeClient() })
     expect(global.keys()).toEqual([])
   })
 
   it('never skips other errors, even when optional, and explains permissions', async () => {
     const error = await caught(() =>
-      load({ projectId: PROJECT, secrets: 'DENIED', optional: true, client: fakeClient() }),
+      load({ projectId: PROJECT, secretId: 'DENIED', optional: true, client: fakeClient() }),
     )
     expect(error.message).toContain(
       'cannot read secret "DENIED": PERMISSION_DENIED: Permission \'secretmanager.versions.access\' denied',
     )
     expect((error as ZnightError).hints.join('\n')).toContain('roles/secretmanager.secretAccessor')
-    const disabled = await caught(() => load({ projectId: PROJECT, secrets: 'DISABLED', client: fakeClient() }))
+    const disabled = await caught(() => load({ projectId: PROJECT, secretId: 'DISABLED', client: fakeClient() }))
     expect(disabled.message).toContain('cannot read secret "DISABLED": FAILED_PRECONDITION:')
     expect((disabled as ZnightError).hints.join('\n')).toContain('disabled or destroyed')
   })
@@ -429,13 +326,13 @@ describe('gcpSecretManager() errors', () => {
           ),
         ),
     }
-    const error = await caught(() => load({ projectId: PROJECT, secrets: 'DB_PASSWORD', client }))
+    const error = await caught(() => load({ projectId: PROJECT, secretId: 'DB_PASSWORD', client }))
     expect(error.message).toContain('cannot read secret "DB_PASSWORD": Could not load the default credentials.')
     expect((error as ZnightError).hints.join('\n')).toContain('gcloud auth application-default login')
     const unauthenticated = await caught(() =>
       load({
         projectId: PROJECT,
-        secrets: 'DB_PASSWORD',
+        secretId: 'DB_PASSWORD',
         client: { accessSecretVersion: () => Promise.reject(new GrpcError(16, '16 UNAUTHENTICATED: bad token')) },
       }),
     )
@@ -445,7 +342,7 @@ describe('gcpSecretManager() errors', () => {
 
   it('times out hanging requests', async () => {
     const client: SecretManagerServiceClientLike = { accessSecretVersion: () => new Promise(() => {}) }
-    const error = await caught(() => load({ projectId: PROJECT, secrets: 'DB_PASSWORD', client, timeoutMs: 20 }))
+    const error = await caught(() => load({ projectId: PROJECT, secretId: 'DB_PASSWORD', client, timeoutMs: 20 }))
     expect(error.message).toBe(
       'ZNIGHT006: Config loader "gcp-secret-manager" failed: cannot read secret "DB_PASSWORD": timed out after 20 ms',
     )
@@ -460,7 +357,7 @@ describe('gcpSecretManager() errors', () => {
     }
     const started = Date.now()
     const error = await caught(() =>
-      load({ projectId: PROJECT, secrets: ['HANGING', 'DENIED'], client, timeoutMs: 60_000 }),
+      load({ projectId: PROJECT, secretId: ['HANGING', 'DENIED'], client, timeoutMs: 60_000 }),
     )
     expect(error.message).toContain('PERMISSION_DENIED: denied')
     expect(Date.now() - started).toBeLessThan(5_000)
@@ -475,7 +372,7 @@ describe('gcpSecretManager() errors', () => {
         return Promise.resolve()
       },
     }
-    await load({ projectId: PROJECT, secrets: 'DB_PASSWORD', client })
+    await load({ projectId: PROJECT, secretId: 'DB_PASSWORD', client })
     expect(closed).toBe(false)
   })
 
@@ -483,40 +380,29 @@ describe('gcpSecretManager() errors', () => {
     const cases: unknown[] = [
       undefined,
       {},
-      { secrets: [] },
-      { secrets: '' },
-      { secrets: 'a/b' },
-      { secrets: 'projects/p/secrets/' },
-      { secrets: [{ key: 'x' }] },
-      { secrets: 'X', version: '' },
-      { secrets: 'X', projectId: '' },
-      { secrets: 'X', location: 'a/b' },
-      { labels: {} },
-      { labels: { App: 'x' } },
-      { labels: { app: 'a b' } },
-      { filter: '' },
-      { secrets: 'X', stripPrefix: 1 },
-      { secrets: 'X', mapKey: 'x' },
-      { secrets: 'X', client: {} },
-      { labels: { app: 'x' }, client: { accessSecretVersion: () => Promise.resolve([{}]) } },
+      { secretId: [] },
+      { secretId: '' },
+      { secretId: 'a/b' },
+      { secretId: 'projects/p/secrets/' },
+      { secretId: [{ key: 'x' }] },
+      { secretId: { secretId: 'X', version: '' } },
+      { secretId: 'X', projectId: '' },
+      { secretId: 'X', location: 'a/b' },
+      { secretId: 'X', client: {} },
+      { secretId: 'X', json: 'yes' },
+      { secretId: { secretId: 'X', optional: 1 } },
+      { secretId: { secretId: 'X', key: '' } },
+      { labels: { app: 'api' } },
     ]
     for (const options of cases) {
       const error = await caught(() => gcpSecretManager(options as never))
       expect([options, (error as ZnightError).code]).toEqual([options, ErrorCode.InvalidConfig])
     }
     for (const timeoutMs of [Number.NaN, -1, 0, 1.5, Number.POSITIVE_INFINITY, 2 ** 31]) {
-      const error = await caught(() => gcpSecretManager({ secrets: 'x', timeoutMs }))
+      const error = await caught(() => gcpSecretManager({ secretId: 'x', timeoutMs }))
       expect((error as ZnightError).code).toBe(ErrorCode.InvalidConfig)
       expect(error.message).toContain('timeoutMs')
     }
-  })
-
-  it('rejects keys mapped to an empty string', async () => {
-    const error = await caught(() =>
-      load({ projectId: PROJECT, secrets: 'DB_PASSWORD', mapKey: () => '', client: fakeClient() }),
-    )
-    expect((error as ZnightError).code).toBe(ErrorCode.InvalidConfig)
-    expect(error.message).toContain('mapKey')
   })
 
   it('the SDK client is assignable to SecretManagerServiceClientLike', () => {
@@ -531,7 +417,6 @@ describe('gcpSecretManager() with the Google Cloud SDK', () => {
   const requests: {
     method: string | undefined
     url: string
-    filter: string | null
     authorization: string | undefined
   }[] = []
 
@@ -541,18 +426,11 @@ describe('gcpSecretManager() with the Google Cloud SDK', () => {
       requests.push({
         method: req.method,
         url: url.pathname,
-        filter: url.searchParams.get('filter'),
         authorization: req.headers.authorization,
       })
       const json = (status: number, body: unknown): void => {
         res.writeHead(status, { 'content-type': 'application/json' })
         res.end(JSON.stringify(body))
-      }
-      if (url.pathname === '/v1/projects/acme-prod/secrets') {
-        json(200, {
-          secrets: [{ name: 'projects/123456/secrets/PROD_DB_PASSWORD' }, { name: 'projects/123456/secrets/MISSING' }],
-        })
-        return
       }
       if (url.pathname.includes('/secrets/DENIED/')) {
         json(403, {
@@ -584,7 +462,7 @@ describe('gcpSecretManager() with the Google Cloud SDK', () => {
   })
 
   // REST transport against the local fake endpoint, with a fake auth client (no Google credentials)
-  const clientOptions = () => ({
+  const clientConfig = () => ({
     fallback: true,
     protocol: 'http',
     apiEndpoint: '127.0.0.1',
@@ -599,24 +477,21 @@ describe('gcpSecretManager() with the Google Cloud SDK', () => {
     },
   })
 
-  it('creates a SecretManagerServiceClient, lists by label and accesses the versions', async () => {
+  it('creates a SecretManagerServiceClient and accesses the versions', async () => {
     const source = await load({
       projectId: PROJECT,
-      labels: { app: 'api' },
-      secrets: 'DB_PASSWORD',
+      secretId: ['DB_PASSWORD', 'projects/123456/secrets/PROD_DB_PASSWORD', 'MISSING'],
       optional: true,
-      clientOptions: clientOptions(),
+      clientConfig: clientConfig(),
     })
     expect(source.get('PROD_DB_PASSWORD')).toBe('value-of-PROD_DB_PASSWORD')
     expect(source.get('DB_PASSWORD')).toBe('value-of-DB_PASSWORD')
     expect(source.has('MISSING')).toBe(false)
     expect(requests.map(request => request.url).sort()).toEqual([
-      '/v1/projects/123456/secrets/MISSING/versions/latest:access',
       '/v1/projects/123456/secrets/PROD_DB_PASSWORD/versions/latest:access',
-      '/v1/projects/acme-prod/secrets',
       '/v1/projects/acme-prod/secrets/DB_PASSWORD/versions/latest:access',
+      '/v1/projects/acme-prod/secrets/MISSING/versions/latest:access',
     ])
-    expect(requests.find(request => request.url === '/v1/projects/acme-prod/secrets')?.filter).toBe('labels.app=api')
     expect(requests.every(request => request.method === 'GET' && request.authorization === 'Bearer test-token')).toBe(
       true,
     )
@@ -624,13 +499,13 @@ describe('gcpSecretManager() with the Google Cloud SDK', () => {
 
   it('sends the requests of a location to its regional endpoint', async () => {
     const urls: string[] = []
-    const options = clientOptions()
+    const options = clientConfig()
     const { apiEndpoint: _endpoint, port: _port, ...regional } = options
     await load({
       projectId: PROJECT,
       location: 'europe-west1',
-      secrets: ['DB_PASSWORD', 'projects/acme-prod/locations/europe-west1/secrets/API_KEY'],
-      clientOptions: {
+      secretId: ['DB_PASSWORD', 'projects/acme-prod/locations/europe-west1/secrets/API_KEY'],
+      clientConfig: {
         ...regional,
         authClient: {
           ...options.authClient,
@@ -656,7 +531,7 @@ describe('gcpSecretManager() with the Google Cloud SDK', () => {
   })
 
   it('maps SDK errors', async () => {
-    const error = await caught(() => load({ projectId: PROJECT, secrets: 'DENIED', clientOptions: clientOptions() }))
+    const error = await caught(() => load({ projectId: PROJECT, secretId: 'DENIED', clientConfig: clientConfig() }))
     expect(error).toBeInstanceOf(ConfigLoaderError)
     expect(error.message).toContain(
       'cannot read secret "DENIED": PERMISSION_DENIED: Permission \'secretmanager.versions.access\' denied',

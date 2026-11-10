@@ -3,17 +3,27 @@ import type { ConfigLoader, ConfigLoaderContext } from './types.ts'
 
 import { ConfigLoaderError, errorMessage, invalidConfig } from '../errors.ts'
 import { nestUnder } from '../source.ts'
+import { normalizeSecrets, readSecretLayers, secretLayer } from './secret-store.ts'
 import {
   delay,
   isRecord,
   nonNegativeOption,
-  readAll,
   readOptionalFile,
   resolveFile,
   retryDelay,
   setting,
   timeoutOption,
 } from './shared.ts'
+
+/** One secret read by {@link vault}. */
+export interface VaultSecretRef {
+  /** `<mount>/<path>`, or relative to the loader `mount` when it is set. */
+  readonly path: string
+  /** Key path under which the secret data is mounted. Default: the loader `key` (the root). */
+  readonly key?: string
+  /** Skip the secret when it does not exist (HTTP 404). Default: the loader `optional`. */
+  readonly optional?: boolean
+}
 
 /** Options of {@link vault}. */
 export interface VaultLoaderOptions {
@@ -22,7 +32,7 @@ export interface VaultLoaderOptions {
    * `<mount>/<path>` (`secret/myapp` → `GET /v1/secret/data/myapp` with KV v2), or relative to
    * {@link mount} when it is set (mounts containing `/`).
    */
-  readonly path: string | readonly string[]
+  readonly path: string | VaultSecretRef | readonly (string | VaultSecretRef)[]
   /** Vault server. Default: `VAULT_ADDR` (previous loaders, then the environment). */
   readonly address?: string
   /** Token. Default: the content of {@link tokenFile}, then `VAULT_TOKEN`. */
@@ -35,7 +45,7 @@ export interface VaultLoaderOptions {
   readonly kvVersion?: 1 | 2
   /** Enterprise namespace (`X-Vault-Namespace`). Default: `VAULT_NAMESPACE`. */
   readonly namespace?: string
-  /** Key path under which the secret data is mounted (see `json()`). Default: the root. */
+  /** Key path under which the data of every secret is mounted (see `json()`). Default: the root. */
   readonly key?: string
   /** Skip secrets that do not exist (HTTP 404) instead of failing. Default: `false`. */
   readonly optional?: boolean
@@ -54,6 +64,9 @@ interface SecretLocation {
   readonly label: string
   /** API path, appended to the server address. */
   readonly apiPath: string
+  /** Key path of the secret data, `undefined` for the root. */
+  readonly key: string | undefined
+  readonly optional: boolean
 }
 
 class RetryableError extends Error {}
@@ -66,7 +79,7 @@ function encodePath(path: string): string {
     .join('/')
 }
 
-function locate(options: VaultLoaderOptions, path: string): SecretLocation {
+function locate(options: VaultLoaderOptions, path: string): Pick<SecretLocation, 'label' | 'apiPath'> {
   const trimmed = path.replace(/^\/+|\/+$/g, '')
   let mount = options.mount?.replace(/^\/+|\/+$/g, '')
   let secret = trimmed
@@ -171,14 +184,18 @@ async function resolveToken(context: ConfigLoaderContext, options: VaultLoaderOp
  * ```
  */
 export function vault(options: VaultLoaderOptions): ConfigLoader {
-  const paths = [options?.path].flat()
-  if (paths.length === 0 || paths.some(path => typeof path !== 'string' || path.trim() === '')) {
-    throw invalidConfig('vault(): "path" must be a non-empty string or an array of them')
-  }
+  const secrets = normalizeSecrets<VaultSecretRef & Record<string, unknown>>('vault()', 'path', options?.path, {
+    optional: options.optional,
+  })
   if (options.kvVersion !== undefined && options.kvVersion !== 1 && options.kvVersion !== 2) {
     throw invalidConfig('vault(): "kvVersion" must be 1 or 2')
   }
-  const locations = paths.map(path => locate(options, path))
+  const key = options.key === '' ? undefined : options.key
+  const locations: SecretLocation[] = secrets.map(secret => ({
+    ...locate(options, secret.id),
+    key: secret.key ?? key,
+    optional: secret.optional,
+  }))
   const timeoutMs = timeoutOption('vault()', options.timeoutMs, 5000)
   const retries = Math.floor(nonNegativeOption('vault()', 'retries', options.retries, 2))
   const retryDelayMs = nonNegativeOption('vault()', 'retryDelayMs', options.retryDelayMs, 200)
@@ -221,7 +238,7 @@ export function vault(options: VaultLoaderOptions): ConfigLoader {
             })
             if (response.status === 404) {
               await response.body?.cancel()
-              if (options.optional === true) return undefined
+              if (location.optional) return undefined
               throw new ConfigLoaderError('vault', `secret ${location.label} not found (HTTP 404)`, {
                 hints: ['Check the path, the mount and kvVersion, or pass { optional: true }'],
               })
@@ -244,7 +261,7 @@ export function vault(options: VaultLoaderOptions): ConfigLoader {
                 `unexpected response for ${location.label}: no secret data (is kvVersion ${kv2 ? 2 : 1} correct?)`,
               )
             }
-            return { origin: `vault:${location.label}`, values: nestUnder(data, options.key), secret: true }
+            return secretLayer(`vault:${location.label}`, nestUnder(data, location.key))
           } catch (error) {
             if (error instanceof ConfigLoaderError) throw error
             lastError = error
@@ -257,8 +274,7 @@ export function vault(options: VaultLoaderOptions): ConfigLoader {
         )
       }
 
-      const layers = await readAll(locations, read)
-      return layers.filter((layer): layer is ConfigLayer => layer !== undefined)
+      return readSecretLayers(locations, read)
     },
   }
 }
