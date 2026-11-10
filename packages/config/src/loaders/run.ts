@@ -30,7 +30,7 @@ export function assertLoaders(loaders: readonly ConfigLoader[]): void {
       typeof loader.load !== 'function'
     ) {
       throw invalidConfig(`Config loader #${index} must be an object with a "name" and a "load(context)" method`, [
-        'Use the built-in loaders (env(), dotenv(), json(), yaml(), vault(), awsSecretsManager(), gcpSecretManager()) or implement ConfigLoader',
+        'Use the built-in loaders (env(), dotenv(), json(), yaml(), vault(), awsSecretsManager(), gcpSecretManager(), azureKeyVault(), ociVault()) or implement ConfigLoader',
       ])
     }
   }
