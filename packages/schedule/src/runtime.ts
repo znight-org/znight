@@ -721,6 +721,7 @@ export class ScheduleRuntime {
           runId: run.runId,
           ...this.#errorContext(error),
         })
+        this.#report(job, run.runId, trigger, error, undefined, undefined)
         return this.#notExecuted(job, run.runId, scheduledAt, trigger, 'failed', startTime, error)
       }
       // aborted while waiting for the store: dropped below, like a run aborted once its lease is acquired
@@ -846,6 +847,7 @@ export class ScheduleRuntime {
         trigger,
         ...this.#errorContext(event.error),
       })
+      this.#report(job, run.runId, trigger, event.error, context, run.aborted)
     }
     if (after !== undefined) {
       logger.error(`Schedule: error after the run ${run.runId} of job '${job.name}'`, { job: job.name, err: after })
@@ -1020,6 +1022,36 @@ export class ScheduleRuntime {
       outcome,
       ...(error === undefined ? {} : { error }),
       ...(aborted === undefined ? {} : { aborted }),
+    })
+  }
+
+  /**
+   * Emits a failed run on the `error:report` hook, when it has listeners: the job threw (or was
+   * aborted and rejected), a wrapper failed before it, or the lock store failed (no `context`).
+   */
+  #report(
+    job: JobRecord,
+    runId: string,
+    trigger: RunTrigger,
+    error: unknown,
+    context: JobContext | undefined,
+    aborted: JobAbortReason | undefined,
+  ): void {
+    const hooks = this.#services.hooks
+    if (!hooks.hasListeners('error:report')) return
+    const tags: Record<string, string | number> = { job: job.name, kind: job.kind }
+    if (job.host !== undefined) tags['host'] = job.host
+    if (job.method !== undefined) tags['method'] = job.method
+    tags['runId'] = runId
+    tags['trigger'] = trigger
+    if (aborted !== undefined) tags['aborted'] = aborted
+    hooks.emit('error:report', {
+      error,
+      source: 'schedule',
+      operation: job.name,
+      requestId: undefined,
+      tags,
+      context,
     })
   }
 
