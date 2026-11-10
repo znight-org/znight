@@ -1142,7 +1142,7 @@ export class Pipeline {
     }
     ctx.commit()
     x.answer(reply)
-    return { tracked, session }
+    return { tracked, session, status: serialized.status }
   }
 
   /** A streamed body was sent or abandoned (`failure`: the stream failed). */
@@ -1151,6 +1151,7 @@ export class Pipeline {
     if (streaming.session !== undefined) this.#streams.delete(streaming.session)
     if (failure !== undefined) {
       this.#logger.error('The response stream failed', { err: failure, requestId: x.requestId, path: ctx.path })
+      this.#report(failure, ctx, streaming.status)
     }
     ctx.releaseBody()
   }
@@ -1437,7 +1438,8 @@ export class Pipeline {
           `@Sse handler ${displayName(plan.info.controller)}.${definition.handler} must return an AsyncIterable, an Iterable or a ReadableStream of SseEvent (received ${describeResult(result)})`,
         )
       }
-      return this.#finish(event, serializeSseReply(this.#openStream(result, sseOptions(sse), ctx), undefined, options))
+      const stream = this.#openStream(result, sseOptions(sse), ctx, options.status ?? 200)
+      return this.#finish(event, serializeSseReply(stream, undefined, options))
     }
     if (!isHttpResponse(result)) return this.#finish(event, serializeResult(result, options))
     return this.#serialize(result, ctx, options, sse).then(reply => this.#finish(event, reply))
@@ -1456,14 +1458,18 @@ export class Pipeline {
         const body = result.body
         // HttpResponse.sse() options win over the @Sse options of the route
         const merged = { ...(route === undefined ? {} : sseOptions(route)), ...definedOptions(body.options) }
-        return serializeSseReply(this.#openStream(body.source, merged, ctx), result, options)
+        const status = options.status ?? result.status ?? 200
+        return serializeSseReply(this.#openStream(body.source, merged, ctx, status), result, options)
       }
     }
     return serializeResult(result, options)
   }
 
-  /** An event stream reading `source` in the request (route options over the plugin `sse` option). */
-  #openStream(source: SseSource, options: SseOptions, ctx: RequestContext): SseSession {
+  /**
+   * An event stream reading `source` in the request (route options over the plugin `sse` option). A
+   * failure of the source (or of an event it yields) is logged and reported with the reply `status`.
+   */
+  #openStream(source: SseSource, options: SseOptions, ctx: RequestContext, status: number): SseSession {
     const settings = this.#options.sse ?? DEFAULT_SSE_SETTINGS
     const heartbeat = options.heartbeat === undefined ? settings.heartbeat : options.heartbeat || 0
     const retry = options.retry ?? settings.retry
@@ -1478,7 +1484,10 @@ export class Pipeline {
       },
       {
         abort: kind => ctx.abort(kind),
-        error: (message, error) => logger.error(message, { err: error, requestId: ctx.requestId, path: ctx.path }),
+        error: (message, error) => {
+          logger.error(message, { err: error, requestId: ctx.requestId, path: ctx.path })
+          this.#report(error, ctx, status)
+        },
         warn: message => logger.warn(message, { requestId: ctx.requestId, path: ctx.path }),
       },
     )
@@ -1556,7 +1565,8 @@ export class Pipeline {
         body = this.#internalBody(bodyError)
       }
       extra = error.headers
-      if (status >= 500) this.#log(original, ctx)
+      // the declared status, not the 500 of a failing toBody(): a 4xx exception is never reported
+      if (error.status >= 500) this.#log(original, ctx, error.status)
     } else {
       status = 500
       body = this.#internalBody(error)
@@ -1582,7 +1592,8 @@ export class Pipeline {
       : { statusCode: 500, error: 'Internal Server Error' }
   }
 
-  #log(error: unknown, ctx: RequestContext): void {
+  /** Logs an error answered with a 5xx `status`, and reports it (see {@link #report}). */
+  #log(error: unknown, ctx: RequestContext, status = 500): void {
     const route = ctx.route
     this.#logger.error(`Request failed: ${ctx.method} ${route?.path ?? truncate(ctx.path)}`, {
       err: error,
@@ -1592,6 +1603,30 @@ export class Pipeline {
       ...(route === undefined
         ? {}
         : { route: route.path, handler: `${displayName(route.controller)}.${route.handler}` }),
+    })
+    this.#report(error, ctx, status)
+  }
+
+  /**
+   * Emits an error of a request on the `error:report` hook, when it has listeners: the errors the
+   * pipeline logs (answered with a 5xx, or a response stream that failed), once each.
+   */
+  #report(error: unknown, ctx: RequestContext, status: number): void {
+    if (!this.#hooks.hasListeners('error:report')) return
+    const route = ctx.route
+    const tags: Record<string, string | number> = { method: ctx.method, path: ctx.path }
+    if (route !== undefined) {
+      tags['route'] = route.path
+      tags['handler'] = `${displayName(route.controller)}.${route.handler}`
+    }
+    tags['status'] = status
+    this.#hooks.emit('error:report', {
+      error,
+      source: 'http',
+      operation: `${ctx.method} ${route?.path ?? truncate(ctx.path)}`,
+      requestId: ctx.requestId,
+      tags,
+      context: ctx,
     })
   }
 
@@ -1646,6 +1681,8 @@ const NOT_CALLED: unique symbol = Symbol('next() not called')
 interface Streaming {
   readonly tracked: TrackedStream
   readonly session: SseSession | undefined
+  /** Status of the streamed reply (reported with a stream failure). */
+  readonly status: number
 }
 
 /** A request being answered (internal): its context, its target and the promise of its reply. */

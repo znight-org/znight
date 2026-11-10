@@ -189,6 +189,14 @@ packages are defined in core so producers and observers share one type:
 | `websocket:connection` | `WebSocketConnectionEvent` | `@znight/websocket` (a connection opened or closed; emitted only)      |
 | `events:publish`       | `EventPublishEvent`        | `@znight/events` (one publication that matched at least one listener)  |
 | `events:listener`      | `EventListenerEvent`       | `@znight/events` (one listener invocation, inline or detached)         |
+| `error:report`         | `ErrorReportEvent`         | every package above and core (one error turned into a failure)         |
+
+`error:report` carries `error`, `source` (`http`, `messaging`, `schedule`, `graphql`, `websocket`,
+`events`, `lifecycle`), `operation`, `requestId`, `tags` and `context`: one listener reports the
+5xx, dead-lettered deliveries, failed runs, unexpected GraphQL and WebSocket errors, failed detached
+listeners and lifecycle failures to Sentry or the like (see
+[Report errors](/guide/plugins#report-errors-error-report)). Core reports a failed `create()` or
+`start()` and each failed shutdown step.
 
 Augment `ZnightHooks` to declare your own. See [Plugins & hooks](/guide/plugins#hooks).
 

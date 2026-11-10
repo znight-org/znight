@@ -10,7 +10,7 @@
  *
  * Kept apart from the import-free `errors.ts`, which the compiler side may reach.
  */
-import type { Container, CoreLogger, Token } from '@znight/core'
+import type { Container, CoreLogger, Hooks, Token } from '@znight/core'
 import type {
   ASTNode,
   DocumentNode,
@@ -58,6 +58,8 @@ export interface ErrorFormatterOptions {
   readonly exposeErrors: boolean
   readonly logger: CoreLogger
   readonly schema: GraphQLSchema
+  /** The application hooks: what is logged at `error` level is also emitted on `error:report`. */
+  readonly hooks?: Hooks
 }
 
 /** Formats the errors of execution results. One per plugin, built at boot. */
@@ -67,6 +69,7 @@ export class ErrorFormatter {
   readonly #expose: boolean
   readonly #logger: CoreLogger
   readonly #schema: GraphQLSchema
+  readonly #hooks: Hooks | undefined
 
   constructor(options: ErrorFormatterOptions) {
     this.#container = options.container
@@ -74,6 +77,7 @@ export class ErrorFormatter {
     this.#expose = options.exposeErrors
     this.#logger = options.logger
     this.#schema = options.schema
+    this.#hooks = options.hooks
   }
 
   /** Formats the errors of an executed operation (field errors). */
@@ -163,6 +167,36 @@ export class ErrorFormatter {
       ...(code === undefined ? {} : { code }),
       ...(coordinate === undefined ? {} : { coordinate }),
       ...(error.path === undefined ? {} : { path: error.path.join('.') }),
+    })
+    this.#report(error, cause, ctx, code, coordinate)
+  }
+
+  /**
+   * Emits what {@link #log} logs on the `error:report` hook, when it has listeners: an unexpected
+   * error (masked), or the cause of a presented `GraphQLException` (`code`), once per result.
+   */
+  #report(
+    error: GraphQLError,
+    cause: unknown,
+    ctx: GraphQLContext,
+    code: string | undefined,
+    coordinate: string | undefined,
+  ): void {
+    const hooks = this.#hooks
+    if (hooks === undefined || !hooks.hasListeners('error:report')) return
+    const tags: Record<string, string> = { operationType: ctx.operationType }
+    if (ctx.operationName !== undefined) tags['operationName'] = ctx.operationName
+    tags['transport'] = ctx.transport
+    if (coordinate !== undefined) tags['coordinate'] = coordinate
+    if (error.path !== undefined) tags['path'] = error.path.join('.')
+    if (code !== undefined) tags['code'] = code
+    hooks.emit('error:report', {
+      error: cause,
+      source: 'graphql',
+      operation: ctx.operationName === undefined ? ctx.operationType : `${ctx.operationType} ${ctx.operationName}`,
+      requestId: ctx.requestId,
+      tags,
+      context: ctx,
     })
   }
 }

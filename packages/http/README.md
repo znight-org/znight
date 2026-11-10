@@ -1616,6 +1616,15 @@ app.hooks.wrap('http:request', async (event, next) => {
 stream, `run` resolves when the stream opens (`status: 200`): durations measure the time to open.
 A stream-lifetime hook is not provided.
 
+Error reporters listen to the `error:report` hook of `@znight/core` (see the
+[Sentry recipe](https://github.com/znight-org/znight/blob/main/docs/guide/plugins.md#report-errors-error-report)): the plugin emits it, when it has listeners, for each error it logs as
+`Request failed` (an unmapped error, a 5xx `HttpException`, the original error of a mapper returning
+a 5xx exception, an invalid response header or cookie), for a response stream that failed and for an
+event stream whose source failed or yielded an invalid event (`The SSE stream failed`), with
+`source: 'http'`, `operation` (`GET /users/:id`), `requestId`, the tags `method`, `path`, `route`,
+`handler` and `status`, and the `HttpContext`. Client errors (4xx) and the replies of exception
+mappers answering with their own `HttpResponse` are not reported.
+
 When CORS is off, routes (other than `@All`) without guards, interceptors, `@Sse`, `@Res()` or
 `@Header` take a fast lane: the plugin decides at boot what the pipeline would do for them, runs a
 synchronous handler without creating a promise and builds the headers of a JSON reply from a
@@ -1799,15 +1808,43 @@ await instance.register(helmet)
 HttpPlugin.configure({ adapter: fastifyAdapter({ instance }) })
 ```
 
-| Option     | Description                                                                              |
-| ---------- | ---------------------------------------------------------------------------------------- |
-| `instance` | An existing Fastify instance (plugins, hooks, native routes)                             |
-| `options`  | Options of the instance created otherwise (`https`, timeouts...; see `trustProxy` below) |
+| Option     | Description                                                                                                      |
+| ---------- | ---------------------------------------------------------------------------------------------------------------- |
+| `instance` | An existing Fastify instance (plugins, hooks, native routes)                                                     |
+| `notFound` | `'znight'` or `'instance'`: who answers the URLs no route matches (see below). Default: detected from `instance` |
+| `options`  | Options of the instance created otherwise (`https`, timeouts...; see `trustProxy` below)                         |
 
-Znight routes are registered in an encapsulated context with their own body handling and 404
+Znight routes are registered in an encapsulated context with their own body handling and error
 handler, so your other routes keep Fastify's parsers. A `content-type` Fastify cannot parse (`foo`,
 an empty one) never reaches Fastify's parsers for Znight routes, which then answer like on the other
 adapters instead of Fastify's `415`.
+
+**Unknown URLs.** Znight's context has no prefix, so in Fastify 5 it shares the not-found handler
+of the root instance, and only one of them can call `setNotFoundHandler()`. By default, Znight
+answers the URLs no route matches (`404`, `405` with `Allow`, automatic `OPTIONS`, CORS
+preflights), unless your instance already has a not-found handler when Znight's context loads (set
+before the application starts): Znight then leaves unknown URLs to it. Set `notFound` to choose
+explicitly:
+
+- `notFound: 'instance'`: your handler (a rate-limited 404, the 404 page of the routes you are
+  migrating...) answers unknown URLs, whether you set it before or after Znight's context loads
+  (Fastify's default `404` when you set none). A request that no route matches on the path of a
+  Znight route is still answered by Znight: `405` with `Allow`, automatic `OPTIONS` and CORS
+  preflights. Znight adds no route for that, but an `onRequest` hook to your instance that acts
+  only on the requests Fastify sends to the not-found handler: your routes, wildcards included,
+  keep every request they match. A CORS preflight on an unknown URL and a plain `GET` of a
+  WebSocket gateway path (`426` otherwise) reach your handler.
+- `notFound: 'znight'`: Znight's handler, and an instance that already has one is refused at
+  startup with an explicit error.
+
+```ts
+const instance = Fastify()
+await instance.register(rateLimit, { global: false })
+instance.setNotFoundHandler({ preHandler: instance.rateLimit() }, (request, reply) => {
+  reply.code(404).send({ message: 'Not found' })
+})
+HttpPlugin.configure({ adapter: fastifyAdapter({ instance, notFound: 'instance' }) })
+```
 
 Znight parses bodies itself, so a Znight route that no other hook needs is served straight from the
 `onRequest` hook of its context: Fastify skips its content type parsing and the steps before the

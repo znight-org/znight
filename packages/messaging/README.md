@@ -604,6 +604,13 @@ app.hooks.wrap('messaging:publish', (event, next) => {
 `next()` (or never calls it) counts as a failed attempt. Listeners (`hooks.on`) receive the completed
 events of both hooks (`outcome` / `error` set).
 
+Error reporters listen to the `error:report` hook of `@znight/core` (see the
+[Sentry recipe](https://github.com/znight-org/znight/blob/main/docs/guide/plugins.md#report-errors-error-report)): the plugin emits it, when it has listeners, once per delivery dead-lettered or
+rejected (whatever the reason; not for the attempts it retries, nor when `@OnError` returns `'ack'`),
+with `source: 'messaging'`, `operation` (`orders order.created`), the tags `queue`, `type`,
+`messageId`, `consumer`, `handler`, `attempt`, `reason` and `deadLetterQueue`, and the
+`InboundMessage`.
+
 ## Writing a driver
 
 Implement `MessagingDriver` (`name`, `capabilities`, `connect`, `subscribe`, `publish`, `close`,

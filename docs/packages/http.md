@@ -793,9 +793,30 @@ ends there the long-lived streams its routes serve, so that the drain does not w
 | Adapter                                     | Peer dependencies           | Notes                                                                                 |
 | ------------------------------------------- | --------------------------- | ------------------------------------------------------------------------------------- |
 | `nodeAdapter()` (`@znight/http`)            | none                        | Built-in `node:http` server (also works on Bun)                                       |
-| `fastifyAdapter()` (`@znight/http/fastify`) | `fastify`                   | `exposeHeadRoutes` disabled: Znight serves HEAD                                       |
+| `fastifyAdapter()` (`@znight/http/fastify`) | `fastify`                   | `exposeHeadRoutes` disabled: Znight serves HEAD; `instance`, `notFound` (see below)   |
 | `expressAdapter()` (`@znight/http/express`) | `express`                   | Your middleware runs before the Znight routes                                         |
 | `honoAdapter()` (`@znight/http/hono`)       | `hono`, `@hono/node-server` | `Bun.serve()` on Bun (`serveOptions`, no 128 MiB cap), `@hono/node-server` on Node.js |
+
+With your own Fastify instance (`fastifyAdapter({ instance })`), Znight registers its routes in an
+encapsulated context without a prefix, which shares the not-found handler of the root instance
+(Fastify 5 allows one per level). When your instance already has one (a rate-limited 404, the
+routes you are migrating), Znight leaves unknown URLs to it; `notFound: 'instance'` does so even
+for a handler set after Znight's context loads, and `notFound: 'znight'` refuses such an instance.
+Either way, the paths of Znight routes keep Znight's `405`, automatic `OPTIONS` and CORS preflights,
+without any extra route (your routes, wildcards included, keep the requests they match):
+
+```ts
+import { HttpPlugin } from '@znight/http'
+import { fastifyAdapter } from '@znight/http/fastify'
+import Fastify from 'fastify'
+
+const instance = Fastify()
+instance.setNotFoundHandler((request, reply) => {
+  reply.code(404).send({ message: `No route for ${request.url}` })
+})
+
+HttpPlugin.configure({ adapter: fastifyAdapter({ instance, notFound: 'instance' }) })
+```
 
 Every adapter implements `inject(request)`: requests handled in memory, without a socket, which is
 what [`TestApp`](/guide/testing#testapp-end-to-end-tests) uses. `inject()` accepts `FormData` bodies

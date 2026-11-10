@@ -51,6 +51,10 @@ The plugin also installs its logger as the application logger (`app.setLogger()`
 `component: 'znight'`), so the core and every plugin log through pino (`replaceCoreLogger: false`
 opts out). Logs and spans are flushed when the application stops (`onDispose`).
 
+Error reporters (Sentry...) listen to the `error:report` hook next to this plugin: the packages emit
+it for the failures this plugin logs, without logging them again, and the plugin does not listen to
+it, so nothing is logged twice. See [Report errors](/guide/plugins#report-errors-error-report).
+
 ## Logging
 
 ```ts

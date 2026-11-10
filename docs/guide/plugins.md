@@ -1,5 +1,5 @@
 ---
-description: Write Znight plugins - lifecycle hooks, supplying runtime values to the container, options computed from the container, HTTP routes served for a plugin, and the typed hooks bus (http:request, messaging:message, messaging:publish, schedule:run, graphql:operation, websocket:message, websocket:connection, events:publish, events:listener).
+description: Write Znight plugins - lifecycle hooks, supplying runtime values to the container, options computed from the container, HTTP routes served for a plugin, and the typed hooks bus (http:request, messaging:message, messaging:publish, schedule:run, graphql:operation, websocket:message, websocket:connection, events:publish, events:listener, error:report), with a Sentry error reporting recipe.
 ---
 
 # Plugins & hooks
@@ -253,6 +253,7 @@ other plugins do, without depending on each other. Feature packages emit:
 | `websocket:connection` | `WebSocketConnectionEvent` | [`@znight/websocket`](/packages/websocket) (emitted only) |
 | `events:publish`       | `EventPublishEvent`        | [`@znight/events`](/packages/events)                      |
 | `events:listener`      | `EventListenerEvent`       | [`@znight/events`](/packages/events)                      |
+| `error:report`         | `ErrorReportEvent`         | every package above, and core (emitted only)              |
 
 ### Observe: `on`
 
@@ -354,6 +355,84 @@ instance holds the lock). A `schedule:run` wrapper that does not call `next()` v
 `graphql:operation` is produced by [`@znight/graphql`](/packages/graphql): one event per operation,
 and one for the whole life of a subscription; the event is built only when the hook has wrappers or
 listeners.
+
+### Report errors: `error:report`
+
+`error:report` is the one hook an error reporter (Sentry, Bugsnag, Rollbar...) needs: every package
+emits it for each error it turns into a failure, with the context of that failure, instead of one
+integration per transport (an exception mapper, `@OnError`, a `schedule:run` wrapper...).
+
+```ts
+interface ErrorReportEvent {
+  readonly error: unknown // what was thrown, as is
+  readonly source: 'http' | 'messaging' | 'schedule' | 'graphql' | 'websocket' | 'events' | 'lifecycle'
+  readonly operation: string // 'GET /users/:id', 'orders order.created', 'digest.daily', 'query Shelf'...
+  readonly requestId: string | undefined // HTTP, GraphQL and WebSocket
+  readonly tags: Readonly<Record<string, string | number | boolean>> // route, status, queue, job...
+  readonly context: unknown // HttpContext, InboundMessage, JobContext, GraphQLContext, WsMessageContext...
+}
+```
+
+| `source`    | Reported                                                                                                         |
+| ----------- | ---------------------------------------------------------------------------------------------------------------- |
+| `http`      | an error answered with a 5xx, a response stream or an event stream that failed                                   |
+| `messaging` | a delivery dead-lettered or rejected (`tags.reason`), unless `@OnError` acknowledged it                          |
+| `schedule`  | a failed run (the job threw, a wrapper failed before it, the lock store failed), not a shutdown or removal abort |
+| `graphql`   | an unexpected (masked) resolver error, the `cause` of a shown `GraphQLException`                                 |
+| `websocket` | an unexpected failure of a handler, `@OnConnect` or `@OnDisconnect`                                              |
+| `events`    | an error of a detached listener or of `emit()` (an inline error rejects `publish()`: its caller reports it)      |
+| `lifecycle` | a failed `create()` or `start()`, each failed shutdown step (`tags.phase`)                                       |
+
+Each error is reported once, where the package logs it: client errors (4xx, validation, rejected
+GraphQL operations), retried attempts and failures your code settled (an exception mapper answering
+with its own `HttpResponse`, `@OnError` returning `'ack'`, a job honouring the abort of a shutdown)
+are not. Without listener, nothing is built. The hook logs nothing: `@znight/observability` keeps
+logging these errors once, and does not listen to it. The specification lists the tags of each source
+([§8.3](/contributing/architecture#error-reporting-error-report)).
+
+#### Recipe: Sentry
+
+Znight does not depend on Sentry. Initialise the SDK before the application (a preload, as Sentry
+requires: `node --import ./instrument.mjs dist/main.mjs`), then report from a plugin registered
+first, so that it is disposed last and flushes after every other plugin stopped:
+
+```ts
+// src/sentry.plugin.ts
+import type { Plugin } from '@znight/core'
+
+import * as Sentry from '@sentry/node'
+
+export const SentryPlugin: Plugin = {
+  name: 'sentry',
+  register({ hooks }) {
+    hooks.on('error:report', report => {
+      // a malformed message is a contract problem, not a crash: keep it out of Sentry
+      if (report.source === 'messaging' && report.tags['reason'] === 'validation') return
+      Sentry.withScope(scope => {
+        scope.setTransactionName(report.operation)
+        scope.setTag('znight.source', report.source)
+        scope.setTags(report.tags)
+        if (report.requestId !== undefined) scope.setTag('request_id', report.requestId)
+        Sentry.captureException(report.error)
+      })
+    })
+  },
+  async onDispose() {
+    await Sentry.flush(2_000)
+  },
+}
+
+// src/main.ts
+const app = await Application.create({
+  metadata: __ZNIGHT_METADATA__,
+  plugins: [SentryPlugin, ObservabilityPlugin.configure(), HttpPlugin.configure({ port: 3000 })],
+})
+```
+
+Listeners run synchronously in the async context of the failure when there is one (the request
+scope and the active span of an HTTP request, a delivery, a GraphQL operation or a WebSocket
+message), so Sentry links the event to the current trace. Uncaught exceptions and unhandled
+rejections are outside the application: Sentry's own integrations capture them.
 
 ### Declaring your own hooks
 

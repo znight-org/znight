@@ -231,6 +231,8 @@ export class Application {
       for (const plugin of this.#plugins) await this.#callPlugin(plugin, 'onBootstrap')
     } catch (error) {
       this.#state = 'failed'
+      // reported before the rollback: a reporter plugin flushes in its onDispose
+      this.#report(error, 'bootstrap', 'Application.create()')
       // nothing was started yet: this disposes the providers and runs plugins' onDispose
       addSuppressedErrors(error, await this.#shutdown())
       throw error
@@ -277,6 +279,7 @@ export class Application {
     try {
       completed = await this.#runStartHooks()
     } catch (error) {
+      this.#report(error, 'start', 'Application.start()')
       if (this.#startAborted) {
         // the shutdown requested by a start hook owns the cleanup
         await this.#settledStop()
@@ -469,7 +472,10 @@ export class Application {
     try {
       await this.container.dispose()
     } catch (error) {
-      errors.push(...flatten(error))
+      for (const failure of flatten(error)) {
+        errors.push(failure)
+        this.#report(failure, 'stop', 'Disposing the container')
+      }
     }
     for (const plugin of [...this.#registered].reverse()) {
       // a plugin whose onStart is still in flight is disposed when it settles (#stopLateStart)
@@ -493,8 +499,26 @@ export class Application {
         const failure = error instanceof StepTimeoutError ? error : shutdownError(label, error)
         errors.push(failure)
         this.#logger.debug(`${label} failed`, { err: error })
+        this.#report(failure, 'stop', label)
       }
     }
+  }
+
+  /**
+   * Emits a lifecycle failure on the `error:report` hook (when it has listeners). Shutdown steps are
+   * reported as they fail, so that a reporter plugin (disposed last when registered first) still
+   * receives them.
+   */
+  #report(error: unknown, phase: 'bootstrap' | 'start' | 'stop', operation: string): void {
+    if (!this.hooks.hasListeners('error:report')) return
+    this.hooks.emit('error:report', {
+      error,
+      source: 'lifecycle',
+      operation,
+      requestId: undefined,
+      tags: { phase },
+      context: undefined,
+    })
   }
 
   async #callPlugin(plugin: Plugin, hook: PluginHook): Promise<void> {

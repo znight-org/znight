@@ -511,6 +511,7 @@ export class GraphQLPlugin implements Plugin, PluginHttpRoutes {
       exposeErrors: options.exposeErrors,
       logger: ctx.logger,
       schema,
+      hooks: ctx.hooks,
     })
     const executor = new GraphQLExecutor({
       schema,

@@ -361,6 +361,33 @@ export class ConsumerRuntime {
         ...this.#errorContext(error),
       },
     )
+    this.#report(context, error, reason, queue)
+  }
+
+  /**
+   * Emits a failed delivery on the `error:report` hook, when it has listeners: once per delivery
+   * dead-lettered or rejected (failed attempts that are retried are not reported).
+   */
+  #report(context: DeliveryContext, error: unknown, reason: DeadLetterReason, queue: string | undefined): void {
+    const hooks = this.#services.hooks
+    if (!hooks.hasListeners('error:report')) return
+    const { message, handler } = context
+    const tags: Record<string, string | number> = { queue: message.queue }
+    if (message.type !== undefined) tags['type'] = message.type
+    tags['messageId'] = message.id
+    tags['consumer'] = this.consumer.name
+    if (handler !== undefined) tags['handler'] = handler.method
+    tags['attempt'] = message.attempt
+    tags['reason'] = reason
+    if (queue !== undefined) tags['deadLetterQueue'] = queue
+    hooks.emit('error:report', {
+      error,
+      source: 'messaging',
+      operation: message.type === undefined ? message.queue : `${message.queue} ${message.type}`,
+      requestId: undefined,
+      tags,
+      context: message,
+    })
   }
 
   /**
