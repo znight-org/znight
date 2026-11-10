@@ -953,7 +953,7 @@ lock its owner out. Following the OWASP
 [Authentication](https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html#protect-against-automated-attacks)
 and
 [Credential Stuffing](https://cheatsheetseries.owasp.org/cheatsheets/Credential_Stuffing_Prevention_Cheat_Sheet.html)
-cheat sheets, the example combines two counters, neither of which refuses the real user:
+cheat sheets, the example combines a budget per client, a queue per account and a device cookie:
 
 ```ts [src/security/sign-in-throttle.ts]
 import { setTimeout as sleep } from 'node:timers/promises'
@@ -963,19 +963,21 @@ import { TooManyRequestsException } from '@znight/http'
 import { addressKey } from './rate-limit.js'
 
 export const WINDOW_MS = 15 * 60_000 // failures are forgotten 15 minutes after the last one
-export const PAIR_BUDGET = 5 // failed attempts per account and address, then that address is refused
-export const FREE_FAILURES = 3 // failures on an account before its attempts are slowed down
-export const BASE_DELAY_MS = 250 // then 250 ms, 500 ms, 1 s, 2 s...
-export const MAX_DELAY_MS = 4000 // ...up to 4 s per attempt: slowed down, never refused
-export const MAX_ENTRIES = 10_000 // pairs and accounts kept in memory, each (least recently failed out first)
+export const CLIENT_BUDGET = 5 // failed attempts per account and client (address or known device), then refused
+export const FREE_FAILURES = 3 // failures on an account before its attempts are spaced out
+export const BASE_INTERVAL_MS = 250 // then one attempt every 250 ms, 500 ms, 1 s, 2 s...
+export const MAX_INTERVAL_MS = 4000 // ...up to one every 4 s, from all unknown clients together
+export const MAX_WAIT_MS = 4000 // a longer queue on the account: 429 for that attempt, retry in a few seconds
+export const MAX_ENTRIES = 10_000 // budgets and accounts kept in memory, each (least recently failed out first)
 
 /**
  * Counters that expire `windowMs` after their last increment, at most `capacity` of them: beyond,
  * the least recently incremented key is dropped. A Map keeps insertion order, and an increment moves
  * its key to the end: the first keys are the oldest, so expired keys are swept from the start.
+ * Each counter also holds the next free slot of its key (see {@link reserve}).
  */
 export class AttemptCounters {
-  readonly #entries = new Map<string, { count: number; expiresAt: number }>()
+  readonly #entries = new Map<string, { count: number; expiresAt: number; nextSlot: number }>()
 
   constructor(
     readonly windowMs: number,
@@ -987,8 +989,7 @@ export class AttemptCounters {
   }
 
   count(key: string): number {
-    const entry = this.#entries.get(key)
-    return entry !== undefined && entry.expiresAt > Date.now() ? entry.count : 0
+    return this.#live(key)?.count ?? 0
   }
 
   msBeforeReset(key: string): number {
@@ -998,13 +999,14 @@ export class AttemptCounters {
 
   increment(key: string): number {
     const now = Date.now()
-    const count = this.count(key) + 1
+    const live = this.#live(key)
     this.#entries.delete(key)
     for (const [oldest, entry] of this.#entries) {
       if (entry.expiresAt > now && this.#entries.size < this.capacity) break
       this.#entries.delete(oldest) // expired, or the least recently incremented one past the capacity
     }
-    this.#entries.set(key, { count, expiresAt: now + this.windowMs })
+    const count = (live?.count ?? 0) + 1
+    this.#entries.set(key, { count, expiresAt: now + this.windowMs, nextSlot: live?.nextSlot ?? 0 })
     return count
   }
 
@@ -1014,77 +1016,125 @@ export class AttemptCounters {
     if (entry !== undefined) entry.count = Math.max(0, entry.count - 1)
   }
 
+  /** How long an attempt starting now would wait for the next free slot of `key`, in milliseconds. */
+  waitFor(key: string): number {
+    const entry = this.#live(key)
+    return entry === undefined ? 0 : Math.max(0, entry.nextSlot - Date.now())
+  }
+
+  /**
+   * Takes the next free slot of `key` (now, or later when earlier attempts hold the slots before it)
+   * and keeps the following one `intervalMs` after it. Returns the wait until the slot taken. A key
+   * without failures has no slots: no wait.
+   */
+  reserve(key: string, intervalMs: number): number {
+    const entry = this.#live(key)
+    if (entry === undefined) return 0
+    const now = Date.now()
+    const slot = Math.max(now, entry.nextSlot)
+    entry.nextSlot = slot + intervalMs
+    return slot - now
+  }
+
   delete(key: string): void {
     this.#entries.delete(key)
   }
+
+  #live(key: string): { count: number; expiresAt: number; nextSlot: number } | undefined {
+    const entry = this.#entries.get(key)
+    return entry !== undefined && entry.expiresAt > Date.now() ? entry : undefined
+  }
+}
+
+/** Who is signing in: the client address, and the device id of a valid device cookie for that name. */
+export interface SignInClient {
+  readonly ip: string | undefined
+  /** Set only when the request carries a device cookie signed for the submitted name. */
+  readonly device?: string | undefined
 }
 
 /**
  * Protects password sign-in against guessing on one account (OWASP Authentication and Credential
- * Stuffing cheat sheets), on top of the per-address `@RateLimit` of the route:
+ * Stuffing cheat sheets, device cookies), on top of the per-address `@RateLimit` of the route:
  *
- * - **per account and address**: after 5 failures, that address is refused on that account (429)
- *   until 15 minutes after the last one. Other addresses, the real user's included, are not.
- * - **per account**: past 3 failures from any address, each attempt waits before the password is
- *   checked, twice as long each time, up to 4 seconds. A botnet spreading its guesses is slowed
- *   down, and the account is never locked: a username is all it takes to lock someone out.
+ * - **per account and client**: after 5 failures, that client is refused on that account (429)
+ *   until 15 minutes after the last one. The client is the address (IPv6: its /64), or the device
+ *   when the request carries a device cookie that a successful sign-in to this account set: failures
+ *   from a shared address (NAT, office or café network) never refuse a device the user signed in from.
+ * - **per account**: past 3 failures from any client, the attempts of clients without a device
+ *   cookie take turns: one every 250 ms, then 500 ms, 1 s, 2 s, up to one every 4 seconds, all
+ *   addresses together. A botnet gets at most one guess per interval on the account, however many
+ *   addresses it holds. An attempt that would wait more than 4 s is refused (429, `retry-after` of a
+ *   few seconds), never the account: known devices skip the queue, so the attacker cannot lock their
+ *   user out; a user on a new device may have to retry while the account is under attack.
  *
  * Both are keyed by the submitted name, whether an account has it or not: the answers and their
- * timing do not tell which names exist. A successful sign-in resets the budget of its address; the
+ * timing do not tell which names exist. A successful sign-in resets the budget of its client; the
  * account's failures stay, or an attacker would start afresh each time the user signs in.
  */
 @Injectable()
 export class SignInThrottle {
-  readonly #pairs = new AttemptCounters(WINDOW_MS, MAX_ENTRIES)
+  readonly #clients = new AttemptCounters(WINDOW_MS, MAX_ENTRIES)
   readonly #accounts = new AttemptCounters(WINDOW_MS, MAX_ENTRIES)
 
   /**
    * Runs `verify` (the password check, resolving to `undefined` for wrong credentials) unless the
-   * address spent its budget on this account, after the delay of the account. `signal`: the client
-   * left (`ctx.signal`), stop waiting.
+   * client spent its budget on this account, in the next free slot of the account. `signal`: the
+   * client left (`ctx.signal`), stop waiting.
    */
   async attempt<T>(
     username: string,
-    ip: string | undefined,
+    client: SignInClient,
     verify: () => Promise<T | undefined>,
     signal?: AbortSignal,
   ): Promise<T | undefined> {
-    const pair = `${addressKey(ip)}\n${username}`
-    // counted when it starts, before any await: a burst of parallel attempts cannot overspend
-    if (this.#pairs.count(pair) >= PAIR_BUDGET) {
-      throw new TooManyRequestsException('Too many failed sign-ins', undefined, {
-        headers: { 'retry-after': String(Math.ceil(this.#pairs.msBeforeReset(pair) / 1000)) },
-      })
+    const known = client.device !== undefined
+    const key = `${known ? `device:${client.device}` : addressKey(client.ip)}\n${username}`
+    // decided and counted when it starts, before any await: a burst of parallel attempts cannot overspend
+    if (this.#clients.count(key) >= CLIENT_BUDGET) {
+      throw tooMany('Too many failed sign-ins', this.#clients.msBeforeReset(key))
     }
-    this.#pairs.increment(pair)
+    let wait = 0
+    if (!known) {
+      const queued = this.#accounts.waitFor(username)
+      if (queued > MAX_WAIT_MS) throw tooMany('Too many sign-in attempts on this account', queued)
+      wait = this.#accounts.reserve(username, this.intervalFor(username))
+    }
+    this.#clients.increment(key)
     let result: T | undefined
     try {
-      await this.pause(this.delayFor(username), signal)
+      await this.pause(wait, signal)
       result = await verify()
     } catch (error) {
-      this.#pairs.decrement(pair) // not a failed guess (hasher busy, client gone): no charge
+      this.#clients.decrement(key) // not a failed guess (hasher busy, client gone): no charge
       throw error
     }
     if (result === undefined) this.#accounts.increment(username)
-    else this.#pairs.delete(pair)
+    else this.#clients.delete(key)
     return result
   }
 
-  /** The wait before the next attempt on this account, in milliseconds. */
-  delayFor(username: string): number {
+  /** The minimum interval between two attempts on this account (unknown clients), in milliseconds. */
+  intervalFor(username: string): number {
     const failures = this.#accounts.count(username)
-    return failures < FREE_FAILURES ? 0 : Math.min(BASE_DELAY_MS * 2 ** (failures - FREE_FAILURES), MAX_DELAY_MS)
+    return failures < FREE_FAILURES ? 0 : Math.min(BASE_INTERVAL_MS * 2 ** (failures - FREE_FAILURES), MAX_INTERVAL_MS)
   }
 
-  /** Pairs and accounts with recent failures (bounded by `MAX_ENTRIES` each). */
-  get stats(): { readonly pairs: number; readonly accounts: number } {
-    return { pairs: this.#pairs.size, accounts: this.#accounts.size }
+  /** Client budgets and accounts with recent failures (bounded by `MAX_ENTRIES` each). */
+  get stats(): { readonly clients: number; readonly accounts: number } {
+    return { clients: this.#clients.size, accounts: this.#accounts.size }
   }
 
   protected pause(ms: number, signal?: AbortSignal): Promise<void> {
     signal?.throwIfAborted()
     return ms > 0 ? sleep(ms, undefined, signal === undefined ? undefined : { signal }) : Promise.resolve()
   }
+}
+
+function tooMany(message: string, ms: number): TooManyRequestsException {
+  return new TooManyRequestsException(message, undefined, {
+    headers: { 'retry-after': String(Math.max(1, Math.ceil(ms / 1000))) },
+  })
 }
 ```
 
@@ -1094,30 +1144,60 @@ export class SignInThrottle {
   @RateLimit({ points: 5, duration: 60 }) // per client address, whatever the account
   @HttpCode(200)
   async signIn(@Body(SignIn) input: SignIn, @Ctx() ctx: HttpContext): Promise<SessionResponse> {
+    const device = this.sessions.knownDevice(ctx, input.username) // signed in with this name before
     const principal = await this.throttle.attempt(
       input.username,
-      ctx.ip,
+      { ip: ctx.ip, device },
       () => this.accounts.signIn(input.username, input.password, ctx.signal),
       ctx.signal,
     )
     if (principal === undefined) throw new UnauthorizedException('Invalid username or password')
+    this.sessions.rememberDevice(ctx, input.username, device)
     return toResponse(this.sessions.open(ctx, principal))
   }
 ```
 
-- **Per account and address**, a hard budget: 5 failures, then `429` with `retry-after` for that
-  address on that account, until 15 minutes after the last failure. The attacker loses that address
-  for that account; the real user, from their own address, is not affected. A successful sign-in
-  resets the budget of its address. An attempt is counted when it starts, so a burst of parallel
-  requests cannot overspend the budget, and given back when it fails for another reason (hasher
-  busy, client gone).
-- **Per account**, a soft slow-down: past 3 failures from any address, each attempt waits before
-  the password is checked, 250 ms doubling up to 4 seconds. It never refuses, so it cannot lock
-  anyone out; every guess on the account takes longer and holds a connection longer (the attacker
-  can still wait in parallel, as many times as the per-address limits of its addresses allow), while
-  the real user still signs in a few seconds later. A success does not reset it: otherwise the attacker would
-  start afresh each time the user signs in. The wait happens before the hash, so it holds no hasher
-  slot, and it stops when the client leaves.
+```ts [src/session/session-cookies.ts (excerpt)]
+  /**
+   * The device id of the request for `username`: a valid device cookie that a successful sign-in with
+   * that name set. A cookie of another name, tampered or expired is no device: `undefined`.
+   */
+  knownDevice(ctx: HttpContext, username: string): string | undefined {
+    const value = ctx.signedCookie(DEVICE_COOKIE)
+    const payload = value === undefined ? undefined : decode(value, DevicePayload)
+    if (payload === undefined || payload.name !== username || payload.exp * 1000 <= Date.now()) return undefined
+    return payload.id
+  }
+
+  /** After a successful sign-in: (re)sets the device cookie for `username`, keeping its id when known. */
+  rememberDevice(ctx: HttpContext, username: string, device: string | undefined): void {
+    const exp = Math.floor(Date.now() / 1000) + DEVICE_MAX_AGE
+    const payload: DevicePayload = { name: username, id: device ?? randomBytes(16).toString('base64url'), exp }
+    ctx.setCookie(DEVICE_COOKIE, Buffer.from(JSON.stringify(payload)).toString('base64url'), {
+      maxAge: DEVICE_MAX_AGE,
+      sameSite: 'strict',
+      signed: true,
+    })
+  }
+```
+
+- **Per account and client**, a hard budget: 5 failures, then `429` with `retry-after` for that
+  client on that account, until 15 minutes after the last failure. The client is the address (an
+  IPv6 `/64`), or the **device** when the request carries a valid `__Host-device` cookie for the
+  submitted name. A successful sign-in sets that cookie (signed, `HttpOnly`, 180 days, kept across
+  sign-outs), so failures from a shared address (a NAT, an office or café network, a shared `/64`)
+  never refuse a browser the user signed in from. A successful sign-in resets the budget of its
+  client. An attempt is counted when it starts, so a burst of parallel requests cannot overspend
+  the budget, and given back when it fails for another reason (hasher busy, client gone).
+- **Per account**, a queue: past 3 failures from any client, the attempts of clients without a
+  device cookie take turns, one every 250 ms, doubling up to one every 4 seconds. Each attempt
+  reserves its slot when it starts, so parallel requests from many addresses are spread out, not run
+  at once: whatever its number of addresses, a botnet gets at most one guess per interval on the
+  account (900 an hour at the cap). An attempt that would wait more than 4 seconds gets `429` with a
+  `retry-after` of a few seconds: the account itself is never locked, and known devices skip the
+  queue. A success does not reset the queue: otherwise the attacker would start afresh each time the
+  user signs in. The wait happens before the hash, so it holds no hasher slot, and it stops when the
+  client leaves.
 - The keys are the **submitted name**, whether an account has it or not, and the throttle never
   looks the account up: an unknown name gets the same `401`, the same `429` and the same delays as a
   known one (the decoy hash of `Accounts` covers the hash itself).
@@ -1125,8 +1205,11 @@ export class SignInThrottle {
   most 10,000 keys, dropping the least recently failed one first. Under a flood of names, an evicted
   pair gets a fresh budget; an attacker able to cause that already holds enough addresses to ignore
   the pair budget.
-- This does not stop a large botnet: it slows it down. Monitor failed sign-ins (logs, metrics), and
-  add a second factor, or a challenge on accounts under attack, when that matters.
+- What remains: while an account is under attack, a user signing in from a **new** device (or after
+  clearing cookies) may get `429` and have to retry, and a client sharing the address of an attacker
+  shares its per-address `@RateLimit` too (5 attempts a minute, any account). A few hundred guesses an
+  hour on one account are still guesses: monitor failed sign-ins (logs, metrics), and add a second
+  factor, or a challenge on accounts under attack, when that matters.
 - The counters live in the memory of one process. With several instances, keep them in a shared
   store such as Redis (`INCR` and `PEXPIRE` per key, or `RateLimiterRedis` of
   `rate-limiter-flexible`), or each instance gives the attacker a budget of its own.
@@ -1209,8 +1292,9 @@ export class WebhookController {
 
 APIs authenticated with bearer tokens or API keys need nothing: browsers never attach these headers
 by themselves. CSRF only concerns **cookie authentication**. The web front-end of the example signs
-in with a password (`POST /session`) and receives two cookies, set with the
-[cookie helpers](/packages/http#cookies) of `@znight/http`:
+in with a password (`POST /session`) and receives two cookies (and a
+[device cookie](#sign-in-throttling)), set with the [cookie helpers](/packages/http#cookies) of
+`@znight/http`:
 
 ```ts [src/session/session-cookies.ts (excerpt)]
 /**
