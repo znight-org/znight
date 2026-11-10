@@ -149,6 +149,8 @@ export {
   contentDisposition,
   type FileBody,
   type FileResponseOptions,
+  type LazyFile,
+  type LazyFileContent,
   parseRange,
 } from './files.ts'
 export { contentTypeFor, matchesMediaType } from './mime.ts'

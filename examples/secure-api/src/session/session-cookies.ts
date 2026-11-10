@@ -14,6 +14,12 @@ import { z } from 'zod'
 export const SESSION_COOKIE = '__Host-session'
 /** The CSRF token of the session, readable by the pages of this origin (not `HttpOnly`). */
 export const CSRF_COOKIE = '__Host-csrf'
+/**
+ * A browser that signed in to an account before (OWASP device cookie): signed, `HttpOnly`, kept 180
+ * days and across sign-outs. `SignInThrottle` gives it a failure budget of its own on that account.
+ */
+export const DEVICE_COOKIE = '__Host-device'
+const DEVICE_MAX_AGE = 180 * 86_400
 
 /** The signed value. Signing gives integrity only: no secret goes in there. */
 const SessionPayload = z.object({
@@ -22,6 +28,13 @@ const SessionPayload = z.object({
   csrf: z.string(), // the CSRF token bound to this session
 })
 type SessionPayload = z.output<typeof SessionPayload>
+
+const DevicePayload = z.object({
+  name: z.string(), // the username the browser signed in with
+  id: z.string(), // a random id: the key of the failure budget of this device
+  exp: z.number().int(), // expiry, Unix seconds
+})
+type DevicePayload = z.output<typeof DevicePayload>
 
 export interface Session {
   readonly principal: Principal
@@ -58,11 +71,33 @@ export class SessionCookies {
   /** The session of the request: signed with a current secret, not expired, of an existing account. */
   read(ctx: HttpContext): Session | undefined {
     const value = ctx.signedCookie(SESSION_COOKIE) // undefined when absent, tampered or signed with a retired secret
-    const payload = value === undefined ? undefined : decode(value)
+    const payload = value === undefined ? undefined : decode(value, SessionPayload)
     if (payload === undefined || payload.exp * 1000 <= Date.now()) return undefined
     const principal = this.accounts.principal(payload.sub) // current roles; a removed account ends its sessions
     if (principal === undefined) return undefined
     return { principal, csrfToken: payload.csrf, expiresAt: new Date(payload.exp * 1000) }
+  }
+
+  /**
+   * The device id of the request for `username`: a valid device cookie that a successful sign-in with
+   * that name set. A cookie of another name, tampered or expired is no device: `undefined`.
+   */
+  knownDevice(ctx: HttpContext, username: string): string | undefined {
+    const value = ctx.signedCookie(DEVICE_COOKIE)
+    const payload = value === undefined ? undefined : decode(value, DevicePayload)
+    if (payload === undefined || payload.name !== username || payload.exp * 1000 <= Date.now()) return undefined
+    return payload.id
+  }
+
+  /** After a successful sign-in: (re)sets the device cookie for `username`, keeping its id when known. */
+  rememberDevice(ctx: HttpContext, username: string, device: string | undefined): void {
+    const exp = Math.floor(Date.now() / 1000) + DEVICE_MAX_AGE
+    const payload: DevicePayload = { name: username, id: device ?? randomBytes(16).toString('base64url'), exp }
+    ctx.setCookie(DEVICE_COOKIE, Buffer.from(JSON.stringify(payload)).toString('base64url'), {
+      maxAge: DEVICE_MAX_AGE,
+      sameSite: 'strict',
+      signed: true,
+    })
   }
 
   /** Whether the request carries a session cookie, valid or not. */
@@ -77,9 +112,9 @@ export class SessionCookies {
   }
 }
 
-function decode(value: string): SessionPayload | undefined {
+function decode<T>(value: string, schema: z.ZodType<T>): T | undefined {
   try {
-    return SessionPayload.parse(JSON.parse(Buffer.from(value, 'base64url').toString('utf8')))
+    return schema.parse(JSON.parse(Buffer.from(value, 'base64url').toString('utf8')))
   } catch {
     return undefined
   }

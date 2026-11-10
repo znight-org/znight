@@ -584,7 +584,7 @@ objects, streams are Web `ReadableStream`s.
 
 - [Uploads](#uploads): `@UploadedFile` / `@UploadedFiles`, text fields with `@Body()`
 - [Limits](#limits): sizes, counts, media types, body limits
-- [Downloads](#downloads): `HttpResponse.file()`, conditional requests and ranges
+- [Downloads](#downloads): `HttpResponse.file()`, conditional requests and ranges, [lazy files](#lazy-files)
 - [Streaming responses](#streaming-responses): `HttpResponse.stream()`
 - [Large files](#large-files): `ctx.bodyStream()`, presigned URLs
 - [Security](#security)
@@ -710,7 +710,8 @@ and expected concurrency, and see [Large files](#large-files) beyond a few dozen
 
 ### Downloads
 
-`HttpResponse.file(path | URL | Blob, options?)` sends a file:
+`HttpResponse.file(path | URL | Blob | LazyFile, options?)` sends a file (see [Lazy files](#lazy-files) for content
+stored elsewhere):
 
 ```ts
 import { Controller, Get, HttpResponse, Param } from '@znight/http'
@@ -753,7 +754,7 @@ export class ReportController {
 
 The response carries `Content-Type`, `Content-Length`, `Accept-Ranges: bytes`, `Last-Modified` and a
 strong `ETag` (`"<mtime>-<size>"`, from the modification time and the size; `File` objects use
-`lastModified`), and answers:
+`lastModified`, lazy files their `etag`), and answers:
 
 | Request                                                                     | Response                                                         |
 | --------------------------------------------------------------------------- | ---------------------------------------------------------------- |
@@ -782,6 +783,64 @@ precedence, `206` / `304` keep theirs.
 
 Returning a `File` / `Blob` directly sends it with its type and size (no `Content-Disposition`,
 ranges or validators: use `HttpResponse.file(blob)` for those).
+
+#### Lazy files
+
+Content stored elsewhere (a database row, an object storage) is described by a `LazyFile`: its
+metadata up front, its bytes behind `load()`. The preconditions and the range are evaluated from
+the metadata, and `load()` is called only when a body is sent, so a client revalidating its cached
+copy costs no read:
+
+```ts
+import { Controller, Get, HttpResponse, Param } from '@znight/http'
+
+@Controller('/books')
+export class CoverController {
+  @Get('/:id/cover')
+  async cover(@Param('id') id: number) {
+    const cover = await this.covers.info(id) // type, size and date: SELECT octet_length(data)...
+    return HttpResponse.file(
+      {
+        size: cover.size,
+        lastModified: cover.updatedAt,
+        type: cover.contentType,
+        load: () => this.covers.bytes(id, cover.updatedAt), // only for a 200 or a 206
+      },
+      { disposition: 'inline' },
+    )
+  }
+}
+```
+
+| Field          | Description                                                                                                                              |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `size`         | Size of the whole content in bytes (required): `Content-Length`, ranges                                                                  |
+| `etag`         | Quoted entity tag, `"v42"` or weak `W/"v42"`. Default: `"<mtime>-<size>"` from `lastModified`, none without it                           |
+| `lastModified` | `Date` or milliseconds since the epoch: `Last-Modified`, `If-Modified-Since`, `If-Unmodified-Since`, `If-Range` dates                    |
+| `type`         | Media type (the `contentType` option wins over it; default: from the extension of `filename` / `name`, else `application/octet-stream`)  |
+| `name`         | File name: the name of `Content-Disposition` when `filename` is not given                                                                |
+| `load()`       | Returns (or resolves to) the **whole** content: a `Uint8Array` (or any `ArrayBuffer` view / `ArrayBuffer`), a `Blob`, or a stream source |
+
+- `load()` is never called for a `304`, a `412`, a `416`, a `HEAD` request or an empty file, and at
+  most once per response. It runs in the request, after the handler (request-scoped providers
+  available).
+- An error thrown (or a rejection) by `load()` answers like an error of the handler: exception
+  mappers first, else `500`.
+- A stream (Web `ReadableStream`, Node.js `Readable`, async iterable of chunks) is read as the client
+  receives it and cancelled when the client disconnects. For a range, the bytes before it are read
+  and dropped, and the stream is cancelled once the range was sent.
+- The content must have the declared `size`: bytes or a `Blob` of another size answer `500`; a
+  stream ending early or producing more fails the response (the connection is closed, the error
+  logged).
+- A weak `etag` satisfies `If-None-Match` (weak comparison) but never `If-Match` nor `If-Range`
+  (strong comparison).
+- `load()` runs after the metadata was read, so the content may have changed in between. Load the
+  version that the metadata describes (the same `updatedAt`, version or etag) and throw when it is
+  gone, rather than sending other bytes under the old validators: a resumed download (`Range` +
+  `If-Range`) would otherwise mix two versions. `examples/rest-api` answers `503` with
+  `Retry-After` in that case.
+- A stream is sent with the declared `Content-Length`, except by `Bun.serve()` (Hono on Bun), which
+  sends streams chunked (see the Hono adapter); bytes and `Blob`s keep it everywhere.
 
 ### Streaming responses
 
@@ -874,7 +933,8 @@ Uploaded files are buffered in memory. For files of hundreds of megabytes or mor
    uploads.
 
 3. **Serve large files with `HttpResponse.file()`**: they are streamed from disk, with ranges for
-   resumable downloads and video seeking.
+   resumable downloads and video seeking. Content in object storage can be served as a
+   [lazy file](#lazy-files) whose `load()` returns the storage stream.
 
 ### Security
 

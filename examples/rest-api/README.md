@@ -25,7 +25,7 @@ constructor types, validates the graph and generates the container (`src/.znight
 | Request-scoped provider filled by the guard, read through `Lazy<T>`                                           | [`auth/request-user.ts`](src/auth/request-user.ts), [`auth/me.controller.ts`](src/auth/me.controller.ts)                         |
 | HTTP interceptor                                                                                              | [`shared/server-timing.interceptor.ts`](src/shared/server-timing.interceptor.ts)                                                 |
 | Domain errors mapped to HTTP (`BookNotFoundError` → 404, duplicate → 409)                                     | [`books/book.ts`](src/books/book.ts), [`shared/domain-error.mapper.ts`](src/shared/domain-error.mapper.ts)                       |
-| File upload with limits (`@UploadedFile`) and download (`HttpResponse.file`)                                  | `PUT` / `GET /books/:id/cover` in the controller                                                                                 |
+| File upload with limits (`@UploadedFile`), download of a lazy file (`HttpResponse.file`, `load()`)            | `PUT` / `GET /books/:id/cover` in the controller                                                                                 |
 | Drizzle + PGlite through a `@Factory`: async init, migrations, dispose                                        | [`db/database.factory.ts`](src/db/database.factory.ts), [`drizzle/`](drizzle)                                                    |
 | Repository behind an interface, injected by interface                                                         | [`books/book.repository.ts`](src/books/book.repository.ts), [`drizzle-book.repository.ts`](src/books/drizzle-book.repository.ts) |
 | `@Config` classes, `@Env`, `@Secret`, `.env` files                                                            | [`config/`](src/config), [`.env.development`](.env.development)                                                                  |
@@ -134,7 +134,7 @@ curl -H "$ADMIN" $API/books/999                      # 404: BookNotFoundError, m
 # cover: multipart upload (≤ 2 MiB, PNG/JPEG/WebP), public download with caching validators
 curl -H "$ADMIN" -X PUT -F cover=@cover.png $API/books/4/cover
 curl -i $API/books/4/cover                           # 200 image/png, etag, last-modified
-curl -i -H 'if-none-match: "<etag>"' $API/books/4/cover   # 304
+curl -i -H 'if-none-match: "<etag>"' $API/books/4/cover   # 304, the image bytes are not even read
 curl -H "$ADMIN" -X DELETE $API/books/4              # 204, the cover goes with the book
 
 # a browser front-end on http://localhost:5173 (CORS_ORIGINS in .env.development): the preflight

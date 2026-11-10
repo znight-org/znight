@@ -19,6 +19,8 @@ interface AdapterResult {
   readonly network: Observed[]
   readonly inject: Observed[]
   readonly abort: { readonly bounded: boolean; readonly order: string[] }
+  readonly lazyLoads: number
+  readonly lazyAbort: { readonly bounded: boolean; readonly cancelled: boolean }
   readonly early: string
 }
 
@@ -33,7 +35,10 @@ async function run(command: string): Promise<Record<string, AdapterResult>> {
   return JSON.parse(stdout) as Record<string, AdapterResult>
 }
 
-const STATUSES = [201, 413, 415, 415, 400, 413, 200, 400, 200, 200, 200, 304, 206, 416, 404, 200, 206, 200, 200, 200]
+const STATUSES = [
+  201, 413, 415, 415, 400, 413, 200, 400, 200, 200, 200, 304, 206, 416, 404, 200, 206, 200, 200, 200, 200, 304, 206,
+  200, 503,
+]
 
 const outputs = new Map<string, Record<string, AdapterResult>>()
 
@@ -60,12 +65,33 @@ for (const runtime of ['node', 'bun']) {
           'accept-ranges': 'bytes',
         },
       })
+      // lazy files: 200 (stream), 304 (not loaded), 206 (Blob), HEAD (not loaded), 503 (mapped load error)
+      expect(reference.network[22]).toEqual({
+        status: 206,
+        body: '0123456789',
+        headers: {
+          'content-type': 'text/plain; charset=utf-8',
+          'content-length': '10',
+          'content-range': 'bytes 60-69/300',
+          etag: '"lazy-1"',
+          'last-modified': 'Mon, 06 May 2024 07:08:09 GMT',
+          'accept-ranges': 'bytes',
+        },
+      })
+      expect(reference.network[20]?.headers['received']).toBe('300')
+      expect(reference.network[24]?.body).toBe('{"unavailable":true}')
       for (const [adapter, observed] of Object.entries(results)) {
         expect({ adapter, network: observed.network }).toEqual({ adapter, network: reference.network })
         expect({ adapter, inject: observed.inject }).toEqual({ adapter, inject: reference.network })
         expect({ adapter, abort: observed.abort }).toEqual({
           adapter,
           abort: { bounded: true, order: ['endless', 'cancel', 'dispose'] },
+        })
+        // three loads per pass (network, inject): 200, 206 and the failing one
+        expect({ adapter, lazyLoads: observed.lazyLoads }).toEqual({ adapter, lazyLoads: 6 })
+        expect({ adapter, lazyAbort: observed.lazyAbort }).toEqual({
+          adapter,
+          lazyAbort: { bounded: true, cancelled: true },
         })
         expect({ adapter, early: observed.early }).toEqual({ adapter, early: 'HTTP/1.1 413 Payload Too Large' })
       }

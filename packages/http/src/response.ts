@@ -7,7 +7,13 @@ import {
   givenCookieKey,
   type ResponseCookie,
 } from './cookies.ts'
-import { type ContentDispositionType, contentDisposition, FileBody, type FileResponseOptions } from './files.ts'
+import {
+  type ContentDispositionType,
+  contentDisposition,
+  FileBody,
+  type FileResponseOptions,
+  type LazyFile,
+} from './files.ts'
 import { contentTypeFor, OCTET_STREAM } from './mime.ts'
 import { SseBody, type SseOptions, type SseSource } from './sse.ts'
 import { isValidStatus } from './status.ts'
@@ -114,8 +120,13 @@ export class HttpResponse<T = unknown> {
    * ```
    *
    * Never pass a path built from the request without `root`.
+   *
+   * A {@link LazyFile} (`{ size, etag?, lastModified?, type?, name?, load() }`) describes content
+   * stored elsewhere (a database row, an object storage): the preconditions and the range are
+   * evaluated from its metadata, and `load()` is called only when a body is sent (200 / 206), never
+   * for a 304, a 412 or a `HEAD` request.
    */
-  static file(file: string | URL | Blob, options?: FileResponseOptions): HttpResponse<FileBody> {
+  static file(file: string | URL | Blob | LazyFile, options?: FileResponseOptions): HttpResponse<FileBody> {
     return new HttpResponse(new FileBody(file, options))
   }
 

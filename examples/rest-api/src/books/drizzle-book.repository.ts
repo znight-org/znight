@@ -11,6 +11,7 @@ import {
   type BookQuery,
   type BookSort,
   type Cover,
+  type CoverInfo,
   DuplicateIsbnError,
   type NewBook,
   type Page,
@@ -120,13 +121,28 @@ export class DrizzleBookRepository implements BookRepository {
     }
   }
 
-  async findCover(id: number): Promise<Cover | undefined> {
+  async findCoverInfo(id: number): Promise<CoverInfo | undefined> {
     if (!isBookId(id)) return undefined
+    // octet_length() is computed by PostgreSQL: the bytes do not leave the database
     const [cover] = await this.db
-      .select({ contentType: bookCovers.contentType, data: bookCovers.data, updatedAt: bookCovers.updatedAt })
+      .select({
+        contentType: bookCovers.contentType,
+        size: sql<number>`octet_length(${bookCovers.data})`.mapWith(Number),
+        updatedAt: bookCovers.updatedAt,
+      })
       .from(bookCovers)
       .where(eq(bookCovers.bookId, id))
     return cover
+  }
+
+  async findCoverData(id: number, updatedAt: Date): Promise<Uint8Array | undefined> {
+    if (!isBookId(id)) return undefined
+    // compared in JavaScript: PostgreSQL keeps microseconds, the Date of findCoverInfo() milliseconds
+    const [cover] = await this.db
+      .select({ data: bookCovers.data, updatedAt: bookCovers.updatedAt })
+      .from(bookCovers)
+      .where(eq(bookCovers.bookId, id))
+    return cover?.updatedAt.getTime() === updatedAt.getTime() ? cover.data : undefined
   }
 }
 

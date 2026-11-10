@@ -10,7 +10,8 @@ import {
   type BookChanges,
   BookNotFoundError,
   type BookQuery,
-  type Cover,
+  CoverChangedError,
+  type CoverInfo,
   CoverNotFoundError,
   type NewBook,
   type Page,
@@ -81,9 +82,21 @@ export class BookService {
     this.logger.info('Cover uploaded', { bookId: id, contentType, size: data.byteLength })
   }
 
-  async getCover(id: number): Promise<Cover> {
-    const cover = await this.books.findCover(id)
+  /** The type, size and date of a cover: enough to answer a conditional request. */
+  async getCoverInfo(id: number): Promise<CoverInfo> {
+    const cover = await this.books.findCoverInfo(id)
     if (cover === undefined) throw new CoverNotFoundError(id)
     return cover
+  }
+
+  /**
+   * The bytes of the cover version that `info` describes. The cover may have been replaced since
+   * `info` was read: its bytes would not match the size, type and validators already chosen (and a
+   * resumed download would mix two images), so that is an error the client retries.
+   */
+  async getCoverData(id: number, info: CoverInfo): Promise<Uint8Array> {
+    const data = await this.books.findCoverData(id, info.updatedAt)
+    if (data === undefined) throw new CoverChangedError(id)
+    return data
   }
 }

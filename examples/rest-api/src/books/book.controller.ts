@@ -130,19 +130,27 @@ export class BookController {
    * `<img src>` works without API key.
    *
    * `HttpResponse.file()` sends the image with `content-length`, `last-modified` and an `etag`, and
-   * answers conditional (`if-none-match` → 304) and range requests (→ 206) by itself. The security
-   * headers of the plugin (`x-content-type-options: nosniff`, `content-security-policy: default-src
-   * 'none'`) keep a file disguised as an image from being run as a page; this route's own
-   * `cache-control` replaces the API-wide `no-store`.
+   * answers conditional (`if-none-match` → 304) and range requests (→ 206) by itself. It gets a lazy
+   * file: the metadata (type, size, date: no bytes) is read first, and `load()` reads the bytes only
+   * when they are sent, so a browser revalidating its cached copy (304) costs no image read. It reads
+   * the version the metadata described: a cover replaced in between answers 503 (retry). The
+   * security headers of the plugin (`x-content-type-options: nosniff`, `content-security-policy:
+   * default-src 'none'`) keep a file disguised as an image from being run as a page; this route's
+   * own `cache-control` replaces the API-wide `no-store`.
    */
   @Get('/:id/cover')
   @Public()
   async downloadCover(@Param('id') id: number): Promise<HttpResponse> {
-    const cover = await this.books.getCover(id)
-    const file = new File([cover.data.slice()], `book-${id}${coverExtension(cover.contentType)}`, {
-      type: cover.contentType,
-      lastModified: cover.updatedAt.getTime(),
-    })
-    return HttpResponse.file(file, { disposition: 'inline' }).withHeader('cache-control', 'public, max-age=300')
+    const cover = await this.books.getCoverInfo(id)
+    return HttpResponse.file(
+      {
+        size: cover.size,
+        lastModified: cover.updatedAt,
+        type: cover.contentType,
+        name: `book-${id}${coverExtension(cover.contentType)}`,
+        load: () => this.books.getCoverData(id, cover),
+      },
+      { disposition: 'inline' },
+    ).withHeader('cache-control', 'public, max-age=300')
   }
 }
