@@ -253,15 +253,15 @@ export class FakeServiceBus {
         Object.assign(stored.applicationProperties, properties)
         stored.lockToken = undefined
         stored.availableAt = 0
-        if (!deadLetter && stored.deliveryCount + 1 >= entity.maxDeliveryCount) {
+        stored.deliveryCount++
+        // like the emulator: the dead-lettered message keeps the count of its deliveries
+        if (!deadLetter && stored.deliveryCount >= entity.maxDeliveryCount) {
           this.#remove(entity, false, stored)
           stored.applicationProperties['DeadLetterReason'] = 'MaxDeliveryCountExceeded'
           stored.applicationProperties['DeadLetterErrorDescription'] =
             `Message could not be consumed after ${entity.maxDeliveryCount} delivery attempts.`
           entity.deadLetter.push(stored)
-          return
         }
-        stored.deliveryCount++
       },
       deadLetterMessage: async (message: ServiceBusReceivedMessage, settings: Properties = {}) => {
         await this.#call('deadLetterMessage', label, [message, settings])

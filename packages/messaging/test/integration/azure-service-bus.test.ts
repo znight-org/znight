@@ -1,6 +1,6 @@
 import type { InboundMessage } from '../../src/index.ts'
 
-import { ServiceBusAdministrationClient } from '@azure/service-bus'
+import { ServiceBusAdministrationClient, ServiceBusClient } from '@azure/service-bus'
 import { AzureServiceBusContainer, type StartedAzureServiceBusContainer } from '@testcontainers/azureservicebus'
 
 import { type AzureServiceBusDriverOptions, azureServiceBus } from '../../src/drivers/azure-service-bus.ts'
@@ -135,9 +135,14 @@ describe.skipIf(!integration)('Azure Service Bus (emulator testcontainers)', () 
       },
     ])
     await app.get(MessageBroker).publish(queue, { owned: true }, { headers: { keep: 'me' } })
-    await waitFor(() => dead.length === 1, 60_000, 'the message dead-lettered by the entity')
+    await waitFor(() => dead.length === 1, 30_000, 'the message dead-lettered by the entity').catch(
+      (error: unknown) => {
+        throw new Error(`${String(error)} (attempts: ${attempts.join(', ')})`)
+      },
+    )
     expect(attempts).toEqual([1, 2, 3])
     expect(dead[0]?.payload).toEqual({ owned: true })
+    expect(dead[0]?.attempt).toBe(1)
     expect(dead[0]?.headers).toMatchObject({ keep: 'me', DeadLetterReason: 'MaxDeliveryCountExceeded' })
   })
 
@@ -159,12 +164,13 @@ describe.skipIf(!integration)('Azure Service Bus (emulator testcontainers)', () 
       {
         class: Provisioned,
         queue,
-        handlers: [handler('handle', { retry: { attempts: 12, backoff: 'fixed', delay: 1 } })],
+        // the emulator accepts a maxDeliveryCount up to 10 (the service up to 2000)
+        handlers: [handler('handle', { retry: { attempts: 4, backoff: 'fixed', delay: 1 } })],
       },
     ])
     await app.get(MessageBroker).publish(queue, { provisioned: true })
     await waitFor(() => received.length === 1, 30_000, 'the message on the provisioned queue')
-    expect((await admin.getQueue(queue)).maxDeliveryCount).toBe(12)
+    expect((await admin.getQueue(queue)).maxDeliveryCount).toBe(10)
   })
 
   it('refuses session-enabled queues', async () => {
@@ -194,6 +200,12 @@ describe.skipIf(!integration)('Azure Service Bus (emulator testcontainers)', () 
     await app.get(MessageBroker).publish(queue, 1)
     await sleep(12_000)
     expect(attempts).toEqual([1])
-    expect((await admin.getQueueRuntimeProperties(queue)).activeMessageCount).toBe(0)
+    // completed after the lock was renewed: nothing left (the emulator has no runtime properties API)
+    const client = new ServiceBusClient(connectionString)
+    try {
+      expect(await client.createReceiver(queue).peekMessages(1)).toEqual([])
+    } finally {
+      await client.close()
+    }
   }, 30_000)
 })

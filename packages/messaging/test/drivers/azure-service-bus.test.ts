@@ -451,9 +451,9 @@ describe('flow control and settlements', () => {
     const driver = driverFor(fake)
     const { received, subscription } = await deliveries(driver, 'orders', { maxAttempts: 3 })
     await waitFor(() => received.length === 1, 'the delivery')
-    expect(messageOf(await caught(received[0]?.retry({ attempt: 2, delayMs: 5000, error: new Error('x') })))).toBe(
-      'busy',
-    )
+    expect(
+      messageOf(await caught(() => received[0]?.retry({ attempt: 2, delayMs: 5000, error: new Error('x') }))),
+    ).toBe('busy')
     expect(fake.callsOf('completeMessage')).toHaveLength(0)
     await subscription.cancel()
     await subscription.close()
@@ -470,11 +470,11 @@ describe('flow control and settlements', () => {
         if (message.attempt < 4) throw new Error(`attempt ${message.attempt}`)
       }
     }
-    const { broker } = await startApp(driverFor(fake, { maxInProcessDelayMs: 20 }), [
+    const { broker } = await startApp(driverFor(fake, { maxInProcessDelayMs: 15 }), [
       {
         class: FlakyConsumer,
         queue: 'orders',
-        // 10 ms in-process (abandon), then 30 ms and 60 ms scheduled
+        // 10 ms in-process (abandon), then 20 ms and 40 ms scheduled
         handlers: [handler('handle', { retry: { attempts: 4, backoff: 'exponential', delay: 10 } })],
       },
     ])
@@ -483,6 +483,47 @@ describe('flow control and settlements', () => {
     expect(attempts).toEqual([1, 2, 3, 4])
     expect(fake.callsOf('abandonMessage')).toHaveLength(1)
     expect(fake.callsOf('scheduleMessages')).toHaveLength(2)
+  })
+  it('holds subscription messages locked during a retry delay, then abandons them', async () => {
+    const fake = new FakeServiceBus()
+    fake.createSubscription('events', 'billing')
+    const attempts: [number, number][] = []
+    class FlakyConsumer {
+      handle(_payload: unknown, message: InboundMessage) {
+        attempts.push([message.attempt, Date.now()])
+        if (message.attempt < 3) throw new Error(`attempt ${message.attempt}`)
+      }
+    }
+    const { broker } = await startApp(driverFor(fake, { maxInProcessDelayMs: 0 }), [
+      {
+        class: FlakyConsumer,
+        queue: 'events/billing',
+        options: { deadLetter: false },
+        handlers: [handler('handle', { retry: { attempts: 3, backoff: 'fixed', delay: 60 } })],
+      },
+    ])
+    await broker.publish('events', 1)
+    await waitFor(() => attempts.length === 3, 'three attempts')
+    expect(attempts.map(([attempt]) => attempt)).toEqual([1, 2, 3])
+    expect((attempts[1]?.[1] ?? 0) - (attempts[0]?.[1] ?? 0)).toBeGreaterThanOrEqual(55)
+    expect(fake.callsOf('scheduleMessages')).toHaveLength(0)
+    expect(fake.callsOf('abandonMessage')).toHaveLength(2)
+  })
+
+  it('gives held messages back when the subscription closes', async () => {
+    const fake = new FakeServiceBus()
+    fake.createSubscription('events', 'billing')
+    await fake.client.createSender('events').sendMessages({ body: Buffer.from('1'), messageId: 'm' })
+    const driver = driverFor(fake)
+    const { received, subscription } = await deliveries(driver, 'events/billing', { maxAttempts: 3 })
+    await waitFor(() => received.length === 1, 'the delivery')
+    await received[0]?.retry({ attempt: 2, delayMs: 60_000, error: new Error('later') })
+    expect(fake.callsOf('abandonMessage')).toHaveLength(0)
+    await subscription.cancel()
+    await subscription.close()
+    expect(fake.callsOf('abandonMessage')).toHaveLength(1)
+    expect(fake.pending('events/billing')).toHaveLength(1)
+    await driver.close()
   })
 })
 
@@ -603,6 +644,59 @@ describe("retries: 'entity'", () => {
     expect(logs.some(entry => entry.message.includes('dead-letter') && entry.level === 'error')).toBe(false)
   })
 
+  it('counts the attempts of messages the entity dead-lettered from their first delivery from the sub-queue', async () => {
+    const fake = new FakeServiceBus()
+    fake.createQueue('orders', { maxDeliveryCount: 2 })
+    const attempts: number[] = []
+    class FailingConsumer {
+      handle() {
+        throw new Error('fail')
+      }
+    }
+    class Collector {
+      handle(_payload: unknown, message: InboundMessage) {
+        attempts.push(message.attempt)
+        if (message.attempt === 1) throw new Error('once')
+      }
+    }
+    const { broker } = await startApp(driverFor(fake, { retries: 'entity' }), [
+      {
+        class: FailingConsumer,
+        queue: 'orders',
+        handlers: [handler('handle', { retry: { attempts: 2, backoff: 'fixed', delay: 1 } })],
+      },
+      {
+        class: Collector,
+        queue: 'orders/$deadletterqueue',
+        options: { deadLetter: false, retries: 'znight' },
+        handlers: [handler('handle', { retry: { attempts: 2, backoff: 'fixed', delay: 0 } })],
+      },
+    ])
+    await broker.publish('orders', 1)
+    await waitFor(() => attempts.length === 2, 'two attempts on the sub-queue')
+    expect(attempts).toEqual([1, 2])
+    await waitFor(() => fake.pending('orders', true).length === 0, 'the dead letter completed')
+  })
+
+  it('refuses to let a dead-letter sub-queue own retries', async () => {
+    const fake = new FakeServiceBus()
+    fake.createQueue('orders')
+    class Consumer {
+      handle() {}
+    }
+    const error = await caught(
+      startApp(driverFor(fake, { retries: 'entity' }), [
+        {
+          class: Consumer,
+          queue: 'orders/$deadletterqueue',
+          options: { deadLetter: false },
+          handlers: [handler('handle')],
+        },
+      ]),
+    )
+    expect(messageOf(error)).toContain('a dead-letter sub-queue has no maxDeliveryCount')
+  })
+
   it('dead-letters non-retryable failures natively at once', async () => {
     const fake = new FakeServiceBus()
     fake.createQueue('orders', { maxDeliveryCount: 5 })
@@ -706,7 +800,7 @@ describe('verification and provisioning', () => {
     expect(messageOf(error)).toContain('queue "orders" requires sessions')
   })
 
-  it('refuses scheduled retries on subscriptions and dead-letter sub-queues', async () => {
+  it('refuses retry delays a subscription cannot hold, and dead-lettering a dead-letter sub-queue', async () => {
     const fake = new FakeServiceBus()
     fake.createSubscription('events', 'billing')
     fake.createQueue('orders')
@@ -715,13 +809,15 @@ describe('verification and provisioning', () => {
     }
     const retry = { attempts: 3, backoff: 'fixed' as const, delay: 5000 }
     const subscription = await caught(
-      startApp(driverFor(fake), [
+      startApp(driverFor(fake, { maxAutoLockRenewalDurationInMs: 4000 }), [
         { class: Consumer, queue: 'events/billing', handlers: [handler('handle', { retry })] },
       ]),
     )
-    expect(messageOf(subscription)).toContain('cannot schedule a retry on subscription "events/billing"')
+    expect(messageOf(subscription)).toContain(
+      'retries the messages of subscription "events/billing" after up to 5000 ms, but a retry on a subscription keeps the message locked during its delay, at most maxAutoLockRenewalDurationInMs (4000 ms)',
+    )
     const deadLetters = await caught(
-      startApp(driverFor(fake), [
+      startApp(driverFor(fake, { maxAutoLockRenewalDurationInMs: 4000 }), [
         {
           class: Consumer,
           queue: 'orders/$deadletterqueue',
@@ -730,7 +826,7 @@ describe('verification and provisioning', () => {
         },
       ]),
     )
-    expect(messageOf(deadLetters)).toContain('cannot schedule a retry on the dead-letter sub-queue')
+    expect(messageOf(deadLetters)).toContain('a retry on a dead-letter sub-queue keeps the message locked')
     const nested = await caught(
       startApp(driverFor(fake), [{ class: Consumer, queue: 'orders/$deadletterqueue', handlers: [handler('handle')] }]),
     )

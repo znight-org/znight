@@ -1,7 +1,7 @@
 {
   "name": "@znight/messaging",
   "version": "0.7.3",
-  "description": "Znight messaging plugin: consumers, retries and dead-letter queues with RabbitMQ, SQS, Kafka or Google Cloud Pub/Sub",
+  "description": "Znight messaging plugin: consumers, retries and dead-letter queues with RabbitMQ, SQS, Kafka, Google Cloud Pub/Sub or Azure Service Bus",
   "license": "MIT",
   "author": "Ugho STEPHAN",
   "homepage": "https://znight-org.github.io/znight/packages/messaging",
@@ -20,6 +20,7 @@
     "kafka",
     "pubsub",
     "google-cloud-pubsub",
+    "azure-service-bus",
     "consumer",
     "queue",
     "dead-letter-queue",
@@ -61,6 +62,11 @@
       "types": "./dist/pubsub.d.mts",
       "default": "./dist/pubsub.mjs"
     },
+    "./azure-service-bus": {
+      "@znight/source": "./src/drivers/azure-service-bus.ts",
+      "types": "./dist/azure-service-bus.d.mts",
+      "default": "./dist/azure-service-bus.mjs"
+    },
     "./testing": {
       "@znight/source": "./src/testing.ts",
       "types": "./dist/testing.d.mts",
@@ -88,6 +94,8 @@
     "@znight/core": "workspace:*"
   },
   "peerDependencies": {
+    "@azure/identity": "^4.0.0",
+    "@azure/service-bus": "^7.9.0",
     "@aws-sdk/client-sqs": "^3.600.0",
     "@google-cloud/pubsub": "^6.0.0",
     "@platformatic/kafka": "^2.0.0",
@@ -95,6 +103,12 @@
     "@znight/compiler": "workspace:^"
   },
   "peerDependenciesMeta": {
+    "@azure/identity": {
+      "optional": true
+    },
+    "@azure/service-bus": {
+      "optional": true
+    },
     "@aws-sdk/client-sqs": {
       "optional": true
     },
