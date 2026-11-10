@@ -17,7 +17,7 @@ Options
   --pm <bun|npm|pnpm|yarn>               Package manager (default: the one running the CLI, bun under Bun, else npm)
   --adapter <fastify|node|express|hono>  HTTP adapter (default: fastify; node is the built-in node:http server)
   --features <list>                      Comma-separated features: config, observability, messaging, schedule, openapi, graphql, websocket, or "all" / "none" (default: config,observability)
-  --openapi-ui <scalar|swagger>          API reference UI of the openapi feature, served at /docs (default: scalar)
+  --openapi-ui <scalar|swagger|none>     API reference UI of the openapi feature, served at /docs, or none (default: scalar)
   --no-docker                            Do not generate a Dockerfile
   --no-install                           Do not install the dependencies
   --no-git                               Do not initialise a git repository

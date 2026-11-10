@@ -9,8 +9,11 @@ export type HttpAdapterName = 'node' | 'fastify' | 'express' | 'hono'
 /** Optional features of a new project. */
 export type Feature = 'config' | 'observability' | 'messaging' | 'schedule' | 'openapi' | 'graphql' | 'websocket'
 
-/** API reference UIs of `@znight/openapi` (its `ui` option). */
-export type OpenApiUiName = 'scalar' | 'swagger'
+/**
+ * API reference UI of the `openapi` feature: `'scalar'` or `'swagger'` (the `ui` option of
+ * `OpenApiPlugin`), or `'none'` (no `ui` option: `/openapi.json` only).
+ */
+export type OpenApiUiName = 'scalar' | 'swagger' | 'none'
 
 /** Every package manager, in display order. */
 export const PACKAGE_MANAGERS: readonly PackageManager[] = ['bun', 'npm', 'pnpm', 'yarn']
@@ -33,7 +36,7 @@ export const FEATURES: readonly Feature[] = [
 ]
 
 /** Every OpenAPI reference UI, in display order (the default first). */
-export const OPENAPI_UIS: readonly OpenApiUiName[] = ['scalar', 'swagger']
+export const OPENAPI_UIS: readonly OpenApiUiName[] = ['scalar', 'swagger', 'none']
 
 /** OpenAPI reference UI used when none is given. */
 export const DEFAULT_OPENAPI_UI: OpenApiUiName = 'scalar'
@@ -55,7 +58,7 @@ export const FEATURE_LABELS: Readonly<Record<Feature, string>> = {
   observability: 'Observability: structured logs, metrics, tracing (@znight/observability)',
   messaging: 'Messaging: message consumers and publishing (@znight/messaging)',
   schedule: 'Schedule: cron, interval and timeout jobs (@znight/schedule)',
-  openapi: 'OpenAPI: openapi.json and an API reference at /docs (@znight/openapi)',
+  openapi: 'OpenAPI: openapi.json and an optional API reference at /docs (@znight/openapi)',
   graphql: 'GraphQL: code-first schema derived from the TypeScript types (@znight/graphql)',
   websocket: 'WebSocket: gateways served on the HTTP port (@znight/websocket)',
 }
@@ -64,6 +67,7 @@ export const FEATURE_LABELS: Readonly<Record<Feature, string>> = {
 export const OPENAPI_UI_LABELS: Readonly<Record<OpenApiUiName, string>> = {
   scalar: 'Scalar',
   swagger: 'Swagger UI',
+  none: 'No UI (openapi.json only)',
 }
 
 /** Everything that determines the files of a new project. */
@@ -74,7 +78,7 @@ export interface ProjectOptions {
   readonly adapter: HttpAdapterName
   /** Selected features, in canonical order. */
   readonly features: readonly Feature[]
-  /** API reference UI served at `/docs` with the `openapi` feature. Default: `'scalar'`. */
+  /** API reference UI served at `/docs` with the `openapi` feature (`'none'`: no UI). Default: `'scalar'`. */
   readonly openapiUi?: OpenApiUiName
   /** Generate a multi-stage `Dockerfile` and a `.dockerignore`. Default: `true`. */
   readonly docker?: boolean

@@ -69,8 +69,8 @@ export const newCommand: Command = defineCommand({
     },
     'openapi-ui': {
       type: 'enum',
-      options: ['scalar', 'swagger'],
-      description: 'API reference UI of the openapi feature, served at /docs (default: scalar)',
+      options: ['scalar', 'swagger', 'none'],
+      description: 'API reference UI of the openapi feature, served at /docs, or none (default: scalar)',
     },
     docker: { type: 'boolean', default: true, description: 'Do not generate a Dockerfile' },
     install: { type: 'boolean', default: true, description: 'Do not install the dependencies' },

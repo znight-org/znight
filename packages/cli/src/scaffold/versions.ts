@@ -12,6 +12,7 @@ export const DEPENDENCY_VERSIONS: Readonly<Record<string, string>> = {
   graphql: '^17.0.2',
   hono: '^4.13.14',
   'light-my-request': '^6.8.0',
+  'pino-pretty': '^13.2.0',
   typescript: '^7.0.0',
   vite: '^8.0.0',
   vitest: '^4.1.0',

@@ -42,8 +42,9 @@ npx @znight/cli new my-service --pm bun --features all --openapi-ui swagger
 
 The CLI asks for the name, the package manager (`bun`, `npm`, `pnpm`, `yarn`), the HTTP adapter
 (`fastify`, the default, `node`, `express`, `hono`), the features (`config`, `observability`,
-`messaging`, `schedule`, `openapi`, `graphql`, `websocket`), the OpenAPI reference UI when `openapi`
-is selected (Scalar, the default, or Swagger UI: `--openapi-ui scalar|swagger`), whether to add a
+`messaging`, `schedule`, `openapi`, `graphql`, `websocket`; `config` and `observability` preselected),
+the OpenAPI reference UI when `openapi` is selected (Scalar, the default, Swagger UI or no UI:
+`--openapi-ui scalar|swagger|none`), whether to add a
 Dockerfile (yes by default, `--no-docker`) and whether to install the dependencies and initialise
 git. The project has a sample greeting API (with a code-first GraphQL resolver and a WebSocket
 gateway when selected), its
@@ -51,7 +52,15 @@ tests (`bun test` for Bun projects, Vitest otherwise), `vite.config.ts` with the
 and a `znight.config.ts` holding the compiler options, shared by the Vite plugin, the Bun preload
 and `znight generate`. Bun projects run the application on Bun: their `dev` and `start` scripts pass
 `--runtime bun` (under `bun run`, the `znight` binary and its `node` shebang run on Node.js).
-`ObservabilityPlugin` names its logger after the project. The `Dockerfile` is multi-stage: the build
+`ObservabilityPlugin` names its logger after the project, metrics and tracing off; it pretty-prints
+in development only (`znight dev` sets `NODE_ENV=development`) and logs JSON in production
+(`znight start` and the `Dockerfile` set `NODE_ENV=production`). With `config`, `pretty` reads
+`AppConfig.environment` (`@Env('NODE_ENV')`):
+`ObservabilityPlugin.configure(container => ({ logging: { name, pretty: container.get(AppConfig).environment === 'development' }, ... }))`;
+without it, `process.env['NODE_ENV']`. `pino-pretty` is a dev dependency, so the production image
+does not ship it.
+`openapi` adds `src/openapi.ts`, whose `@OpenApiDocument` sets the title (the project name), the
+description and the version of the document. The `Dockerfile` is multi-stage: the build
 stage runs the compiler with every dependency, the runtime stage ships `dist/` with the production
 dependencies only, as a non-root user, with `NODE_ENV=production`, port 3000 and a health check on
 `GET /health` (see [Deployment](/guide/deployment#docker)).

@@ -75,7 +75,7 @@ export function renderProject(options: ProjectOptions): ProjectFile[] {
     files.push({ path: 'src/app/heartbeat.jobs.ts', content: heartbeatJobs() })
     files.push({ path: 'test/heartbeat.jobs.test.ts', content: heartbeatJobsTest(flags) })
   }
-  if (flags.openapi) files.push({ path: 'src/api.ts', content: apiDocument(options) })
+  if (flags.openapi) files.push({ path: 'src/openapi.ts', content: openApiDocument(flags) })
   if (flags.graphql) {
     files.push({ path: 'src/app/greeting.resolver.ts', content: greetingResolver() })
     files.push({ path: 'test/greeting.resolver.test.ts', content: greetingResolverTest(flags) })
@@ -137,6 +137,8 @@ function packageJson(options: ProjectOptions, flags: Flags): string {
   }
   if (flags.bun) devDependencies['@types/bun'] = versionOf('@types/bun')
   else devDependencies['vitest'] = versionOf('vitest')
+  // logging.pretty in src/main.ts, loaded only in development: the production image does not ship it
+  if (flags.observability) devDependencies['pino-pretty'] = versionOf('pino-pretty')
   if (flags.adapter === 'express') devDependencies['@types/express'] = versionOf('@types/express')
   // in-memory requests (TestApp.inject) with the node and express adapters
   if (flags.adapter === 'node' || flags.adapter === 'express') {
@@ -425,19 +427,22 @@ function mainTs(flags: Flags): string {
 
   const plugins: string[] = []
   if (flags.observability) {
-    plugins.push(
-      '    // first, so that its hooks wrap everything: request logs, metrics (with prom-client), traces',
-      '    ObservabilityPlugin.configure({',
+    const logging = [
       '      logging: {',
       `        name: ${quote(flags.name)},`,
+      '        // human-readable logs in development (`znight dev`), JSON logs in production',
+      flags.config
+        ? "        pretty: container.get(AppConfig).environment === 'development',"
+        : "        pretty: process.env['NODE_ENV'] === 'development',",
       '      },',
-      '      // metrics: {',
-      '      //   // options of the metrics registry',
-      '      // },',
-      '      // tracing: {',
-      '      //   // options of the tracer',
-      '      // },',
-      '    }),',
+      '      metrics: false,',
+      '      tracing: false,',
+    ]
+    plugins.push(
+      '    // first, so that its hooks wrap everything; metrics (with prom-client) and tracing are off',
+      ...(flags.config
+        ? ['    ObservabilityPlugin.configure(container => ({', ...logging, '    })),']
+        : ['    ObservabilityPlugin.configure({', ...logging, '    }),']),
     )
   }
   if (flags.config) {
@@ -476,8 +481,15 @@ function mainTs(flags: Flags): string {
   }
   if (flags.openapi) {
     plugins.push(
-      `    // GET /openapi.json and the API reference at /docs, with ${OPENAPI_UI_LABELS[flags.openapiUi]} (document options: src/api.ts)`,
-      `    OpenApiPlugin.configure({ ui: ${quote(flags.openapiUi)} }),`,
+      ...(flags.openapiUi === 'none'
+        ? [
+            '    // GET /openapi.json, no API reference UI (document options: src/openapi.ts)',
+            '    OpenApiPlugin.configure(),',
+          ]
+        : [
+            `    // GET /openapi.json and the API reference at /docs, with ${OPENAPI_UI_LABELS[flags.openapiUi]} (document options: src/openapi.ts)`,
+            `    OpenApiPlugin.configure({ ui: ${quote(flags.openapiUi)} }),`,
+          ]),
     )
   }
   if (flags.graphql) {
@@ -539,6 +551,10 @@ export class AppConfig {
 
   /** Greeting used by GreetingService (APP_GREETING). */
   greeting = 'Hello'
+
+  /** Runtime environment (NODE_ENV): \`znight dev\` sets "development", the Docker image "production". */
+  @Env('NODE_ENV')
+  environment = 'development'
 }
 `
 }
@@ -706,17 +722,18 @@ export class HeartbeatJobs {
 `
 }
 
-function apiDocument(options: ProjectOptions): string {
+function openApiDocument(flags: Flags): string {
+  const served = flags.openapiUi === 'none' ? 'GET /openapi.json' : 'GET /openapi.json, the API reference at /docs'
   return `import { OpenApiDocument } from '@znight/openapi'
 
-/**
- * ${options.name}
- *
- * The HTTP API of ${options.name}. Title and description of the OpenAPI document come from this
- * comment, the version from package.json.
- */
+// Options of the OpenAPI document (${served}), read by the
+// compiler. The class is a marker: it is never instantiated.
 @OpenApiDocument({
-  tags: [{ name: 'Greeting', description: 'Greetings' }],
+  info: {
+    title: ${quote(flags.name)},
+    description: ${quote(`The HTTP API of ${flags.name}.`)},
+    version: '1.0.0',
+  },
 })
 export class Api {}
 `
@@ -993,12 +1010,12 @@ function readme(options: ProjectOptions, flags: Flags): string {
     `- **HTTP** with \`@znight/http\` (${flags.adapter === 'node' ? 'built-in node:http server' : `${flags.adapter} adapter`})`,
     flags.config ? '- **Configuration** with `@znight/config` (`src/app/app.config.ts`, `.env` files)' : undefined,
     flags.observability
-      ? '- **Observability** with `@znight/observability` (structured logs, metrics, traces)'
+      ? '- **Observability** with `@znight/observability` (structured logs: pretty-printed by `pino-pretty` in development, JSON in production; metrics and tracing are off in `src/main.ts`)'
       : undefined,
     flags.messaging ? '- **Messaging** with `@znight/messaging` (in-memory broker in `src/main.ts`)' : undefined,
     flags.schedule ? '- **Scheduled jobs** with `@znight/schedule` (`src/app/heartbeat.jobs.ts`)' : undefined,
     flags.openapi
-      ? `- **OpenAPI** with \`@znight/openapi\` (\`/openapi.json\`, ${OPENAPI_UI_LABELS[flags.openapiUi]} API reference at \`/docs\`, options in \`src/api.ts\`)`
+      ? `- **OpenAPI** with \`@znight/openapi\` (\`/openapi.json\`, ${flags.openapiUi === 'none' ? '' : `${OPENAPI_UI_LABELS[flags.openapiUi]} API reference at \`/docs\`, `}options in \`src/openapi.ts\`)`
       : undefined,
     flags.graphql
       ? '- **GraphQL** with `@znight/graphql` (code-first: the schema is derived from `src/app/greeting.resolver.ts`)'
@@ -1022,7 +1039,7 @@ function readme(options: ProjectOptions, flags: Flags): string {
     'src/',
     '├─ main.ts                    # Application.create() + plugins + start()',
     flags.openapi
-      ? '├─ api.ts                     # @OpenApiDocument: title, tags, security of openapi.json'
+      ? '├─ openapi.ts                 # @OpenApiDocument: title, description, version of openapi.json'
       : undefined,
     '├─ .znight/                   # generated DI container (git-ignored)',
     '└─ app/',
@@ -1036,9 +1053,9 @@ function readme(options: ProjectOptions, flags: Flags): string {
     ? `
 ## Configuration
 
-\`AppConfig\` (\`src/app/app.config.ts\`) reads \`PORT\` and \`APP_GREETING\` from the environment or from
-\`.env\` / \`.env.local\` files. Missing or invalid values stop the application at boot with every
-problem listed.${
+\`AppConfig\` (\`src/app/app.config.ts\`) reads \`PORT\`, \`APP_GREETING\` and \`NODE_ENV\` from the environment
+or from \`.env\` / \`.env.local\` files. Missing or invalid values stop the application at boot with
+every problem listed.${
         flags.bun
           ? `
 
@@ -1097,7 +1114,7 @@ ${
 ${run('dev')}
 curl localhost:3000/health
 curl localhost:3000/greetings/Ada?excited=true
-curl -X POST localhost:3000/greetings -H 'content-type: application/json' -d '{"name":"Grace"}'${flags.openapi ? '\ncurl localhost:3000/openapi.json        # the API reference is at http://localhost:3000/docs' : ''}${flags.graphql ? `\ncurl localhost:3000/graphql -H 'content-type: application/json' -d '{"query":"{ greeting(name: \\"Ada\\") { message } }"}'` : ''}
+curl -X POST localhost:3000/greetings -H 'content-type: application/json' -d '{"name":"Grace"}'${flags.openapi ? `\ncurl localhost:3000/openapi.json${flags.openapiUi === 'none' ? '' : '        # the API reference is at http://localhost:3000/docs'}` : ''}${flags.graphql ? `\ncurl localhost:3000/graphql -H 'content-type: application/json' -d '{"query":"{ greeting(name: \\"Ada\\") { message } }"}'` : ''}
 \`\`\`
 
 ## Project structure
