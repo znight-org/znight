@@ -20,15 +20,20 @@ describe.skipIf(!integration)('NATS JetStream (testcontainers)', () => {
   afterEach(stopApps)
 
   let container: StartedNatsContainer
-  let servers: string[]
+  /** Servers and credentials of the container (the image is started with a user). */
+  let base: { servers: string[]; connectionOptions: { user?: string; pass?: string } }
   let connection: NatsConnection
   let js: JetStreamClient
   let jsm: JetStreamManager
 
   beforeAll(async () => {
     container = await new NatsContainer(IMAGE).withJetStream().start()
-    servers = [`${container.getHost()}:${container.getMappedPort(4222)}`]
-    connection = await connect({ servers })
+    const { user, pass } = container.getConnectionOptions()
+    base = {
+      servers: [`${container.getHost()}:${container.getMappedPort(4222)}`],
+      connectionOptions: { ...(user === undefined ? {} : { user }), ...(pass === undefined ? {} : { pass }) },
+    }
+    connection = await connect({ ...base.connectionOptions, servers: base.servers })
     js = jetstream(connection)
     jsm = await js.jetstreamManager()
   }, 180_000)
@@ -46,7 +51,7 @@ describe.skipIf(!integration)('NATS JetStream (testcontainers)', () => {
 
   describeDriverConformance({
     name: 'nats',
-    driver: overrides => nats({ servers, fetchExpiresMs: 1000, ...overrides }),
+    driver: overrides => nats({ ...base, fetchExpiresMs: 1000, ...overrides }),
     prepareQueue: (queue, deadLetterQueue) =>
       jsm.streams
         .add({ name: queue, subjects: [queue] })
@@ -63,7 +68,7 @@ describe.skipIf(!integration)('NATS JetStream (testcontainers)', () => {
     class Consumer {
       handle() {}
     }
-    await startApp(nats({ servers, ackWaitMs: 5000 }), [{ class: Consumer, queue, handlers: [handler('handle')] }])
+    await startApp(nats({ ...base, ackWaitMs: 5000 }), [{ class: Consumer, queue, handlers: [handler('handle')] }])
     const info = await jsm.consumers.info(queue, `znight-${queue}`)
     expect(info.config).toMatchObject({
       durable_name: `znight-${queue}`,
@@ -81,7 +86,7 @@ describe.skipIf(!integration)('NATS JetStream (testcontainers)', () => {
       handle() {}
     }
     await expect(
-      startApp(nats({ servers }), [{ class: Consumer, queue, handlers: [handler('handle')] }]),
+      startApp(nats({ ...base }), [{ class: Consumer, queue, handlers: [handler('handle')] }]),
     ).rejects.toThrow(`no stream captures the subject "${queue}"`)
     const received: unknown[] = []
     class Provisioned {
@@ -89,7 +94,7 @@ describe.skipIf(!integration)('NATS JetStream (testcontainers)', () => {
         received.push(payload)
       }
     }
-    const app = await startApp(nats({ servers, provision: true, fetchExpiresMs: 1000 }), [
+    const app = await startApp(nats({ ...base, provision: true, fetchExpiresMs: 1000 }), [
       { class: Provisioned, queue, handlers: [handler('handle')] },
     ])
     await app.get(MessageBroker).publish(queue, { provisioned: true })
@@ -110,7 +115,7 @@ describe.skipIf(!integration)('NATS JetStream (testcontainers)', () => {
       handle() {}
     }
     await expect(
-      startApp(nats({ servers }), [
+      startApp(nats({ ...base }), [
         {
           class: Consumer,
           queue,
@@ -147,8 +152,9 @@ describe.skipIf(!integration)('NATS JetStream (testcontainers)', () => {
         dead.push(message)
       }
     }
-    await startApp(nats({ servers, fetchExpiresMs: 1000 }), [
-      { class: Consumer, queue, handlers: [handler('handle')] },
+    await startApp(nats({ ...base, fetchExpiresMs: 1000 }), [
+      // one attempt: max_deliver 1 allows it
+      { class: Consumer, queue, handlers: [handler('handle', { retry: { attempts: 1, backoff: 'fixed', delay: 0 } })] },
       { class: Collector, queue: `${queue}.dlq`, options: { deadLetter: false }, handlers: [handler('collect')] },
     ])
     await waitFor(() => dead.length === 1, 30_000, 'the dead letter of the advisory')
@@ -171,7 +177,7 @@ describe.skipIf(!integration)('NATS JetStream (testcontainers)', () => {
         await sleep(3000)
       }
     }
-    const app = await startApp(nats({ servers, ackWaitMs: 1000, fetchExpiresMs: 1000 }), [
+    const app = await startApp(nats({ ...base, ackWaitMs: 1000, fetchExpiresMs: 1000 }), [
       { class: Slow, queue, options: { concurrency: 2 }, handlers: [handler('handle')] },
     ])
     await app.get(MessageBroker).publish(queue, 1)

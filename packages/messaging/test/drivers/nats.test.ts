@@ -100,7 +100,7 @@ describe('names', () => {
     const { received, consumer } = collector('notifications', { options: { durable: 'notifier' } })
     const driver = driverFor(fake, {
       subjects: { notifications: 'events.notifications', 'notifications.dlq': 'dead.notifications' },
-      streams: queue => (queue === 'notifications' ? 'EVENTS' : queue),
+      streams: queue => (queue === 'notifications' ? 'EVENTS' : undefined),
     })
     const { broker } = await startApp(driver, [consumer])
     await broker.publish('notifications', 'hello')

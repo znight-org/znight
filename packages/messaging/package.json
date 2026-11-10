@@ -1,7 +1,7 @@
 {
   "name": "@znight/messaging",
   "version": "0.7.3",
-  "description": "Znight messaging plugin: consumers, retries and dead-letter queues with RabbitMQ, SQS, Kafka or Google Cloud Pub/Sub",
+  "description": "Znight messaging plugin: consumers, retries and dead-letter queues with RabbitMQ, SQS, Kafka, Google Cloud Pub/Sub or NATS JetStream",
   "license": "MIT",
   "author": "Ugho STEPHAN",
   "homepage": "https://znight-org.github.io/znight/packages/messaging",
@@ -20,6 +20,8 @@
     "kafka",
     "pubsub",
     "google-cloud-pubsub",
+    "nats",
+    "jetstream",
     "consumer",
     "queue",
     "dead-letter-queue",
@@ -61,6 +63,11 @@
       "types": "./dist/pubsub.d.mts",
       "default": "./dist/pubsub.mjs"
     },
+    "./nats": {
+      "@znight/source": "./src/drivers/nats.ts",
+      "types": "./dist/nats.d.mts",
+      "default": "./dist/nats.mjs"
+    },
     "./testing": {
       "@znight/source": "./src/testing.ts",
       "types": "./dist/testing.d.mts",
@@ -90,6 +97,8 @@
   "peerDependencies": {
     "@aws-sdk/client-sqs": "^3.600.0",
     "@google-cloud/pubsub": "^6.0.0",
+    "@nats-io/jetstream": "^3.0.0",
+    "@nats-io/transport-node": "^3.0.0",
     "@platformatic/kafka": "^2.0.0",
     "amqplib": "^2.0.0",
     "@znight/compiler": "workspace:^"
@@ -99,6 +108,12 @@
       "optional": true
     },
     "@google-cloud/pubsub": {
+      "optional": true
+    },
+    "@nats-io/jetstream": {
+      "optional": true
+    },
+    "@nats-io/transport-node": {
       "optional": true
     },
     "@platformatic/kafka": {
