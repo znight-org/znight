@@ -141,6 +141,19 @@ letters, a driver option chooses **who retries**, never both layers at once: `'z
 - **Provisioning and tests.** Entities verified with the administration client (`maxDeliveryCount`
   ≥ attempts under `'znight'`), created with `provision: true`. Tests use the Service Bus emulator
   (entities declared in its configuration file, since it has no administration API).
+- **Implementation notes** (2026-11-11, M2). The emulator 2.x does serve the administration API (port
+  5300; `maxDeliveryCount` capped at 10, no runtime properties), so the integration tests create their
+  entities like the conformance kit expects. A copy scheduled for a delayed retry can only target a
+  queue: on a topic subscription it would reach every subscription of the topic, so a delayed retry on
+  a subscription (or a dead-letter sub-queue) keeps the message locked, its lock renewed by the SDK,
+  and abandons it after the delay (delays bounded by `maxAutoLockRenewalDurationInMs`, checked at
+  boot). The dead-letter sub-queue keeps the delivery count: the driver records it on the messages it
+  dead-letters (`x-znight-delivery-base`) and otherwise counts from the first delivery it sees, so
+  that a sub-queue consumer starts at attempt 1. `key` is set as both `sessionId` and `partitionKey`
+  on every message (ignored by entities without sessions or partitions). Under `retries: 'entity'`,
+  terminal failures (non-retryable, validation, decoding, no handler) go to the sub-queue at once and
+  only exhausted attempts are left to `maxDeliveryCount`. A `fullyQualifiedNamespace` without
+  credential uses `DefaultAzureCredential` from `@azure/identity`, an optional peer loaded lazily.
 
 ### 4.2 NATS JetStream (`/nats`, peers `@nats-io/jetstream` ^3 and `@nats-io/transport-node` ^3)
 

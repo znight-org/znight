@@ -229,7 +229,7 @@ cron expressions: every diagnostic has a stable `ZNIGHTxxx` code, explained in t
   webhook signatures and CSRF are tested recipes in the [security guide](./docs/guide/security.md).
 - **Messaging.** Consumers with typed payloads, retries with backoff, dead-letter queues,
   per-consumer concurrency and a draining shutdown, on RabbitMQ, Amazon SQS, Kafka, Google Cloud
-  Pub/Sub or in memory.
+  Pub/Sub, Azure Service Bus or in memory.
 - **Configuration.** Typed `@Config` classes loaded from the environment, `.env`, JSON/YAML files,
   HashiCorp Vault, AWS Secrets Manager or Google Cloud Secret Manager, validated all at once before
   anything starts; secrets masked in logs and errors.
@@ -327,21 +327,21 @@ specification of the framework.
 All `@znight/*` packages are versioned together. Install only what you use: integrations (Fastify,
 amqplib, prom-client...) are optional peer dependencies loaded from subpath exports.
 
-| Package                                             | Description                                                                           | Install as    |
-| --------------------------------------------------- | ------------------------------------------------------------------------------------- | ------------- |
-| [`@znight/core`](./packages/core)                   | Container, application lifecycle, plugins, hooks, AOP, marker decorators              | dependency    |
-| [`@znight/compiler`](./packages/compiler)           | Analysis, validation and code generation: Vite plugin, Bun preload, API               | devDependency |
-| [`@znight/http`](./packages/http)                   | Controllers, validation, files, cookies, SSE, security; node, Fastify, Express, Hono  | dependency    |
-| [`@znight/messaging`](./packages/messaging)         | Consumers, retries, dead-letter queues; RabbitMQ, SQS, Kafka, Pub/Sub, in-memory      | dependency    |
-| [`@znight/config`](./packages/config)               | Typed config classes from env, `.env`, JSON/YAML, Vault, AWS/GCP secret managers      | dependency    |
-| [`@znight/observability`](./packages/observability) | Pino logging, Prometheus metrics, OpenTelemetry tracing                               | dependency    |
-| [`@znight/openapi`](./packages/openapi)             | OpenAPI 3.1 document built at compile time, served with Scalar or Swagger UI          | dependency    |
-| [`@znight/schedule`](./packages/schedule)           | Cron, interval and timeout jobs checked at build time, locks across instances         | dependency    |
-| [`@znight/graphql`](./packages/graphql)             | GraphQL: schema from TypeScript types or SDL files, checked at build time, SSE        | dependency    |
-| [`@znight/websocket`](./packages/websocket)         | WebSocket gateways on the HTTP server: validated events, replies, rooms, backpressure | dependency    |
-| [`@znight/events`](./packages/events)               | In-process application events: listeners wired at build time, inline or detached      | dependency    |
-| [`@znight/testing`](./packages/testing)             | `TestBed` with auto-mocks, `TestApp` for in-memory end-to-end tests                   | devDependency |
-| [`@znight/cli`](./packages/cli)                     | `znight new`, generators, `generate`, `dev`, `build`, `start`, `openapi`              | devDependency |
+| Package                                             | Description                                                                                   | Install as    |
+| --------------------------------------------------- | --------------------------------------------------------------------------------------------- | ------------- |
+| [`@znight/core`](./packages/core)                   | Container, application lifecycle, plugins, hooks, AOP, marker decorators                      | dependency    |
+| [`@znight/compiler`](./packages/compiler)           | Analysis, validation and code generation: Vite plugin, Bun preload, API                       | devDependency |
+| [`@znight/http`](./packages/http)                   | Controllers, validation, files, cookies, SSE, security; node, Fastify, Express, Hono          | dependency    |
+| [`@znight/messaging`](./packages/messaging)         | Consumers, retries, dead-letter queues; RabbitMQ, SQS, Kafka, Pub/Sub, Service Bus, in-memory | dependency    |
+| [`@znight/config`](./packages/config)               | Typed config classes from env, `.env`, JSON/YAML, Vault, AWS/GCP secret managers              | dependency    |
+| [`@znight/observability`](./packages/observability) | Pino logging, Prometheus metrics, OpenTelemetry tracing                                       | dependency    |
+| [`@znight/openapi`](./packages/openapi)             | OpenAPI 3.1 document built at compile time, served with Scalar or Swagger UI                  | dependency    |
+| [`@znight/schedule`](./packages/schedule)           | Cron, interval and timeout jobs checked at build time, locks across instances                 | dependency    |
+| [`@znight/graphql`](./packages/graphql)             | GraphQL: schema from TypeScript types or SDL files, checked at build time, SSE                | dependency    |
+| [`@znight/websocket`](./packages/websocket)         | WebSocket gateways on the HTTP server: validated events, replies, rooms, backpressure         | dependency    |
+| [`@znight/events`](./packages/events)               | In-process application events: listeners wired at build time, inline or detached              | dependency    |
+| [`@znight/testing`](./packages/testing)             | `TestBed` with auto-mocks, `TestApp` for in-memory end-to-end tests                           | devDependency |
+| [`@znight/cli`](./packages/cli)                     | `znight new`, generators, `generate`, `dev`, `build`, `start`, `openapi`                      | devDependency |
 
 ## Examples
 

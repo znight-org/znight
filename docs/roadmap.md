@@ -149,11 +149,12 @@ graphql-js 17. The engine and the GraphQL Yoga driver are in place.
 ### Messaging drivers
 
 Milestone 2 of [RFC 0014](https://github.com/znight-org/znight/blob/main/rfcs/0014-messaging-drivers.md):
-first-party drivers for Redis Streams (`@znight/messaging/redis`), NATS JetStream
-(`@znight/messaging/nats`) and Azure Service Bus (`@znight/messaging/azure-service-bus`), each
-checked by the conformance kit. The public driver contract and the kit
-(`@znight/messaging/testing`) are in place; OCI Streaming and Azure Event Hubs already work through
-the Kafka driver, and OCI Queue is left to a third-party driver.
+first-party drivers for Redis Streams (`@znight/messaging/redis`) and NATS JetStream
+(`@znight/messaging/nats`), each checked by the conformance kit, and session receivers (ordered
+processing) for the Azure Service Bus driver. The public driver contract, the kit
+(`@znight/messaging/testing`) and the Azure Service Bus driver (`@znight/messaging/azure-service-bus`)
+are in place; OCI Streaming and Azure Event Hubs already work through the Kafka driver, and OCI Queue
+is left to a third-party driver.
 
 ## Considered, not scheduled {#considered}
 
