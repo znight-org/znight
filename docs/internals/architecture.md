@@ -1959,11 +1959,20 @@ not call `next()` gets the same reply as in the general pipeline.
   `uploads` limits. Plugin-wide limits `uploads: { maxFileSize (10 MiB), maxFiles (10), maxParts
   (1000), maxFieldSize (1 MiB) }`; part headers ≤ 16 KiB. Errors raised while the body is still
   being read carry `connection: close`. Files are standard `File` objects held in memory.
-- Files out: `HttpResponse.file(path | file: URL | Blob, { filename, contentType, disposition, root,
+- Files out: `HttpResponse.file(path | file: URL | Blob | LazyFile, { filename, contentType, disposition, root,
   dotfiles })` (file-backed `Blob`s via `fs.openAsBlob()`; `root` confines the path, links
   included, dotfiles denied by default → 404; `Content-Length`/`Content-Type`/`Last-Modified`/strong
   `ETag`; conditional requests 304/412; a single `bytes` range 206/416, other ranges → 200; RFC 6266
-  `Content-Disposition`) and `HttpResponse.stream(source, { contentType, filename, disposition })`
+  `Content-Disposition`). `HttpResponse.file()` also accepts a lazy file `{ size, etag?,
+  lastModified?, type?, name?, load() }`: the preconditions and the range MUST be evaluated from
+  that metadata, and `load()` MUST be called at most once, only when a body is sent (200 / 206 to a
+  `GET`), never for a 304, a 412, a 416, a `HEAD` request or an empty file. `load()` returns the
+  whole content (bytes, `Blob` or stream source); the pipeline cuts the range out of it, a content
+  of another size than `size` fails (500 for bytes and blobs, an interrupted body for streams), a
+  `load()` error goes through the exception mappers like a handler error, and a stream is read
+  under backpressure and cancelled with the response. A given `etag` is used as is (a weak tag
+  never satisfies `If-Match` nor `If-Range`); without one it is derived from `size` and
+  `lastModified`. And `HttpResponse.stream(source, { contentType, filename, disposition })`
   (Web stream, Node.js `Readable` or async iterable; pull-based, cancelled when the client
   disconnects; chunked). A file (or any `Blob`) body is sent as a tracked stream like any other
   stream body: the request scope and the in-flight count last until it has been sent or the client
