@@ -802,7 +802,8 @@ encapsulated context without a prefix, which shares the not-found handler of the
 (Fastify 5 allows one per level). When your instance already has one (a rate-limited 404, the
 routes you are migrating), Znight leaves unknown URLs to it; `notFound: 'instance'` does so even
 for a handler set after Znight's context loads, and `notFound: 'znight'` refuses such an instance.
-Either way, the paths of Znight routes keep Znight's `405`, automatic `OPTIONS` and CORS preflights:
+Either way, the paths of Znight routes keep Znight's `405`, automatic `OPTIONS` and CORS preflights,
+without any extra route (your routes, wildcards included, keep the requests they match):
 
 ```ts
 import { HttpPlugin } from '@znight/http'

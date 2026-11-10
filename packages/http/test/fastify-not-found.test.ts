@@ -184,6 +184,77 @@ describe('fastifyAdapter({ instance }) with an instance that owns its 404 handle
     await app.stop()
   })
 
+  it('serves Znight routes that overlap other Znight paths through their own route', async () => {
+    class FilesController {
+      read(name: string, reply: FastifyReply) {
+        reply.header('x-route-url', String(reply.request.routeOptions.url)).send(`file ${name}`)
+      }
+      removeLatest() {
+        return { removed: 'latest' }
+      }
+    }
+    const filesMetadata = metadata({ [t('FilesController')]: provider(FilesController) }, [
+      controller(t('FilesController'), '/files', [
+        route(
+          'read',
+          '/:name',
+          (c: FilesController, ctx) => c.read(ctx.params['name'] as string, ctx.response as never),
+          {
+            rawResponse: true,
+            params: [{ index: 1, source: 'response' }],
+          },
+        ),
+        route('removeLatest', '/latest', (c: FilesController) => c.removeLatest(), { method: 'DELETE' }),
+      ]),
+    ])
+    const instance = legacyInstance(i => i.setNotFoundHandler(legacyNotFound))
+    const app = await createApp(filesMetadata, { adapter: fastifyAdapter({ instance }) }, { start: false })
+    const send = app.http.inject.bind(app.http)
+    // `GET /files/latest` is served by `GET /files/:name` (with its native reply), not by the fallback
+    const latest = await send({ method: 'GET', url: '/files/latest' })
+    expect(latest.status).toBe(200)
+    expect(latest.body).toBe('file latest')
+    expect(latest.headers['x-route-url']).toBe('/files/:name')
+    expect((await send({ method: 'DELETE', url: '/files/latest' })).json()).toEqual({ removed: 'latest' })
+    const wrongMethod = await send({ method: 'DELETE', url: '/files/other' })
+    expect(wrongMethod.status).toBe(405)
+    expect(wrongMethod.headers['allow']).toBe('GET, HEAD, OPTIONS')
+    const put = await send({ method: 'PUT', url: '/files/latest' })
+    expect(put.status).toBe(405)
+    expect(put.headers['allow']).toBe('DELETE, GET, HEAD, OPTIONS')
+    await app.stop()
+  })
+
+  it('leaves to the wildcard and parametric routes of the instance the methods they serve', async () => {
+    const instance = legacyInstance(i => i.setNotFoundHandler(legacyNotFound))
+    instance.all('/items/*', request => ({ legacy: request.method }))
+    const app = await createApp(itemsMetadata(), { adapter: fastifyAdapter({ instance }) }, { start: false })
+    const send = app.http.inject.bind(app.http)
+    expect((await send({ method: 'GET', url: '/items/7' })).json()).toEqual({ id: 7 })
+    expect((await send({ method: 'DELETE', url: '/items/7' })).json()).toEqual({ legacy: 'DELETE' })
+    expect((await send({ method: 'PUT', url: '/items/echo' })).json()).toEqual({ legacy: 'PUT' })
+    expect((await send({ method: 'OPTIONS', url: '/items/7' })).json()).toEqual({ legacy: 'OPTIONS' })
+    await app.stop()
+  })
+
+  it('registers no route of its own besides the Znight routes', async () => {
+    const instance = legacyInstance(i => i.setNotFoundHandler(legacyNotFound))
+    const seen: string[] = []
+    instance.addHook('onRoute', options => {
+      for (const method of [options.method].flat()) seen.push(`${method} ${options.url}`)
+    })
+    const app = await createApp(itemsMetadata(), { adapter: fastifyAdapter({ instance }) }, { start: false })
+    expect((await app.http.inject({ method: 'GET', url: '/items/1' })).status).toBe(200)
+    expect(seen.sort()).toEqual([
+      'GET /items/:id',
+      'GET /items/fail',
+      'HEAD /items/:id',
+      'HEAD /items/fail',
+      'POST /items/echo',
+    ])
+    await app.stop()
+  })
+
   it('validates the notFound option', () => {
     expect(() => fastifyAdapter({ notFound: 'root' as 'instance' })).toThrow(
       `fastifyAdapter: option "notFound" must be 'znight' or 'instance' (received root)`,

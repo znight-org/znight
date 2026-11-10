@@ -2357,9 +2357,10 @@ like the other adapters instead of Fastify's 415; Express answers 500 with an ex
 when a body parser already consumed the body; `fastifyAdapter({ instance })` registers the Znight
 routes in an encapsulated context without a prefix, which shares the root instance's not-found
 handler in Fastify 5: with `notFound: 'instance'` (the default when the instance already has a
-not-found handler once that context loads) the instance's handler answers unknown URLs, and the
-adapter routes the other standard methods of the Znight paths to the fallback handler instead
-(`405`, automatic `OPTIONS`, CORS preflights), skipping those the instance routes itself;
+not-found handler once that context loads) the instance's handler answers unknown URLs, and a
+root `onRequest` hook passes to the fallback handler the requests Fastify routed to the not-found
+handler on the path of a Znight route (`405`, automatic `OPTIONS`, CORS preflights), without
+adding routes;
 `honoAdapter({ app?, serveOptions? })` passes
 `serveOptions` to `Bun.serve()` with
 `maxRequestBodySize` unlimited by default (the plugin enforces the body limits) and lifts Bun's

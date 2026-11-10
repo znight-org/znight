@@ -1819,11 +1819,12 @@ explicitly:
 
 - `notFound: 'instance'`: your handler (a rate-limited 404, the 404 page of the routes you are
   migrating...) answers unknown URLs, whether you set it before or after Znight's context loads
-  (Fastify's default `404` when you set none). On the paths of Znight routes, Znight still answers
-  the other standard methods (`GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS`): `405`
-  with `Allow`, automatic `OPTIONS` and CORS preflights, unless one of your routes serves that
-  method on that path. A CORS preflight or another method on an unknown URL, and a plain `GET` of
-  a WebSocket gateway path (`426` otherwise), reach your handler.
+  (Fastify's default `404` when you set none). A request that no route matches on the path of a
+  Znight route is still answered by Znight: `405` with `Allow`, automatic `OPTIONS` and CORS
+  preflights. Znight adds no route for that, but an `onRequest` hook to your instance that acts
+  only on the requests Fastify sends to the not-found handler: your routes, wildcards included,
+  keep every request they match. A CORS preflight on an unknown URL and a plain `GET` of a
+  WebSocket gateway path (`426` otherwise) reach your handler.
 - `notFound: 'znight'`: Znight's handler, and an instance that already has one is refused at
   startup with an explicit error.
 
