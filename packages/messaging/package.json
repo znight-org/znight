@@ -97,14 +97,16 @@
   },
   "devDependencies": {
     "@aws-sdk/client-sqs": "3.1164.0",
+    "@google-cloud/pubsub": "6.3.2",
     "@platformatic/kafka": "2.15.0",
+    "@testcontainers/gcloud": "12.2.1",
     "@testcontainers/kafka": "12.2.1",
     "@testcontainers/localstack": "12.2.1",
     "@testcontainers/rabbitmq": "12.2.1",
+    "@znight/compiler": "workspace:*",
     "amqplib": "2.2.1",
     "testcontainers": "12.2.1",
-    "zod": "catalog:",
-    "@znight/compiler": "workspace:*"
+    "zod": "catalog:"
   },
   "znight": {
     "apiVersion": 1,
