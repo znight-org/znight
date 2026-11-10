@@ -118,8 +118,10 @@ function observe(request: InjectRequest, response: InjectResponse): Observed {
     if (typeof value === 'string') headers[name] = value.replace(/;charset=utf-8$/, '')
   }
   // streams have no declared length: servers send them chunked, or with the length when they could
-  // buffer the whole (short) stream at once. Compare the bytes received instead.
-  if (request.url.startsWith('/download/stream/') || request.url.startsWith('/scoped/')) {
+  // buffer the whole (short) stream at once. Compare the bytes received instead. A lazy file loaded as
+  // a stream declares its length, but `Bun.serve()` (Hono on Bun) sends any stream chunked.
+  const streamed = ['/download/stream/', '/scoped/', '/lazy/stream'].some(prefix => request.url.startsWith(prefix))
+  if (streamed && request.method !== 'HEAD') {
     delete headers['content-length']
     headers['received'] = String(response.bytes.byteLength)
   }

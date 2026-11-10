@@ -1,10 +1,11 @@
 /**
  * File downloads (`HttpResponse.file()`): files on disk (sent as lazily read, file-backed `Blob`s:
- * `fs.openAsBlob()`) or `Blob` objects, with `Content-Length`, `Content-Type`, `Last-Modified` /
- * `ETag`, conditional requests (304 / 412), single byte ranges (206 / 416) and RFC 6266
- * `Content-Disposition` headers.
+ * `fs.openAsBlob()`), `Blob` objects or lazy files (metadata known up front, content loaded only when
+ * a body is sent), with `Content-Length`, `Content-Type`, `Last-Modified` / `ETag`, conditional
+ * requests (304 / 412), single byte ranges (206 / 416) and RFC 6266 `Content-Disposition` headers.
  */
 import type { HeaderValue } from './exceptions.ts'
+import type { StreamSource } from './stream.ts'
 
 import { openAsBlob } from 'node:fs'
 import { realpath, stat } from 'node:fs/promises'
@@ -13,6 +14,7 @@ import { fileURLToPath } from 'node:url'
 
 import { HttpException, NotFoundException } from './exceptions.ts'
 import { contentTypeFor, OCTET_STREAM } from './mime.ts'
+import { isStreamSource, toByteStream } from './stream.ts'
 import { emptyRecord } from './utils.ts'
 
 /** How a file is presented to the client (`Content-Disposition`). */
@@ -51,21 +53,71 @@ export interface FileResponseOptions {
 }
 
 /**
- * The body of `HttpResponse.file()`: a file on disk or a `Blob`, resolved by the pipeline when the
- * response is sent (stat, conditional request, range).
+ * What {@link LazyFile.load} returns: the **whole** content, as bytes (`Uint8Array`, any
+ * `ArrayBuffer` view, `ArrayBuffer`), a `Blob`, or a stream source (Web `ReadableStream`, Node.js
+ * `Readable`, async iterable of `Uint8Array` / `string` chunks). The pipeline cuts byte ranges out of it.
+ */
+export type LazyFileContent = Uint8Array | ArrayBufferView | ArrayBuffer | Blob | StreamSource
+
+/**
+ * A file whose metadata is known up front and whose content is loaded only when its bytes are sent:
+ * a row of a database, an object of a storage service. `HttpResponse.file()` evaluates the
+ * preconditions (`If-None-Match`, `If-Modified-Since`, `If-Match`, `If-Unmodified-Since`, `If-Range`)
+ * and the `Range` header from the metadata, and calls {@link load} only for a 200 or 206 response with
+ * a body: never for a 304, a 412, a 416, a `HEAD` request or an empty file.
+ *
+ * ```ts
+ * return HttpResponse.file({
+ *   size: cover.size,
+ *   lastModified: cover.updatedAt,
+ *   type: cover.contentType,
+ *   load: () => this.covers.readBytes(id),
+ * })
+ * ```
+ */
+export interface LazyFile {
+  /** Size of the whole content in bytes (`Content-Length`, ranges); the loaded content must match it. */
+  readonly size: number
+  /**
+   * Entity tag, quoted: `"v42"`, or weak: `W/"v42"` (a weak tag never satisfies `If-Match` nor
+   * `If-Range`). Default: derived from `size` and `lastModified` like for files on disk, none
+   * without `lastModified`.
+   */
+  readonly etag?: string | undefined
+  /** Last modification (`Date` or milliseconds since the epoch): `Last-Modified`, `If-Modified-Since`. */
+  readonly lastModified?: Date | number | undefined
+  /** Media type of the content (the `contentType` option wins over it). */
+  readonly type?: string | undefined
+  /** File name: media type from its extension when `type` is absent, name of `Content-Disposition`. */
+  readonly name?: string | undefined
+  /**
+   * Loads the whole content, at most once per response and only when a body is sent. It runs in the
+   * request (request-scoped providers available); an error (or rejection) answers through the
+   * exception mappers like an error of the handler. A stream it returns is read as the client
+   * receives the data and cancelled when the client disconnects.
+   */
+  load(): LazyFileContent | Promise<LazyFileContent>
+}
+
+/**
+ * The body of `HttpResponse.file()`: a file on disk, a `Blob` or a {@link LazyFile}, resolved by the
+ * pipeline when the response is sent (stat, conditional request, range).
  */
 export class FileBody {
-  /** Path (`string` / `file:` URL) or `Blob` / `File`. */
-  readonly source: string | URL | Blob
+  /** Path (`string` / `file:` URL), `Blob` / `File` or lazy file. */
+  readonly source: string | URL | Blob | LazyFile
   readonly options: FileResponseOptions
 
-  constructor(source: string | URL | Blob, options: FileResponseOptions = {}) {
-    if (typeof source !== 'string' && !(source instanceof URL) && !(source instanceof Blob)) {
-      throw new TypeError('HttpResponse.file() expects a path (string or file: URL), a Blob or a File')
+  constructor(source: string | URL | Blob | LazyFile, options: FileResponseOptions = {}) {
+    if (typeof source !== 'string' && (source === null || typeof source !== 'object')) {
+      throw new TypeError(
+        'HttpResponse.file() expects a path (string or file: URL), a Blob, a File or a lazy file ({ size, load() })',
+      )
     }
     if (source instanceof URL && source.protocol !== 'file:') {
       throw new TypeError(`HttpResponse.file() expects a file: URL (received ${source.protocol})`)
     }
+    if (typeof source === 'object' && !(source instanceof URL) && !(source instanceof Blob)) checkLazyFile(source)
     const disposition = options.disposition
     if (disposition !== undefined && disposition !== 'attachment' && disposition !== 'inline') {
       throw new TypeError(`Invalid disposition ${JSON.stringify(disposition)} (expected "attachment" or "inline")`)
@@ -76,6 +128,31 @@ export class FileBody {
     this.source = source
     this.options = options
   }
+}
+
+/** A quoted entity tag, strong or weak (RFC 9110 §8.8.3, visible ASCII only). */
+const ENTITY_TAG = /^(?:W\/)?"[\x21\x23-\x7e]*"$/
+
+/** @throws TypeError for an invalid lazy file. */
+function checkLazyFile(file: LazyFile): void {
+  if (typeof file.load !== 'function') {
+    throw new TypeError('A lazy file passed to HttpResponse.file() needs a load() function')
+  }
+  if (!Number.isSafeInteger(file.size) || file.size < 0) {
+    throw new TypeError(`Invalid lazy file size ${String(file.size)} (expected a non-negative integer)`)
+  }
+  const { etag, lastModified, type, name } = file
+  if (etag !== undefined && (typeof etag !== 'string' || !ENTITY_TAG.test(etag))) {
+    throw new TypeError(`Invalid lazy file etag ${JSON.stringify(etag)} (expected a quoted entity tag: "v1" or W/"v1")`)
+  }
+  if (
+    lastModified !== undefined &&
+    !Number.isFinite(lastModified instanceof Date ? lastModified.getTime() : lastModified)
+  ) {
+    throw new TypeError('Invalid lazy file lastModified (expected a valid Date or a number of milliseconds)')
+  }
+  if (type !== undefined && typeof type !== 'string') throw new TypeError('Invalid lazy file type (expected a string)')
+  if (name !== undefined && typeof name !== 'string') throw new TypeError('Invalid lazy file name (expected a string)')
 }
 
 /** Whether `value` is a {@link FileBody}. */
@@ -96,9 +173,10 @@ export interface ResolvedFile {
   readonly headers: Record<string, HeaderValue>
   /**
    * The bytes to send, as a `Blob` (file-backed for files on disk: read lazily, sent with its size;
-   * `sendfile` on Bun); `null` for 304, HEAD requests and empty files.
+   * `sendfile` on Bun) or a stream (a lazy file loaded as a stream); `null` for 304, HEAD requests
+   * and empty files.
    */
-  readonly body: Blob | null
+  readonly body: Blob | ReadableStream<Uint8Array> | null
 }
 
 /** Attempts to open a file whose size changes between `stat` and `openAsBlob` (concurrent writes). */
@@ -107,15 +185,19 @@ const OPEN_ATTEMPTS = 3
 /**
  * Resolves a file response for a request: opens the file, evaluates the preconditions
  * (`If-Match`, `If-Unmodified-Since` → 412; `If-None-Match`, `If-Modified-Since` → 304) and the
- * `Range` header (single range, honouring `If-Range`; 416 when unsatisfiable).
+ * `Range` header (single range, honouring `If-Range`; 416 when unsatisfiable). A lazy file is
+ * loaded after them, only when a body is sent.
  *
  * @throws NotFoundException (404) when the file does not exist, is not a regular file or escapes `root`;
- *   HttpException 412 / 416.
+ *   HttpException 412 / 416; the error of `LazyFile.load()`; an `Error` when the loaded content
+ *   does not have the declared size.
  */
 export function resolveFile(file: FileBody, request: FileRequest): Promise<ResolvedFile> {
-  if (!(file.source instanceof Blob)) return resolvePath(file, request)
+  const source = file.source
+  if (typeof source === 'string' || source instanceof URL) return resolvePath(file, request)
+  if (!(source instanceof Blob)) return resolveLazy(file, source, request)
   try {
-    return Promise.resolve(resolveBlob(file, file.source, request))
+    return Promise.resolve(resolveBlob(file, source, request))
   } catch (error) {
     return Promise.reject(error)
   }
@@ -169,6 +251,97 @@ function resolveBlob(file: FileBody, blob: Blob, request: FileRequest): Resolved
   return { ...plan, body: plan.body === undefined ? null : slice(blob, plan.body) }
 }
 
+async function resolveLazy(file: FileBody, source: LazyFile, request: FileRequest): Promise<ResolvedFile> {
+  const size = source.size
+  const lastModified = source.lastModified
+  const plan = planResponse(
+    {
+      size,
+      lastModified: lastModified instanceof Date ? lastModified.getTime() : lastModified,
+      etag: source.etag,
+      contentType: contentTypeOf(file.options, source.type, source.name),
+      disposition: dispositionOf(file.options, source.name),
+    },
+    request,
+  )
+  if (plan.body === undefined) return { ...plan, body: null }
+  return { ...plan, body: lazyBody(await source.load(), plan.body, size) }
+}
+
+/** The bytes `range` of the loaded content of a lazy file of `size` bytes. */
+function lazyBody(content: unknown, range: ByteRange, size: number): Blob | ReadableStream<Uint8Array> {
+  let blob: Blob | undefined
+  if (content instanceof Blob) blob = content
+  else if (content instanceof ArrayBuffer) blob = new Blob([content])
+  else if (ArrayBuffer.isView(content)) {
+    blob = new Blob([new Uint8Array(content.buffer as ArrayBuffer, content.byteOffset, content.byteLength)])
+  }
+  if (blob !== undefined) {
+    if (blob.size !== size) {
+      throw new Error(`The lazy file loaded ${blob.size} bytes, but its declared size is ${size} bytes`)
+    }
+    return slice(blob, range)
+  }
+  if (isStreamSource(content)) return sliceStream(toByteStream(content), range, size)
+  throw new TypeError(
+    `load() of a lazy file must return bytes, a Blob or a stream (received ${content === null ? 'null' : typeof content})`,
+  )
+}
+
+/**
+ * The bytes `range` of a stream of `size` bytes: the bytes before the range are read and dropped,
+ * the source is cancelled once the range was sent (or when the consumer cancels). The stream fails
+ * when the source ends early or produces more than `size` bytes.
+ */
+function sliceStream(source: ReadableStream<Uint8Array>, range: ByteRange, size: number): ReadableStream<Uint8Array> {
+  const reader = source.getReader()
+  const toEnd = range.end === size - 1
+  let position = 0
+  const stop = (reason?: unknown): void => {
+    reader.cancel(reason).catch(() => undefined)
+  }
+  return new ReadableStream<Uint8Array>(
+    {
+      async pull(controller) {
+        for (;;) {
+          const result = await reader.read()
+          if (result.done === true) {
+            // only reached when the range runs to the end: its last read confirms the size
+            if (position === size) controller.close()
+            else
+              controller.error(
+                new Error(`The lazy file ended after ${position} bytes, but its declared size is ${size} bytes`),
+              )
+            return
+          }
+          const chunk = result.value
+          const offset = position
+          position += chunk.byteLength
+          if (position > size) {
+            const error = new Error(`The lazy file produced more than its declared size of ${size} bytes`)
+            controller.error(error)
+            stop(error)
+            return
+          }
+          if (position <= range.start) continue
+          const from = Math.max(range.start - offset, 0)
+          const to = Math.min(range.end + 1 - offset, chunk.byteLength)
+          controller.enqueue(from === 0 && to === chunk.byteLength ? chunk : chunk.subarray(from, to))
+          if (!toEnd && position > range.end) {
+            controller.close()
+            stop()
+          }
+          return
+        }
+      },
+      cancel(reason) {
+        return reader.cancel(reason)
+      },
+    },
+    { highWaterMark: 0 },
+  )
+}
+
 /** The bytes `start..end` (inclusive) of a blob (the blob itself when complete). */
 function slice(blob: Blob, { start, end }: ByteRange): Blob {
   return start === 0 && end === blob.size - 1 ? blob : blob.slice(start, end + 1)
@@ -219,6 +392,8 @@ interface Representation {
   readonly size: number
   /** Milliseconds since the epoch, when known. */
   readonly lastModified: number | undefined
+  /** Entity tag given by the application (lazy files); derived from size and date otherwise. */
+  readonly etag?: string | undefined
   readonly contentType: string
   readonly disposition: string | undefined
 }
@@ -232,7 +407,7 @@ interface Plan {
 
 function planResponse(info: Representation, request: FileRequest): Plan {
   const validators = emptyRecord<HeaderValue>()
-  const etag = info.lastModified === undefined ? undefined : entityTag(info.size, info.lastModified)
+  const etag = info.etag ?? (info.lastModified === undefined ? undefined : entityTag(info.size, info.lastModified))
   const seconds = info.lastModified === undefined ? undefined : Math.floor(info.lastModified / 1000)
   if (etag !== undefined) validators['etag'] = etag
   if (seconds !== undefined) validators['last-modified'] = new Date(seconds * 1000).toUTCString()
@@ -293,7 +468,10 @@ function evaluatePreconditions(
   return undefined
 }
 
-/** Whether an `If-Match` / `If-None-Match` list matches `etag` (`*` matches any existing file). */
+/**
+ * Whether an `If-Match` / `If-None-Match` list matches `etag` (`*` matches any existing file). The
+ * strong comparison never matches a weak tag.
+ */
 function matchesEntityTag(header: string, etag: string | undefined, strong: boolean): boolean {
   if (header.trim() === '*') return true
   if (etag === undefined) return false
@@ -301,7 +479,7 @@ function matchesEntityTag(header: string, etag: string | undefined, strong: bool
     const candidate = raw.trim()
     if (candidate === '') continue
     if (strong) {
-      if (candidate === etag) return true
+      if (candidate === etag && !isWeak(etag)) return true
     } else if (stripWeak(candidate) === stripWeak(etag)) {
       return true
     }
@@ -309,8 +487,12 @@ function matchesEntityTag(header: string, etag: string | undefined, strong: bool
   return false
 }
 
+function isWeak(tag: string): boolean {
+  return tag.startsWith('W/')
+}
+
 function stripWeak(tag: string): string {
-  return tag.startsWith('W/') ? tag.slice(2) : tag
+  return isWeak(tag) ? tag.slice(2) : tag
 }
 
 /** Seconds of an HTTP date, `undefined` when absent or invalid. */
@@ -334,7 +516,7 @@ function requestedRange(
     const isTag = ifRange.startsWith('"') || ifRange.startsWith('W/')
     // an entity tag must match strongly; a date must be the exact modification date
     const fresh = isTag
-      ? etag !== undefined && ifRange === etag
+      ? etag !== undefined && !isWeak(etag) && ifRange === etag
       : seconds !== undefined && httpDate(ifRange) === seconds
     if (!fresh) return undefined
   }

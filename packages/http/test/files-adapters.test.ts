@@ -38,6 +38,9 @@ function rawMultipart(boundary: string, parts: readonly string[]): string {
 
 let dir: FilesDir
 
+/** Whether the Hono adapter serves with `Bun.serve()` (tests running on Bun). */
+const BUN_SERVE = typeof (globalThis as { Bun?: unknown }).Bun !== 'undefined'
+
 beforeAll(() => {
   dir = createFilesDir()
   filesState.dir = dir
@@ -65,6 +68,8 @@ for (const adapter of ADAPTERS) {
         beforeAll(() => {
           send = transport.create(app.http)
         })
+        /** Whether streamed bodies reach the client chunked: `Bun.serve()` ignores their `Content-Length`. */
+        const chunkedStreams = adapter.name === 'hono' && transport.name === 'fetch' && BUN_SERVE
 
         describe('uploads', () => {
           it('injects the file and the validated text fields', async () => {
@@ -429,7 +434,7 @@ for (const adapter of ADAPTERS) {
               { 'if-none-match': LAZY_ETAG },
               { 'if-modified-since': LAZY_MODIFIED.toUTCString() },
               { 'if-none-match': LAZY_ETAG, range: 'bytes=0-4' },
-            ]) {
+            ] as Record<string, string>[]) {
               for (const kind of ['bytes', 'blob', 'stream']) {
                 const { res, loads: count } = await loads({ method: 'GET', url: `/lazy/${kind}`, headers })
                 expect({ kind, headers, status: res.status, loads: count }).toEqual({
@@ -449,12 +454,15 @@ for (const adapter of ADAPTERS) {
 
           it('loads the content once for 200 and 206', async () => {
             for (const kind of ['bytes', 'blob', 'stream']) {
+              // Bun.serve() (Hono on Bun) sends a stream chunked, whatever its Content-Length, unless it
+              // could read the whole stream at once (a short range)
+              const length = (value: string) => (chunkedStreams && kind === 'stream' ? undefined : value)
               const full = await loads({ method: 'GET', url: `/lazy/${kind}` })
               expect({ kind, status: full.res.status, loads: full.loads }).toEqual({ kind, status: 200, loads: 1 })
               expect(full.res.body).toBe('0123456789'.repeat(30))
+              expect(full.res.headers['content-length']).toBe(length('300') as string)
               expect(full.res.headers).toMatchObject({
                 'content-type': 'text/plain; charset=utf-8',
-                'content-length': '300',
                 'accept-ranges': 'bytes',
                 etag: LAZY_ETAG,
                 'last-modified': 'Mon, 06 May 2024 07:08:09 GMT',
@@ -467,7 +475,7 @@ for (const adapter of ADAPTERS) {
               })
               expect(partial.res.body).toBe('0123456789')
               expect(partial.res.headers['content-range']).toBe('bytes 60-69/300')
-              expect(partial.res.headers['content-length']).toBe('10')
+              expect([length('10'), '10']).toContain(partial.res.headers['content-length'] as string)
             }
           })
 
@@ -544,7 +552,8 @@ for (const adapter of ADAPTERS) {
       const port = app.http.address?.port as number
       let received = false
       const request = http.get({ host: '127.0.0.1', port, path: '/lazy/endless' }, response => {
-        expect(response.headers['content-length']).toBe(String(1024 * 1024 * 1024))
+        const length = adapter.name === 'hono' && BUN_SERVE ? undefined : String(1024 * 1024 * 1024)
+        expect(response.headers['content-length']).toBe(length as string)
         response.once('data', () => {
           received = true
           response.pause()

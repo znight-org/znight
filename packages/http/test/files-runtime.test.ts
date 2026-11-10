@@ -78,7 +78,7 @@ for (const runtime of ['node', 'bun']) {
           'accept-ranges': 'bytes',
         },
       })
-      expect(reference.network[20]?.headers['content-length']).toBe('300')
+      expect(reference.network[20]?.headers['received']).toBe('300')
       expect(reference.network[24]?.body).toBe('{"unavailable":true}')
       for (const [adapter, observed] of Object.entries(results)) {
         expect({ adapter, network: observed.network }).toEqual({ adapter, network: reference.network })

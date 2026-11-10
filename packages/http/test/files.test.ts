@@ -399,7 +399,7 @@ describe('resolveFile', () => {
     for (let index = 0; index < 20; index++) {
       const resolved = await resolveFile(new FileBody(dir.sample), get())
       expect(resolved.body).toBeInstanceOf(Blob)
-      expect(resolved.body?.size).toBe(300)
+      expect((resolved.body as Blob).size).toBe(300)
       if (index % 2 === 0) unread.push(resolved)
       else await text(resolved)
     }
