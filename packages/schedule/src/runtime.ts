@@ -847,7 +847,7 @@ export class ScheduleRuntime {
         trigger,
         ...this.#errorContext(event.error),
       })
-      this.#report(job, run.runId, trigger, event.error, context, run.aborted)
+      if (!isRequestedAbort(run, event.error)) this.#report(job, run.runId, trigger, event.error, context, run.aborted)
     }
     if (after !== undefined) {
       logger.error(`Schedule: error after the run ${run.runId} of job '${job.name}'`, { job: job.name, err: after })
@@ -1412,4 +1412,18 @@ function errorMessage(error: unknown): string {
   } catch {
     return 'unknown error'
   }
+}
+
+/**
+ * Whether a run failed because it honoured an abort the application asked for (`shutdown`, or
+ * `remove(name, { abort: true })`): its error is the abort reason of `ctx.signal`, or an `AbortError`
+ * caused by it (`fetch()`, `timers/promises`). Not an error to report; a `timeout` or `lock-lost`
+ * abort still is.
+ */
+function isRequestedAbort(run: RunRecord, error: unknown): boolean {
+  if (run.aborted !== 'shutdown' && run.aborted !== 'removed') return false
+  const reason: unknown = run.controller.signal.reason
+  if (error === reason) return true
+  const abort = error as { readonly name?: unknown; readonly cause?: unknown } | null
+  return typeof abort === 'object' && abort?.name === 'AbortError' && abort.cause === reason
 }

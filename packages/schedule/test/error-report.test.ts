@@ -1,11 +1,15 @@
 /**
  * The `error:report` hook: one report per failed run (the job threw, a wrapper failed before it,
- * the lock store failed), none for completed, skipped or refused occurrences.
+ * the lock store failed), none for completed, skipped or refused occurrences, nor for a run that
+ * honoured an abort the application asked for (shutdown, removal).
  */
 import type { Application, ErrorReportEvent } from '@znight/core'
 import type { JobContext } from '../src/index.ts'
 
-import { boot, metadataWith } from './helpers.ts'
+import { setTimeout as sleep } from 'node:timers/promises'
+
+import { JobAbortedError } from '../src/index.ts'
+import { aborted, boot, metadataWith } from './helpers.ts'
 import { describe, expect, test as it } from 'bun:test'
 
 function record(booted: { readonly app: Application }): ErrorReportEvent[] {
@@ -88,5 +92,76 @@ describe('error:report', () => {
     expect(booted.registry.get('ok')?.lastRun?.outcome).toBe('completed')
     expect(booted.registry.get('vetoed')?.lastRun?.outcome).toBe('skipped')
     expect(reports).toEqual([])
+  })
+
+  it('does not report a run that honours the abort of a shutdown or a removal', async () => {
+    const booted = await boot({
+      metadata: metadataWith([
+        {
+          name: 'poller',
+          kind: 'cron',
+          cron: '* * * * *',
+          // rejects with an AbortError whose cause is the abort reason, like fetch() on Node.js
+          run: ctx => sleep(60_000, undefined, { signal: ctx.signal }),
+        },
+        {
+          name: 'monitor',
+          kind: 'cron',
+          cron: '* * * * *',
+          run: async ctx => {
+            await aborted(ctx.signal)
+            ctx.signal.throwIfAborted()
+          },
+        },
+      ]),
+    })
+    const reports = record(booted)
+    const runs: string[] = []
+    booted.app.hooks.on('schedule:run', event => {
+      runs.push(`${event.job}: ${event.outcome} (${event.aborted})`)
+    })
+    await booted.clock.advance('1m')
+    booted.registry.remove('monitor', { abort: true })
+    await booted.app.stop()
+    expect(runs.sort()).toEqual(['monitor: failed (removed)', 'poller: failed (shutdown)'])
+    // still logged: only the report is left out
+    expect(booted.logs.messages('error')).toContain("Schedule: job 'monitor' failed")
+    expect(reports).toEqual([])
+  })
+
+  it('still reports a timeout abort, and another error after a shutdown abort', async () => {
+    const failure = new Error('connection reset')
+    const booted = await boot({
+      metadata: metadataWith([
+        {
+          name: 'slow',
+          kind: 'cron',
+          cron: '* * * * *',
+          maxDuration: 1000,
+          run: async ctx => {
+            await aborted(ctx.signal)
+            ctx.signal.throwIfAborted()
+          },
+        },
+        {
+          name: 'flaky',
+          kind: 'cron',
+          cron: '* * * * *',
+          run: async ctx => {
+            await aborted(ctx.signal)
+            throw failure
+          },
+        },
+      ]),
+    })
+    const reports = record(booted)
+    await booted.clock.advance('61s')
+    await booted.app.stop()
+    expect(reports.map(report => [report.operation, report.tags['aborted']])).toEqual([
+      ['slow', 'timeout'],
+      ['flaky', 'shutdown'],
+    ])
+    expect(reports[0]?.error).toBeInstanceOf(JobAbortedError)
+    expect(reports[1]?.error).toBe(failure)
   })
 })

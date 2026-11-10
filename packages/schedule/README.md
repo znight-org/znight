@@ -469,7 +469,10 @@ Error reporters listen to the `error:report` hook of `@znight/core` (see the
 [Sentry recipe](https://github.com/znight-org/znight/blob/main/docs/guide/plugins.md#report-errors-error-report)): the scheduler emits it, when it has listeners, once per failed run (the job
 threw, a wrapper failed before it, the lock store failed), with `source: 'schedule'`, the job name as
 `operation`, the tags `job`, `kind`, `host`, `method`, `runId`, `trigger` and `aborted`, and the
-`JobContext` (`undefined` for a lock store failure).
+`JobContext` (`undefined` for a lock store failure). A run that honours an abort the application
+asked for (a shutdown, `remove(name, { abort: true })`), failing with the reason of `ctx.signal` or an
+`AbortError` caused by it (`fetch()`, `timers/promises`), is logged but not reported; a `timeout` or
+`lock-lost` abort is.
 
 ## Testing
 
