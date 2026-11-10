@@ -13,7 +13,10 @@
  * loads its config natively (`--config-loader native`, so that the condition applies), and the
  * application runs on Node.js (`NODE_OPTIONS=--conditions=@znight/source`).
  *
- * Set `ZNIGHT_CLI_E2E_KEEP=1` to keep the application for inspection.
+ * A second, smaller application (`--openapi-ui none`) is built and started to check that it serves
+ * `/openapi.json` and no API reference page at `/docs`.
+ *
+ * Set `ZNIGHT_CLI_E2E_KEEP=1` to keep the applications for inspection.
  */
 import { type ChildProcess, spawn } from 'node:child_process'
 import {
@@ -73,8 +76,8 @@ function run(
 }
 
 /** `znight <args>` on Bun, the CLI and the workspace packages loaded from their sources. */
-function znight(args: readonly string[], env: Record<string, string> = {}): Promise<Result> {
-  return run('bun', [SOURCE, CLI, ...args], { env: { NODE_OPTIONS: SOURCE, ...env } })
+function znight(args: readonly string[], env: Record<string, string> = {}, cwd = APP): Promise<Result> {
+  return run('bun', [SOURCE, CLI, ...args], { cwd, env: { NODE_OPTIONS: SOURCE, ...env } })
 }
 
 interface LongRunning {
@@ -84,9 +87,9 @@ interface LongRunning {
 }
 
 /** A long-running `znight <args>` process. */
-function startZnight(args: readonly string[], env: Record<string, string>): LongRunning {
+function startZnight(args: readonly string[], env: Record<string, string>, cwd = APP): LongRunning {
   const child = spawn('bun', [SOURCE, CLI, ...args], {
-    cwd: APP,
+    cwd,
     env: { ...process.env, NO_COLOR: '1', NODE_OPTIONS: SOURCE, ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
@@ -160,9 +163,9 @@ function greetOverWebSocket(url: string): Promise<unknown> {
   })
 }
 
-/** Links a package into the application's `node_modules`. */
-function link(name: string, target: string): void {
-  const path = join(APP, 'node_modules', name)
+/** Links a package into the `node_modules` of the application in `app`. */
+function link(name: string, target: string, app: string): void {
+  const path = join(app, 'node_modules', name)
   mkdirSync(dirname(path), { recursive: true })
   symlinkSync(realpathSync(target), path, 'dir')
 }
@@ -216,48 +219,40 @@ const THIRD_PARTY: readonly (readonly [name: string, from: string])[] = [
   ['pino-pretty', 'observability'],
 ]
 
+/**
+ * Creates the application `name` in `app` with `znight new --yes <args>`, links the workspace and
+ * third-party packages into its `node_modules`, and writes the type-check and Vite settings of the tests.
+ */
+async function scaffold(app: string, name: string, args: readonly string[]): Promise<void> {
+  rmSync(app, { recursive: true, force: true })
+  mkdirSync(dirname(app), { recursive: true })
+  const created = await run(
+    'bun',
+    [SOURCE, CLI, 'new', name, '--yes', '--pm', 'bun', ...args, '--no-install', '--no-git', '--dir', app],
+    { cwd: dirname(app) },
+  )
+  expectSuccess(created, 'znight new')
+  for (const pkg of WORKSPACE_PACKAGES) {
+    link(`@znight/${pkg}`, join(REPO, 'packages', pkg), app)
+  }
+  for (const [pkg, from] of THIRD_PARTY) link(pkg, packageDirectory(pkg, join(REPO, 'packages', from)), app)
+  link('vite', packageDirectory('vite', CLI_ROOT), app)
+  // tsc resolves the workspace packages to their sources, like the tests of the repository
+  const tsconfig = readFileSync(join(app, 'tsconfig.json'), 'utf8').replace(
+    '"noEmit": true',
+    '"noEmit": true,\n    "customConditions": ["@znight/source"]',
+  )
+  writeFileSync(join(app, 'tsconfig.json'), tsconfig)
+  // the linked workspace packages stay external in the bundle (like dependencies installed from npm)
+  const external = `ssr: { external: ${JSON.stringify([...WORKSPACE_PACKAGES.map(pkg => `@znight/${pkg}`), ...THIRD_PARTY.map(([pkg]) => pkg)])} }`
+  writeFileSync(
+    join(app, VITE_CONFIG),
+    `import { mergeConfig } from 'vite'\nimport base from './vite.config.ts'\n\nexport default mergeConfig(base, { ${external} })\n`,
+  )
+}
+
 describe.skipIf(!enabled)('scaffolded application (ZNIGHT_CLI_E2E=1)', () => {
-  beforeAll(async () => {
-    rmSync(APP, { recursive: true, force: true })
-    mkdirSync(dirname(APP), { recursive: true })
-    const created = await run(
-      'bun',
-      [
-        SOURCE,
-        CLI,
-        'new',
-        'e2e-app',
-        '--yes',
-        '--pm',
-        'bun',
-        '--features',
-        'all',
-        '--no-install',
-        '--no-git',
-        '--dir',
-        APP,
-      ],
-      { cwd: dirname(APP) },
-    )
-    expectSuccess(created, 'znight new')
-    for (const name of WORKSPACE_PACKAGES) {
-      link(`@znight/${name}`, join(REPO, 'packages', name))
-    }
-    for (const [name, from] of THIRD_PARTY) link(name, packageDirectory(name, join(REPO, 'packages', from)))
-    link('vite', packageDirectory('vite', CLI_ROOT))
-    // tsc resolves the workspace packages to their sources, like the tests of the repository
-    const tsconfig = readFileSync(join(APP, 'tsconfig.json'), 'utf8').replace(
-      '"noEmit": true',
-      '"noEmit": true,\n    "customConditions": ["@znight/source"]',
-    )
-    writeFileSync(join(APP, 'tsconfig.json'), tsconfig)
-    // the linked workspace packages stay external in the bundle (like dependencies installed from npm)
-    const external = `ssr: { external: ${JSON.stringify([...WORKSPACE_PACKAGES.map(name => `@znight/${name}`), ...THIRD_PARTY.map(([name]) => name)])} }`
-    writeFileSync(
-      join(APP, VITE_CONFIG),
-      `import { mergeConfig } from 'vite'\nimport base from './vite.config.ts'\n\nexport default mergeConfig(base, { ${external} })\n`,
-    )
-  }, TIMEOUT)
+  beforeAll(() => scaffold(APP, 'e2e-app', ['--features', 'all']), TIMEOUT)
 
   afterAll(() => {
     if (process.env['ZNIGHT_CLI_E2E_KEEP'] !== '1') rmSync(APP, { recursive: true, force: true })
@@ -489,6 +484,50 @@ describe.skipIf(!enabled)('scaffolded application (ZNIGHT_CLI_E2E=1)', () => {
         dev.child.kill('SIGINT')
       }
       expect(await dev.exit).toBe(0)
+    },
+    TIMEOUT,
+  )
+})
+
+describe.skipIf(!enabled)('scaffolded application without an API reference UI (--openapi-ui none)', () => {
+  const app = `${APP}-no-ui`
+
+  beforeAll(
+    () => scaffold(app, 'e2e-no-ui', ['--adapter', 'node', '--features', 'openapi', '--openapi-ui', 'none']),
+    TIMEOUT,
+  )
+
+  afterAll(() => {
+    if (process.env['ZNIGHT_CLI_E2E_KEEP'] !== '1') rmSync(app, { recursive: true, force: true })
+  })
+
+  it(
+    'serves /openapi.json and no page at /docs',
+    async () => {
+      expectSuccess(
+        await znight(['build', '--config', VITE_CONFIG, '--config-loader', 'native'], {}, app),
+        'znight build',
+      )
+      const port = await freePort()
+      const server = startZnight(['start', '--runtime', 'node'], { PORT: String(port), LOG_LEVEL: 'warn' }, app)
+      const base = `http://127.0.0.1:${port}`
+      try {
+        const openapi = await fetchWhenUp(`${base}/openapi.json`, server)
+        expect(openapi.status).toBe(200)
+        expect(((await openapi.json()) as { info?: object }).info).toEqual({
+          title: 'e2e-no-ui',
+          description: 'The HTTP API of e2e-no-ui.',
+          version: '1.0.0',
+        })
+        // OpenApiPlugin.configure() without ui: no reference page and no asset route
+        expect((await fetch(`${base}/docs`)).status).toBe(404)
+        expect((await fetch(`${base}/docs/_assets/index.js`)).status).toBe(404)
+      } catch (error) {
+        throw new Error(`${String(error)}\n--- znight start output ---\n${server.output()}`)
+      } finally {
+        server.child.kill('SIGTERM')
+      }
+      expect(await server.exit).toBe(0)
     },
     TIMEOUT,
   )
