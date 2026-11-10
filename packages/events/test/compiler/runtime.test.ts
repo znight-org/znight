@@ -2,7 +2,7 @@
  * Runtime behaviour on a compiled application (RFC 0011 §5.7–§5.13): errors of inline and detached
  * listeners, `emit()`, `onError`, hooks, `recordEvents()`, lifecycle errors and the drain on stop.
  */
-import type { EventListenerEvent, EventPublishEvent, Plugin, ZnightMetadata } from '@znight/core'
+import type { ErrorReportEvent, EventListenerEvent, EventPublishEvent, Plugin, ZnightMetadata } from '@znight/core'
 import type { EventErrorInfo } from '../../src/index.ts'
 
 import { Application, silentLogger, ZnightError } from '@znight/core'
@@ -200,6 +200,55 @@ describe('hooks', () => {
     expect(listeners.map(l => [l.listener, l.detached, l.error instanceof mod.DomainError])).toEqual([
       ['First.run', false, true],
     ])
+  })
+})
+
+describe('error:report', () => {
+  async function reporting() {
+    const plugin = EventsPlugin.configure({ onError: () => undefined })
+    const test = await TestApp.create({ metadata, plugins: [plugin], logger: silentLogger })
+    const reports: ErrorReportEvent[] = []
+    test.app.hooks.on('error:report', report => {
+      reports.push(report)
+    })
+    return { plugin, test, reports, publisher: test.app.container.get(EventPublisher) }
+  }
+
+  it('reports a detached listener failure once, even with an onError handler', async () => {
+    mod.log.length = 0
+    const { plugin, test, reports, publisher } = await reporting()
+    await using _ = test
+    const event = new mod.Boom('detached')
+    await publisher.publish(event)
+    await plugin.idle()
+    expect(reports).toHaveLength(1)
+    const report = reports[0] as ErrorReportEvent
+    expect((report.error as Error).message).toBe('detached failed')
+    expect(report.source).toBe('events')
+    expect(report.operation).toBe('Boom Later.fail')
+    expect(report.requestId).toBeUndefined()
+    expect(report.tags).toEqual({ event: 'Boom', listener: 'Later.fail', detached: true, mode: 'publish' })
+    expect(report.context).toBe(event)
+  })
+
+  it('reports the inline failure of emit(), not the inline failure of publish() (its caller gets it)', async () => {
+    mod.log.length = 0
+    const { plugin, test, reports, publisher } = await reporting()
+    await using _ = test
+    expect(await publisher.publish(new mod.Boom('inline')).catch((error: unknown) => error)).toBeInstanceOf(
+      mod.DomainError,
+    )
+    await plugin.idle()
+    expect(reports).toEqual([])
+    publisher.emit(new mod.Boom('inline'))
+    await new Promise(resolve => setImmediate(resolve))
+    await plugin.idle()
+    expect(reports.map(report => [report.operation, report.tags])).toEqual([
+      ['Boom First.run', { event: 'Boom', listener: 'First.run', detached: false, mode: 'emit' }],
+    ])
+    await publisher.publish(new mod.Boom('none'))
+    await plugin.idle()
+    expect(reports).toHaveLength(1)
   })
 })
 

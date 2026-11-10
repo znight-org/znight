@@ -1410,6 +1410,14 @@ of the HTTP span), the metrics `graphql_operations_total{type, name, outcome}` a
 then `_OTHER`), and one log entry per operation with `logging: { graphql: true }` (off by default).
 See [GraphQL operation spans](../observability/README.md#graphql-operation-spans).
 
+Error reporters listen to the `error:report` hook of `@znight/core` (see the
+[Sentry recipe](https://github.com/znight-org/znight/blob/main/docs/guide/plugins.md#report-errors-error-report)): the plugin emits it, when it has listeners, for what it logs at `error`: each
+unexpected (masked) error and the `cause` of a shown `GraphQLException`, once per result, with
+`source: 'graphql'`, `operation` (`query Shelf`), `requestId`, the tags `operationType`,
+`operationName`, `transport`, `coordinate`, `path` and `code`, and the `GraphQLContext`. Expected
+errors (`GraphQLException`, mapped errors, 4xx `HttpException`s) and rejected operations are not
+reported, nor errors thrown outside the engine by a driver.
+
 ## Performance
 
 The plugin decides everything it can at boot: the schema is built from data, singleton resolvers

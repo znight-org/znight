@@ -157,6 +157,12 @@ events.failures() // listeners that threw
 Two core hooks, produced only when observed: `events:publish` (one publication with listeners,
 around its inline phase) and `events:listener` (one listener invocation, inline or detached).
 
+Error reporters listen to the `error:report` hook (see the [Sentry recipe](https://github.com/znight-org/znight/blob/main/docs/guide/plugins.md#report-errors-error-report)): the plugin emits
+it, when it has listeners, for each error of a detached listener or of `emit()`, whatever `onError`
+does, with `source: 'events'`, `operation` (`UserCreated WelcomeMail.send`), the tags `event`,
+`listener`, `detached` and `mode`, and the published object. An inline error of `publish()` is not
+reported: it rejects `publish()`, and the caller (a request, a delivery) reports it.
+
 ## Compiler contract
 
 - Manifest: `compiler: '@znight/events/compiler'`, `provides: EventPublisher → EventsPlugin

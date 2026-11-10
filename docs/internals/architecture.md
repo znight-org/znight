@@ -1611,6 +1611,7 @@ interface ZnightHooks {
   'websocket:connection': WebSocketConnectionEvent // produced by @znight/websocket (opened or closed; emitted only)
   'events:publish': EventPublishEvent // produced by @znight/events (one publication with listeners, RFC 0011)
   'events:listener': EventListenerEvent // produced by @znight/events (one listener invocation, RFC 0011)
+  'error:report': ErrorReportEvent // an error turned into a failure, by the package that failed (emitted only)
 } // augmentable by third-party packages
 class Hooks {
   on<K>(name: K, listener: (event) => unknown): () => void
@@ -1622,7 +1623,7 @@ class Hooks {
 }
 ```
 
-- The nine hooks and their event types live in `@znight/core`, so producers and observers share
+- The ten hooks and their event types live in `@znight/core`, so producers and observers share
   them without depending on each other. Event shapes:
   - `HttpRequestEvent`: `method`, `path`, `route` (pattern, `undefined` when unmatched),
     `requestId`, `headers`, `context` (`HttpContext`), `startTime`, `responseHeaders` (mutable),
@@ -1665,7 +1666,12 @@ class Hooks {
     the inline phase (§9.8);
   - `EventListenerEvent`: `event`, `payload`, `listener` (`Class.method`), `detached`, `startTime`,
     `error?`. One per listener invocation, inline listeners in the publisher's async context,
-    detached ones in their own scope.
+    detached ones in their own scope;
+  - `ErrorReportEvent`: `error` (what was thrown, not wrapped, except for `lifecycle`), `source`
+    (`http` / `messaging` / `schedule` / `graphql` / `websocket` / `events` / `lifecycle`),
+    `operation` (a name usable as a transaction name), `requestId` (`undefined` outside HTTP, GraphQL
+    and WebSocket), `tags` (flat `string` / `number` / `boolean` values, keys per source below) and
+    `context` (the producer's context object). See "Error reporting" below.
 - Listeners are called synchronously in registration order; a failing listener is logged and never
   affects the emitter. Producers call `run` when there are wrappers and `emit` after it when there
   are listeners.
@@ -1676,6 +1682,39 @@ class Hooks {
   `undefined` for a veto (or for a wrapper that threw before the job), and observers read it as
   `skipped` (`failed` when `next()` rejected).
 - Registration is copy-on-write: emitting allocates nothing.
+
+#### Error reporting (`error:report`)
+
+`error:report` is the cross-cutting hook of error reporters (Sentry, Bugsnag...): every package that
+turns an error into a failure emits it, so that one listener covers every transport.
+
+- Producers MUST emit it only (never `run`), only when it has listeners (`hasListeners`: no event is
+  built otherwise), and once per error they turn into a failure, at the place where they log that
+  error at `error` level: the hook adds no log entry, and `@znight/observability` does not listen to
+  it (no double logging).
+- Expected failures MUST NOT be reported: client errors (HTTP 4xx and validation, refused
+  WebSocket handshakes or messages, rejected GraphQL operations), failed attempts that are retried,
+  failures an application handler settled (`@OnError` returning `'ack'`, an exception mapper answering with its own
+  `HttpResponse` or `Response`), runs that honour an abort the application asked for (shutdown,
+  removal of a job).
+- `error` MUST be the original error: when an exception mapper turns it into another exception,
+  the mapped exception decides whether the failure is expected, the original error is reported.
+- Producers SHOULD emit it in the async context of the failure (request scope, active span) when
+  they have one.
+- A listener that throws is logged like any listener and never affects the producer.
+
+| `source`    | Reported                                                                                                                                                                                                                                                       | `operation`                                                    | `tags`                                                                                         | `context`                                                                  |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `http`      | an error answered with a 5xx (unmapped, a 5xx `HttpException`, the original error of a mapper returning a 5xx exception, an invalid header or cookie), a response stream that failed and an event stream whose source failed or yielded an invalid event       | `GET /users/:id` (path if unmatched)                           | `method`, `path`, `route?`, `handler?` (`Class.method`), `status`                              | `HttpContext`                                                              |
+| `messaging` | a delivery dead-lettered or rejected, whatever its `reason` (`max-attempts`, `non-retryable`, `validation`, `decode`, `no-handler`: a reporter may filter on it), once `@OnError` did not acknowledge it                                                       | `orders order.created` (`queue type`)                          | `queue`, `type?`, `messageId`, `consumer`, `handler?`, `attempt`, `reason`, `deadLetterQueue?` | `InboundMessage`                                                           |
+| `schedule`  | a run with outcome `failed`: the job threw, a wrapper failed before it, or the lock store failed; not a run failing with the abort the application asked for (`shutdown`, `removed`: its error is the reason of `ctx.signal`, or an `AbortError` caused by it) | the job name                                                   | `job`, `kind`, `host?`, `method?`, `runId`, `trigger`, `aborted?`                              | `JobContext` (`undefined` for a lock store failure)                        |
+| `graphql`   | an unexpected (masked) execution error, and the `cause` of a shown `GraphQLException`, once per cause and result                                                                                                                                               | `query Shelf` (`type name?`)                                   | `operationType`, `operationName?`, `transport`, `coordinate?`, `path?`, `code?`                | `GraphQLContext`                                                           |
+| `websocket` | an unexpected failure of a handler (not a `WsException` other than `INTERNAL`, a 4xx `HttpException` or a timeout; for a mapped failure, the `WsException` of the mapper decides, the original error is reported), of `@OnConnect` or of `@OnDisconnect`       | `ChatGateway.send`                                             | `gateway`, `path`, `event?`, `handler`, `connectionId`                                         | `WsMessageContext` (the `WsConnection` for `@OnConnect` / `@OnDisconnect`) |
+| `events`    | an error of a detached listener or of `emit()` (inline errors of `publish()` reject it: its caller reports them), whatever `onError` does                                                                                                                      | `UserCreated WelcomeMail.send`                                 | `event`, `listener?`, `detached`, `mode`                                                       | the published object                                                       |
+| `lifecycle` | a failed `Application.create()` (before the rollback) or `start()`, and each failed shutdown step (before the plugins' `onDispose`)                                                                                                                            | `Application.start()`, the step label (`Plugin "db" onStop()`) | `phase` (`bootstrap` / `start` / `stop`)                                                       | `undefined`                                                                |
+
+Impl.: errors thrown outside the engine by a GraphQL driver (Yoga, an Envelop plugin) and
+`uncaughtException` / `unhandledRejection` are not reported.
 
 ### 8.4 AOP
 
