@@ -1,4 +1,5 @@
 import type { Role } from '../auth/access.js'
+import type { SignInThrottle } from '../security/sign-in-throttle.js'
 import type { Accounts } from './accounts.js'
 import type { Session, SessionCookies } from './session-cookies.js'
 
@@ -44,15 +45,24 @@ export class SessionController {
   constructor(
     private readonly accounts: Accounts,
     private readonly sessions: SessionCookies,
+    private readonly throttle: SignInThrottle,
   ) {}
 
-  /** POST /session: sets the session and CSRF cookies; 401 for any wrong username or password. */
+  /**
+   * POST /session: sets the session and CSRF cookies; 401 for any wrong username or password, 429
+   * once the address spent its budget on the account (see `SignInThrottle`).
+   */
   @Post()
   @Public()
-  @RateLimit({ points: 5, duration: 60 }) // per client address: slows down password guessing
+  @RateLimit({ points: 5, duration: 60 }) // per client address, whatever the account
   @HttpCode(200)
   async signIn(@Body(SignIn) input: SignIn, @Ctx() ctx: HttpContext): Promise<SessionResponse> {
-    const principal = await this.accounts.signIn(input.username, input.password, ctx.signal)
+    const principal = await this.throttle.attempt(
+      input.username,
+      ctx.ip,
+      () => this.accounts.signIn(input.username, input.password, ctx.signal),
+      ctx.signal,
+    )
     if (principal === undefined) throw new UnauthorizedException('Invalid username or password')
     return toResponse(this.sessions.open(ctx, principal))
   }
