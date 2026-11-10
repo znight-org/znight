@@ -160,6 +160,17 @@ letters, a driver option chooses **who retries**, never both layers at once: `'z
 - **Provisioning and tests.** Streams verified (`provision: true` creates them); durable consumers are
   created or updated by the driver, like Kafka consumer groups. Tests run `nats` with `-js` in
   Testcontainers.
+- **As implemented** (`@znight/messaging/nats`). Back-pressure is per process: one fetch at a time
+  asks for at most the free concurrency slots, and the consumer's `max_ack_pending` is left to its
+  configuration (`max_ack_pending = concurrency` would bound every replica of a service together).
+  Durable consumers are created when missing and only verified when they exist (pull, explicit
+  acks, `max_deliver` unlimited or at least the attempts), never updated. Retries always send an
+  explicit `nak` delay (a delay of 0 becomes 1 ms) so that a consumer `backoff` never adds to the
+  `@Retry` delay; `nak` and `term` are followed by a flush. For a consumer with a finite
+  `max_deliver` (set by hand), the driver listens to the `MAX_DELIVERIES` advisories in a queue
+  group and dead-letters the messages JetStream stopped delivering from the stream (releases and
+  expired ack waits spend deliveries too); the dead-letter copies of a stream message share a
+  `Nats-Msg-Id`, so the stream stores one.
 
 ### 4.3 Redis Streams (`/redis`, peer `redis` ^5)
 

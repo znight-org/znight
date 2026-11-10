@@ -1,15 +1,16 @@
 ---
-description: "@znight/messaging - message consumers with typed handlers, retries with backoff and dead-letter queues on RabbitMQ, SQS, Kafka, Google Cloud Pub/Sub or in memory."
+description: "@znight/messaging - message consumers with typed handlers, retries with backoff and dead-letter queues on RabbitMQ, SQS, Kafka, Google Cloud Pub/Sub, NATS JetStream or in memory."
 ---
 
 # @znight/messaging <Badge type="tip" text="available" />
 
 Message consumers for Znight. Consumers are providers whose handlers are analysed by the compiler;
 the `MessagingPlugin` subscribes them through a driver: RabbitMQ, Amazon SQS, Kafka, Google Cloud
-Pub/Sub, or in memory for tests. Runs on Node.js 24+ and Bun 1.3+.
+Pub/Sub, NATS JetStream, or in memory for tests. Runs on Node.js 24+ and Bun 1.3+.
 
 ```sh
-npm install @znight/messaging amqplib   # or @aws-sdk/client-sqs, @platformatic/kafka, @google-cloud/pubsub
+npm install @znight/messaging amqplib   # or @aws-sdk/client-sqs, @platformatic/kafka, @google-cloud/pubsub,
+                                        # @nats-io/jetstream + @nats-io/transport-node
 ```
 
 ::: code-group
@@ -124,13 +125,14 @@ Pub/Sub ordering key, `delay` is not supported by Kafka nor Pub/Sub.
 
 ## Drivers
 
-| Driver               | Import                       | Peer dependency        | Native delayed retries     |
-| -------------------- | ---------------------------- | ---------------------- | -------------------------- |
-| In memory            | `@znight/messaging/memory`   | —                      | in process                 |
-| RabbitMQ             | `@znight/messaging/rabbitmq` | `amqplib`              | TTL + dead-letter exchange |
-| Amazon SQS           | `@znight/messaging/sqs`      | `@aws-sdk/client-sqs`  | visibility timeout         |
-| Kafka                | `@znight/messaging/kafka`    | `@platformatic/kafka`  | retry topic                |
-| Google Cloud Pub/Sub | `@znight/messaging/pubsub`   | `@google-cloud/pubsub` | ack deadline (≤ 600 s)     |
+| Driver               | Import                       | Peer dependency                                 | Native delayed retries     |
+| -------------------- | ---------------------------- | ----------------------------------------------- | -------------------------- |
+| In memory            | `@znight/messaging/memory`   | —                                               | in process                 |
+| RabbitMQ             | `@znight/messaging/rabbitmq` | `amqplib`                                       | TTL + dead-letter exchange |
+| Amazon SQS           | `@znight/messaging/sqs`      | `@aws-sdk/client-sqs`                           | visibility timeout         |
+| Kafka                | `@znight/messaging/kafka`    | `@platformatic/kafka`                           | retry topic                |
+| Google Cloud Pub/Sub | `@znight/messaging/pubsub`   | `@google-cloud/pubsub`                          | ack deadline (≤ 600 s)     |
+| NATS JetStream       | `@znight/messaging/nats`     | `@nats-io/jetstream`, `@nats-io/transport-node` | `nak(delay)`               |
 
 A driver implements
 `MessagingDriver { name, capabilities, connect(), subscribe(), publish(), close(), deadLetterName() }`;
@@ -178,6 +180,46 @@ MessagingPlugin.configure({
   defaults: { retry: { attempts: 5, backoff: 'fixed', delay: 0 } }, // the subscription's maxDeliveryAttempts
 })
 ```
+
+### NATS JetStream
+
+`publish(queue)` publishes to a **subject** (the queue name, or `subjects` to map it) that a
+**stream** must capture, and resolves on the JetStream acknowledgement; the message id is the
+`Nats-Msg-Id`, so the stream deduplicates a message published twice. `@Consumer(queue)` reads a
+**durable pull consumer**, `<durablePrefix>-<queue>`, on the stream capturing the subject.
+
+```ts
+import { MessagingPlugin } from '@znight/messaging'
+import { nats } from '@znight/messaging/nats'
+
+MessagingPlugin.configure({
+  driver: nats({
+    servers: 'nats://localhost:4222',
+    durablePrefix: 'billing', // one prefix per service: each durable receives every message
+    subjects: { orders: 'orders.created' },
+  }),
+})
+```
+
+- **Consumers** are created when missing (explicit acks, `max_deliver: -1`, `ack_wait` 30 s,
+  `consumerConfig` for the rest) and only checked when they exist: a pull consumer with explicit
+  acks whose `max_deliver` allows every attempt, or the boot fails with
+  [`ZNIGHT011`](/reference/error-codes#znight011). `@Consumer({ queue, durable, stream })` names them
+  for one consumer. Streams are only created with `provision: true` (one per missing subject).
+- **Settlements**: a confirmed double ack; retries are `nak(delay)`, and the attempts are JetStream's
+  delivery count; dead letters are a copy on `<queue>.dlq` (deduplicated, then `term()`); releases
+  are `nak()`. The ack wait is extended while a handler runs, and `concurrency` bounds the messages
+  each process fetches.
+- **`max_deliver`**: when a consumer has a finite one, the driver listens to the `MAX_DELIVERIES`
+  advisories and dead-letters the messages JetStream stopped delivering (releases and expired ack
+  waits count as deliveries). Keep `-1` unless you need that bound.
+- **Headers** are NATS headers (trace context included); `Nats-*` headers reach JetStream on publish
+  (`Nats-TTL`...) and are hidden from handlers. No delayed publishing; order per subject with
+  `concurrency: 1`. On stop, the pull request in flight ends, the messages in flight are settled, and
+  the connection the driver created is drained.
+
+Every option is in the
+[package README](https://github.com/znight-org/znight/tree/main/packages/messaging#nats-jetstream).
 
 ### Oracle Cloud Infrastructure Streaming
 
