@@ -98,7 +98,9 @@ consumer retries (`maxAttempts > 1`) and the subscription has none.
 Pub/Sub can own retries (subscription retry policy: exponential backoff between 0 and 600 s) and
 dead letters (dead-letter policy: a topic, 5–100 delivery attempts). Znight retries in process and
 publishes its own dead-letter copies. Stacking both multiplies attempts and splits dead letters
-across two topics. The driver option `retries` picks one owner:
+across two topics. The driver option `retries` picks one owner, and a consumer can override it with
+`@Consumer({ queue, retries })` (the collector of a dead-letter topic, whose subscription has no
+dead-letter policy, keeps `'znight'` under a driver set to `'subscription'`):
 
 - **`'znight'` (default).** `@Retry` applies as with the other drivers (in-process delays, then ack
   deadlines). Dead letters go to the topic `<queue>-dlq` (`deadLetterName`), with the Znight
@@ -159,8 +161,10 @@ Google Cloud tools for delayed work.
   client the driver builds its RPC clients from (`getClientConfig()`); `PUBSUB_PROJECT_ID` gives the
   project. The integration tests run the conformance scenarios against the emulator image with
   Testcontainers (`ZNIGHT_INTEGRATION=1`).
-- **Shutdown.** `cancel()` stops pulling: the outstanding `Pull` (unary calls cannot be cancelled)
-  is abandoned, and the messages it may still return are released at once. In-flight deliveries keep
+- **Shutdown.** `cancel()` stops pulling: the outstanding `Pull` (unary calls cannot be cancelled;
+  it waits at most `pullTimeoutMs`, 30 s by default) is abandoned, and the messages it may still
+  return are released at once (or redelivered after their ack deadline when the client is already
+  closed). In-flight deliveries keep
   their lease until the runtime settles them; `close()` waits for them, and the driver closes the
   clients it created (never those passed in). A long drain needs `shutdown.hookTimeoutMs` above it.
 - **Dependencies.** Optional peer `@google-cloud/pubsub` ^6 (Node.js ≥ 22), imported only by the

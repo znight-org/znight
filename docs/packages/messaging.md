@@ -1,15 +1,15 @@
 ---
-description: "@znight/messaging - message consumers with typed handlers, retries with backoff and dead-letter queues on RabbitMQ, SQS, Kafka or in memory."
+description: "@znight/messaging - message consumers with typed handlers, retries with backoff and dead-letter queues on RabbitMQ, SQS, Kafka, Google Cloud Pub/Sub or in memory."
 ---
 
 # @znight/messaging <Badge type="tip" text="available" />
 
 Message consumers for Znight. Consumers are providers whose handlers are analysed by the compiler;
-the `MessagingPlugin` subscribes them through a driver: RabbitMQ, Amazon SQS, Kafka, or in memory for
-tests. Runs on Node.js 24+ and Bun 1.3+.
+the `MessagingPlugin` subscribes them through a driver: RabbitMQ, Amazon SQS, Kafka, Google Cloud
+Pub/Sub, or in memory for tests. Runs on Node.js 24+ and Bun 1.3+.
 
 ```sh
-npm install @znight/messaging amqplib   # or @aws-sdk/client-sqs, or @platformatic/kafka
+npm install @znight/messaging amqplib   # or @aws-sdk/client-sqs, @platformatic/kafka, @google-cloud/pubsub
 ```
 
 ::: code-group
@@ -85,10 +85,10 @@ Delivery is **at least once**: handlers must be idempotent.
 2. The handler is selected by `message.type`: exact match, then patterns, then the default handler.
 3. Success → **ack**.
 4. A retryable failure with attempts left → **retry** as `attempt + 1`, attempts being counted by the
-   broker (`ApproximateReceiveCount`, `x-delivery-count`) or an `x-znight-attempt` header. Short
+   broker (`ApproximateReceiveCount`, `x-delivery-count`, `deliveryAttempt`) or an `x-znight-attempt` header. Short
    delays are waited in process (within the driver's budget) and the message is then redelivered
    through the broker; longer ones use the broker's native mechanism (SQS visibility timeout,
-   RabbitMQ delay queues, Kafka retry topic). The application refuses to boot
+   RabbitMQ delay queues, Kafka retry topic, Pub/Sub ack deadline). The application refuses to boot
    ([`ZNIGHT011`](/reference/error-codes#znight011)) if a `@Retry` policy cannot be honoured by the
    driver.
 5. A terminal failure — last attempt, `NonRetryableError`, schema failure (`MessageValidationError`),
@@ -119,17 +119,18 @@ export class CheckoutService {
 ```
 
 `publish(queue, payload, { type?, headers?, key?, delay?, id?, contentType? })` resolves with `{ id }`
-once the broker **confirmed** the message; `key` is the Kafka partition key or the SQS FIFO group,
-`delay` is not supported by Kafka.
+once the broker **confirmed** the message; `key` is the Kafka partition key, the SQS FIFO group or the
+Pub/Sub ordering key, `delay` is not supported by Kafka nor Pub/Sub.
 
 ## Drivers
 
-| Driver     | Import                       | Peer dependency       | Native delayed retries     |
-| ---------- | ---------------------------- | --------------------- | -------------------------- |
-| In memory  | `@znight/messaging/memory`   | —                     | in process                 |
-| RabbitMQ   | `@znight/messaging/rabbitmq` | `amqplib`             | TTL + dead-letter exchange |
-| Amazon SQS | `@znight/messaging/sqs`      | `@aws-sdk/client-sqs` | visibility timeout         |
-| Kafka      | `@znight/messaging/kafka`    | `@platformatic/kafka` | retry topic                |
+| Driver               | Import                       | Peer dependency        | Native delayed retries     |
+| -------------------- | ---------------------------- | ---------------------- | -------------------------- |
+| In memory            | `@znight/messaging/memory`   | —                      | in process                 |
+| RabbitMQ             | `@znight/messaging/rabbitmq` | `amqplib`              | TTL + dead-letter exchange |
+| Amazon SQS           | `@znight/messaging/sqs`      | `@aws-sdk/client-sqs`  | visibility timeout         |
+| Kafka                | `@znight/messaging/kafka`    | `@platformatic/kafka`  | retry topic                |
+| Google Cloud Pub/Sub | `@znight/messaging/pubsub`   | `@google-cloud/pubsub` | ack deadline (≤ 600 s)     |
 
 A driver implements
 `MessagingDriver { name, capabilities, connect(), subscribe(), publish(), close(), deadLetterName() }`;
@@ -158,6 +159,22 @@ Driver highlights (details in the
 - **Kafka**: records fetched again after a rebalance are skipped (commits never move back), and the
   retry stream has its own back-pressure, so waiting retries never pause the main topic.
 - **SQS**: the lease extension stops before each settlement, so it never overrides a retry delay.
+- **Pub/Sub**: `publish(queue)` targets a topic and `@Consumer(queue)` a subscription (same name by
+  default, `topics` / `subscriptions` to map them). Attempts come from `deliveryAttempt` (subscriptions
+  with a dead-letter policy). `retries: 'znight'` (default) applies `@Retry` and publishes Znight dead
+  letters; `retries: 'subscription'` nacks every failure so that the subscription's retry and
+  dead-letter policies own redelivery, never both layers at once. No delayed publishing; topics and
+  subscriptions are only created with `provision: true` (`PUBSUB_EMULATOR_HOST` targets the emulator).
+
+```ts
+import { MessagingPlugin } from '@znight/messaging'
+import { pubsub } from '@znight/messaging/pubsub'
+
+MessagingPlugin.configure({
+  driver: pubsub({ retries: 'subscription', subscriptions: { notifications: 'events-notifications' } }),
+  defaults: { retry: { attempts: 5, backoff: 'fixed', delay: 0 } }, // the subscription's maxDeliveryAttempts
+})
+```
 
 ## Concurrency
 
