@@ -58,10 +58,25 @@ import { NodeUpgrades } from './upgrade-io.ts'
 export interface FastifyAdapterOptions {
   /**
    * An existing instance (with your plugins and hooks). Znight registers its routes in an
-   * encapsulated child context (its own body handling and 404 handler) and closes the instance on
-   * shutdown. Malformed URLs are then answered by Fastify's `frameworkErrors` handler.
+   * encapsulated child context (its own body handling and error handler) and closes the instance on
+   * shutdown. Malformed URLs are then answered by Fastify's `frameworkErrors` handler. See
+   * `notFound` for the requests no route matches.
    */
   readonly instance?: FastifyInstance
+  /**
+   * Who answers the requests no route matches. Znight's context has no prefix, so in Fastify 5 it
+   * shares the root instance's not-found handler (`setNotFoundHandler()`): only one of them can set it.
+   *
+   * - `'znight'`: Znight's handler (`404`, `405` with `Allow`, automatic `OPTIONS`, CORS preflights).
+   *   An instance that already has a not-found handler is refused.
+   * - `'instance'`: the instance's own handler, whether it is set before or after Znight's context
+   *   loads (Fastify's default `404` when it has none). On the paths of its routes, Znight still
+   *   answers the other standard methods (`405`, automatic `OPTIONS`, CORS preflights).
+   *
+   * Default: `'instance'` when the instance already has a not-found handler once Znight's context
+   * loads (set before the application starts), `'znight'` otherwise.
+   */
+  readonly notFound?: 'znight' | 'instance'
   /**
    * Options of the instance created when `instance` is absent. Znight sets `exposeHeadRoutes: false`
    * (HEAD is served by Znight), a `maxParamLength` of 8 KiB and a `frameworkErrors` handler.
@@ -94,6 +109,12 @@ export function fastifyAdapter(options: FastifyAdapterOptions = {}): FastifyAdap
 }
 
 const MAX_PARAM_LENGTH = 8192
+
+/** The methods of Znight routes (`ALL` is expanded into them). */
+const ROUTE_METHODS = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'] as const
+
+/** The start of the error Fastify throws when a 404 level already has a not-found handler. */
+const NOT_FOUND_ALREADY_SET = 'Not found handler already set'
 
 /** Whether a Fastify `trustProxy` option trusts every hop (`true`, or a function trusting any address). */
 function trustsEveryHop(value: unknown): boolean {
@@ -175,8 +196,16 @@ class FastifyHttpAdapter implements FastifyAdapter {
   #closing: Promise<void> | undefined
   /** The Fastify `trustProxy` option, when it trusts every hop. */
   readonly #everyProxy: string | undefined
+  readonly #notFound: 'znight' | 'instance' | undefined
 
   constructor(options: FastifyAdapterOptions) {
+    const notFound = options.notFound
+    if (notFound !== undefined && notFound !== 'znight' && notFound !== 'instance') {
+      throw new TypeError(
+        `fastifyAdapter: option "notFound" must be 'znight' or 'instance' (received ${String(notFound)})`,
+      )
+    }
+    this.#notFound = notFound
     if (options.instance === undefined) {
       const serverOptions = options.options ?? {}
       this.#everyProxy = trustsEveryHop(serverOptions.trustProxy) ? 'the Fastify option trustProxy' : undefined
@@ -213,38 +242,94 @@ class FastifyHttpAdapter implements FastifyAdapter {
   }
 
   async #register(): Promise<void> {
-    const routes = this.#routes
     await this.instance.register((child, _options, done) => {
-      // Znight reads and parses bodies itself: accept every content type without consuming it. The
-      // RegExp parser matches every content type like '*' does, but Fastify caches what a RegExp
-      // matched (it parses the content type again on every request to find the '*' parser)
-      child.removeAllContentTypeParsers()
-      child.addContentTypeParser('*', ignoreBody)
-      child.addContentTypeParser(/^/, ignoreBody)
-      child.addHook('onRequest', this.#onRequest)
-      // added last: sees the route options once every other `onRoute` hook changed them
-      child.addHook('onRoute', this.#onRoute)
-      for (const route of routes) {
-        const handler = route.handler
-        const fastifyHandler = (request: FastifyRequest, reply: FastifyReply): Promise<FastifyReply> =>
-          this.#reply(reply, handler(adapterRequest(request, reply)))
-        this.#handlers.set(fastifyHandler, handler)
-        child.route({
-          method: route.method,
-          url: toFastifyPath(route.path),
-          exposeHeadRoute: false,
-          handler: fastifyHandler,
-        })
+      try {
+        this.#setup(child)
+      } catch (error) {
+        // a plugin that throws would escape Fastify's boot: fail `ready()` instead
+        done(asError(error))
+        return
       }
-      child.setNotFoundHandler((request, reply) =>
-        this.#reply(reply, this.#dispatchFallback(request, reply, undefined)),
-      )
-      child.setErrorHandler((error, request, reply) =>
-        this.#reply(reply, this.#dispatchFallback(request, reply, error)),
-      )
       done()
     })
     await this.instance.ready()
+  }
+
+  /** Fills Znight's encapsulated context: body handling, hooks, routes, not-found and error handlers. */
+  #setup(child: FastifyInstance): void {
+    const routes = this.#routes
+    // Znight reads and parses bodies itself: accept every content type without consuming it. The
+    // RegExp parser matches every content type like '*' does, but Fastify caches what a RegExp
+    // matched (it parses the content type again on every request to find the '*' parser)
+    child.removeAllContentTypeParsers()
+    child.addContentTypeParser('*', ignoreBody)
+    child.addContentTypeParser(/^/, ignoreBody)
+    child.addHook('onRequest', this.#onRequest)
+    // added last: sees the route options once every other `onRoute` hook changed them
+    child.addHook('onRoute', this.#onRoute)
+    for (const route of routes) {
+      const handler = route.handler
+      const fastifyHandler = (request: FastifyRequest, reply: FastifyReply): Promise<FastifyReply> =>
+        this.#reply(reply, handler(adapterRequest(request, reply)))
+      this.#handlers.set(fastifyHandler, handler)
+      child.route({
+        method: route.method,
+        url: toFastifyPath(route.path),
+        exposeHeadRoute: false,
+        handler: fastifyHandler,
+      })
+    }
+    if (!this.#setNotFoundHandler(child)) this.#routeOtherMethods(child, routes)
+    child.setErrorHandler((error, request, reply) => this.#reply(reply, this.#dispatchFallback(request, reply, error)))
+  }
+
+  /** The Fastify handler of the requests Znight's fallback answers (404, 405, automatic `OPTIONS`...). */
+  readonly #unmatched = (request: FastifyRequest, reply: FastifyReply): Promise<FastifyReply> =>
+    this.#reply(reply, this.#dispatchFallback(request, reply, undefined))
+
+  /**
+   * Sets Znight's not-found handler, unless the instance answers unknown URLs (see the `notFound`
+   * option). Fastify 5 gives an encapsulated context its own 404 level only when it has a prefix:
+   * Znight's context shares the root's, and `setNotFoundHandler()` throws when the level already has
+   * a handler. Returns whether Znight's handler was set.
+   */
+  #setNotFoundHandler(child: FastifyInstance): boolean {
+    if (this.#notFound === 'instance') return false
+    try {
+      child.setNotFoundHandler(this.#unmatched)
+      return true
+    } catch (error) {
+      if (!(error instanceof Error) || !error.message.startsWith(NOT_FOUND_ALREADY_SET)) throw error
+      if (this.#notFound === undefined) return false
+      throw new Error(
+        "fastifyAdapter: the instance already has a not-found handler (setNotFoundHandler()), and notFound: 'znight' " +
+          "needs it. Remove that handler, or set notFound: 'instance' to keep it for the URLs no route matches",
+        { cause: error },
+      )
+    }
+  }
+
+  /**
+   * With the instance's not-found handler: routes the standard methods that no Znight route serves
+   * on the paths of Znight routes to Znight's fallback, which keeps answering them there (`405`
+   * with `Allow`, automatic `OPTIONS`, CORS preflights). A method the instance already routes on
+   * that path is left to it.
+   */
+  #routeOtherMethods(child: FastifyInstance, routes: readonly AdapterRoute[]): void {
+    // by path shape (parameter names erased, as Fastify's router matches them): its URL and methods
+    const paths = new Map<string, { readonly url: string; readonly methods: Set<string> }>()
+    for (const route of routes) {
+      let path = paths.get(route.path.shape)
+      if (path === undefined) {
+        path = { url: toFastifyPath(route.path), methods: new Set() }
+        paths.set(route.path.shape, path)
+      }
+      path.methods.add(route.method)
+    }
+    for (const { url, methods } of paths.values()) {
+      const others = ROUTE_METHODS.filter(method => !methods.has(method) && !child.hasRoute({ method, url }))
+      if (others.length > 0) child.route({ method: others, url, exposeHeadRoute: false, handler: this.#unmatched })
+    }
   }
 
   /**

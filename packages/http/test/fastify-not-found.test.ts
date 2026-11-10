@@ -49,7 +49,12 @@ function rootPlugin(plugin: FastifyPluginCallback): FastifyPluginCallback {
 }
 
 const notFoundPlugin = rootPlugin((app, _options, done) => {
-  app.setNotFoundHandler(legacyNotFound)
+  try {
+    app.setNotFoundHandler(legacyNotFound)
+  } catch (error) {
+    done(error as Error)
+    return
+  }
   done()
 })
 
@@ -110,9 +115,10 @@ describe('fastifyAdapter({ instance }) with an instance that owns its 404 handle
       expect(wrongMethod.status).toBe(405)
       expect(wrongMethod.headers['allow']).toBe('GET, HEAD, OPTIONS')
       expect(wrongMethod.headers['x-legacy-404']).toBeUndefined()
+      // `/items/echo` also matches `GET /items/:id`
       const options = await send({ method: 'OPTIONS', url: '/items/echo' })
       expect(options.status).toBe(204)
-      expect(options.headers['allow']).toBe('POST, OPTIONS')
+      expect(options.headers['allow']).toBe('GET, HEAD, POST, OPTIONS')
       const preflight = await send({
         method: 'OPTIONS',
         url: '/items/echo',
@@ -131,7 +137,7 @@ describe('fastifyAdapter({ instance }) with an instance that owns its 404 handle
     const adapter = fastifyAdapter({ instance, notFound: 'instance' })
     const app = await createApp(itemsMetadata(), { adapter }, { start: false })
     // the first request registers Znight's context: the plugin below is queued after it
-    const first = adapter.injectStream({ method: 'GET', url: '/items/1' })
+    const first = adapter.inject({ method: 'GET', url: '/items/1' })
     instance.register(notFoundPlugin)
     expect((await first).status).toBe(200)
     const send = app.http.inject.bind(app.http)
@@ -145,7 +151,7 @@ describe('fastifyAdapter({ instance }) with an instance that owns its 404 handle
     const instance = legacyInstance(() => undefined)
     const adapter = fastifyAdapter({ instance })
     const app = await createApp(itemsMetadata(), { adapter }, { start: false })
-    const first = adapter.injectStream({ method: 'GET', url: '/items/1' })
+    const first = adapter.inject({ method: 'GET', url: '/items/1' })
     instance.register(notFoundPlugin)
     // Fastify refuses the second handler of the level: that order needs notFound: 'instance'
     expect(String(await caught(() => first))).toContain('Not found handler already set')
@@ -165,6 +171,23 @@ describe('fastifyAdapter({ instance }) with an instance that owns its 404 handle
     expect((await send({ method: 'GET', url: '/items/3' })).json()).toEqual({ id: 3 })
     expect((await send({ method: 'PATCH', url: '/items/3' })).status).toBe(405)
     await app.stop()
+  })
+
+  it('leaves to the instance the methods it routes itself on the paths of Znight routes', async () => {
+    const instance = legacyInstance(i => i.setNotFoundHandler(legacyNotFound))
+    instance.delete('/items/:itemId', request => ({ deleted: (request.params as { itemId: string }).itemId }))
+    const app = await createApp(itemsMetadata(), { adapter: fastifyAdapter({ instance }) }, { start: false })
+    const send = app.http.inject.bind(app.http)
+    expect((await send({ method: 'DELETE', url: '/items/4' })).json()).toEqual({ deleted: '4' })
+    expect((await send({ method: 'GET', url: '/items/4' })).json()).toEqual({ id: 4 })
+    expect((await send({ method: 'PUT', url: '/items/4' })).status).toBe(405)
+    await app.stop()
+  })
+
+  it('validates the notFound option', () => {
+    expect(() => fastifyAdapter({ notFound: 'root' as 'instance' })).toThrow(
+      `fastifyAdapter: option "notFound" must be 'znight' or 'instance' (received root)`,
+    )
   })
 
   it("refuses an instance that owns its 404 handler with notFound: 'znight'", async () => {
