@@ -16,14 +16,14 @@ Standard Schemas (Zod, Valibot, ArkType...). A few `@Api*` decorators add what c
   their own library and assembles the document. The same pure function runs at boot, at build time
   and in tests: the served document and the committed `openapi.json` are byte-identical.
 - **Served everywhere.** `OpenApiPlugin` serves `/openapi.json` (precomputed bytes, strong ETag),
-  an optional YAML twin and an API reference UI (Scalar, or Swagger UI) with a strict CSP, the same
-  way on the node, Fastify, Express and Hono adapters, on Node.js and Bun.
+  an optional YAML twin and, opt-in, an API reference UI (Scalar, or Swagger UI) with a strict CSP,
+  the same way on the node, Fastify, Express and Hono adapters, on Node.js and Bun.
 
 ```sh
 # bun
 bun add @znight/core @znight/http @znight/openapi
 bun add -d @znight/compiler vite
-bun add @scalar/api-reference     # optional: serve the UI from node_modules instead of the pinned CDN
+bun add @scalar/api-reference     # optional, with ui: 'scalar': serve it from node_modules, not the CDN
 bun add yaml                      # optional: YAML output
 bun add @valibot/to-json-schema   # optional: Valibot schemas
 bun add -d @cfworker/json-schema  # optional: validateResponse() in tests
@@ -31,7 +31,7 @@ bun add -d @cfworker/json-schema  # optional: validateResponse() in tests
 # npm
 npm install @znight/core @znight/http @znight/openapi
 npm install -D @znight/compiler vite
-npm install @scalar/api-reference     # optional: serve the UI from node_modules instead of the pinned CDN
+npm install @scalar/api-reference     # optional, with ui: 'scalar': serve it from node_modules, not the CDN
 npm install yaml                      # optional: YAML output
 npm install @valibot/to-json-schema   # optional: Valibot schemas
 npm install -D @cfworker/json-schema  # optional: validateResponse() in tests
@@ -40,6 +40,11 @@ npm install -D @cfworker/json-schema  # optional: validateResponse() in tests
 Runs on Node.js >= 24 and Bun >= 1.3 (ESM only). `@znight/http` is a required peer dependency; the
 others are optional (`swagger-ui-dist` serves Swagger UI from `node_modules`, `vite` is needed by
 the `openapi()` Vite plugin).
+
+**UI packages are optional.** Nothing is bundled: `@scalar/api-reference` and `swagger-ui-dist` are
+optional peer dependencies, never installed for you. The API reference page is opt-in (`ui` has no
+default); with a `ui`, its assets come from `node_modules` when you installed the package, otherwise
+from the jsDelivr copy pinned by this release, with Subresource Integrity (`assets`).
 
 **Documentation:** [`@znight/openapi`](https://github.com/znight-org/znight/blob/main/docs/packages/openapi.md).
 **Example:** [`storefront-api`](https://github.com/znight-org/znight/tree/main/examples/storefront-api)
@@ -69,10 +74,13 @@ import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
 
 const app = await Application.create({
   metadata: __ZNIGHT_METADATA__,
-  plugins: [HttpPlugin.configure({ port: 3000 }), OpenApiPlugin.configure()],
+  plugins: [HttpPlugin.configure({ port: 3000 }), OpenApiPlugin.configure({ ui: 'scalar' })],
 })
-await app.start() // GET /openapi.json, GET /docs
+await app.start() // GET /openapi.json, GET /docs (Scalar)
 ```
+
+Without `ui`, the plugin serves the document only: `OpenApiPlugin.configure()` gives
+`GET /openapi.json` and no API reference page.
 
 Nothing else is needed: the title, version, description and license come from `package.json`,
 parameters from the signatures, request schemas from `@Body(S)`, responses from the annotated
@@ -329,24 +337,27 @@ schemes (ZNIGHT036).
 
 `OpenApiPlugin.configure(options | (container) => options)` (name `openapi`):
 
-| Option            | Default           | Description                                                                                                  |
-| ----------------- | ----------------- | ------------------------------------------------------------------------------------------------------------ |
-| `enabled`         | `true`            | `false` serves nothing and builds nothing (the `OpenApi` external still works)                               |
-| `path`            | `'/openapi.json'` | JSON document, relative to the HTTP prefix                                                                   |
-| `yaml`            | `false`           | A path (`'/openapi.yaml'`) serves YAML (`application/yaml`, needs `yaml`)                                    |
-| `ui`              | `'scalar'`        | `'scalar'`, `'swagger'`, `false`, or `{ scalar: config }` / `{ swagger: config }` (JSON configuration)       |
-| `uiPath`          | `'/docs'`         | The UI page; local assets are under `${uiPath}/_assets/`                                                     |
-| `assets`          | `'auto'`          | `'local'` (from `node_modules`), `'cdn'` (jsDelivr, pinned with SRI), `'auto'` (local when installed)        |
-| `document`        | `'build'`         | `{ file }` serves a prebuilt `openapi.json` (no conversion at boot; a stale file is a ZNIGHT030 warning)²    |
-| `build`           | `'boot'`          | `'boot'`: a failure fails `Application.create`; `'first-request'`: built lazily, one shared promise, retried |
-| `info`, `servers` | —                 | Runtime overrides (`info` merged, `servers` replaced)                                                        |
-| `filter`          | —                 | `(operation: OpenApiOperationView) => boolean`; unreferenced components are pruned                           |
-| `transform`       | —                 | `(document) => document`, last-resort escape hatch                                                           |
-| `converters`      | `[]`              | Extra `SchemaConverter`s, tried before the built-in ones                                                     |
-| `unrepresentable` | `'error'`         | `'warn'`: a schema that cannot be converted becomes `{}` with a ZNIGHT037 warning                            |
-| `meta`            | `[]`              | Route metadata of the docs routes (`[Public.meta()]`), seen by guards and by the route decision check        |
-| `guards`          | `[]`              | Extra guards of the docs routes (global guards still run first)                                              |
-| `cacheControl`    | `'no-cache'`      | `cache-control` of the document (revalidated with the ETag)                                                  |
+| Option            | Default           | Description                                                                                                                 |
+| ----------------- | ----------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `enabled`         | `true`            | `false` serves nothing and builds nothing (the `OpenApi` external still works)                                              |
+| `path`            | `'/openapi.json'` | JSON document, relative to the HTTP prefix                                                                                  |
+| `yaml`            | `false`           | A path (`'/openapi.yaml'`) serves YAML (`application/yaml`, needs `yaml`)                                                   |
+| `ui`              | none              | `'scalar'`, `'swagger'`, or `{ scalar: config }` / `{ swagger: config }` (JSON configuration); omitted or `false`: no page¹ |
+| `uiPath`          | `'/docs'`         | The UI page; local assets are under `${uiPath}/_assets/`                                                                    |
+| `assets`          | `'auto'`          | `'local'` (from `node_modules`), `'cdn'` (jsDelivr, pinned with SRI), `'auto'` (local when installed); ignored without `ui` |
+| `document`        | `'build'`         | `{ file }` serves a prebuilt `openapi.json` (no conversion at boot; a stale file is a ZNIGHT030 warning)²                   |
+| `build`           | `'boot'`          | `'boot'`: a failure fails `Application.create`; `'first-request'`: built lazily, one shared promise, retried                |
+| `info`, `servers` | —                 | Runtime overrides (`info` merged, `servers` replaced)                                                                       |
+| `filter`          | —                 | `(operation: OpenApiOperationView) => boolean`; unreferenced components are pruned                                          |
+| `transform`       | —                 | `(document) => document`, last-resort escape hatch                                                                          |
+| `converters`      | `[]`              | Extra `SchemaConverter`s, tried before the built-in ones                                                                    |
+| `unrepresentable` | `'error'`         | `'warn'`: a schema that cannot be converted becomes `{}` with a ZNIGHT037 warning                                           |
+| `meta`            | `[]`              | Route metadata of the docs routes (`[Public.meta()]`), seen by guards and by the route decision check                       |
+| `guards`          | `[]`              | Extra guards of the docs routes (global guards still run first)                                                             |
+| `cacheControl`    | `'no-cache'`      | `cache-control` of the document (revalidated with the ETag)                                                                 |
+
+¹ No default UI: without `ui` (or with `ui: false`), the plugin serves the document (and `yaml`) but
+no API reference page and no asset route, and `uiPath` is free for your own routes.
 
 ² `info`, `servers`, `filter` and `transform` apply to the file as to a build. Under an HTTP
 prefix, the servers of the file are checked (ZNIGHT030 warnings), so that clients generated from
@@ -386,7 +397,7 @@ installed UI package is found the same way on Node.js and Bun, even when its exp
 export its `package.json` (`@scalar/api-reference`).
 
 Logs: `OpenAPI document built` (debug: operations, schemas, ms), each assembly warning once,
-`API reference: <address>/docs` when the server listens. Exclude the docs from request logs with
+`API reference: <address>/docs` when the server listens (with a `ui`). Exclude the docs from request logs with
 `logging.requests.ignore: e => e.route?.startsWith('/docs')`.
 
 ## Injection
@@ -483,7 +494,7 @@ import { OpenApi } from '@znight/openapi'
 import { validateResponse } from '@znight/openapi/testing'
 
 test('GET /books/:id answers what its documentation says', async () => {
-  await using app = await createTestApp() // the plugins of main.ts, with OpenApiPlugin.configure({ ui: false })
+  await using app = await createTestApp() // the plugins of main.ts, OpenApiPlugin without ui
   const document = await app.get(OpenApi).document()
   const response = await app.inject({ method: 'GET', url: '/books/1', headers: { 'x-api-key': READER_KEY } })
   expect(validateResponse(document, { method: 'GET', path: '/books/{id}', response })).toEqual([])
