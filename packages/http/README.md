@@ -190,7 +190,8 @@ beat parameters, which beat the wildcard (`/users/me` before `/users/:id`).
 `trailingSlash` applies to every adapter: `'strict'` (default: `/users/` does not match `/users`),
 `'ignore'` (it does) or `'redirect'` (`308` to `/users`, query string kept; the `location` always
 stays on the same origin: a backslash, a control character or a leading `//` of the raw path is
-percent-encoded or collapsed, so `GET /\evil.com/` redirects to `/%5Cevil.com`). `prefix: '/api'`
+percent-encoded or collapsed, so `GET /\evil.com/` redirects to `/%5Cevil.com`; the Hono adapter
+on Node.js never sees it: `@hono/node-server` answers `400` to such a request target). `prefix: '/api'`
 is prepended to every route.
 
 ## Parameters
@@ -2014,7 +2015,6 @@ for await (const item of parseSseStream(response.body!)) {
 }
 ```
 
-
 ## Lifecycle and graceful shutdown
 
 | Plugin hook   | What happens                                                                                                                                                                                                           |
@@ -2250,6 +2250,7 @@ extensions: {
 ```
 
 Rules:
+
 - Optional fields (`status`, `headers`, `bodyLimit`, `uploads`, `rawResponse`, `sse`, param
   `name`/`type`/`optional`/`schema`, upload `field`/`multiple`/`required`/`maxSize`/`maxFiles`/
   `mimeTypes`) are omitted when absent (`exactOptionalPropertyTypes`).

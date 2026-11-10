@@ -324,6 +324,7 @@ async store(@Param('id', FileId) id: string, @Ctx() ctx: HttpContext) {
 ### Security
 
 ::: warning Never trust what the client sends
+
 - `File.name` is chosen by the client: never use it as a path. Store files under generated
   identifiers and keep the name as metadata.
 - `File.type` and `mimeTypes` rely on the type the client declares: check the content (magic
