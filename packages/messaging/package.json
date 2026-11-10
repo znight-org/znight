@@ -119,8 +119,10 @@
     "@testcontainers/kafka": "12.2.1",
     "@testcontainers/localstack": "12.2.1",
     "@testcontainers/rabbitmq": "12.2.1",
+    "@testcontainers/redis": "12.2.1",
     "@znight/compiler": "workspace:*",
     "amqplib": "2.2.1",
+    "ioredis": "6.0.0",
     "testcontainers": "12.2.1",
     "zod": "catalog:"
   },
