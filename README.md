@@ -278,7 +278,7 @@ const app = await Application.create({
     SchedulePlugin.configure({ timeZone: 'Europe/Paris' }),
     MessagingPlugin.configure(c => ({ driver: rabbitmq({ url: c.get(AmqpConfig).url }) })),
     HttpPlugin.configure({ adapter: fastifyAdapter(), port: 3000 }),
-    OpenApiPlugin.configure(), // GET /openapi.json, GET /docs
+    OpenApiPlugin.configure({ ui: 'scalar' }), // GET /openapi.json, GET /docs (Scalar)
   ],
 })
 

@@ -2899,9 +2899,12 @@ served document and the emitted file are byte-identical.
 - `register` provides the `OpenApi` external (singleton: `document()`, `json()`, `yaml()`,
   `operations`); `initRoots()` returns the classes of the `guards` option.
 - It serves its routes as **plugin routes** of `HttpPlugin` (`httpRoutes`, §9.1; no `http` plugin:
-  ZNIGHT030): `path` (`/openapi.json`), `yaml` (optional peer `yaml`), the UI page at `uiPath`
-  (`/docs`, Scalar or Swagger UI, local assets under `${uiPath}/_assets/` or a pinned CDN with
-  Subresource Integrity, `assets: 'auto' | 'local' | 'cdn'`) with its own
+  ZNIGHT030): `path` (`/openapi.json`), `yaml` (optional peer `yaml`), and, only when `ui` is given
+  (`'scalar'`, `'swagger'` or `{ scalar | swagger: config }`; it has no default, and omitted or
+  `false` registers neither the page nor the asset route), the UI page at `uiPath`
+  (`/docs`, Scalar or Swagger UI, both optional peers that are never bundled: local assets under
+  `${uiPath}/_assets/` or a pinned CDN with Subresource Integrity, `assets: 'auto' | 'local' | 'cdn'`)
+  with its own
   `content-security-policy` (inline script allowed by hash, CDN assets allowed by their exact URL,
   never the CDN origin, `connect-src` limited to the origins of
   the served document's servers, their variables expanded with their `default` and `enum` values

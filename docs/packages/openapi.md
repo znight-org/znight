@@ -16,13 +16,13 @@ inferred.
 2. **When the document is assembled**, the schemas only their library knows (Zod, Valibot, ArkType...)
    are converted by that library, through [Standard JSON Schema](https://standardschema.dev/json-schema):
    input schemas for requests, output schemas for responses. The compiler never runs your code.
-3. **At runtime**, `OpenApiPlugin` serves `GET /openapi.json` (precomputed bytes, strong ETag) and an
-   API reference UI (Scalar by default, Swagger UI as an option) through `@znight/http`, identically on
-   the node, Fastify, Express and Hono adapters, on Node.js 24+ and Bun 1.3+.
+3. **At runtime**, `OpenApiPlugin` serves `GET /openapi.json` (precomputed bytes, strong ETag) and,
+   when you choose one with `ui`, an API reference UI (Scalar or Swagger UI) through `@znight/http`,
+   identically on the node, Fastify, Express and Hono adapters, on Node.js 24+ and Bun 1.3+.
 
 ```sh
 npm install @znight/openapi
-npm install @scalar/api-reference     # optional: serve the UI from node_modules instead of a pinned CDN
+npm install @scalar/api-reference     # optional, with ui: 'scalar': serve it from node_modules, not the CDN
 npm install @valibot/to-json-schema   # optional: Valibot schemas (Zod and ArkType need nothing)
 ```
 
@@ -34,10 +34,20 @@ import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
 
 const app = await Application.create({
   metadata: __ZNIGHT_METADATA__,
-  plugins: [HttpPlugin.configure({ port: 3000 }), OpenApiPlugin.configure()],
+  plugins: [HttpPlugin.configure({ port: 3000 }), OpenApiPlugin.configure({ ui: 'scalar' })],
 })
-await app.start() // GET /openapi.json, GET /docs
+await app.start() // GET /openapi.json, GET /docs (Scalar)
 ```
+
+`ui` has no default: `OpenApiPlugin.configure()` serves the document only, without an API
+reference page.
+
+::: tip UI packages are optional
+Nothing is bundled: `@scalar/api-reference` and `swagger-ui-dist` are optional peer dependencies of
+`@znight/openapi`, never installed for you. With a `ui`, the page loads the package from
+`node_modules` when you installed it, otherwise the jsDelivr copy pinned by the release, with
+Subresource Integrity.
+:::
 
 Nothing else is needed: the title, version and description come from `package.json`, there is one
 operation per route, and the compiler extension is discovered because a scanned file imports
@@ -165,8 +175,8 @@ The title and description come from the JSDoc of the class. Schemes are declared
 | `enabled`        | `true`            | `false` serves nothing (e.g. on a public deployment)                             |
 | `path`           | `'/openapi.json'` | The JSON document, relative to the HTTP prefix                                   |
 | `yaml`           | `false`           | A path (`'/openapi.yaml'`) also serves YAML (optional peer `yaml`)               |
-| `ui`             | `'scalar'`        | `'scalar'`, `'swagger'` or `false`                                               |
-| `uiPath`         | `'/docs'`         | The page of the API reference UI                                                 |
+| `ui`             | none              | `'scalar'` or `'swagger'`; omitted (or `false`): no API reference page           |
+| `uiPath`         | `'/docs'`         | The page of the API reference UI (with `ui`)                                     |
 | `document`       | `'build'`         | `{ file }` serves an `openapi.json` emitted at build time: no conversion at boot |
 | `meta`, `guards` | `[]`              | Route metadata and guards of the documentation routes                            |
 

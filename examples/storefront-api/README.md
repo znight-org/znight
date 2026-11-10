@@ -293,8 +293,9 @@ constants of [`responses.ts`](src/shared/responses.ts).
 
 - `GET /openapi.json`: precomputed bytes with a strong `etag` (`304` on `if-none-match`, `HEAD`
   included), `cache-control: no-cache`;
-- `GET /docs`: Scalar, with its own `content-security-policy` (the inline script allowed by its hash).
-  Its script comes from `node_modules` once `@scalar/api-reference` is installed, from the jsDelivr
+- `GET /docs`: Scalar (`ui: 'scalar'`; `ui` has no default, without it only the document is
+  served), with its own `content-security-policy` (the inline script allowed by its hash). Its
+  script comes from `node_modules` once `@scalar/api-reference` is installed, from the jsDelivr
   build pinned by `@znight/openapi` with Subresource Integrity otherwise (this example installs
   nothing);
 - `meta: [Public.meta()]`: the docs routes are plugin routes of `HttpPlugin`, behind the global

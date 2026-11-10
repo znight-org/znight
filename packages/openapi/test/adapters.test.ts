@@ -49,7 +49,7 @@ for (const adapter of ADAPTERS) {
         metadata,
         plugins: [
           Http.configure({ adapter: adapter.create(), port: 0, host: '127.0.0.1', prefix: '/api' }),
-          OpenApiPlugin.configure({ yaml: '/openapi.yaml' }),
+          OpenApiPlugin.configure({ yaml: '/openapi.yaml', ui: 'scalar' }),
         ],
         logger: silentLogger,
       })
