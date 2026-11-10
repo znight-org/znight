@@ -16,6 +16,7 @@ Design documents for significant changes. Each RFC is discussed before implement
 | [0010](./0010-custom-parameter-decorators.md) | Custom parameter decorators               | Implemented (0.4.0)                   |
 | [0011](./0011-application-events.md)          | Application events (`@znight/events`)     | Implemented (0.5.0)                   |
 | [0012](./0012-messaging-pubsub.md)            | Pub/Sub driver (`@znight/messaging`)      | Accepted (implemented, unreleased)    |
+| [0013](./0013-config-secret-managers.md)      | Secret-store loaders (`@znight/config`)   | Accepted (implemented, unreleased)    |
 | [0014](./0014-messaging-drivers.md)           | Messaging drivers (`@znight/messaging`)   | Accepted (M1 implemented, unreleased) |
 
 ## Error code allocation

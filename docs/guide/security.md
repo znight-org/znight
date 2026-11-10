@@ -1443,8 +1443,9 @@ Common mistakes:
 ## Secrets and logs {#secrets}
 
 - Read secrets with [`@Secret`](/packages/config) (masked whenever the config object is logged,
-  serialised or printed in an error) and load them from Vault, AWS Secrets Manager or Google Cloud
-  Secret Manager with the `@znight/config` loaders.
+  serialised or printed in an error) and load them from Vault, AWS Secrets Manager, Google Cloud
+  Secret Manager, Azure Key Vault or OCI Vault with the
+  [`@znight/config` loaders](/packages/config#secret-stores).
 - Never log credentials. Znight's request logs do not include headers; when you log headers or
   request objects yourself, redact them, as the example's `main.ts` does:
   `ObservabilityPlugin.configure({ logging: { redact: ['*.headers.authorization', '*.headers.cookie', '*.headers["x-api-key"]', '*.headers["x-signature"]'] } })`.
