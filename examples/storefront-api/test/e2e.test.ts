@@ -197,7 +197,9 @@ describe.skipIf(!ENABLED)('end to end (production build)', () => {
     if (exported.data) for await (const line of readNdjson<Order>(exported.data)) orders.push(line)
     expect(orders.map(line => line.id)).toEqual([order.id])
 
-    // structured logs: one line per request, the documentation requests left out
+    // structured logs: one line per request, the documentation requests left out (the log lines reach
+    // stdout after the responses: wait for the order's)
+    await app.waitForLog(log => log.msg === 'request completed' && log.method === 'POST' && log.route === '/orders')
     const completed = app.logs().filter(log => log.msg === 'request completed')
     expect(completed).toContainEqual(expect.objectContaining({ method: 'POST', route: '/orders', status: 201 }))
     expect(completed.map(log => log.route)).not.toContain('/openapi.json')
