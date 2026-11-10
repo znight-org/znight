@@ -373,21 +373,21 @@ interface ErrorReportEvent {
 }
 ```
 
-| `source`    | Reported                                                                                                    |
-| ----------- | ----------------------------------------------------------------------------------------------------------- |
-| `http`      | an error answered with a 5xx, a response stream that failed                                                 |
-| `messaging` | a delivery dead-lettered or rejected (`tags.reason`), unless `@OnError` acknowledged it                     |
-| `schedule`  | a failed run (the job threw, a wrapper failed before it, the lock store failed)                             |
-| `graphql`   | an unexpected (masked) resolver error, the `cause` of a shown `GraphQLException`                            |
-| `websocket` | an unexpected failure of a handler, `@OnConnect` or `@OnDisconnect`                                         |
-| `events`    | an error of a detached listener or of `emit()` (an inline error rejects `publish()`: its caller reports it) |
-| `lifecycle` | a failed `create()` or `start()`, each failed shutdown step (`tags.phase`)                                  |
+| `source`    | Reported                                                                                                         |
+| ----------- | ---------------------------------------------------------------------------------------------------------------- |
+| `http`      | an error answered with a 5xx, a response stream or an event stream that failed                                   |
+| `messaging` | a delivery dead-lettered or rejected (`tags.reason`), unless `@OnError` acknowledged it                          |
+| `schedule`  | a failed run (the job threw, a wrapper failed before it, the lock store failed), not a shutdown or removal abort |
+| `graphql`   | an unexpected (masked) resolver error, the `cause` of a shown `GraphQLException`                                 |
+| `websocket` | an unexpected failure of a handler, `@OnConnect` or `@OnDisconnect`                                              |
+| `events`    | an error of a detached listener or of `emit()` (an inline error rejects `publish()`: its caller reports it)      |
+| `lifecycle` | a failed `create()` or `start()`, each failed shutdown step (`tags.phase`)                                       |
 
 Each error is reported once, where the package logs it: client errors (4xx, validation, rejected
 GraphQL operations), retried attempts and failures your code settled (an exception mapper answering
-with its own `HttpResponse`, `@OnError` returning `'ack'`) are not. Without listener, nothing is
-built. The hook logs nothing: `@znight/observability` keeps logging these errors once, and does not
-listen to it. The specification lists the tags of each source
+with its own `HttpResponse`, `@OnError` returning `'ack'`, a job honouring the abort of a shutdown)
+are not. Without listener, nothing is built. The hook logs nothing: `@znight/observability` keeps
+logging these errors once, and does not listen to it. The specification lists the tags of each source
 ([§8.3](/contributing/architecture#error-reporting-error-report)).
 
 #### Recipe: Sentry
