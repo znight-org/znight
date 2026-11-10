@@ -58,7 +58,7 @@ is a plain package exporting a factory.
   (`deliveryCount: 'header'`, read with `attemptFromHeaders()`), or both combined.
 - **Headers.** Every header is carried verbatim, both ways, as strings: Znight's (`x-znight-*`), the
   application's, and the trace context written by `@znight/observability` in the
-  `messaging:publish` hook (`traceparent`, `tracestate`, `baggage`). A broker that renames headers
+  `messaging:publish` hook (`traceparent`, `tracestate`, whatever the configured propagator writes). A broker that renames headers
   maps them back (Pub/Sub exposes `googclient_traceparent` as `traceparent`). `id`, `type`, `key`,
   `contentType` and `timestamp` survive the round trip, in properties or in `x-znight-*` headers.
 - **Dead letters.** A dead-lettered copy keeps the body, the type and the headers, minus
