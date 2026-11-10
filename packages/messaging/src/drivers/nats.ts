@@ -6,14 +6,17 @@
  *   stream must capture; the JetStream confirmation (`PubAck`) resolves it. The Znight id is the
  *   `Nats-Msg-Id`, so the stream deduplicates a republished message within its duplicate window.
  * - `@Consumer(queue)` reads a durable pull consumer (`<durablePrefix>-<queue>`, filter subject
- *   `subjects(queue)`, explicit acks) on the stream capturing the subject (or `streams(queue)`),
- *   created when missing, verified otherwise. One fetch at a time per subscription, for at most the
+ *   `subjects(queue)`, explicit acks) on the stream capturing the subject (or `streams(queue)`, which
+ *   must capture it), created when missing, verified otherwise (pull, explicit acks, that filter
+ *   subject, enough `max_deliver`). One fetch at a time per subscription, for at most the
  *   free concurrency slots; `working()` extends the ack wait of the messages in flight.
  * - Acks are double acks (`ackAck()`), releases `nak()`, retries `nak(delay)`: JetStream redelivers
- *   the message and counts its deliveries, which are the attempts. Dead letters are a copy published
- *   to `<queue>.dlq` (deduplicated by stream sequence), then `term()`.
+ *   the message and counts its deliveries, which are the attempts; a message waiting for its retry
+ *   stays pending, so it counts against the consumer's `max_ack_pending`. Dead letters are a copy published
+ *   to `<queue>.dlq` (deduplicated by consumer and stream sequence), then `term()`.
  * - A consumer with a finite `max_deliver` gets its `MAX_DELIVERIES` advisories: a message JetStream
  *   stopped delivering is dead-lettered from the stream (one replica per queue group handles it).
+ *   Advisories are core NATS messages: one published while no replica listens is lost.
  * - Headers are NATS headers; `Nats-*` headers reach JetStream on publish and are hidden from
  *   handlers. No delayed publishing. Streams are only created with `provision: true`.
  */
@@ -451,9 +454,9 @@ export class NatsDriver implements MessagingDriver {
   ): Promise<string> {
     const provision = this.#options.provision === true
     if (explicit !== undefined) {
+      let config: StreamConfig
       try {
-        await jsm.streams.info(explicit)
-        return explicit
+        config = (await jsm.streams.info(explicit)).config
       } catch (error) {
         if (!isNotFound(error)) {
           throw brokerUnavailableError(
@@ -467,6 +470,16 @@ export class NatsDriver implements MessagingDriver {
           'Or set nats({ provision: true }) in development',
         ])
       }
+      // a consumer may read a stream filled by a mirror or sources; a dead letter is published to it
+      if (!captures(config, subject, what === 'subject')) {
+        throw consumerError(`NATS JetStream: stream "${explicit}" does not capture the ${what} "${subject}"`, [
+          `Add "${subject}" (or a wildcard matching it) to the subjects of stream "${explicit}"`,
+          what === 'subject'
+            ? 'Or fix nats({ streams }) or @Consumer({ stream })'
+            : 'Or fix nats({ streams }) for the dead-letter queue',
+        ])
+      }
+      return explicit
     }
     try {
       return await jsm.streams.find(subject)
@@ -529,6 +542,16 @@ export class NatsDriver implements MessagingDriver {
       throw consumerError(
         `${name} acknowledgement policy is '${String(config.ack_policy)}': ${options.consumer} needs 'explicit'`,
         ['Recreate the consumer with ack_policy explicit, or name another one with @Consumer({ queue, durable })'],
+      )
+    }
+    const filters = filterSubjects(config)
+    if (filters.length !== 1 || filters[0] !== subject) {
+      throw consumerError(
+        `${name} ${filters.length === 0 ? 'has no filter subject (it reads the whole stream)' : `filters ${filters.map(filter => `"${filter}"`).join(', ')}`}: ${options.consumer} reads "${subject}"`,
+        [
+          `Delete it so that the driver creates it for "${subject}"`,
+          'Or name another one with @Consumer({ queue, durable }) or nats({ durablePrefix })',
+        ],
       )
     }
     const maxDeliver = config.max_deliver ?? -1
@@ -661,7 +684,7 @@ export class NatsDriver implements MessagingDriver {
               request.queue,
               message.data,
               deadLetterCopy(transport, headers, request, subscription.queue),
-              deadLetterId(info.stream, info.streamSequence),
+              deadLetterId(info.stream, subscription.durable, info.streamSequence),
             )
           }
           await terminate(request)
@@ -750,7 +773,7 @@ export class NatsDriver implements MessagingDriver {
       deadLetter.queue,
       stored.data,
       deadLetterCopy(transport, headers, request, queue),
-      deadLetterId(stream, seq),
+      deadLetterId(stream, durable, seq),
     )
     this.#logger.warn(
       `NATS JetStream: message ${transport[MessagingHeaders.Id] ?? `${stream}:${seq}`} of "${queue}" reached the max_deliver of ${durable} (${deliveries} deliveries): dead-lettered to "${deadLetter.queue}"`,
@@ -790,9 +813,40 @@ function deadLetterCopy(
   return copy
 }
 
-/** `Nats-Msg-Id` of the dead-letter copy of a stream message: a repeated copy is deduplicated. */
-function deadLetterId(stream: string, seq: number): string {
-  return `znight-dlq-${stream}-${seq}`
+/**
+ * `Nats-Msg-Id` of the dead-letter copy of a stream message by a durable consumer: a copy written
+ * twice by that consumer (a runtime dead letter and a `max_deliver` advisory) is stored once, while
+ * two consumers of the same stream (a fan-out) each store theirs.
+ */
+function deadLetterId(stream: string, durable: string, seq: number): string {
+  return `znight-dlq-${stream}-${durable}-${seq}`
+}
+
+/** The filter subjects of a consumer (`filter_subjects`, else `filter_subject`). */
+function filterSubjects(config: ConsumerConfig): readonly string[] {
+  if (config.filter_subjects !== undefined && config.filter_subjects.length > 0) return config.filter_subjects
+  return config.filter_subject === undefined || config.filter_subject === '' ? [] : [config.filter_subject]
+}
+
+/**
+ * Whether a stream captures `subject` (one of its subjects matches it). A stream filled by a mirror
+ * or sources holds other subjects too, which `sourced` accepts (it cannot be checked).
+ */
+function captures(config: StreamConfig, subject: string, sourced: boolean): boolean {
+  if ((config.subjects ?? []).some(filter => subjectMatches(filter, subject))) return true
+  return sourced && (config.mirror != null || (config.sources ?? []).length > 0)
+}
+
+/** Whether `subject` matches the NATS subject `filter` (`*` one token, `>` one or more tokens). */
+function subjectMatches(filter: string, subject: string): boolean {
+  const filterTokens = filter.split('.')
+  const tokens = subject.split('.')
+  for (const [index, token] of filterTokens.entries()) {
+    if (token === '>') return tokens.length > index
+    if (index >= tokens.length) return false
+    if (token !== '*' && token !== tokens[index]) return false
+  }
+  return filterTokens.length === tokens.length
 }
 
 /** Stream created by `provision` for a subject: its name with forbidden characters replaced. */

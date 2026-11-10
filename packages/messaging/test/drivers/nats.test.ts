@@ -266,13 +266,32 @@ describe('settlements', () => {
       [MessagingHeaders.Attempts]: '1',
     })
     const copy = fake.callsOf('publish')[1]
-    expect(copy).toMatchObject({ subject: 'orders.dlq', options: { msgID: 'znight-dlq-orders-1' } })
+    expect(copy).toMatchObject({ subject: 'orders.dlq', options: { msgID: 'znight-dlq-orders-znight-orders-1' } })
     const term = fake.callsOf('term')[0]
     expect(term).toMatchObject({ stream: 'orders', seq: 1 })
     expect(term.reason).toContain('non-retryable')
     expect(fake.calls.findIndex(call => call.method === 'term')).toBeGreaterThan(
       fake.calls.findIndex(call => call.method === 'publish' && call.args.subject === 'orders.dlq'),
     )
+  })
+
+  it('keeps the dead letter of each consumer of a stream (fan-out with one durable prefix per service)', async () => {
+    const fake = fakeWithQueues('orders')
+    class Failing {
+      handle() {
+        throw new NonRetryableError('poison')
+      }
+    }
+    const failing: TestConsumer = { class: Failing, queue: 'orders', handlers: [handler('handle')] }
+    const { broker } = await startApp(driverFor(fake, { durablePrefix: 'billing' }), [failing])
+    await startApp(driverFor(fake, { durablePrefix: 'shipping' }), [failing])
+    await broker.publish('orders', 1)
+    await waitFor(() => fake.callsOf('term').length === 2, 'both terms')
+    expect(fake.messages('orders_dlq')).toHaveLength(2)
+    expect([...(fake.streams.get('orders_dlq')?.msgIds ?? [])].sort()).toEqual([
+      'znight-dlq-orders-billing-orders-1',
+      'znight-dlq-orders-shipping-orders-1',
+    ])
   })
 
   it('terminates without a copy when dead-lettering is disabled', async () => {
@@ -349,6 +368,39 @@ describe('verification and provisioning', () => {
     )
   })
 
+  it('fails to subscribe when a mapped stream does not capture the subject or the dead-letter subject', async () => {
+    const cases: [NatsDriverOptions['streams'], string][] = [
+      [{ orders: 'ORDERS' }, 'stream "ORDERS" does not capture the subject "orders"'],
+      [() => 'EVENTS', 'stream "EVENTS" does not capture the dead-letter subject "orders.dlq"'],
+    ]
+    for (const [streams, expected] of cases) {
+      const fake = new FakeNats()
+      fake.createStream('ORDERS', ['orders.created'])
+      fake.createStream('EVENTS', ['orders'])
+      fake.createStream('orders_dlq', ['orders.dlq'])
+      const { consumer } = collector('orders')
+      const error = await caught(startApp(driverFor(fake, { streams }), [consumer]))
+      expect(error).toMatchObject({ code: 'ZNIGHT011' })
+      expect(messageOf(error)).toContain(expected)
+    }
+  })
+
+  it('accepts a mapped stream that captures the subject through a wildcard, or is filled by sources', async () => {
+    const fake = new FakeNats()
+    fake.createStream('ORDERS', ['orders.>'])
+    fake.createStream('AGGREGATE', []).config.sources = [{ name: 'ORDERS' }]
+    const { consumer } = collector('orders.created')
+    const { consumer: aggregated } = collector('orders.updated', {
+      options: { stream: 'AGGREGATE', deadLetter: false },
+    })
+    await startApp(driverFor(fake, { streams: { 'orders.created': 'ORDERS', 'orders.created.dlq': 'ORDERS' } }), [
+      consumer,
+      aggregated,
+    ])
+    expect(fake.consumer('ORDERS', 'znight-orders_created')).toBeDefined()
+    expect(fake.consumer('AGGREGATE', 'znight-orders_updated')).toBeDefined()
+  })
+
   it('creates the streams of a consumer and of its dead letters with provision: true', async () => {
     const fake = new FakeNats()
     const { received, consumer } = collector('orders')
@@ -376,6 +428,9 @@ describe('verification and provisioning', () => {
       [{ deliver_subject: 'push.inbox' }, 'is a push consumer'],
       [{ ack_policy: 'none' }, "acknowledgement policy is 'none'"],
       [{ max_deliver: 2 }, 'stops delivering a message after 2 deliveries, but Flaky allows 3 attempt(s)'],
+      [{ filter_subject: 'payments' }, 'filters "payments": Flaky reads "orders"'],
+      [{ filter_subject: '' }, 'has no filter subject (it reads the whole stream): Flaky reads "orders"'],
+      [{ filter_subjects: ['orders', 'payments'] }, 'filters "orders", "payments": Flaky reads "orders"'],
     ]
     for (const [config, expected] of cases) {
       const fake = fakeWithQueues('orders')
@@ -395,6 +450,14 @@ describe('verification and provisioning', () => {
       expect(error).toMatchObject({ code: 'ZNIGHT011' })
       expect(messageOf(error)).toContain(expected)
     }
+  })
+
+  it('accepts an existing consumer filtering the subject through filter_subjects', async () => {
+    const fake = fakeWithQueues('orders')
+    fake.createConsumer('orders', { durable_name: 'znight-orders', filter_subjects: ['orders'] })
+    const { consumer } = collector('orders')
+    await startApp(driverFor(fake), [consumer])
+    expect(fake.callsOf('consumers.add')).toEqual([])
   })
 
   it('refuses invalid consumer options', async () => {
@@ -443,7 +506,7 @@ describe('max-deliver advisories', () => {
       [MessagingHeaders.OriginalQueue]: 'orders',
       [MessagingHeaders.Attempts]: '5',
     })
-    expect(fake.callsOf('publish').at(-1)?.options.msgID).toBe('znight-dlq-orders-1')
+    expect(fake.callsOf('publish').at(-1)?.options.msgID).toBe('znight-dlq-orders-znight-orders-1')
     expect(blocked).toEqual([])
     expect(logs.some(entry => entry.level === 'warn' && entry.message.includes('max_deliver'))).toBe(true)
   })

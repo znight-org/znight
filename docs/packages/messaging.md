@@ -203,16 +203,21 @@ MessagingPlugin.configure({
 
 - **Consumers** are created when missing (explicit acks, `max_deliver: -1`, `ack_wait` 30 s,
   `consumerConfig` for the rest) and only checked when they exist: a pull consumer with explicit
-  acks whose `max_deliver` allows every attempt, or the boot fails with
-  [`ZNIGHT011`](/reference/error-codes#znight011). `@Consumer({ queue, durable, stream })` names them
+  acks, filtering exactly the subject of the queue, whose `max_deliver` allows every attempt, or the
+  boot fails with [`ZNIGHT011`](/reference/error-codes#znight011). A stream named with `streams` or
+  `@Consumer({ stream })` must capture the subject. `@Consumer({ queue, durable, stream })` names them
   for one consumer. Streams are only created with `provision: true` (one per missing subject).
 - **Settlements**: a confirmed double ack; retries are `nak(delay)`, and the attempts are JetStream's
-  delivery count; dead letters are a copy on `<queue>.dlq` (deduplicated, then `term()`); releases
-  are `nak()`. The ack wait is extended while a handler runs, and `concurrency` bounds the messages
-  each process fetches.
+  delivery count; dead letters are a copy on `<queue>.dlq` (deduplicated per consumer, then
+  `term()`); releases are `nak()`. The ack wait is extended while a handler runs, and `concurrency`
+  bounds the messages each process fetches.
+- **`max_ack_pending`** bounds all replicas together, and a message waiting for a delayed retry
+  keeps its slot until it is redelivered: with long `@Retry` delays, raise it through
+  `consumerConfig` so that waiting retries never stop new deliveries.
 - **`max_deliver`**: when a consumer has a finite one, the driver listens to the `MAX_DELIVERIES`
   advisories and dead-letters the messages JetStream stopped delivering (releases and expired ack
-  waits count as deliveries). Keep `-1` unless you need that bound.
+  waits count as deliveries). Advisories are not stored: one published while no replica listens is
+  lost, and its message stays in the stream undelivered. Keep `-1` unless you need that bound.
 - **Headers** are NATS headers (trace context included); `Nats-*` headers reach JetStream on publish
   (`Nats-TTL`...) and are hidden from handlers. No delayed publishing; order per subject with
   `concurrency: 1`. On stop, the pull request in flight ends, the messages in flight are settled, and

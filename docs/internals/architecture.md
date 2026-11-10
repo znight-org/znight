@@ -2612,7 +2612,7 @@ specifics:
 | `/sqs` (client-sqs ^3.600)          | `ApproximateReceiveCount`                                                                              | visibility timeout (≤ 12 h)                                                                      | 1 s                                    | `<q>-dlq` or `RedrivePolicy` target             | queues never created; `maxReceiveCount` ≥ attempts checked; lease extension (stopped before each settlement); FIFO groups by `key`                                                                                                                                                                                                                                                                                                                                                           |
 | `/kafka` (@platformatic/kafka)      | `x-znight-attempt`                                                                                     | retry topic `<group>.retry` (`x-znight-not-before`, ≤ 15 min: `maxRetryDelayMs`)                 | 0                                      | `<topic>.dlq`                                   | one consumer group per `@Consumer` (`<groupId>.<topic>`, override with `groupId`), manual commits (never moving back), partitions sequential, deduplication after a rebalance, back-pressure per stream, no delayed publish                                                                                                                                                                                                                                                                  |
 | `/pubsub` (@google-cloud/pubsub ^6) | `deliveryAttempt` (subscriptions with a dead-letter policy), else the retries it requested (in memory) | ack deadline (`ModifyAckDeadline`, ≤ 600 s)                                                      | 1 s (0 with `retries: 'subscription'`) | topic `<q>-dlq` or the dead-letter policy topic | `@Consumer` queue = subscription, published queue = topic (`topics` / `subscriptions` maps); unary Pull, at most `concurrency` messages leased, lease extension (stopped before each settlement); `retries: 'subscription'` nacks every failure (subscription retry and dead-letter policies own redelivery; a dead-letter policy is required); `maxDeliveryAttempts` ≥ attempts checked otherwise; ordering keys serialised; no delayed publish; topology verified (`provision` creates it) |
-| `/nats` (@nats-io/jetstream ^3)     | JetStream delivery count                                                                               | `nak(delay)` (≤ 2^53 ns, about 104 days)                                                         | 1 s                                    | subject `<q>.dlq`, then `term()`                | durable pull consumer `<durablePrefix>-<queue>` filtering `subjects(queue)` on the stream capturing it (or `streams(queue)`), created when missing (explicit acks, `max_deliver: -1`), verified otherwise (`max_deliver` ≥ attempts); fetches of at most the free slots; ack wait extended (`working()`); `ackAck()`; `nak` / `term` then a flush; dead-letter copies deduplicated by stream sequence; `MAX_DELIVERIES` advisories dead-lettered; streams verified (`provision`)             |
+| `/nats` (@nats-io/jetstream ^3)     | JetStream delivery count                                                                               | `nak(delay)` (≤ 2^53 ns, about 104 days)                                                         | 1 s                                    | subject `<q>.dlq`, then `term()`                | durable pull consumer `<durablePrefix>-<queue>` filtering `subjects(queue)` on the stream capturing it (or `streams(queue)`), created when missing (explicit acks, `max_deliver: -1`), verified otherwise (filter subject, `max_deliver` ≥ attempts); fetches of at most the free slots; ack wait extended (`working()`); `ackAck()`; `nak` / `term` then a flush; dead-letter copies deduplicated per durable; `MAX_DELIVERIES` advisories dead-lettered; streams verified (`provision`)    |
 
 More on the drivers:
 
@@ -2707,29 +2707,35 @@ More on the drivers:
   duplicate window) and resolves on the `PubAck`; `JetStreamNotEnabled` / no responders means no
   stream captures the subject (ZNIGHT011, or a stream named after the subject with `provision`). At
   subscribe time the driver resolves the stream (`streams(queue)` or `@Consumer({ stream })`,
-  verified; otherwise the stream capturing the subject), checks a stream captures the dead-letter
-  subject, then reads the durable (`@Consumer({ durable })` or `<durablePrefix>-<queue>`, characters
+  verified to exist and to capture the subject through its `subjects`, unless a mirror or sources
+  fill it; otherwise the stream capturing the subject), checks a stream captures the dead-letter
+  subject (a mapped one through its `subjects`), then reads the durable (`@Consumer({ durable })` or `<durablePrefix>-<queue>`, characters
   outside `[A-Za-z0-9_-]` replaced by `_`): a missing one is created (`ack_policy: explicit`,
   `ack_wait: ackWaitMs`, `max_deliver: -1`, `deliver_policy: all`, then `consumerConfig`), an existing
-  one is never updated and must be a pull consumer with explicit acks whose `max_deliver` is
-  unlimited or ≥ the consumer's attempts (ZNIGHT011 otherwise). Back-pressure is per process: one
+  one is never updated and must be a pull consumer with explicit acks, filtering exactly the subject
+  (`filter_subject`, or `filter_subjects` = `[subject]`), whose `max_deliver` is unlimited or ≥ the
+  consumer's attempts (ZNIGHT011 otherwise). Back-pressure is per process: one
   fetch at a time asks for at most `concurrency − inflight` messages (`max_ack_pending` stays the
-  consumer's, shared by every replica). Messages handed to the runtime get `working()` every half
+  consumer's, shared by every replica; a message nak'ed with a delay stays pending until its
+  redelivery and holds one of those slots). Messages handed to the runtime get `working()` every half
   ack wait until their settlement. `ack` is `ackAck()` (confirmed); `release` is `nak()`; `retry`
   is `nak(max(1, delayMs))` (an explicit delay, so a consumer `backoff` never adds to it); `deadLetter`
   publishes the copy (transport headers, headers, dead-letter headers on one line each,
-  `Nats-Msg-Id` `znight-dlq-<stream>-<seq>`) then `term(reason)`, or only `term()` with
+  `Nats-Msg-Id` `znight-dlq-<stream>-<durable>-<seq>`, so that consumers of one stream never
+  deduplicate each other's copies) then `term(reason)`, or only `term()` with
   `deadLetter: false`. `nak` and `term` are fire-and-forget in NATS: each is followed by a
   connection flush, so it resolves once the server received it. When the consumer has a finite
   `max_deliver`, the driver subscribes to `$JS.EVENT.ADVISORY.CONSUMER.MAX_DELIVERIES.<stream>.<durable>`
   in a queue group: a message JetStream stopped delivering (deliveries spent by releases or expired
   ack waits) is read from the stream and dead-lettered with reason `max-attempts`, the same
   `Nats-Msg-Id` deduplicating it against a runtime dead letter (the stream message stays; without a
-  dead-letter queue, an error is logged). Headers are NATS headers (values are single lines,
-  trimmed); `Nats-*` headers reach JetStream on publish (`Nats-TTL`...) and are hidden from
-  handlers; `key` travels in `x-znight-key`; the timestamp is the stream time. Cancel stops the
-  fetch in flight (messages it still yields are given back with `nak()`); close waits for the
-  deliveries in flight, then drains the connection it created, or flushes the one it was given.
+  dead-letter queue, an error is logged). Impl.: advisories are core NATS messages, so one published
+  while no replica is subscribed is lost (the message stays in the stream, undelivered). Headers are
+  NATS headers (values are single lines, trimmed); `Nats-*` headers reach JetStream on publish
+  (`Nats-TTL`...) and are hidden from handlers; `key` travels in `x-znight-key`; the timestamp is
+  the stream time. Cancel stops the fetch in flight (messages it still yields are given back with
+  `nak()`); close waits for the deliveries in flight, then drains the connection it created, or
+  flushes the one it was given.
 
 ### 9.3 Config (`@znight/config`)
 

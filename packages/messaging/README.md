@@ -623,21 +623,28 @@ must capture; it resolves on the JetStream acknowledgement. The Znight message i
 `Nats-Msg-Id`, so a message published twice within the stream's duplicate window is stored once.
 `@Consumer(queue)` reads a **durable pull consumer**, `<durablePrefix>-<queue>` (characters other
 than letters, digits, `-` and `_` become `_`), filtering the subject on the stream that captures it
-(or `streams(queue)`). `@Consumer({ queue, durable: 'billing-orders', stream: 'ORDERS' })` names
+(or `streams(queue)`, which must capture it unless a mirror or sources fill it). `@Consumer({ queue, durable: 'billing-orders', stream: 'ORDERS' })` names
 them for one consumer. For a fan-out, give each service its own `durablePrefix`: each durable
 consumer receives every message of the subject.
 
 Consumers are created when missing, with explicit acks, `ack_wait: ackWaitMs`, `max_deliver: -1`
 (Znight counts the attempts) and `consumerConfig`. An existing consumer is never updated, only
-checked: it must be a pull consumer with explicit acks whose `max_deliver` is unlimited or allows
-every attempt of the `@Consumer` (the boot fails with ZNIGHT011 otherwise). Streams are never
+checked: it must be a pull consumer with explicit acks, filtering exactly the subject of the queue
+(`filter_subject`, or `filter_subjects` with that one subject), whose `max_deliver` is unlimited or
+allows every attempt of the `@Consumer` (the boot fails with ZNIGHT011 otherwise, so that a durable
+left over from another subject or shared by two consumers is never reused silently). Streams are never
 created unless `provision: true`, which creates one per missing subject, named after it (`orders.dlq`
 → `orders_dlq`, with the default limits retention and `streamConfig`).
 
 The driver fetches at most the free concurrency slots at a time (one pull request per subscription,
 waiting up to `fetchExpiresMs`), so `concurrency` bounds each process; the consumer's
-`max_ack_pending` (1000 by default) bounds all replicas together. While a message is handled, its ack
-wait is extended (`working()`, every half ack wait). Settlements:
+`max_ack_pending` (1000 by default) bounds all replicas together. A message waiting for a delayed
+retry stays pending until JetStream redelivers it, so it holds one of these slots: when
+`max_ack_pending` messages wait for their retry, JetStream delivers no new message to any replica
+until a delay expires. With long `@Retry` delays (minutes or more), raise `max_ack_pending` through
+`consumerConfig` (or on the existing consumer) above the number of messages that may be waiting.
+While a message is handled, its ack wait is extended (`working()`, every half ack wait).
+Settlements:
 
 - **ack**: a double ack (`ackAck()`), confirmed by the server;
 - **retry**: `nak(delay)`; JetStream redelivers the message after the delay and counts its
@@ -646,7 +653,8 @@ wait is extended (`working()`, every half ack wait). Settlements:
   delivery too;
 - **dead letter**: the copy is published to the subject `<queue>.dlq` (a stream must capture it, the
   boot checks it) with the `x-znight-*` dead-letter headers and the `Nats-Msg-Id`
-  `znight-dlq-<stream>-<sequence>`, so that a copy written twice is stored once, then the original
+  `znight-dlq-<stream>-<durable>-<sequence>`, so that a copy written twice by one consumer is stored
+  once (two consumers of a fan-out each store theirs), then the original
   is terminated (`term()`); with `deadLetter: false`, the original is only terminated;
 - **release**: `nak()`.
 
@@ -656,8 +664,11 @@ they resolve once the server received them. **`max_deliver`.** When a consumer h
 after that many deliveries, releases and expired ack waits included, and only publishes an
 advisory. The driver listens to these advisories (`MAX_DELIVERIES`, in a queue group: one replica
 handles each), reads the message from the stream and dead-letters it with the reason
-`max-attempts`; without a dead-letter queue, it logs an error. Keep `max_deliver: -1` unless you
-need that bound.
+`max-attempts`; without a dead-letter queue, it logs an error. Advisories are core NATS messages,
+not stored: one published while no replica of the service is subscribed (every replica stopped or
+restarting when the last delivery's ack wait expires) is lost, and the message then stays in the
+stream, no longer delivered and not dead-lettered. Keep `max_deliver: -1` unless you need that
+bound.
 
 Headers are NATS headers (Znight uses `x-znight-id`, `x-znight-type`, `content-type` and
 `x-znight-key` for the key); values are single lines (a value with a line break is refused before
