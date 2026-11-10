@@ -15,6 +15,7 @@ import type {
 } from '../src/index.ts'
 
 import { createHash } from 'node:crypto'
+import { getEventListeners } from 'node:events'
 
 import { ADAPTERS, createApp, metadata } from './helpers.ts'
 import { describe, expect, it } from 'bun:test'
@@ -141,6 +142,140 @@ describe('upgrade routes in memory', () => {
       // the guard settled: the handshake left the pipeline
       expect(http.inflight).toBe(0)
       expect(accepted).toEqual([])
+    } finally {
+      await stop()
+    }
+  })
+
+  it('aborts ctx.signal (client) when the client leaves during the handshake, and completes nothing', async () => {
+    let aborted: unknown
+    const entered = Promise.withResolvers<void>()
+    class SlowGuard implements CanActivate {
+      canActivate(ctx: HttpContext): Promise<boolean> {
+        entered.resolve()
+        // lets the handshake through once the client left: the pipeline must not complete it
+        return new Promise(resolve =>
+          ctx.signal.addEventListener('abort', () => {
+            aborted = ctx.signal.reason
+            resolve(true)
+          }),
+        )
+      }
+    }
+    const accepted: Accepted[] = []
+    const { http, stop } = await createApp(
+      metadata({}, []),
+      {},
+      { plugins: [upgradePlugin(accepted, { guards: [new SlowGuard()] })], start: false },
+    )
+    try {
+      const client = new AbortController()
+      const reply = http.upgradeInMemory(
+        { method: 'GET', url: '/ws/a', signal: client.signal },
+        { kind: 'memory', peer: {} },
+      )
+      await entered.promise
+      expect(http.inflight).toBe(1)
+      client.abort()
+      const refused = await reply
+      expect(refused?.status).toBe(400)
+      expect(aborted).toMatchObject({ name: 'AbortError', kind: 'client', message: 'The client disconnected' })
+      expect(accepted).toEqual([])
+      expect(http.inflight).toBe(0)
+      expect(getEventListeners(client.signal, 'abort')).toHaveLength(0)
+    } finally {
+      await stop()
+    }
+  })
+
+  it('refuses a handshake whose client left before it started', async () => {
+    const accepted: Accepted[] = []
+    const { http, stop } = await createApp(metadata({}, []), {}, { plugins: [upgradePlugin(accepted)], start: false })
+    try {
+      const reply = await http.upgradeInMemory(
+        { method: 'GET', url: '/ws/a?token=secret', signal: AbortSignal.abort() },
+        { kind: 'memory', peer: {} },
+      )
+      expect(reply?.status).toBe(400)
+      expect(accepted).toEqual([])
+      expect(http.inflight).toBe(0)
+    } finally {
+      await stop()
+    }
+  })
+
+  it('stops listening to the client once the connection was accepted', async () => {
+    let handshake: HttpContext | undefined
+    const closed = Promise.withResolvers<void>()
+    const plugin: Plugin & PluginHttpUpgrades = {
+      name: 'fake-ws',
+      httpUpgrades: () => ({
+        routes: [
+          {
+            path: '/ws/:room',
+            name: 'FakeGateway',
+            accept(ctx: HttpContext, upgrade: PendingUpgrade): void {
+              handshake = ctx
+              // created during the handshake: a later abort would reach it
+              void ctx.signal
+              upgrade.hold(closed.promise)
+            },
+          },
+        ],
+      }),
+    }
+    const { http, stop } = await createApp(metadata({}, []), {}, { plugins: [plugin], start: false })
+    try {
+      const client = new AbortController()
+      const reply = await http.upgradeInMemory(
+        { method: 'GET', url: '/ws/a', signal: client.signal },
+        { kind: 'memory', peer: {} },
+      )
+      expect(reply).toBeUndefined()
+      expect(getEventListeners(client.signal, 'abort')).toHaveLength(0)
+      client.abort()
+      await Promise.resolve()
+      expect(handshake?.signal.aborted).toBe(false)
+      // the connection still lives in the scope of its handshake
+      expect(http.inflight).toBe(1)
+      closed.resolve()
+      await Bun.sleep(1)
+      expect(http.inflight).toBe(0)
+      expect(handshake?.signal.aborted).toBe(false)
+    } finally {
+      await stop()
+    }
+  })
+
+  it('stops listening to the client when the handshake is refused or times out', async () => {
+    class NeverGuard implements CanActivate {
+      canActivate(ctx: HttpContext): Promise<boolean> {
+        return new Promise(resolve => ctx.signal.addEventListener('abort', () => resolve(false)))
+      }
+    }
+    const { http, stop } = await createApp(
+      metadata({}, []),
+      {},
+      { plugins: [upgradePlugin([], { timeoutMs: 30, guards: [new TokenGuard(), new NeverGuard()] })], start: false },
+    )
+    try {
+      const refusedClient = new AbortController()
+      const refused = await http.upgradeInMemory(
+        { method: 'GET', url: '/ws/a', signal: refusedClient.signal },
+        { kind: 'memory', peer: {} },
+      )
+      expect(refused?.status).toBe(403)
+      expect(getEventListeners(refusedClient.signal, 'abort')).toHaveLength(0)
+
+      const expiredClient = new AbortController()
+      const expired = await http.upgradeInMemory(
+        { method: 'GET', url: '/ws/a?token=secret', signal: expiredClient.signal },
+        { kind: 'memory', peer: {} },
+      )
+      expect(expired?.status).toBe(408)
+      expect(getEventListeners(expiredClient.signal, 'abort')).toHaveLength(0)
+      await Promise.resolve()
+      expect(http.inflight).toBe(0)
     } finally {
       await stop()
     }
