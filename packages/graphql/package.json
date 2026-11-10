@@ -79,7 +79,7 @@
     "@znight/compiler": "workspace:*",
     "@znight/http": "workspace:*",
     "@znight/testing": "workspace:*",
-    "graphql": "17.0.2",
+    "graphql": "17.1.0",
     "graphql-http": "1.23.1",
     "graphql-sse": "2.6.3",
     "graphql-yoga": "6.0.1",

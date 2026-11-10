@@ -65,13 +65,19 @@ const HONO_ON_BUN = {
   redirect: ['404 location='], // `/\evil.com/` is `//evil.com/`: no route
 }
 
+/** `@hono/node-server` (2.1.6+) refuses a request target holding a backslash itself, before Znight. */
+const HONO_ON_NODE = {
+  redirect: ['400 location='], // `/\evil.com/` is refused upstream: no redirect at all
+}
+
 for (const runtime of ['node', 'bun']) {
   describe(`${runtime} runtime`, () => {
     it('answers the same on every adapter', async () => {
       const results = await run(runtime === 'node' ? 'node' : process.execPath)
       expect(Object.keys(results)).toEqual(['node', 'fastify', 'express', 'hono', 'expressBodyParser'])
       for (const adapter of ['node', 'fastify', 'express', 'hono']) {
-        const expected = adapter === 'hono' && runtime === 'bun' ? { ...EXPECTED, ...HONO_ON_BUN } : EXPECTED
+        const expected =
+          adapter === 'hono' ? { ...EXPECTED, ...(runtime === 'bun' ? HONO_ON_BUN : HONO_ON_NODE) } : EXPECTED
         expect({ adapter, ...results[adapter] }).toEqual({ adapter, ...expected })
       }
       // a body parser consumed the body before the Znight route: an explicit 500, not an empty body

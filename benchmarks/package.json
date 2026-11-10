@@ -15,15 +15,15 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@nestjs/common": "12.3.2",
-    "@nestjs/core": "12.3.2",
+    "@nestjs/common": "12.4.0",
+    "@nestjs/core": "12.4.0",
     "@znight/compiler": "workspace:*",
     "@znight/core": "workspace:*",
     "@znight/graphql": "workspace:*",
     "@znight/http": "workspace:*",
     "autocannon": "8.0.0",
-    "graphql": "17.0.2",
-    "inversify": "8.2.3",
+    "graphql": "17.1.0",
+    "inversify": "8.2.4",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2",
     "tsyringe": "4.10.0"

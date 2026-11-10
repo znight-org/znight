@@ -18,7 +18,7 @@
     "@znight/config": "workspace:*",
     "@znight/observability": "workspace:*",
     "zod": "catalog:",
-    "amqplib": "2.2.0"
+    "amqplib": "2.2.1"
   },
   "devDependencies": {
     "@znight/compiler": "workspace:*",
