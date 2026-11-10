@@ -3,7 +3,14 @@ import type { ConfigLoader, ConfigLoaderContext } from './types.ts'
 
 import { ConfigLoaderError, errorMessage, invalidConfig } from '../errors.ts'
 import { nestUnder } from '../source.ts'
-import { normalizeSecrets, readSecretLayers, secretLayer } from './secret-store.ts'
+import {
+  isTimeout,
+  normalizeSecrets,
+  noValueError,
+  readSecretLayers,
+  requireOptions,
+  secretLayer,
+} from './secret-store.ts'
 import {
   delay,
   isRecord,
@@ -97,14 +104,30 @@ function locate(options: VaultLoaderOptions, path: string): Pick<SecretLocation,
   return { label: `${mount}/${secret}`, apiPath }
 }
 
+/** The `errors` of a Vault error body, joined; `''` when there are none. */
 async function vaultErrors(response: Response): Promise<string> {
   try {
     const body = (await response.json()) as { errors?: unknown }
-    if (Array.isArray(body.errors) && body.errors.length > 0) return `: ${body.errors.map(String).join('; ')}`
+    if (Array.isArray(body.errors) && body.errors.length > 0) return body.errors.map(String).join('; ')
   } catch {
     // not JSON: the status is enough
   }
   return ''
+}
+
+/** `HTTP <status>: <Vault errors>`, or `HTTP <status>: <fallback>` when the body names none. */
+async function httpReason(response: Response, fallback: string): Promise<string> {
+  const errors = await vaultErrors(response)
+  return `HTTP ${response.status}: ${errors === '' ? fallback : errors}`
+}
+
+/** `cannot read secret "<label>": <reason>`: the common message of the secret-store loaders. */
+function readFailure(
+  label: string,
+  reason: string,
+  options: { readonly cause?: unknown; readonly hints?: readonly string[] } = {},
+): ConfigLoaderError {
+  return new ConfigLoaderError('vault', `cannot read secret "${label}": ${reason}`, options)
 }
 
 /**
@@ -184,7 +207,8 @@ async function resolveToken(context: ConfigLoaderContext, options: VaultLoaderOp
  * ```
  */
 export function vault(options: VaultLoaderOptions): ConfigLoader {
-  const secrets = normalizeSecrets<VaultSecretRef & Record<string, unknown>>('vault()', 'path', options?.path, {
+  requireOptions('vault()', options)
+  const secrets = normalizeSecrets<VaultSecretRef & Record<string, unknown>>('vault()', 'path', options.path, {
     optional: options.optional,
   })
   if (options.kvVersion !== undefined && options.kvVersion !== 1 && options.kvVersion !== 2) {
@@ -239,27 +263,27 @@ export function vault(options: VaultLoaderOptions): ConfigLoader {
             if (response.status === 404) {
               await response.body?.cancel()
               if (location.optional) return undefined
-              throw new ConfigLoaderError('vault', `secret ${location.label} not found (HTTP 404)`, {
-                hints: ['Check the path, the mount and kvVersion, or pass { optional: true }'],
+              throw readFailure(location.label, 'HTTP 404: not found', {
+                hints: ['Check the path, the mount and kvVersion, or mark the secret optional'],
               })
             }
             if (response.status === 429 || response.status >= 500) {
-              throw new RetryableError(`HTTP ${response.status}${await vaultErrors(response)}`)
+              throw new RetryableError(await httpReason(response, 'server error'))
             }
             if (!response.ok) {
-              throw new ConfigLoaderError(
-                'vault',
-                `cannot read secret ${location.label}: HTTP ${response.status}${await vaultErrors(response)}`,
-                { hints: response.status === 403 ? ['Check the token and its policies'] : [] },
-              )
+              throw readFailure(location.label, await httpReason(response, 'request refused'), {
+                hints:
+                  response.status === 403
+                    ? ['Check the token (VAULT_TOKEN, tokenFile) and that its policies allow "read" on the path']
+                    : [],
+              })
             }
             const body = (await secretBody(response)) as { data?: { data?: unknown } } | null
             const data = kv2 ? body?.data?.data : body?.data
             if (!isRecord(data)) {
-              throw new ConfigLoaderError(
-                'vault',
-                `unexpected response for ${location.label}: no secret data (is kvVersion ${kv2 ? 2 : 1} correct?)`,
-              )
+              throw noValueError('vault', location.label, [
+                `The response holds no secret data: check that the mount is a KV version ${kv2 ? 2 : 1} engine (kvVersion)`,
+              ])
             }
             return secretLayer(`vault:${location.label}`, nestUnder(data, location.key))
           } catch (error) {
@@ -267,11 +291,8 @@ export function vault(options: VaultLoaderOptions): ConfigLoader {
             lastError = error
           }
         }
-        throw new ConfigLoaderError(
-          'vault',
-          `cannot read secret ${location.label} after ${retries + 1} attempt(s): ${errorMessage(lastError)}`,
-          { cause: lastError },
-        )
+        const reason = isTimeout(lastError) ? `timed out after ${timeoutMs} ms` : errorMessage(lastError)
+        throw readFailure(location.label, `${reason}, after ${retries + 1} attempt(s)`, { cause: lastError })
       }
 
       return readSecretLayers(locations, read)

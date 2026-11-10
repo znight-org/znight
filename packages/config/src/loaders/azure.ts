@@ -11,6 +11,7 @@ import {
   readError,
   readSecretLayers,
   requestSignal,
+  requireOptions,
   secretLayer,
   secretValues,
 } from './secret-store.ts'
@@ -163,7 +164,7 @@ async function createClient(
  * ```
  */
 export function azureKeyVault(options: AzureKeyVaultLoaderOptions): ConfigLoader {
-  if (typeof options !== 'object' || options === null) throw invalidConfig(`${WHERE}: options are required`)
+  requireOptions(WHERE, options)
   const secrets = normalizeSecrets<AzureSecretRef & Record<string, unknown>>(WHERE, 'secretId', options.secretId, {
     json: options.json,
     optional: options.optional,

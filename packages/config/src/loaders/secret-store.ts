@@ -175,6 +175,14 @@ export function readError(
 }
 
 /** `secret "<id>" has no value`: the store answered without a payload. */
-export function noValueError(loader: string, id: string): ConfigLoaderError {
-  return new ConfigLoaderError(loader, `secret "${id}" has no value`)
+export function noValueError(loader: string, id: string, hints?: readonly string[]): ConfigLoaderError {
+  return new ConfigLoaderError(loader, `secret "${id}" has no value`, hints === undefined ? {} : { hints })
+}
+
+/**
+ * The guard every loader starts with: `options` must be an object (ZNIGHT012 otherwise, never a
+ * `TypeError` from reading a property of `undefined`).
+ */
+export function requireOptions(where: string, options: unknown): void {
+  if (typeof options !== 'object' || options === null) throw invalidConfig(`${where}: options are required`)
 }

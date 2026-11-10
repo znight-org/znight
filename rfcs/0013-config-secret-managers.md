@@ -71,7 +71,7 @@ content is base64, decoded as UTF-8. Authentication comes from `oci-common`: `au
 Container Instances), `'instance-principal'`, or `'config-file'` (`~/.oci/config`, `OCI_CONFIG_FILE`,
 profile `OCI_CLI_PROFILE`; the default otherwise), or any `authenticationDetailsProvider`. OCI
 answers `NotAuthorizedOrNotFound` (404) for a missing secret and a missing policy alike: `optional`
-skips both, and the hint says so.
+skips both, the hint says so, and each skipped optional secret emits a `ZnightWarning` naming it.
 
 ## 5. Alternatives considered
 

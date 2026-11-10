@@ -12,6 +12,7 @@ import {
   readError,
   readSecretLayers,
   requestSignal,
+  requireOptions,
   secretLayer,
   secretValues,
 } from './secret-store.ts'
@@ -245,7 +246,7 @@ async function createClient(
  * ```
  */
 export function gcpSecretManager(options: GcpSecretManagerLoaderOptions): ConfigLoader {
-  if (typeof options !== 'object' || options === null) throw invalidConfig(`${WHERE}: options are required`)
+  requireOptions(WHERE, options)
   const projectOption = optionalString('projectId', options.projectId, SEGMENT)
   const location = optionalString('location', options.location, SEGMENT)
   const targets = normalizeSecrets<GcpSecretRef & Record<string, unknown>>(WHERE, 'secretId', options.secretId, {

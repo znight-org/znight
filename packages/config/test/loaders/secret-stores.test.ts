@@ -19,7 +19,7 @@ import {
   vault,
 } from '../../src/index.ts'
 import { caught, field } from '../helpers.ts'
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it, spyOn } from 'bun:test'
 
 /** The secrets every fake store serves, by logical name (`null`: a secret without value). */
 const VALUES: Readonly<Record<string, string | null>> = {
@@ -81,6 +81,12 @@ interface ContractOptions {
 interface SecretStoreCase {
   /** Loader name (`ConfigLoader.name`). */
   readonly loader: string
+  /** The loader factory itself, called with arbitrary options. */
+  readonly factory: (options?: unknown) => ConfigLoader
+  /** Provider identifier of a logical name, as messages quote it. */
+  readonly id: (name: string) => string
+  /** Skipping an optional secret emits a warning (OCI: a 404 may be a missing policy). */
+  readonly warnsOnSkip: boolean
   /** Origin of the layer of a logical name. */
   readonly origin: (name: string) => string
   /** Key of a plain value read without `key`. */
@@ -107,6 +113,9 @@ const VAULT_PREFIX = '/v1/secret/data/'
 const CASES: readonly SecretStoreCase[] = [
   {
     loader: 'vault',
+    factory: vault as (options?: unknown) => ConfigLoader,
+    id: name => `secret/${name}`,
+    warnsOnSkip: false,
     origin: name => `vault:secret/${name}`,
     defaultKey: name => name,
     plainValues: false,
@@ -147,6 +156,9 @@ const CASES: readonly SecretStoreCase[] = [
   },
   {
     loader: 'aws-secrets-manager',
+    factory: awsSecretsManager as (options?: unknown) => ConfigLoader,
+    id: name => `prod/${name}`,
+    warnsOnSkip: false,
     origin: name => `aws-secrets-manager:prod/${name}`,
     defaultKey: name => `prod/${name}`,
     plainValues: true,
@@ -175,6 +187,9 @@ const CASES: readonly SecretStoreCase[] = [
   },
   {
     loader: 'gcp-secret-manager',
+    factory: gcpSecretManager as (options?: unknown) => ConfigLoader,
+    id: name => name,
+    warnsOnSkip: false,
     origin: name => `gcp-secret-manager:${name}`,
     defaultKey: name => name,
     plainValues: true,
@@ -204,6 +219,9 @@ const CASES: readonly SecretStoreCase[] = [
   },
   {
     loader: 'azure-key-vault',
+    factory: azureKeyVault as (options?: unknown) => ConfigLoader,
+    id: name => name,
+    warnsOnSkip: false,
     origin: name => `azure-key-vault:${name}`,
     defaultKey: name => name.replaceAll('--', '.').replaceAll('-', '_'),
     plainValues: true,
@@ -240,6 +258,9 @@ const CASES: readonly SecretStoreCase[] = [
   },
   {
     loader: 'oci-vault',
+    factory: ociVault as (options?: unknown) => ConfigLoader,
+    id: name => name,
+    warnsOnSkip: true,
     origin: name => `oci-vault:${name}`,
     defaultKey: name => name,
     plainValues: true,
@@ -342,41 +363,51 @@ describe.each(CASES)('secret-store contract: $loader', store => {
     })
   }
 
-  it('fails on a missing secret, naming it (ZNIGHT006)', async () => {
+  it('fails on a missing secret, naming it, with a hint (ZNIGHT006)', async () => {
     const error = await caught(() => load({ secrets: ['app', 'missing'] }))
     expect(error).toBeInstanceOf(ConfigLoaderError)
     expect((error as ZnightError).code).toBe(ErrorCode.MissingConfig)
-    expect(error.message).toContain(`"${store.loader}" failed`)
-    expect(error.message).toContain('missing')
+    expect(error.message).toContain(`"${store.loader}" failed: cannot read secret "${store.id('missing')}": `)
     expect(error.message).not.toContain('app-password')
+    expect((error as ZnightError).hints.length).toBeGreaterThan(0)
   })
 
   it('skips a missing secret marked optional, or every missing secret with the loader option', async () => {
-    const one = await load({ secrets: ['app', { name: 'missing', optional: true }] })
-    expect(one.get('DB_PASSWORD')).toBe('app-password')
-    const all = await load({ secrets: ['missing', 'app'], optional: true })
-    expect(all.get('DB_PASSWORD')).toBe('app-password')
-    const required = await caught(() => load({ secrets: [{ name: 'missing', optional: false }], optional: true }))
-    expect(required).toBeInstanceOf(ConfigLoaderError)
+    const emitWarning = spyOn(process, 'emitWarning').mockImplementation(() => undefined)
+    try {
+      const one = await load({ secrets: ['app', { name: 'missing', optional: true }] })
+      expect(one.get('DB_PASSWORD')).toBe('app-password')
+      const all = await load({ secrets: ['missing', 'app'], optional: true })
+      expect(all.get('DB_PASSWORD')).toBe('app-password')
+      const required = await caught(() => load({ secrets: [{ name: 'missing', optional: false }], optional: true }))
+      expect(required).toBeInstanceOf(ConfigLoaderError)
+      const warnings = emitWarning.mock.calls.map(call => String(call[0]))
+      // one warning per skipped secret, only where a not-found answer may hide a missing policy
+      expect(warnings).toHaveLength(store.warnsOnSkip ? 2 : 0)
+      expect(warnings.every(warning => warning.includes(`"${store.id('missing')}"`))).toBe(true)
+    } finally {
+      emitWarning.mockRestore()
+    }
   })
 
-  it('reports an access error, even for an optional secret', async () => {
+  it('reports an access error with a hint, even for an optional secret', async () => {
     const error = await caught(() => load({ secrets: [{ name: 'denied', optional: true }] }))
     expect(error).toBeInstanceOf(ConfigLoaderError)
-    expect(error.message).toContain('denied')
+    expect(error.message).toContain(`cannot read secret "${store.id('denied')}": `)
+    expect((error as ZnightError).hints.length).toBeGreaterThan(0)
   })
 
   it('fails on a secret without value', async () => {
     const error = await caught(() => load({ secrets: ['empty'] }))
     expect(error).toBeInstanceOf(ConfigLoaderError)
-    expect(error.message).toContain('empty')
+    expect(error.message).toContain(`secret "${store.id('empty')}" has no value`)
   })
 
   it('gives up on a request after timeoutMs', async () => {
     const started = performance.now()
     const error = await caught(() => load({ secrets: ['app', 'hang'], timeoutMs: 50 }))
     expect(error).toBeInstanceOf(ConfigLoaderError)
-    expect(error.message).toContain('hang')
+    expect(error.message).toContain(`cannot read secret "${store.id('hang')}": timed out after 50 ms`)
     expect(performance.now() - started).toBeLessThan(2000)
   })
 
@@ -384,6 +415,11 @@ describe.each(CASES)('secret-store contract: $loader', store => {
     for (const options of [{ secrets: [] }, { secrets: ['app'], timeoutMs: 0 }, { secrets: [{ name: '' }] }]) {
       const error = await caught(() => create(options))
       expect((error as ZnightError).code).toBe(ErrorCode.InvalidConfig)
+    }
+    for (const options of [undefined, null, 'app']) {
+      const error = await caught(() => store.factory(options))
+      expect((error as ZnightError).code).toBe(ErrorCode.InvalidConfig)
+      expect(error.message).toContain('options are required')
     }
   })
 })

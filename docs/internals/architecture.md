@@ -2770,7 +2770,9 @@ Secret-store contract (normative for the five loaders above):
 - **Missing secrets.** A not-found answer (Vault HTTP 404, AWS `ResourceNotFoundException`, GCP
   `NOT_FOUND`, Azure HTTP 404, OCI HTTP 404 `NotAuthorizedOrNotFound`) skips the secret when it is
   `optional` (per secret, else the loader's, default `false`) and fails otherwise; every other error
-  fails. A response without payload is `secret "<id>" has no value`.
+  fails. OCI cannot tell a missing secret from a missing policy (both are 404), so `ociVault()` MUST
+  emit a `ZnightWarning` (`process.emitWarning`) naming each optional secret it skips. A response
+  without payload is `secret "<id>" has no value`.
 - **Requests.** Each request has a timeout (`timeoutMs`, default 10 000 ms, Vault 5 000 ms; an
   integer from 1 to 2^31 − 1, ZNIGHT012 otherwise), enforced even when the client ignores the abort
   signal. The secrets of a loader are read concurrently; once one read fails, the abort signal given
@@ -2779,7 +2781,9 @@ Secret-store contract (normative for the five loaders above):
   from 0, ZNIGHT012 otherwise; backoff capped at 30 s); the SDK loaders keep the retries of their SDK.
 - **Errors.** `cannot read secret "<id>": <provider status>: <message>` (or `timed out after <n>
   ms`), with the original error as `cause` and hints for permissions, credentials and missing
-  secrets.
+  secrets. Vault's provider status is `HTTP <status>`, and once its retries are spent the message
+  ends with `, after <n> attempt(s)`. A loader created without an options object, or with invalid
+  options, throws ZNIGHT012.
 - **Clients.** The SDK is imported lazily (non-literal dynamic import) when the loader runs without
   `client`; a client the loader created is closed after loading, an injected one is not. Settings
   read from the context (`VAULT_ADDR`, `VAULT_TOKEN`, `VAULT_NAMESPACE`, `AWS_REGION` /

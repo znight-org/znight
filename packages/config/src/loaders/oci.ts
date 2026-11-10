@@ -11,6 +11,7 @@ import {
   readError,
   readSecretLayers,
   requestSignal,
+  requireOptions,
   secretLayer,
   secretValues,
 } from './secret-store.ts'
@@ -155,6 +156,17 @@ function accessHints(error: unknown): string[] {
   }
 }
 
+/**
+ * OCI answers 404 `NotAuthorizedOrNotFound` both for a missing secret and for a missing policy, so
+ * an optional secret skipped on a 404 may hide an authorization failure: say so (`ZnightWarning`).
+ */
+function warnSkipped(id: string): void {
+  process.emitWarning(
+    `ociVault(): skipped the optional secret "${id}": OCI answered 404 NotAuthorizedOrNotFound, which means a missing secret or a missing "read secret-bundles" policy`,
+    { type: 'ZnightWarning' },
+  )
+}
+
 function optionalString(name: string, value: unknown): string | undefined {
   if (value === undefined) return undefined
   if (typeof value !== 'string' || value.trim() === '')
@@ -222,7 +234,7 @@ function decode(content: OciSecretBundleContentLike | undefined): string | undef
  * ```
  */
 export function ociVault(options: OciVaultLoaderOptions): ConfigLoader {
-  if (typeof options !== 'object' || options === null) throw invalidConfig(`${WHERE}: options are required`)
+  requireOptions(WHERE, options)
   const secrets = normalizeSecrets<OciSecretRef & Record<string, unknown>>(WHERE, 'secretId', options.secretId, {
     json: options.json,
     optional: options.optional,
@@ -282,7 +294,10 @@ export function ociVault(options: OciVaultLoaderOptions): ConfigLoader {
             : client.getSecretBundleByName({ secretName: secret.id, vaultId: vaultId as string, ...version })
           response = await abortable(request, requestSignal(cancel, timeoutMs))
         } catch (error) {
-          if (statusCode(error) === 404 && secret.optional) return undefined
+          if (statusCode(error) === 404 && secret.optional) {
+            warnSkipped(secret.id)
+            return undefined
+          }
           throw readError(LOADER, secret.id, error, {
             status: errorStatus(error),
             timeoutMs,

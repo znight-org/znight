@@ -11,6 +11,7 @@ import {
   readError,
   readSecretLayers,
   requestSignal,
+  requireOptions,
   secretLayer,
   secretValues,
 } from './secret-store.ts'
@@ -98,6 +99,37 @@ function errorName(error: unknown): string | undefined {
   return typeof name === 'string' && name !== 'Error' ? name : undefined
 }
 
+const CREDENTIALS_HINT =
+  'Check the AWS credentials: the default chain reads AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY, AWS_PROFILE (shared config, SSO), web identity and the container or instance role; or pass clientConfig.credentials'
+
+/** Exceptions of a missing, invalid or expired identity. */
+const CREDENTIALS_ERRORS: ReadonlySet<string> = new Set([
+  'CredentialsProviderError',
+  'UnrecognizedClientException',
+  'InvalidClientTokenId',
+  'InvalidSignatureException',
+  'ExpiredTokenException',
+  'ExpiredToken',
+])
+
+function accessHints(error: unknown): string[] {
+  const name = errorName(error)
+  switch (name) {
+    case 'AccessDeniedException':
+      return [
+        'Allow secretsmanager:GetSecretValue on the secret to the identity the application runs as (and kms:Decrypt on its key when the secret uses a customer managed KMS key)',
+      ]
+    case 'ResourceNotFoundException':
+      return ['Check the secret name or ARN and the region, or mark the secret optional']
+    case 'DecryptionFailure':
+      return [
+        'Secrets Manager cannot decrypt the secret: allow kms:Decrypt on its KMS key to the identity the application runs as',
+      ]
+    default:
+      return name !== undefined && CREDENTIALS_ERRORS.has(name) ? [CREDENTIALS_HINT] : []
+  }
+}
+
 async function createClient(
   context: ConfigLoaderContext,
   options: AwsSecretsManagerLoaderOptions,
@@ -129,7 +161,8 @@ async function createClient(
  * ```
  */
 export function awsSecretsManager(options: AwsSecretsManagerLoaderOptions): ConfigLoader {
-  const secrets = normalizeSecrets<AwsSecretRef & Record<string, unknown>>(WHERE, 'secretId', options?.secretId, {
+  requireOptions(WHERE, options)
+  const secrets = normalizeSecrets<AwsSecretRef & Record<string, unknown>>(WHERE, 'secretId', options.secretId, {
     json: options.json,
     optional: options.optional,
   })
@@ -166,7 +199,7 @@ export function awsSecretsManager(options: AwsSecretsManagerLoaderOptions): Conf
           output = await abortable(fetchSecret(secret.ref, signal), signal)
         } catch (error) {
           if (errorName(error) === 'ResourceNotFoundException' && secret.optional) return undefined
-          throw readError(LOADER, secret.id, error, { status: errorName(error), timeoutMs })
+          throw readError(LOADER, secret.id, error, { status: errorName(error), timeoutMs, hints: accessHints(error) })
         }
         const text = secretText(output ?? {})
         if (text === undefined) throw noValueError(LOADER, secret.id)

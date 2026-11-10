@@ -254,7 +254,9 @@ ociVault({ vaultId: 'ocid1.vault.oc1.eu-frankfurt-1.example', secretId: ['DB_PAS
   instance. Vault secrets are always key/value maps.
 - **Missing secrets.** A secret that does not exist fails the start, unless `optional` (per secret,
   or for every secret of the loader): it is then skipped. Other errors (permissions, credentials,
-  network) always fail, `optional` or not.
+  network) always fail, `optional` or not. One exception: OCI answers the same 404
+  (`NotAuthorizedOrNotFound`) for a missing secret and a missing policy, so on OCI `optional` also
+  skips a missing policy; `ociVault()` then emits a `ZnightWarning` naming the secret and both causes.
 - **Requests.** Secrets are read concurrently, each request with a timeout (`timeoutMs`, an integer
   from 1 to 2^31 − 1). Once one read fails, the others are cancelled (or, when the SDK cannot cancel,
   no longer awaited). Retries are those of the SDK (Vault: `retries`).
@@ -263,9 +265,10 @@ ociVault({ vaultId: 'ocid1.vault.oc1.eu-frankfurt-1.example', secretId: ['DB_PAS
   fields without `@Secret`.
 - **Refresh.** Secrets are read once, at start; a rotated secret is read by the next start. Nothing
   is cached on disk.
-- **Errors.** `cannot read secret "<id>": <provider status>: <message>`, with hints for missing
+- **Errors.** `cannot read secret "<id>": <provider status>: <message>` (or `timed out after <n>
+  ms`; Vault adds `, after <n> attempt(s)` once its retries are spent), with hints for missing
   permissions, credentials and missing secrets; `secret "<id>" has no value` when the store answers
-  without a payload.
+  without a payload. Invalid options, or none, are `ZNIGHT012` when the loader is created.
 - **Testing.** Each loader takes its client (`client`, Vault: `fetch`), so tests need no network.
 
 ### `vault(options)` {#vault}
@@ -305,9 +308,11 @@ previous loaders first, then from the environment.
 
 **Refresh.** Read once at start; Vault leases and token renewal are not involved (KV secrets).
 
-**Errors.** `secret <path> not found (HTTP 404)` unless optional; `cannot read secret <path>: HTTP
-403` (check the token policies); after the retries, `cannot read secret <path> after <n>
-attempt(s)`. `timeoutMs` must be an integer from 1 to 2^31 − 1, `retries` and `retryDelayMs` finite
+**Errors.** `cannot read secret "<mount>/<path>": HTTP <status>: <Vault errors>`: HTTP 404 unless
+optional, HTTP 403 with a hint on the token and its policies; after the retries,
+`cannot read secret "<mount>/<path>": <last error>, after <n> attempt(s)`; a response without
+secret data (a KV v1 mount read as KV v2, for instance) is `secret "<mount>/<path>" has no value`,
+with a `kvVersion` hint. `timeoutMs` must be an integer from 1 to 2^31 − 1, `retries` and `retryDelayMs` finite
 numbers from 0 (`ZNIGHT012` otherwise). A token or namespace loses its leading and trailing white
 space (as `fetch` does: `readFileSync(path, 'utf8')` keeps a final newline); one that is still not a
 valid header value (a token file with several lines, an inner line break, NUL or a character above
@@ -347,7 +352,9 @@ plain secret (or a binary one, decoded as UTF-8) is one value under its `key`, d
 **Refresh.** Read once at start, version `AWSCURRENT` unless `versionStage` or `versionId` is set.
 
 **Errors.** `cannot read secret "<secretId>": <exception>: <message>` (`ResourceNotFoundException`,
-`AccessDeniedException`, `DecryptionFailure`...). LocalStack works with
+`AccessDeniedException`, `DecryptionFailure`...), with a hint for a missing secret (name, ARN,
+region), a denied access (`secretsmanager:GetSecretValue`, `kms:Decrypt`), a KMS failure and missing
+or expired credentials. LocalStack works with
 `clientConfig: { endpoint: 'http://localhost:4566' }`.
 
 ### `gcpSecretManager(options)` {#gcp-secret-manager}
@@ -492,7 +499,8 @@ a policy such as `allow dynamic-group <group> to read secret-bundles in compartm
 
 **Errors.** `cannot read secret "<secretId>": <service code> (HTTP <status>): <message>`. OCI answers
 `NotAuthorizedOrNotFound` (404) both for a missing secret and a missing policy, so `optional` skips
-both: the hint names the two causes. A name without `vaultId` fails at load time; an unusable
+both: the hint names the two causes, and a skipped optional secret emits a `ZnightWarning`
+(`process.emitWarning`) that names it, so a missing policy does not go unnoticed. A name without `vaultId` fails at load time; an unusable
 config file or principal fails with `cannot set up the <auth> authentication`.
 
 ### `inline(values, options?)` {#inline}
