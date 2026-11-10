@@ -2523,7 +2523,9 @@ interface MessagingDriver {
 //   exactly one settlement: ack() | retry({ attempt, delayMs, error }) | deadLetter({ queue, reason,
 //   error, attempt }) | release(), possibly followed by release() when it failed
 // SubscribeOptions: consumer, concurrency, deadLetterQueue, maxAttempts, retryDelays, options (driver options)
-// Subscription: cancel() (stop receiving), close() (after in-flight settlements)
+// Subscription: cancel() (stop receiving), close() (after in-flight settlements), nativeDeadLetter?
+//   (true: the broker dead-letters by its own policy; the runtime then requests dead letters with
+//   queue: undefined, logs them as rejected and reports no dead-letter queue for the consumer)
 ```
 
 Drivers verify their topology (and native DLQ configuration) at subscribe time. **Impl.** driver
@@ -2603,13 +2605,19 @@ More on the drivers:
   flight before its own call (ack: `Acknowledge`; release: deadline 0; retry: deadline
   `ceil(delayMs / 1000)`). Without a dead-letter policy, `deliveryAttempt` is 0 and the attempt is
   the one of the last retry the driver requested for that message id (bounded, per process).
-  `retries` (driver option, overridable by `@Consumer({ retries })`): `'znight'` publishes dead
-  letters (attributes truncated to Pub/Sub limits) then acknowledges, and with `deadLetter: false`
-  nacks (dead-letter policy present or unknown) or acknowledges (known to have none);
-  `'subscription'` answers every retry and dead-letter request with a zero deadline (in-process
-  budget 0), refuses a subscription known to have no dead-letter policy (ZNIGHT011) and warns when
-  `maxDeliveryAttempts` differs from the consumer's attempts. `NOT_FOUND` on the subscription or the
-  Znight dead-letter topic fails the subscription (ZNIGHT011) unless `provision`; `PERMISSION_DENIED`
+  `retries` (driver option; under `'subscription'`, `@Consumer({ retries: 'znight' })` takes the
+  ownership back, while `@Consumer({ retries: 'subscription' })` under `'znight'` is ZNIGHT011, since
+  the in-process budget is driver-wide): `'znight'` publishes dead letters (attributes truncated to
+  Pub/Sub limits) then acknowledges, and with `deadLetter: false` nacks (dead-letter policy present
+  or unknown) or acknowledges (known to have none); `'subscription'` answers every retry and
+  dead-letter request with a zero deadline (in-process budget 0), reports `nativeDeadLetter`, refuses
+  a subscription known to have no dead-letter policy (ZNIGHT011) and warns when
+  `maxDeliveryAttempts` differs from the consumer's attempts. A lease extension is sent every half
+  deadline whatever the initial deadlines of new batches in flight (a tick is only skipped while the
+  previous periodic extension is in flight). `NOT_FOUND` on the subscription or the Znight
+  dead-letter topic fails the subscription (ZNIGHT011) unless `provision` (under `'subscription'`, a
+  provisioned subscription gets a dead-letter policy to the consumer's dead-letter topic,
+  `maxDeliveryAttempts` = its attempts clamped to 5–100); `PERMISSION_DENIED`
   logs a warning and skips the checks (ordering then assumed). Attributes (≤ 100, keys ≤ 256 bytes,
   values ≤ 1024 bytes, no `goog` prefix) are checked before publishing; `googclient_traceparent` is
   exposed as `traceparent` when absent. A Pull in flight when the subscription stops is abandoned

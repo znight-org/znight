@@ -98,9 +98,13 @@ consumer retries (`maxAttempts > 1`) and the subscription has none.
 Pub/Sub can own retries (subscription retry policy: exponential backoff between 0 and 600 s) and
 dead letters (dead-letter policy: a topic, 5–100 delivery attempts). Znight retries in process and
 publishes its own dead-letter copies. Stacking both multiplies attempts and splits dead letters
-across two topics. The driver option `retries` picks one owner, and a consumer can override it with
-`@Consumer({ queue, retries })` (the collector of a dead-letter topic, whose subscription has no
-dead-letter policy, keeps `'znight'` under a driver set to `'subscription'`):
+across two topics. The driver option `retries` picks one owner. The in-process budget and the
+`@Retry` checks are driver capabilities, so a consumer can only take the ownership back:
+`@Consumer({ queue, retries: 'znight' })` under a driver set to `'subscription'` (the collector of a
+dead-letter topic, whose subscription has no dead-letter policy) keeps `@Retry` and Znight dead
+letters, with no in-process budget. `@Consumer({ retries: 'subscription' })` under a `'znight'`
+driver fails the boot (ZNIGHT011): the runtime would still wait in-process and check delays the
+subscription ignores.
 
 - **`'znight'` (default).** `@Retry` applies as with the other drivers (in-process delays, then ack
   deadlines). Dead letters go to the topic `<queue>-dlq` (`deadLetterName`), with the Znight
@@ -119,7 +123,11 @@ dead-letter policy, keeps `'znight'` under a driver set to `'subscription'`):
   `maxDeliveryAttempts`, so that the handler runs on every delivery: deliveries beyond the consumer's
   attempts are nacked without running it (a warning at subscribe time when the two differ). A
   `NonRetryableError`, a validation failure or a message without handler is nacked like any failure:
-  it is redelivered until the dead-letter policy forwards it.
+  it is redelivered until the dead-letter policy forwards it. The subscription reports
+  `nativeDeadLetter` to the runtime, which then requests dead letters with `queue: undefined` and
+  logs them as rejected (never naming `<queue>-dlq`, which receives nothing); the handler, `@OnError`
+  and the `dead-letter` delivery outcome repeat on each such delivery. The `@Retry` delays are still
+  checked against the native limit (600 s).
 
 ## 6. Messages: body, attributes, trace context
 
@@ -153,7 +161,9 @@ Google Cloud tools for delayed work.
   `roles/pubsub.subscriber` only) logs a warning and skips the checks.
 - `provision: true` (development, emulator) creates what is missing: the topic of the queue and its
   subscription, and the dead-letter topic with a subscription of the same name (a topic without
-  subscription drops what is published to it). A publication to a missing topic creates it.
+  subscription drops what is published to it). Under `'subscription'`, which requires a dead-letter
+  policy, a created subscription gets one to that topic, with `maxDeliveryAttempts` set to the
+  consumer's attempts (clamped to 5–100). A publication to a missing topic creates it.
 
 ## 9. Emulator, shutdown, dependencies
 

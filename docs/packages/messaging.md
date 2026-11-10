@@ -163,7 +163,8 @@ Driver highlights (details in the
   default, `topics` / `subscriptions` to map them). Attempts come from `deliveryAttempt` (subscriptions
   with a dead-letter policy). `retries: 'znight'` (default) applies `@Retry` and publishes Znight dead
   letters; `retries: 'subscription'` nacks every failure so that the subscription's retry and
-  dead-letter policies own redelivery, never both layers at once. No delayed publishing; topics and
+  dead-letter policies own redelivery, never both layers at once (a consumer can only take the
+  ownership back, with `@Consumer({ queue, retries: 'znight' })`). No delayed publishing; topics and
   subscriptions are only created with `provision: true` (`PUBSUB_EMULATOR_HOST` targets the emulator).
 
 ```ts
