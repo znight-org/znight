@@ -1,7 +1,9 @@
 /**
  * WebSocket handshake check executed by `test/upgrade-abort-runtime.test.ts` with Node.js
  * (`node --conditions=@znight/source`) and Bun: on every adapter, a client leaving while a guard
- * waits aborts `ctx.signal` (`kind: 'client'`) and the handshake is not completed; a connection
+ * waits aborts `ctx.signal` (`kind: 'client'`) and the handshake is not completed, also when it sent
+ * bytes after its handshake before ending its side (bytes nothing reads yet), and a guard failing
+ * with that abort logs no error; a connection
  * accepted then closed by its client aborts nothing, and the handshake stopped listening to the
  * client once accepted. Prints the results as JSON.
  */
@@ -16,6 +18,7 @@ import type {
   RequestAbortedError,
 } from '../../src/index.ts'
 
+import { Buffer } from 'node:buffer'
 import { createHash } from 'node:crypto'
 import { getEventListeners } from 'node:events'
 import net from 'node:net'
@@ -40,7 +43,10 @@ function fresh(): Run {
   return { entered: Promise.withResolvers(), reason: undefined, accepted: 0, released: undefined }
 }
 
-/** Waits on `ctx.signal` for `?slow`, then lets the handshake through, aborted or not. */
+/**
+ * Waits on `ctx.signal` for `?slow`, then lets the handshake through, aborted or not; for `?rethrow`,
+ * fails with the signal's reason once aborted (an authentication call given `ctx.signal`).
+ */
 class SlowGuard implements CanActivate {
   canActivate(ctx: HttpContext): boolean | Promise<boolean> {
     const signal = ctx.signal
@@ -49,22 +55,27 @@ class SlowGuard implements CanActivate {
     })
     run.entered.resolve()
     if (ctx.query['slow'] === undefined) return true
-    return new Promise(resolve => {
+    const rethrow = ctx.query['rethrow'] !== undefined
+    return new Promise((resolve, reject) => {
       const timer = setTimeout(() => resolve(true), 3000)
       signal.addEventListener('abort', () => {
         clearTimeout(timer)
-        resolve(true)
+        if (rethrow) reject(signal.reason)
+        else resolve(true)
       })
     })
   }
 }
 
-/** The number of client listeners of a native upgrade (socket `end` and `close`, request `abort`). */
+/**
+ * The number of client listeners of a native upgrade (socket `end`, `close` and `readable`, request
+ * `abort`).
+ */
 function listeners(upgrade: PendingUpgrade): number {
   const native = upgrade.native
   if (native.kind === 'node') {
     const socket = native.socket as Duplex
-    return socket.listenerCount('end') + socket.listenerCount('close')
+    return socket.listenerCount('end') + socket.listenerCount('close') + socket.listenerCount('readable')
   }
   if (native.kind === 'bun') return getEventListeners(native.request.signal, 'abort').length
   return 0
@@ -154,6 +165,33 @@ for (const adapter of ADAPTERS) {
   await sleep(50)
   const left = { waiting, reason: run.reason ?? null, accepted: run.accepted, settled }
 
+  // the client sends bytes after its handshake (a frame, in its own segment), then ends its side
+  run = fresh()
+  const ending = handshake(port, '/ws?slow=1')
+  await run.entered.promise
+  ending.write(Buffer.from([0x81, 0x80, 0, 0, 0, 0]))
+  await sleep(50)
+  ending.end()
+  const ended = await until(() => app.http.inflight === 0)
+  await sleep(50)
+  ending.destroy()
+  const sent = { reason: run.reason ?? null, accepted: run.accepted, settled: ended }
+
+  // the guard fails with the client's abort: answered without an error log
+  run = fresh()
+  const errors = app.logger.entries.length
+  const failing = handshake(port, '/ws?slow=1&rethrow=1')
+  await run.entered.promise
+  failing.destroy()
+  const failed = await until(() => app.http.inflight === 0)
+  await sleep(50)
+  const rethrown = {
+    reason: run.reason ?? null,
+    accepted: run.accepted,
+    settled: failed,
+    errors: app.logger.entries.slice(errors).filter(entry => entry.level === 'error').length,
+  }
+
   // accepted, then closed by the client
   run = fresh()
   const client = handshake(port, '/ws')
@@ -173,7 +211,7 @@ for (const adapter of ADAPTERS) {
     released: run.released ?? null,
   }
 
-  results[adapter.name] = { left, accepted }
+  results[adapter.name] = { left, sent, rethrown, accepted }
   await app.stop()
 }
 

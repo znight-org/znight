@@ -48,7 +48,7 @@ import { isSseBody, isSseSource, type SseOptions, SseSession, type SseSource } f
 import { isBodylessStatus } from './status.ts'
 import { type ContextRunner, captureContext, discardStream, type TrackedStream, trackStream } from './stream.ts'
 import { HttpTokens } from './tokens.ts'
-import { PendingUpgradeState } from './upgrade.ts'
+import { handshakeAborted, PendingUpgradeState } from './upgrade.ts'
 import { emptyRecord, errorMessage, fastRecord, isBun, isThenable } from './utils.ts'
 
 /** A dependency of the pipeline: an instance resolved at bootstrap, or a token resolved per request. */
@@ -1489,8 +1489,14 @@ export class Pipeline {
     return reply
   }
 
-  /** Maps an error to a reply: exception mappers first, then the default rendering. Never throws. */
-  async #errorReply(error: unknown, ctx: RequestContext): Promise<SerializedReply> {
+  /**
+   * Maps an error to a reply: exception mappers first, then the default rendering. Never throws. A
+   * WebSocket handshake failing with the abort of its own client (a guard passing `ctx.signal` to
+   * its work, like `fetch()`) is answered like a client that left: a `400`, not a logged server
+   * error (the reply reaches nobody).
+   */
+  async #errorReply(thrown: unknown, ctx: RequestContext): Promise<SerializedReply> {
+    const error = UPGRADES.has(ctx) && ctx.isClientAbort(thrown) ? handshakeAborted() : thrown
     for (const mapper of this.#options.mappers) {
       let mapped: unknown
       try {

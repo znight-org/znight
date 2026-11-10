@@ -473,6 +473,16 @@ export class RequestContext implements HttpContext {
     unwatch?.()
   }
 
+  /**
+   * Whether `error` is the client disconnect that aborted {@link signal} (internal): its reason
+   * (what `fetch()` rejects with), or an error caused by it (`node:timers/promises` wraps it).
+   */
+  isClientAbort(error: unknown): boolean {
+    const reason = this.#more?.abortReason
+    if (reason?.kind !== 'client' || typeof error !== 'object' || error === null) return false
+    return error === reason || (error as { readonly cause?: unknown }).cause === reason
+  }
+
   /** Why {@link signal} aborted, `undefined` while it did not (internal). */
   get abortKind(): RequestAbortKind | undefined {
     return this.#more?.abortReason?.kind

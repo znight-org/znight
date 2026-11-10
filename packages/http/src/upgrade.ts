@@ -302,6 +302,14 @@ export function isWebSocketUpgrade(headers: Readonly<Record<string, string | und
 }
 
 /**
+ * The refusal of a handshake whose client left before it completed (internal): `accept` is not
+ * called, or a guard failed with the client's abort of `ctx.signal`.
+ */
+export function handshakeAborted(): BadRequestException {
+  return new BadRequestException('The WebSocket handshake was aborted')
+}
+
+/**
  * The protocol checks of a handshake: `GET`, `sec-websocket-version: 13` (`426` with the supported
  * version otherwise) and a base64 16-byte `sec-websocket-key` (`400`).
  */

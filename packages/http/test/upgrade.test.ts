@@ -16,6 +16,7 @@ import type {
 
 import { createHash } from 'node:crypto'
 import { getEventListeners } from 'node:events'
+import { setTimeout } from 'node:timers/promises'
 
 import { ADAPTERS, createApp, metadata } from './helpers.ts'
 import { describe, expect, it } from 'bun:test'
@@ -183,6 +184,69 @@ describe('upgrade routes in memory', () => {
       expect(accepted).toEqual([])
       expect(http.inflight).toBe(0)
       expect(getEventListeners(client.signal, 'abort')).toHaveLength(0)
+    } finally {
+      await stop()
+    }
+  })
+
+  it('answers a guard failing with its own client abort like a client that left, without logging an error', async () => {
+    let entered = Promise.withResolvers<void>()
+    /** An authentication call honouring ctx.signal, which rejects with its reason (`fetch()`) or wraps it. */
+    class AuthGuard implements CanActivate {
+      async canActivate(ctx: HttpContext): Promise<boolean> {
+        entered.resolve()
+        const signal = ctx.signal
+        const call =
+          ctx.query['timers'] === undefined
+            ? new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason)))
+            : setTimeout(60_000, undefined, { signal })
+        await call
+        return true
+      }
+    }
+    const accepted: Accepted[] = []
+    const { http, logger, stop } = await createApp(
+      metadata({}, []),
+      {},
+      { plugins: [upgradePlugin(accepted, { guards: [new AuthGuard()] })], start: false },
+    )
+    try {
+      for (const url of ['/ws/a', '/ws/a?timers=1']) {
+        entered = Promise.withResolvers<void>()
+        const client = new AbortController()
+        const reply = http.upgradeInMemory({ method: 'GET', url, signal: client.signal }, { kind: 'memory', peer: {} })
+        await entered.promise
+        client.abort()
+        const refused = await reply
+        expect(refused?.status).toBe(400)
+        expect(refused?.json()).toMatchObject({ message: 'The WebSocket handshake was aborted' })
+      }
+      expect(accepted).toEqual([])
+      expect(http.inflight).toBe(0)
+      expect(logger.entries.filter(entry => entry.level === 'error')).toEqual([])
+    } finally {
+      await stop()
+    }
+  })
+
+  it('still logs an abort error of a handshake whose client did not leave', async () => {
+    class FailingGuard implements CanActivate {
+      canActivate(): boolean {
+        throw new DOMException('An upstream call was aborted', 'AbortError')
+      }
+    }
+    const { http, logger, stop } = await createApp(
+      metadata({}, []),
+      {},
+      { plugins: [upgradePlugin([], { guards: [new FailingGuard()] })], start: false },
+    )
+    try {
+      const refused = await http.upgradeInMemory(
+        { method: 'GET', url: '/ws/a', signal: new AbortController().signal },
+        { kind: 'memory', peer: {} },
+      )
+      expect(refused?.status).toBe(500)
+      expect(logger.entries.filter(entry => entry.level === 'error')).toHaveLength(1)
     } finally {
       await stop()
     }

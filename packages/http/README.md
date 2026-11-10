@@ -1691,10 +1691,12 @@ optional `meta`, `guards`, `timeoutMs` and `precheck`, and an `accept(ctx, upgra
 the handshake on `upgrade.native` (a `node:http` socket, a `Bun.serve()` request or an in-memory
 peer) and calls `upgrade.hold(closed)`. Once `timeoutMs` answered `408`, `upgrade.expired` is
 `true`, `ctx.signal` aborts (`kind: 'expired'`, so guards waiting on it stop) and `accept` must not
-complete the handshake. When the client leaves first (its socket ends or closes, `Bun.serve()`
-aborts `request.signal`, or the `signal` given to `upgradeInMemory()` aborts), `ctx.signal`
-aborts with `kind: 'client'`, `upgrade.disconnected` is `true` and the handshake is not completed
-either (`400` when the guards let it through anyway). Once `hold()` was called the client is no
+complete the handshake. When the client leaves first (its socket ends, even behind bytes it sent
+after its headers, or closes; `Bun.serve()` aborts `request.signal`; or the `signal` given to
+`upgradeInMemory()` aborts), `ctx.signal` aborts with `kind: 'client'`, `upgrade.disconnected` is
+`true` and the handshake is not completed either (`400` when the guards let it through anyway). A
+guard that passes `ctx.signal` to its work and lets the resulting `AbortError` propagate (the
+signal's reason, or an error whose `cause` it is) gets the same `400`, without an error log. Once `hold()` was called the client is no
 longer watched: the connection closing never aborts the handshake's `ctx.signal`. The handshake
 runs the request pipeline (hook, request scope, global and route guards); a refusal is an HTTP
 response, and a plain `GET` of an upgrade path answers `426`. Every built-in adapter supports

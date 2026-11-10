@@ -45,6 +45,16 @@ function onSignalAbort(signal: AbortSignal | undefined, listener: () => void): (
   return () => signal.removeEventListener('abort', aborted)
 }
 
+/**
+ * Whether the client ended its side of `socket`: `readableEnded` only turns true once the buffered
+ * bytes were read, the stream state knows as soon as the end arrived (Node.js and Bun keep it as
+ * `_readableState.ended`).
+ */
+function ended(socket: Duplex): boolean {
+  const state = (socket as { readonly _readableState?: { readonly ended?: unknown } })._readableState
+  return socket.readableEnded || state?.ended === true
+}
+
 /** The `IncomingMessage` of a `node:http` upgrade as an {@link AdapterRequest}. */
 class NodeUpgradeRequest implements AdapterRequest {
   readonly method: string
@@ -79,23 +89,31 @@ class NodeUpgradeRequest implements AdapterRequest {
   /**
    * The client left during the handshake: the socket closed, or the client ended its side (a
    * `node:http` server allows half-open sockets, so a client's FIN alone never closes the socket).
-   * The plugin removes the listeners once the transport took the socket: its later close is the
-   * connection's, not the handshake's.
+   * Nothing reads the socket during the handshake, so a FIN after bytes the client sent past its
+   * headers (a frame sent early) emits no `end` until they are read: `readable`, emitted at the end
+   * of the stream whatever is buffered, catches it (and reads nothing). The plugin removes the
+   * listeners once the transport took the socket (removing `readable` hands the socket back
+   * unpaused to whoever reads it next): its later close is the connection's, not the handshake's.
    */
   onAbort(listener: () => void): () => void {
     const socket = this.rawResponse as Duplex
-    if (socket.destroyed || socket.readableEnded) return callSoon(listener)
+    if (socket.destroyed || ended(socket)) return callSoon(listener)
     let called = false
     const gone = (): void => {
       if (called) return
       called = true
       listener()
     }
+    const readable = (): void => {
+      if (ended(socket)) gone()
+    }
     socket.once('end', gone)
     socket.once('close', gone)
+    socket.on('readable', readable)
     return () => {
       socket.removeListener('end', gone)
       socket.removeListener('close', gone)
+      socket.removeListener('readable', readable)
     }
   }
 }

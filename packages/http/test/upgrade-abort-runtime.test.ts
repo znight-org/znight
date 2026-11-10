@@ -1,7 +1,8 @@
 /**
  * Runs `fixtures/upgrade-abort-check.ts` in a Node.js 24 process and a Bun process: on every adapter,
- * a client leaving during a WebSocket handshake aborts `ctx.signal` (`kind: 'client'`) without the
- * handshake being completed, and a connection accepted then closed by its client aborts nothing.
+ * a client leaving during a WebSocket handshake (bytes sent after the handshake or not) aborts
+ * `ctx.signal` (`kind: 'client'`) without the handshake being completed, a guard failing with that
+ * abort logs no error, and a connection accepted then closed by its client aborts nothing.
  */
 import { fileURLToPath } from 'node:url'
 
@@ -23,6 +24,10 @@ async function run(command: string): Promise<Record<string, unknown>> {
 const EXPECTED = {
   // in flight while the guard waited, aborted by the client, never accepted, then released
   left: { waiting: 1, reason: 'client', accepted: 0, settled: true },
+  // the same when the client sent bytes nothing read yet before ending its side
+  sent: { reason: 'client', accepted: 0, settled: true },
+  // a guard failing with the client's abort logs no error
+  rethrown: { reason: 'client', accepted: 0, settled: true, errors: 0 },
   // the connection held the handshake's scope until it closed, and its close aborted nothing
   accepted: {
     status: 'HTTP/1.1 101 Switching Protocols',

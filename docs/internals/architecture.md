@@ -2125,12 +2125,17 @@ not call `next()` gets the same reply as in the general pipeline.
   `accept` MUST NOT complete it (it checks the flag after every `await`, right before the
   transport, and refuses with a `4xx`).
   The pipeline listens to the client from the start of a handshake (`AdapterRequest.onAbort` of the
-  upgrade request: the socket's `end` or `close` for `node:http`, `request.signal` for
-  `Bun.serve()`, the caller's `signal` in memory): when the client leaves first, `ctx.signal`
-  aborts with the kind `client` and `upgrade.disconnected` becomes `true`, with the same rule as
-  `expired` for `accept` (`HttpPlugin` refuses with `400` when the guards let it through). The
-  listener is removed by `upgrade.hold()` (the transport took the connection: closing it never
-  aborts the handshake's `ctx.signal`) and when the handshake is answered (refusal, `408`).
+  upgrade request: the socket's `end` or `close` for `node:http`, and its `readable` at the end of
+  the stream, since nothing reads the socket during the handshake and a client's FIN behind unread
+  bytes emits no `end`; `request.signal` for `Bun.serve()`, the caller's `signal` in memory): when
+  the client leaves first, `ctx.signal` aborts with the kind `client` and `upgrade.disconnected`
+  becomes `true`, with the same rule as `expired` for `accept` (`HttpPlugin` refuses with `400`
+  when the guards let it through). A handshake failing with that abort (the signal's reason, or an
+  error whose `cause` it is: a guard passing `ctx.signal` to `fetch()`) is answered the same `400`,
+  not as a server error: nothing is logged at `error` level. The listeners are removed by
+  `upgrade.hold()` (the transport took the connection: closing it never aborts the handshake's
+  `ctx.signal`; the socket is handed back unpaused) and when the handshake is answered (refusal,
+  `408`).
   A refusal (an exception) is written as an HTTP response on the raw socket. A plain `GET` of an
   upgrade path answers `426`. `HttpPlugin.upgradeInMemory(request, { kind: 'memory', peer })` runs
   a handshake without socket (tests); aborting `request.signal` before it completes disconnects the

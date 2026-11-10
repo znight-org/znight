@@ -47,7 +47,7 @@ import {
   RouteGroups,
   type RouteMeta,
 } from './decisions.ts'
-import { BadRequestException, HttpException, ServiceUnavailableException } from './exceptions.ts'
+import { HttpException, ServiceUnavailableException } from './exceptions.ts'
 import { isHeaderName } from './headers.ts'
 import { openInjectSse } from './inject-sse.ts'
 import { isMediaTypePattern } from './mime.ts'
@@ -71,7 +71,7 @@ import { parseByteSize } from './size.ts'
 import { MAX_SSE_TIMER_MS, MIN_SSE_INTERVAL_MS } from './sse.ts'
 import { isValidStatus } from './status.ts'
 import { HttpTokens } from './tokens.ts'
-import { checkHandshake, collectPluginUpgrades } from './upgrade.ts'
+import { checkHandshake, collectPluginUpgrades, handshakeAborted } from './upgrade.ts'
 import { bodyPlan, DEFAULT_UPLOAD_LIMITS, type ResolvedUploadLimits, type UploadLimits } from './uploads.ts'
 
 /** How requests whose path ends with an extra `/` are handled. */
@@ -1668,8 +1668,4 @@ function resolveRef<T>(
 /** A handshake completed after its `408`: refused quietly (a 4xx is not logged as a server error). */
 function handshakeExpired(): HttpException {
   return new HttpException(408, 'WebSocket handshake timed out')
-}
-
-function handshakeAborted(): HttpException {
-  return new BadRequestException('The WebSocket handshake was aborted')
 }

@@ -254,7 +254,9 @@ concurrent handshakes of one user can all pass it: `@OnConnect` counts again onc
 in its `user:<name>` room and closes the extra ones with `4429`. A handshake guard that calls
 another service passes it `ctx.signal`: the signal aborts when the client leaves before the
 connection opens (the handshake is then not completed) or when `handshakeTimeoutMs` answers `408`,
-never when the open connection closes later. `@UseMessageGuard(ModeratorGuard)` runs a `WsGuard`
+never when the open connection closes later. The guard can let the resulting `AbortError`
+propagate: a handshake failing with its own client's abort is answered like a client that left,
+without an error log. `@UseMessageGuard(ModeratorGuard)` runs a `WsGuard`
 before a handler, here reading the handler's `@Roles`:
 
 ```ts [src/chat/moderator.guard.ts]

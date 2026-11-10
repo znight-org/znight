@@ -13,8 +13,8 @@ backpressure, heartbeats and a graceful shutdown. Like every Znight feature, gat
   Headers and cookies a guard sets are sent with the `101` response, minus those `res.setHeader()`
   would refuse on an HTTP route (a name that is not a token, a value with CR, LF or another control
   character): they are dropped. A client leaving during the handshake aborts `ctx.signal`
-  (`kind: 'client'`, so a guard calling an auth service with it stops) and the handshake is not
-  completed; once the connection is open, its close no longer touches that signal (use
+  (`kind: 'client'`, so a guard calling an auth service with it stops, and may let the
+  `AbortError` propagate without an error log) and the handshake is not completed; once the connection is open, its close no longer touches that signal (use
   `conn.signal`).
 - One server, every adapter: `node`, `fastify`, `express` and `hono` on Node.js and Bun. The `ws`
   transport serves `node:http` servers (Bun ships its own `ws`); Bun's native WebSocket serves
