@@ -7,9 +7,10 @@ import { createMock } from '@znight/testing'
 
 import { BookAdded } from '../src/books/book.events.js'
 import { RecentlyAdded } from '../src/books/book.listeners.js'
+import { DrizzleBookRepository } from '../src/books/drizzle-book.repository.js'
 import { createTestApp } from './support/app.js'
 import { ADMIN_KEY, BROWSER_ORIGIN, PNG_BYTES, pngFile, READER_KEY } from './support/fixtures.js'
-import { afterAll, beforeAll, describe, expect, test as it } from 'bun:test'
+import { afterAll, beforeAll, describe, expect, test as it, spyOn } from 'bun:test'
 
 const admin = { 'x-api-key': ADMIN_KEY }
 const reader = { 'x-api-key': READER_KEY }
@@ -230,6 +231,38 @@ describe('Books API', () => {
       const etag = String(download.headers.etag)
       const cached = await app.inject({ url: `/books/${book.id}/cover`, headers: { 'if-none-match': etag } })
       expect(cached.status).toBe(304)
+    })
+
+    it('reads the cover bytes only when it sends them', async () => {
+      const book = await createBook()
+      const form = new FormData()
+      form.append('cover', pngFile())
+      await app.inject({ method: 'PUT', url: `/books/${book.id}/cover`, headers: admin, body: form })
+      const reads = spyOn(app.app.container.get(DrizzleBookRepository), 'findCoverData')
+      try {
+        const url = `/books/${book.id}/cover`
+        const download = await app.inject({ url })
+        expect(download.bytes).toEqual(PNG_BYTES)
+        expect(reads).toHaveBeenCalledTimes(1)
+
+        // the metadata answers these: no byte read from the database
+        const etag = String(download.headers.etag)
+        const lastModified = String(download.headers['last-modified'])
+        expect((await app.inject({ url, headers: { 'if-none-match': etag } })).status).toBe(304)
+        expect((await app.inject({ url, headers: { 'if-modified-since': lastModified } })).status).toBe(304)
+        const head = await app.inject({ method: 'HEAD', url })
+        expect(head.status).toBe(200)
+        expect(head.headers['content-length']).toBe(String(PNG_BYTES.byteLength))
+        expect(reads).toHaveBeenCalledTimes(1)
+
+        // a range of the current version sends bytes: one more read
+        const range = await app.inject({ url, headers: { range: 'bytes=0-3', 'if-range': etag } })
+        expect(range.status).toBe(206)
+        expect(range.bytes).toEqual(PNG_BYTES.slice(0, 4))
+        expect(reads).toHaveBeenCalledTimes(2)
+      } finally {
+        reads.mockRestore()
+      }
     })
 
     it('enforces the upload limits', async () => {
