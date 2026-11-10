@@ -57,6 +57,14 @@ export interface Cover {
   readonly updatedAt: Date
 }
 
+/** What is known about a cover without reading its bytes. */
+export interface CoverInfo {
+  readonly contentType: string
+  /** Size of the image, in bytes. */
+  readonly size: number
+  readonly updatedAt: Date
+}
+
 /** Thrown when a book does not exist: mapped to `404 Not Found` by `DomainErrorMapper`. */
 export class BookNotFoundError extends Error {
   readonly bookId: number

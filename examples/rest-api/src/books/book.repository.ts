@@ -1,4 +1,4 @@
-import type { Book, BookChanges, BookQuery, Cover, NewBook, Page } from './book.js'
+import type { Book, BookChanges, BookQuery, Cover, CoverInfo, NewBook, Page } from './book.js'
 
 /**
  * Persistence of the books, as the service needs it.
@@ -19,5 +19,8 @@ export interface BookRepository {
   delete(id: number): Promise<boolean>
   /** Creates or replaces the cover; `false` when the book does not exist. */
   saveCover(id: number, cover: Omit<Cover, 'updatedAt'>): Promise<boolean>
-  findCover(id: number): Promise<Cover | undefined>
+  /** The type, size and date of the cover, without its bytes. */
+  findCoverInfo(id: number): Promise<CoverInfo | undefined>
+  /** The bytes of the cover. */
+  findCoverData(id: number): Promise<Uint8Array | undefined>
 }

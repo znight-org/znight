@@ -10,7 +10,7 @@ import {
   type BookChanges,
   BookNotFoundError,
   type BookQuery,
-  type Cover,
+  type CoverInfo,
   CoverNotFoundError,
   type NewBook,
   type Page,
@@ -81,9 +81,18 @@ export class BookService {
     this.logger.info('Cover uploaded', { bookId: id, contentType, size: data.byteLength })
   }
 
-  async getCover(id: number): Promise<Cover> {
-    const cover = await this.books.findCover(id)
+  /** The type, size and date of a cover: enough to answer a conditional request. */
+  async getCoverInfo(id: number): Promise<CoverInfo> {
+    const cover = await this.books.findCoverInfo(id)
     if (cover === undefined) throw new CoverNotFoundError(id)
     return cover
+  }
+
+  /** The bytes of a cover. */
+  async getCoverData(id: number): Promise<Uint8Array> {
+    const data = await this.books.findCoverData(id)
+    // deleted since its metadata was read
+    if (data === undefined) throw new CoverNotFoundError(id)
+    return data
   }
 }

@@ -104,9 +104,12 @@ describe('BookService', () => {
 
     it('reports a missing cover', async () => {
       const { service, repository } = await setup()
-      repository.findCover.mockResolvedValue(undefined)
+      repository.findCoverInfo.mockResolvedValue(undefined)
+      repository.findCoverData.mockResolvedValue(undefined)
 
-      await expect(service.getCover(1)).rejects.toBeInstanceOf(CoverNotFoundError)
+      await expect(service.getCoverInfo(1)).rejects.toBeInstanceOf(CoverNotFoundError)
+      // deleted between the metadata and the bytes
+      await expect(service.getCoverData(1)).rejects.toBeInstanceOf(CoverNotFoundError)
     })
   })
 })

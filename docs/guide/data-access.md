@@ -152,7 +152,7 @@ Services depend on a repository **interface**, written in the terms of the domai
 ::: code-group
 
 ```ts [src/books/book.repository.ts]
-import type { Book, BookChanges, BookQuery, Cover, NewBook, Page } from './book.js'
+import type { Book, BookChanges, BookQuery, Cover, CoverInfo, NewBook, Page } from './book.js'
 
 export interface BookRepository {
   list(query: BookQuery): Promise<Page<Book>>
@@ -164,7 +164,10 @@ export interface BookRepository {
   /** `false` when the book does not exist. */
   delete(id: number): Promise<boolean>
   saveCover(id: number, cover: Omit<Cover, 'updatedAt'>): Promise<boolean>
-  findCover(id: number): Promise<Cover | undefined>
+  /** The type, size and date of the cover, without its bytes. */
+  findCoverInfo(id: number): Promise<CoverInfo | undefined>
+  /** The bytes of the cover. */
+  findCoverData(id: number): Promise<Uint8Array | undefined>
 }
 ```
 
@@ -206,7 +209,7 @@ export class DrizzleBookRepository implements BookRepository {
     return deleted.length > 0
   }
 
-  // list(), findById(), update(), saveCover(), findCover()...
+  // list(), findById(), update(), saveCover(), findCoverInfo(), findCoverData()...
 }
 
 /** Ids are PostgreSQL `integer`s: anything else cannot exist (and would fail the query). */
