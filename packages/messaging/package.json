@@ -114,10 +114,13 @@
   "devDependencies": {
     "@aws-sdk/client-sqs": "3.1164.0",
     "@google-cloud/pubsub": "6.3.2",
+    "@nats-io/jetstream": "3.4.0",
+    "@nats-io/transport-node": "3.4.0",
     "@platformatic/kafka": "2.15.0",
     "@testcontainers/gcloud": "12.2.1",
     "@testcontainers/kafka": "12.2.1",
     "@testcontainers/localstack": "12.2.1",
+    "@testcontainers/nats": "12.2.1",
     "@testcontainers/rabbitmq": "12.2.1",
     "@znight/compiler": "workspace:*",
     "amqplib": "2.2.1",
