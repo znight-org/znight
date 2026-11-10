@@ -91,7 +91,7 @@ describe('error:report hook (HTTP)', () => {
       handler: 'ItemsController.get',
       status: 500,
     })
-    expect((report.context as HttpContext).requestId).toBe(report.requestId as string)
+    expect(String((report.context as HttpContext).requestId)).toBe(String(report.requestId))
     await app.stop()
   })
 

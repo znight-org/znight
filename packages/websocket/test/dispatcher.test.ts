@@ -287,7 +287,7 @@ describe('error:report', () => {
           throw new ForbiddenException('nope')
         }),
         handler('invalid', 'invalid', () => {
-          throw new WsValidationException([{ message: 'bad', path: [] }])
+          throw new WsValidationException([{ message: 'bad', path: '' }])
         }),
         handler('slow', 'slow', () => new Promise(() => undefined)),
         handler('ok', 'ok', () => 1),
