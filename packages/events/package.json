@@ -4,7 +4,7 @@
   "description": "Znight events: in-process application events with listeners wired at build time, inline or detached",
   "license": "MIT",
   "author": "Ugho STEPHAN",
-  "homepage": "https://github.com/znight-org/znight/tree/main/packages/events#readme",
+  "homepage": "https://znight-org.github.io/znight/packages/events",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/znight-org/znight.git",

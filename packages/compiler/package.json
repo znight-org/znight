@@ -4,7 +4,7 @@
   "description": "Znight compiler: Vite plugin that analyzes your code and generates the DI container at build time",
   "license": "MIT",
   "author": "Ugho STEPHAN",
-  "homepage": "https://github.com/znight-org/znight/tree/main/packages/compiler#readme",
+  "homepage": "https://znight-org.github.io/znight/packages/compiler",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/znight-org/znight.git",

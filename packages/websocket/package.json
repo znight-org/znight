@@ -4,7 +4,7 @@
   "description": "Znight WebSocket gateways served by the HTTP server, validated at build time",
   "license": "MIT",
   "author": "Ugho STEPHAN",
-  "homepage": "https://github.com/znight-org/znight/tree/main/packages/websocket#readme",
+  "homepage": "https://znight-org.github.io/znight/packages/websocket",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/znight-org/znight.git",

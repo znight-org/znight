@@ -4,7 +4,7 @@
   "description": "Znight messaging plugin: consumers, retries and dead-letter queues with RabbitMQ, SQS or Kafka",
   "license": "MIT",
   "author": "Ugho STEPHAN",
-  "homepage": "https://github.com/znight-org/znight/tree/main/packages/messaging#readme",
+  "homepage": "https://znight-org.github.io/znight/packages/messaging",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/znight-org/znight.git",
