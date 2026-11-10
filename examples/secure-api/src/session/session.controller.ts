@@ -49,21 +49,24 @@ export class SessionController {
   ) {}
 
   /**
-   * POST /session: sets the session and CSRF cookies; 401 for any wrong username or password, 429
-   * once the address spent its budget on the account (see `SignInThrottle`).
+   * POST /session: sets the session, CSRF and device cookies; 401 for any wrong username or password,
+   * 429 once the client spent its budget on the account or the account's queue is full (see
+   * `SignInThrottle`).
    */
   @Post()
   @Public()
   @RateLimit({ points: 5, duration: 60 }) // per client address, whatever the account
   @HttpCode(200)
   async signIn(@Body(SignIn) input: SignIn, @Ctx() ctx: HttpContext): Promise<SessionResponse> {
+    const device = this.sessions.knownDevice(ctx, input.username) // signed in with this name before
     const principal = await this.throttle.attempt(
       input.username,
-      ctx.ip,
+      { ip: ctx.ip, device },
       () => this.accounts.signIn(input.username, input.password, ctx.signal),
       ctx.signal,
     )
     if (principal === undefined) throw new UnauthorizedException('Invalid username or password')
+    this.sessions.rememberDevice(ctx, input.username, device)
     return toResponse(this.sessions.open(ctx, principal))
   }
 
