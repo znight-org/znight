@@ -5,11 +5,14 @@ import { LocalstackContainer, type StartedLocalStackContainer } from '@testconta
 
 import { sqs } from '../../src/drivers/sqs.ts'
 import { MessageBroker } from '../../src/index.ts'
+import { describeDriverConformance } from '../../src/testing.ts'
 import { handler, sleep } from '../helpers.ts'
-import { driverConformance, integration, startApp, waitFor } from './conformance.ts'
-import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
+import { integration, startApp, stopApps, waitFor } from './support.ts'
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test'
 
 describe.skipIf(!integration)('SQS (LocalStack testcontainers)', () => {
+  afterEach(stopApps)
+
   let container: StartedLocalStackContainer
   let config: SQSClientConfig
   let admin: SQSClient
@@ -41,18 +44,17 @@ describe.skipIf(!integration)('SQS (LocalStack testcontainers)', () => {
     return Attributes?.QueueArn as string
   }
 
-  driverConformance(
-    'sqs',
-    () => ({
-      createDriver: overrides => sqs({ clientConfig: config, waitTimeSeconds: 1, visibilityTimeout: 5, ...overrides }),
-      prepareQueue: async queue => {
-        await createQueue(queue)
-        await createQueue(`${queue}-dlq`)
-      },
-      nativeDelayMs: 2000,
-    }),
-    { delayedPublish: true },
-  )
+  describeDriverConformance({
+    name: 'sqs',
+    driver: overrides => sqs({ clientConfig: config, waitTimeSeconds: 1, visibilityTimeout: 5, ...overrides }),
+    prepareQueue: async (queue, deadLetterQueue) => {
+      await createQueue(queue)
+      await createQueue(deadLetterQueue)
+    },
+    test: { describe, it },
+    nativeDelayMs: 2000,
+    timeoutMs: 120_000,
+  })
 
   it('refuses a RedrivePolicy that would steal retries, and uses its target otherwise', async () => {
     const dlqUrl = await createQueue(`redrive-target-${Date.now()}`)

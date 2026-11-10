@@ -4,11 +4,14 @@ import { KafkaContainer, type StartedKafkaContainer } from '@testcontainers/kafk
 
 import { kafka } from '../../src/drivers/kafka.ts'
 import { MessageBroker } from '../../src/index.ts'
+import { describeDriverConformance } from '../../src/testing.ts'
 import { handler, sleep } from '../helpers.ts'
-import { driverConformance, integration, startApp, waitFor } from './conformance.ts'
-import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
+import { integration, startApp, stopApps, waitFor } from './support.ts'
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test'
 
 describe.skipIf(!integration)('Kafka (testcontainers)', () => {
+  afterEach(stopApps)
+
   let container: StartedKafkaContainer
   let brokers: string[]
 
@@ -23,22 +26,20 @@ describe.skipIf(!integration)('Kafka (testcontainers)', () => {
 
   const fast = { sessionTimeout: 10_000, rebalanceTimeout: 15_000, heartbeatInterval: 500, maxWaitTime: 200 }
 
-  driverConformance(
-    'kafka',
-    () => ({
-      createDriver: overrides =>
-        kafka({
-          bootstrapBrokers: brokers,
-          createTopics: { partitions: 3 },
-          fromBeginning: true,
-          consumer: fast,
-          ...overrides,
-        }),
-      prepareQueue: async () => {},
-      nativeDelayMs: 1000,
-    }),
-    { delayedPublish: false },
-  )
+  describeDriverConformance({
+    name: 'kafka',
+    driver: overrides =>
+      kafka({
+        bootstrapBrokers: brokers,
+        createTopics: { partitions: 3 },
+        fromBeginning: true,
+        consumer: fast,
+        ...overrides,
+      }),
+    test: { describe, it },
+    nativeDelayMs: 1000,
+    timeoutMs: 120_000,
+  })
 
   it('keeps the order of a partition and handles partitions concurrently', async () => {
     const topic = `kafka-order-${Date.now()}`

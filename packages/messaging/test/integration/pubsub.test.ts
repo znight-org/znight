@@ -6,14 +6,17 @@ import { PubSubEmulatorContainer, type StartedPubSubEmulatorContainer } from '@t
 
 import { pubsub } from '../../src/drivers/pubsub.ts'
 import { MessageBroker } from '../../src/index.ts'
+import { describeDriverConformance } from '../../src/testing.ts'
 import { handler, sleep } from '../helpers.ts'
-import { driverConformance, integration, startApp, waitFor } from './conformance.ts'
-import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
+import { integration, startApp, stopApps, waitFor } from './support.ts'
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test'
 
 /** The emulators image of the Google Cloud CLI (gcloud beta emulators pubsub start). */
 const EMULATOR_IMAGE = 'gcr.io/google.com/cloudsdktool/google-cloud-cli:576.0.0-emulators'
 
 describe.skipIf(!integration)('Pub/Sub (emulator testcontainers)', () => {
+  afterEach(stopApps)
+
   let container: StartedPubSubEmulatorContainer
   let config: ClientConfig
   let client: PubSub
@@ -63,18 +66,17 @@ describe.skipIf(!integration)('Pub/Sub (emulator testcontainers)', () => {
     })
   }
 
-  driverConformance(
-    'pubsub',
-    () => ({
-      createDriver: overrides => pubsub({ clientConfig: config, pullTimeoutMs: 1000, ...overrides }),
-      prepareQueue: async queue => {
-        await createQueue(`${queue}-dlq`)
-        await createQueue(queue)
-      },
-      nativeDelayMs: 2000,
-    }),
-    { delayedPublish: false },
-  )
+  describeDriverConformance({
+    name: 'pubsub',
+    driver: overrides => pubsub({ clientConfig: config, pullTimeoutMs: 1000, ...overrides }),
+    prepareQueue: async (queue, deadLetterQueue) => {
+      await createQueue(deadLetterQueue)
+      await createQueue(queue)
+    },
+    test: { describe, it },
+    nativeDelayMs: 2000,
+    timeoutMs: 120_000,
+  })
 
   it('counts attempts natively and lets the subscription dead-letter (retries: subscription)', async () => {
     const queue = `owned-${Date.now()}`

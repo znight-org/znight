@@ -7,6 +7,8 @@
  * - the root README, the landing page on GitHub that scaffolded projects and examples link to,
  *   only names existing packages, links to existing files and headings, and bootstraps the
  *   application with the generated metadata.
+ * - a fenced block right after `<!-- sample: <repository path> -->` is that file, verbatim: the
+ *   sample compiles and runs with the tests of its package (`bun run typecheck`, `bun run test`).
  *
  * Exports are read statically from the `@znight/source` entry of each subpath, following
  * `export ... from` and `export *`: nothing is loaded, so optional integrations (fastify,
@@ -173,6 +175,42 @@ function importProblems(markdown: string): string[] {
   return [...new Set(problems)]
 }
 
+/** A code sample copied from a repository file: `<!-- sample: path -->`, then a fenced block. */
+interface Sample {
+  readonly path: string
+  readonly code: string | undefined
+}
+
+/** The samples of a Markdown document (`code` undefined when no fenced block follows the marker). */
+function samplesOf(markdown: string): Sample[] {
+  const samples: Sample[] = []
+  const lines = markdown.split('\n')
+  for (const [index, line] of lines.entries()) {
+    const path = /^<!--\s*sample:\s*(\S+)\s*-->$/.exec(line.trim())?.[1]
+    if (path === undefined) continue
+    let start = index + 1
+    while (lines[start]?.trim() === '') start++
+    const fence = /^(`{3,}|~{3,})/.exec(lines[start] ?? '')?.[1]
+    let end = start + 1
+    while (fence !== undefined && end < lines.length && !(lines[end] ?? '').startsWith(fence)) end++
+    samples.push({ path, code: fence === undefined ? undefined : lines.slice(start + 1, end).join('\n') })
+  }
+  return samples
+}
+
+/** Problems with the samples of a Markdown document. */
+function sampleProblems(markdown: string): string[] {
+  const problems: string[] = []
+  for (const { path, code } of samplesOf(markdown)) {
+    const file = join(repoRoot, path)
+    if (code === undefined) problems.push(`no fenced block after the sample marker of ${path}`)
+    else if (!existsSync(file)) problems.push(`sample ${path} does not exist`)
+    else if (readFileSync(file, 'utf8').trimEnd() !== code.trimEnd())
+      problems.push(`sample ${path} differs from the file`)
+  }
+  return problems
+}
+
 /** The `Application.create(...)` calls of `code`, up to their closing parenthesis. */
 function createCalls(code: string): string[] {
   const calls: string[] = []
@@ -282,6 +320,33 @@ describe('imports in Markdown', () => {
 
   it.each(documents)('%s imports only what the packages export', document => {
     expect(importProblems(readFileSync(join(repoRoot, document), 'utf8'))).toEqual([])
+  })
+})
+
+describe('samples in Markdown', () => {
+  it('reads the fenced block after a sample marker', () => {
+    const markdown = ['<!-- sample: a.ts -->', '', '```ts', 'const a = 1', '```', '<!-- sample: b.ts -->', 'text'].join(
+      '\n',
+    )
+    expect(samplesOf(markdown)).toEqual([
+      { path: 'a.ts', code: 'const a = 1' },
+      { path: 'b.ts', code: undefined },
+    ])
+    expect(sampleProblems(markdown)).toEqual([
+      'sample a.ts does not exist',
+      'no fenced block after the sample marker of b.ts',
+    ])
+  })
+
+  it('embeds the messaging driver sample in the package README and the docs page', () => {
+    for (const document of ['packages/messaging/README.md', 'docs/packages/messaging.md']) {
+      const samples = samplesOf(readFileSync(join(repoRoot, document), 'utf8')).map(sample => sample.path)
+      expect(samples).toContain('packages/messaging/test/testing/local-driver.ts')
+    }
+  })
+
+  it.each(documents)('%s copies its samples verbatim', document => {
+    expect(sampleProblems(readFileSync(join(repoRoot, document), 'utf8'))).toEqual([])
   })
 })
 
