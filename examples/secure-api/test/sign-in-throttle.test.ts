@@ -237,6 +237,7 @@ describe('SignInThrottle', () => {
   })
 
   it('treats a name that matches no account like any other: the throttle never looks the account up', async () => {
+    setSystemTime(Date.now()) // the delays are slot - now: a frozen clock makes the two runs comparable
     const known = new InstantThrottle()
     const unknown = new InstantThrottle()
     const run = async (throttle: InstantThrottle, username: string): Promise<unknown[]> => {
