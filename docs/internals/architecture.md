@@ -2649,6 +2649,11 @@ interface ConfigLoader {
   name: string
   load(ctx: { cwd; env; source: ConfigSource }): ConfigLayer | ConfigLayer[] | undefined | Promise<...>
 }
+interface ConfigLayer {
+  origin: string // shown in messages: 'process.env', '.env.local', 'vault:secret/app'...
+  values: Record<string, unknown>
+  secret?: boolean // values masked in messages, as for @Secret fields
+}
 ```
 
 Loaders: `env({ prefix?, keepPrefix?, env? })`; `dotenv({ path?, nodeEnv?, optional?, populate?,
@@ -2658,15 +2663,25 @@ untouched unless `populate`); `json(path, { optional?, key? })`, `yaml(...)` (op
 `vault({ path, address?, token?, tokenFile?, mount?, kvVersion?: 1 | 2, namespace?, key?, optional?,
 timeoutMs?, retries?, retryDelayMs?, fetch? })` (KV, token auth); `awsSecretsManager({ secretId,
 region?, client?, clientConfig?, optional?, timeoutMs? })` (optional peer
-`@aws-sdk/client-secrets-manager`); `inline(values, { name? })`. A failing loader throws
+`@aws-sdk/client-secrets-manager`); `gcpSecretManager({ secrets?, labels?, filter?, projectId?,
+location?, version? = 'latest', stripPrefix?, mapKey?, json? = false, optional?, client?,
+clientOptions?, timeoutMs? })` (optional peer `@google-cloud/secret-manager`: `accessSecretVersion`
+for each secret, `listSecrets` with `labels.<k>=<v>` and/or `filter` to discover them, read before the
+named `secrets`; one value per secret under its `key`, else its id minus `stripPrefix` through
+`mapKey`; two discovered secrets with the same key are a `ConfigLoaderError`; the project is
+`projectId`, `GOOGLE_CLOUD_PROJECT` / `GCLOUD_PROJECT`, then the client's; `NOT_FOUND` is skipped
+when `optional`); `inline(values, { name? })`. A failing loader throws
 `ConfigLoaderError` (ZNIGHT006); invalid options or metadata are ZNIGHT012. Loader errors never
 quote values: a JSON or YAML syntax error gives the file, the line, the column and a fixed reason
 (the YAML error code), never the parser message, which quotes the input (a secret, maybe), and the
 parser error is not kept as `cause`; YAML warnings are re-emitted the same way (`YAMLWarning`).
-`vault()` and `awsSecretsManager()` reject, when created, a `timeoutMs` that is not an integer from 1
+`vault()`, `awsSecretsManager()` and `gcpSecretManager()` reject, when created, a `timeoutMs` that is not an integer from 1
 to 2^31 − 1, and `vault()` a `retries` or `retryDelayMs` that is not a finite number >= 0 (ZNIGHT012);
-the backoff between retries is capped at 30 s. Both read their secrets concurrently and, once one
-read fails, abort the requests and retry waits of the others. `vault()` checks the token and the namespace before any request: a value `fetch` would refuse as a
+the backoff between retries is capped at 30 s. They read their secrets concurrently and, once one
+read fails, abort the requests and retry waits of the others (`gcpSecretManager()` stops waiting for
+them). The layers of these three loaders are flagged `secret: true` (`ConfigLayer.secret`, also
+available to custom loaders): their values are masked in validation messages even for a field
+without `@Secret`. `vault()` checks the token and the namespace before any request: a value `fetch` would refuse as a
 header (line break, NUL, a character above U+00FF) is a `ConfigLoaderError` naming its origin
 (option, token file, `VAULT_TOKEN`, `VAULT_NAMESPACE`), never the value.
 

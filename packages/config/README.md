@@ -2,8 +2,8 @@
 
 Type-safe configuration for [Znight](../../README.md): declare a class, get a validated singleton.
 
-Values are loaded from environment variables, `.env` files, JSON/YAML files, HashiCorp Vault or AWS
-Secrets Manager.
+Values are loaded from environment variables, `.env` files, JSON/YAML files, HashiCorp Vault, AWS
+Secrets Manager or Google Cloud Secret Manager.
 
 - **Compile-time metadata.** The compiler reads your config classes (property names, TypeScript
   types, decorators) and generates their field definitions. No reflection at runtime.
@@ -21,12 +21,14 @@ bun add @znight/core @znight/config
 bun add -d @znight/compiler vite
 bun add yaml                               # optional, for yaml()
 bun add @aws-sdk/client-secrets-manager    # optional, for awsSecretsManager()
+bun add @google-cloud/secret-manager       # optional, for gcpSecretManager()
 
 # npm
 npm install @znight/core @znight/config
 npm install -D @znight/compiler vite
 npm install yaml                               # optional, for yaml()
 npm install @aws-sdk/client-secrets-manager    # optional, for awsSecretsManager()
+npm install @google-cloud/secret-manager       # optional, for gcpSecretManager()
 ```
 
 Runs on Node.js >= 24 and Bun >= 1.3 (ESM only).
@@ -158,7 +160,9 @@ instance (`console.log` in Node and Bun use the latter); methods the class defin
 Error messages show `[REDACTED]` instead of secret values. Spreading (`{ ...config }`) or reading the
 property gives the real value, of course. The `ConfigSource` itself never prints its values either,
 and neither do loader errors: a JSON or YAML syntax error gives the line and column, not the parser
-message (which quotes the file content).
+message (which quotes the file content). Values loaded from a secret store (`vault()`,
+`awsSecretsManager()`, `gcpSecretManager()`) are masked in error messages even when the field is not
+`@Secret`: their layers are flagged `secret: true`, which a custom loader can set too.
 
 ## ConfigPlugin
 
@@ -306,10 +310,10 @@ ConfigPlugin.configure({
 | `fetch`        | global `fetch`                  | Custom `fetch` (proxies, tests)                                                  |
 
 `timeoutMs` must be an integer from 1 to 2^31 − 1, `retries` and `retryDelayMs` finite numbers
-
-> = 0: other values fail when the loader is created (ZNIGHT012), and so does an invalid `timeoutMs`
-> of `awsSecretsManager()`. Paths are read concurrently; once one fails, the requests and retry waits
-> of the others are cancelled (`awsSecretsManager()` does the same with its secrets).
+from 0: other values fail when the loader is created (ZNIGHT012), and so does an invalid `timeoutMs`
+of `awsSecretsManager()` or `gcpSecretManager()`. Paths are read concurrently; once one fails, the
+requests and retry waits of the others are cancelled (`awsSecretsManager()` and `gcpSecretManager()`
+do the same with their secrets).
 
 `VAULT_*` settings are read from the values loaded by the previous loaders first (a `.env` file
 works), then from the environment. A token or namespace loses its leading and trailing white space
@@ -339,6 +343,69 @@ awsSecretsManager({
 | `clientConfig` | —                                   | Extra options of the default client (`endpoint`, `credentials`...)                           |
 | `optional`     | `false`                             | Skip secrets that do not exist (`ResourceNotFoundException`)                                 |
 | `timeoutMs`    | `10000`                             | Timeout of each request                                                                      |
+
+### `gcpSecretManager(options)`
+
+Reads secrets from Google Cloud Secret Manager with the optional peer `@google-cloud/secret-manager`,
+by name and/or by label. Each secret provides one value, under its id by default
+(`DB_PASSWORD` matches `@Secret('DB_PASSWORD')`), read from the version `latest` by default.
+
+```ts
+ConfigPlugin.configure({
+  loaders: [
+    dotenv(),
+    env(),
+    // every secret labelled app=api and env=prod; PROD_DB_PASSWORD is stored as DB_PASSWORD
+    gcpSecretManager({ labels: { app: 'api', env: 'prod' }, stripPrefix: 'PROD_' }),
+  ],
+})
+
+gcpSecretManager({
+  projectId: 'acme-prod',
+  secrets: ['DB_PASSWORD', { name: 'smtp-credentials', json: true }, { name: 'API_KEY', version: '3' }],
+})
+```
+
+| Option          | Default                                   | Description                                                                                          |
+| --------------- | ----------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `secrets`       | —                                         | Id, resource name, `{ name, version?, key?, json?, optional? }`, or an array (later wins)            |
+| `labels`        | —                                         | Read every secret carrying these labels (`{ app: 'api' }` → filter `labels.app=api`)                 |
+| `filter`        | —                                         | Read every secret matching this `listSecrets` filter (`name:PROD_`), and-ed with `labels`            |
+| `projectId`     | `GOOGLE_CLOUD_PROJECT` / `GCLOUD_PROJECT` | Project of secret ids and listings (else the client's: credentials, metadata server)                 |
+| `location`      | —                                         | Regional secrets: `projects/<p>/locations/<l>/secrets/...` on `secretmanager.<l>.rep.googleapis.com` |
+| `version`       | `latest`                                  | Version or alias of every secret                                                                     |
+| `stripPrefix`   | —                                         | Removed from the start of secret ids to build keys (`PROD_DB_PASSWORD` → `DB_PASSWORD`)              |
+| `mapKey`        | the id                                    | `(secretId) => key`, after `stripPrefix` (`constantCase`, `` id => `secrets.${id}` ``...)            |
+| `json`          | `false`                                   | Expand JSON object values into one value per entry, like `awsSecretsManager()`                       |
+| `optional`      | `false`                                   | Skip secrets that do not exist or have no version (`NOT_FOUND`)                                      |
+| `client`        | a new `SecretManagerServiceClient`        | Your client (custom credentials, tests): `accessSecretVersion`, `listSecrets` for labels             |
+| `clientOptions` | —                                         | Options of the default client (`credentials`, `keyFilename`, `apiEndpoint`, `port`, `fallback`...)   |
+| `timeoutMs`     | `10000`                                   | Timeout of each request                                                                              |
+
+`secrets`, `labels` or `filter` is required. A secret name is an id of the loader's project
+(`DB_PASSWORD`) or a resource name (`projects/<project>/secrets/<id>`, optionally
+`/versions/<version>`), which needs no project. Listed secrets are read in the order of their ids,
+then the `secrets` in their order: an explicit secret overrides a listed one, and two listed secrets
+mapping to the same key fail (narrow the labels or use `mapKey`). Secrets are read concurrently;
+once one read fails, the loader stops waiting for the others.
+
+Values are kept as text, JSON included: a service account key stored as a secret stays one value.
+With `json` (globally or per secret), a JSON object secret provides one value per entry, merged at
+the root, or under the secret's `key` when it sets one. Values are masked in error messages.
+
+Authentication is the client's: Application Default Credentials (`gcloud auth application-default
+login` locally, the attached service account or workload identity in Google Cloud,
+`GOOGLE_APPLICATION_CREDENTIALS`), or `clientOptions.credentials` / `keyFilename`. Reading needs
+`roles/secretmanager.secretAccessor`, listing by label `roles/secretmanager.viewer` (permission
+`secretmanager.secrets.list`) on the project. Errors are `ConfigLoaderError`s (`ZNIGHT006`) naming
+the secret and the gRPC status, with a hint for `PERMISSION_DENIED`, `UNAUTHENTICATED` or missing
+credentials, `NOT_FOUND` and disabled versions (`FAILED_PRECONDITION`); invalid options fail when the
+loader is created (`ZNIGHT012`).
+
+There is no official Secret Manager emulator. For tests, pass a `client` implementing
+`SecretManagerServiceClientLike` (no network), or point the default client to your own endpoint
+with `clientOptions` (`apiEndpoint`, `port`, and `fallback: true` with `protocol: 'http'` for the
+REST transport).
 
 ### `inline(values, options?)`
 
