@@ -848,18 +848,26 @@ describeDriverConformance({
 })
 ```
 
-| Option                            | Default   | Description                                                                                          |
-| --------------------------------- | --------- | ---------------------------------------------------------------------------------------------------- |
-| `name`                            | —         | Name in the scenario names (`acme driver conformance`).                                              |
-| `driver(overrides)`               | —         | A driver for one application. Pass `overrides.maxInProcessDelayMs` on: the retry scenario lowers it. |
-| `test`                            | —         | `{ describe, it }` of the test framework (`it(name, body, timeoutMs)`).                              |
-| `prepareQueue(queue, deadLetter)` | none      | Creates a queue and its dead-letter destination before a scenario uses them.                         |
-| `consumerOptions(queue)`          | none      | Driver options of `@Consumer` (a consumer group...).                                                 |
-| `nativeDelayMs`                   | `1000`    | Shortest native retry delay the broker honours precisely (whole seconds for SQS and Pub/Sub).        |
-| `timeoutMs`                       | `120_000` | Timeout of each scenario.                                                                            |
+| Option                            | Default   | Description                                                                                   |
+| --------------------------------- | --------- | --------------------------------------------------------------------------------------------- |
+| `name`                            | —         | Name in the scenario names (`acme driver conformance`).                                       |
+| `driver(overrides)`               | —         | A driver for one application. Must honour `overrides.maxInProcessDelayMs` (see below).        |
+| `test`                            | —         | `{ describe, it }` of the test framework (`it(name, body, timeoutMs)`).                       |
+| `prepareQueue(queue, deadLetter)` | none      | Creates a queue and its dead-letter destination before a scenario uses them.                  |
+| `consumerOptions(queue)`          | none      | Driver options of `@Consumer` (a consumer group...).                                          |
+| `nativeDelayMs`                   | `1000`    | Shortest native retry delay the broker honours precisely (whole seconds for SQS and Pub/Sub). |
+| `timeoutMs`                       | `120_000` | Timeout of each scenario; its waits give up a quarter of it (at most 10 s) earlier.           |
+
+`overrides.maxInProcessDelayMs` is the in-process retry budget a scenario needs: the retry scenario
+sets it below its second retry delay to force a native retry, the restart scenario above its retry
+delay (1 s) so that a retry is pending in-process when the application stops and `release()` must
+give it back. A driver that keeps another budget fails these scenarios with an explanation. For an
+in-process broker held by the driver instance, return the same instance for the same overrides (it
+is connected again after `close()`).
 
 Run it against a real broker (Testcontainers, an emulator) in CI. Each scenario stops the
-applications it started, whatever its outcome.
+applications it started, whatever its outcome; its waits give up before `timeoutMs`, so a failure
+names what it waited for instead of surfacing as a framework timeout.
 
 **Publishing.** Name the package `znight-messaging-<broker>` (or `@<scope>/znight-messaging-<broker>`)
 and export a factory (`acme(options)`) and the driver class. Declare `@znight/messaging` as a peer

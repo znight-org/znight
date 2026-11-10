@@ -98,7 +98,8 @@ describeDriverConformance({
   redelivered to the next application; delayed publishing honoured, or refused when
   `maxPublishDelayMs` is `0`.
 - **Options**: `name`, `driver(overrides)` (a new driver for each application, reaching the same
-  broker; `overrides.maxInProcessDelayMs` lets the retry scenario force native retries),
+  broker; it must honour `overrides.maxInProcessDelayMs`, which the retry scenario lowers to force
+  native retries and the restart scenario raises so that a retry is pending in-process on stop),
   `prepareQueue(queue, deadLetterQueue)` (for drivers that never create resources),
   `consumerOptions(queue)` (driver options of `@Consumer`, e.g. a Kafka group), `nativeDelayMs`
   (shortest native delay the broker honours precisely: whole seconds for SQS and Pub/Sub) and

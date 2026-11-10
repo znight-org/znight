@@ -36,8 +36,10 @@ export interface ConformanceTestApi {
 /** What a scenario may ask of the driver factory. */
 export interface ConformanceDriverOverrides {
   /**
-   * Longest retry delay waited in-process: the retry scenario sets it below the second delay to force
-   * a native retry. Pass it to the driver options (a driver without such an option may ignore it).
+   * Longest retry delay waited in-process. Required: pass it to the driver options. The retry scenario
+   * sets it below the second retry delay to force a native retry, and the restart scenario sets it
+   * above its retry delay so that a retry is pending in-process when the application stops; a driver
+   * keeping another budget fails them with an explanation.
    */
   readonly maxInProcessDelayMs?: number
 }
@@ -64,13 +66,20 @@ export interface DriverConformanceOptions {
   readonly consumerOptions?: (queue: string) => Readonly<Record<string, unknown>>
   /** Shortest native retry delay the broker honours precisely, in ms (whole seconds for SQS). Default: 1000. */
   readonly nativeDelayMs?: number
-  /** Timeout of each scenario, in ms. Default: 120 000. */
+  /**
+   * Timeout of each scenario, in ms. Default: 120 000. The scenario's own waits end a quarter of it
+   * (at most 10 s) earlier, so that a failure reports what it waited for and stops its applications
+   * before the test framework times the scenario out.
+   */
   readonly timeoutMs?: number
 }
 
 const DEFAULT_NATIVE_DELAY_MS = 1000
 const DEFAULT_TIMEOUT_MS = 120_000
-const WAIT_MS = 60_000
+/** Longest share of the scenario timeout kept for stopping the applications after a failed wait. */
+const MAX_STOP_MARGIN_MS = 10_000
+/** Retry delay of the restart scenario, held in-process when the application stops. */
+const RESTART_RETRY_DELAY_MS = 1000
 
 /**
  * Describes the conformance scenarios of a messaging driver: publishing and consuming with type
@@ -97,11 +106,18 @@ export function describeDriverConformance(options: DriverConformanceOptions): vo
   ) {
     throw new TypeError('[znight] describeDriverConformance() expects { name, driver, test: { describe, it } }')
   }
+  for (const key of ['nativeDelayMs', 'timeoutMs'] as const) {
+    const value = options[key]
+    if (value !== undefined && !(typeof value === 'number' && Number.isFinite(value) && value > 0)) {
+      throw new TypeError(
+        `[znight] describeDriverConformance(): "${key}" must be a positive number of milliseconds, got ${String(value)}`,
+      )
+    }
+  }
   const suite = new Suite(options)
   const { test } = options
-  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
   const scenario = (name: string, body: (run: Run) => Promise<void>): void => {
-    test.it(name, () => suite.run(body), timeoutMs)
+    test.it(name, () => suite.run(body), suite.timeoutMs)
   }
   test.describe(`${options.name} driver conformance`, () => {
     scenario('publishes and consumes with type routing, headers and confirmations', run => basic(suite, run))
@@ -151,7 +167,7 @@ async function basic(suite: Suite, run: Run): Promise<void> {
     { type: 'order.created', headers: { 'x-tenant': 'acme', traceparent }, key: 'k1' },
   )
   await broker.publish(queue, 'plain', { type: 'order.cancelled' })
-  await waitFor(() => created.length === 1 && others.length === 1, 'both messages')
+  await run.waitFor(() => created.length === 1 && others.length === 1, 'both messages')
   const [first] = created
   ok(first, 'the typed message reached its handler')
   deepStrictEqual(first.payload, { id: 1, items: ['a', 'b'] })
@@ -175,10 +191,18 @@ async function retries(suite: Suite, run: Run): Promise<void> {
   const driver = suite.options.driver({ maxInProcessDelayMs: nativeDelayMs - 1 })
   await suite.prepareQueue(queue, driver)
   const capabilities = driver.capabilities
-  // without native delay, both retries wait in-process
+  // with native delay, the second retry (twice the first one) is above the actual budget, whatever
+  // the driver did with the override; without native delay, both retries wait in-process
   const delay = capabilities.nativeDelay
-    ? nativeDelayMs / 2
+    ? Math.max(nativeDelayMs / 2, Math.floor(capabilities.maxInProcessDelayMs / 2) + 1)
     : Math.min(nativeDelayMs / 2, Math.floor(capabilities.maxInProcessDelayMs / 2))
+  if (capabilities.nativeDelay) {
+    const budget = `in-process budget ${capabilities.maxInProcessDelayMs} ms (overrides.maxInProcessDelayMs: ${nativeDelayMs - 1})`
+    ok(
+      delay * 2 <= capabilities.maxNativeDelayMs && delay * 3 < run.remainingMs(),
+      `no retry delay forces a native retry in time with an ${budget} and native delays up to ${capabilities.maxNativeDelayMs} ms: honour overrides.maxInProcessDelayMs`,
+    )
+  }
   const attempts: number[] = []
   class FlakyConsumer {
     handle(_payload: unknown, message: InboundMessage): void {
@@ -196,7 +220,7 @@ async function retries(suite: Suite, run: Run): Promise<void> {
   ])
   const started = Date.now()
   await app.get(MessageBroker).publish(queue, { n: 1 })
-  await waitFor(() => attempts.length === 3, 'three attempts')
+  await run.waitFor(() => attempts.length === 3, 'three attempts')
   deepStrictEqual(attempts, [1, 2, 3])
   const elapsed = Date.now() - started
   ok(elapsed >= delay * 3 - 100, `the retries waited ${elapsed} ms, expected at least ${delay * 3 - 100} ms`)
@@ -243,11 +267,11 @@ async function deadLetters(suite: Suite, run: Run): Promise<void> {
   ])
   const broker = app.get(MessageBroker)
   await broker.publish(queue, { id: 1 }, { type: 'a', headers: { keep: 'me' } })
-  await waitFor(() => dead.length === 1, 'first dead letter')
+  await run.waitFor(() => dead.length === 1, 'first dead letter')
   await broker.publish(queue, { id: 2 })
-  await waitFor(() => dead.length === 2, 'second dead letter')
+  await run.waitFor(() => dead.length === 2, 'second dead letter')
   await broker.publish(queue, { id: 'invalid' })
-  await waitFor(() => dead.length === 3, 'third dead letter')
+  await run.waitFor(() => dead.length === 3, 'third dead letter')
   deepStrictEqual(attempts, [1, 2, 1])
   deepStrictEqual(
     dead.map(entry => entry.payload),
@@ -286,13 +310,19 @@ async function concurrency(suite: Suite, run: Run): Promise<void> {
   ])
   const broker = app.get(MessageBroker)
   for (let index = 0; index < 6; index++) await broker.publish(queue, index, { key: `k${index}` })
-  await waitFor(() => done === 6, 'six messages')
+  await run.waitFor(() => done === 6, 'six messages')
   ok(max > 1, `messages were handled one at a time (max ${max} concurrently)`)
   ok(max <= 3, `${max} messages were handled concurrently, above the consumer concurrency (3)`)
 }
 
 async function restart(suite: Suite, run: Run): Promise<void> {
-  const { queue, driver, options } = await suite.prepare('stop')
+  // a budget covering the retry delay: the retry is pending in-process when the application stops
+  const overrides = { maxInProcessDelayMs: RESTART_RETRY_DELAY_MS }
+  const { queue, driver, options } = await suite.prepare('stop', overrides)
+  ok(
+    driver.capabilities.maxInProcessDelayMs >= RESTART_RETRY_DELAY_MS,
+    `the restart scenario holds a ${RESTART_RETRY_DELAY_MS} ms retry in-process, the driver budget is ${driver.capabilities.maxInProcessDelayMs} ms: honour overrides.maxInProcessDelayMs`,
+  )
   const firstRun: number[] = []
   class FailingConsumer {
     handle(_payload: unknown, message: InboundMessage): void {
@@ -305,11 +335,11 @@ async function restart(suite: Suite, run: Run): Promise<void> {
       class: FailingConsumer,
       queue,
       options,
-      handlers: [handler('handle', { retry: { attempts: 5, backoff: 'fixed', delay: 900 } })],
+      handlers: [handler('handle', { retry: { attempts: 5, backoff: 'fixed', delay: RESTART_RETRY_DELAY_MS } })],
     },
   ])
   await app.get(MessageBroker).publish(queue, { keep: true })
-  await waitFor(() => firstRun.length === 1, 'first attempt')
+  await run.waitFor(() => firstRun.length === 1, 'first attempt')
   await sleep(50)
   await run.stop(app)
 
@@ -319,8 +349,10 @@ async function restart(suite: Suite, run: Run): Promise<void> {
       received.push({ payload, message })
     }
   }
-  await run.start(suite.options.driver({}), [{ class: HealthyConsumer, queue, options, handlers: [handler('handle')] }])
-  await waitFor(() => received.length === 1, 'redelivery after restart')
+  await run.start(suite.options.driver(overrides), [
+    { class: HealthyConsumer, queue, options, handlers: [handler('handle')] },
+  ])
+  await run.waitFor(() => received.length === 1, 'redelivery after restart')
   deepStrictEqual(received[0]?.payload, { keep: true })
 }
 
@@ -340,7 +372,7 @@ async function delayedPublish(suite: Suite, run: Run): Promise<void> {
   }
   const started = Date.now()
   await broker.publish(queue, 1, { delay: 1000 })
-  await waitFor(() => received.length === 1, 'delayed message')
+  await run.waitFor(() => received.length === 1, 'delayed message')
   const elapsed = (received[0] ?? 0) - started
   ok(elapsed >= 900, `the message published with a delay of 1000 ms arrived after ${elapsed} ms`)
 }
@@ -363,15 +395,18 @@ let counter = 0
 class Suite {
   readonly options: DriverConformanceOptions
   readonly nativeDelayMs: number
+  readonly timeoutMs: number
 
   constructor(options: DriverConformanceOptions) {
     this.options = options
     this.nativeDelayMs = options.nativeDelayMs ?? DEFAULT_NATIVE_DELAY_MS
+    this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
   }
 
   /** Runs a scenario, then stops every application it started (in reverse order). */
   async run(body: (run: Run) => Promise<void>): Promise<void> {
-    const run = new Run()
+    const margin = Math.min(MAX_STOP_MARGIN_MS, this.timeoutMs / 4)
+    const run = new Run(Date.now() + this.timeoutMs - margin)
     try {
       await body(run)
     } finally {
@@ -393,9 +428,12 @@ class Suite {
     await this.options.prepareQueue?.(queue, driver.deadLetterName(queue))
   }
 
-  async prepare(prefix: string): Promise<{ queue: string; driver: MessagingDriver; options: Record<string, unknown> }> {
+  async prepare(
+    prefix: string,
+    overrides: ConformanceDriverOverrides = {},
+  ): Promise<{ queue: string; driver: MessagingDriver; options: Record<string, unknown> }> {
     const queue = this.uniqueQueue(prefix)
-    const driver = this.options.driver({})
+    const driver = this.options.driver(overrides)
     await this.prepareQueue(queue, driver)
     return { queue, driver, options: this.consumerOptions(queue) }
   }
@@ -420,6 +458,27 @@ class Suite {
 /** The applications of one scenario. */
 class Run {
   #apps: Application[] = []
+  /** When the scenario's waits give up (epoch ms), ahead of the framework timeout. */
+  readonly #deadline: number
+
+  constructor(deadline: number) {
+    this.#deadline = deadline
+  }
+
+  /** Time left for the scenario's waits, in ms. */
+  remainingMs(): number {
+    return this.#deadline - Date.now()
+  }
+
+  /** Polls `predicate` until it holds, failing with `label` once the scenario's wait deadline passed. */
+  async waitFor(predicate: () => boolean, label: string): Promise<void> {
+    while (!predicate()) {
+      if (Date.now() > this.#deadline) {
+        throw new Error(`Timed out waiting for ${label} (the scenario timeout is near; see the timeoutMs option)`)
+      }
+      await sleep(20)
+    }
+  }
 
   async start(driver: MessagingDriver, consumers: readonly TestConsumer[]): Promise<Application> {
     const app = await Application.create({
@@ -492,13 +551,4 @@ function handler(method: string, extra: { type?: string; retry?: RetryPolicy } =
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
-}
-
-/** Polls `predicate` until it holds. */
-async function waitFor(predicate: () => boolean, label: string): Promise<void> {
-  const deadline = Date.now() + WAIT_MS
-  while (!predicate()) {
-    if (Date.now() > deadline) throw new Error(`Timed out after ${WAIT_MS} ms waiting for ${label}`)
-    await sleep(20)
-  }
 }

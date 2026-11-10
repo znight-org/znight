@@ -2595,8 +2595,10 @@ failure, with their headers; bounded concurrency; pending retries released on st
 after a restart; delayed publishing honoured, or refused when `maxPublishDelayMs` is `0`).
 Framework-neutral: the caller passes `describe` / `it` (`it(name, body, timeoutMs)`), assertions are
 `node:assert`'s, each scenario boots applications from hand-written metadata and stops them whatever
-its outcome. `driver(overrides)` is called for each application (all of them reach the same broker;
-`overrides.maxInProcessDelayMs` lets the retry scenario force native retries). The memory driver runs
+its outcome, its waits ending ahead of `timeoutMs`. `driver(overrides)` is called for each
+application (all of them reach the same broker) and MUST honour `overrides.maxInProcessDelayMs`: the
+retry scenario lowers it to force a native retry, the restart scenario raises it to the retry delay
+so that `release()` runs on stop; a driver keeping another budget fails them. The memory driver runs
 it in the regular test run, the broker drivers under `ZNIGHT_INTEGRATION=1`.
 
 Drivers verify their topology (and native DLQ configuration) at subscribe time. **Impl.** driver
