@@ -161,23 +161,35 @@ letters, a driver option chooses **who retries**, never both layers at once: `'z
   created or updated by the driver, like Kafka consumer groups. Tests run `nats` with `-js` in
   Testcontainers.
 
-### 4.3 Redis Streams (`/redis`, peer `redis` ^5)
+### 4.3 Redis Streams (`/redis`, peer `ioredis` ^5.4 or ^6)
 
-- **Names.** `publish(queue)` is an `XADD` to the stream `<prefix><queue>` (body, type, id, content
-  type and headers as fields; optional `MAXLEN ~`); `@Consumer(queue)` reads through a consumer group
-  (`XREADGROUP`, `COUNT` = free slots), created idempotently with `MKSTREAM`. Valkey works the same.
+- **Client.** ioredis rather than `redis` (node-redis), decided at implementation time: it is the
+  more widespread client (about twice the weekly downloads), the one BullMQ users already have, with
+  mature Sentinel and TLS support, and its raw `call()` / `callBuffer()` keep bodies binary-safe.
+  Redis 6.2+ (`XAUTOCLAIM`) and Valkey; Redis Cluster is not supported (a queue, its delayed set and
+  its dead-letter stream would live in different slots).
+- **Names.** `publish(queue)` is an `XADD` to the stream `<prefix><queue>` (body, id, type, key,
+  content type, timestamp and `h:<header>` fields; optional `MAXLEN ~`); `@Consumer(queue)` reads
+  through a consumer group (`XREADGROUP` on a blocking connection per consumer, `COUNT` = free
+  slots), created idempotently with `MKSTREAM`. Valkey works the same.
 - **Settlement.** `ack` is `XACK`. Messages received but never settled stay in the pending entries
-  list and are claimed back (`XAUTOCLAIM` after `claimIdleMs`) by any member, including a restarted
-  one: that is `release`, and the shutdown path.
+  list and are claimed back (`XAUTOCLAIM` after `claimIdleMs`) by any member, their deliveries
+  counting as attempts; a heartbeat (`XCLAIM ... JUSTID`) keeps in-flight entries claimed. `release`
+  adds a copy keeping the attempt and acknowledges the original, so the message comes back at once.
 - **Retries.** Redis has no redelivery policy, so retries are Znight's only: a copy with
-  `x-znight-attempt` is added and the original acknowledged in one `MULTI`. Delays go through a sorted
-  set per stream (`<stream>:delayed`, score = due time) moved back into the stream by an atomic script
-  polled by the driver; the same set serves delayed publishing. In-process budget 1 s.
-- **Dead letters.** The stream `<queue>.dlq`, written and acknowledged in one `MULTI`.
+  `x-znight-attempt` is added and the original acknowledged in one Lua script (rather than a
+  `MULTI`: atomic too, and it adds nothing when the entry is no longer pending). Delays go through a
+  sorted set per stream (`<stream>:delayed`, score = server time + delay) moved back into the stream
+  by an atomic script polled by the driver; the same set serves delayed publishing. In-process
+  budget 1 s.
+- **Dead letters.** The stream `<queue>.dlq`, written and acknowledged in the same script.
 - **Durability and ordering.** A confirmation means Redis executed the command; durability follows
   the server's persistence (AOF), and an option waits for replicas (`WAIT`). No ordering across
   members of a group.
-- **Tests.** The `redis` image in Testcontainers.
+- **Shutdown.** `cancel()` unblocks the blocking read (`CLIENT UNBLOCK`, else it ends within
+  `blockMs`); `close()` removes the consumer from its group when it has no pending entry.
+- **Tests.** The conformance kit against an in-memory fake server in the regular run, and against
+  the `redis` and `valkey` images in Testcontainers.
 
 ## 5. Oracle Cloud Infrastructure and other brokers
 

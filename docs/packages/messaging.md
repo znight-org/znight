@@ -1,5 +1,5 @@
 ---
-description: "@znight/messaging - message consumers with typed handlers, retries with backoff and dead-letter queues on RabbitMQ, SQS, Kafka, Google Cloud Pub/Sub or in memory."
+description: "@znight/messaging - message consumers with typed handlers, retries with backoff and dead-letter queues on RabbitMQ, SQS, Kafka, Google Cloud Pub/Sub, Redis Streams or in memory."
 ---
 
 # @znight/messaging <Badge type="tip" text="available" />
@@ -9,7 +9,7 @@ the `MessagingPlugin` subscribes them through a driver: RabbitMQ, Amazon SQS, Ka
 Pub/Sub, or in memory for tests. Runs on Node.js 24+ and Bun 1.3+.
 
 ```sh
-npm install @znight/messaging amqplib   # or @aws-sdk/client-sqs, @platformatic/kafka, @google-cloud/pubsub
+npm install @znight/messaging amqplib   # or @aws-sdk/client-sqs, @platformatic/kafka, @google-cloud/pubsub, ioredis
 ```
 
 ::: code-group
@@ -120,17 +120,18 @@ export class CheckoutService {
 
 `publish(queue, payload, { type?, headers?, key?, delay?, id?, contentType? })` resolves with `{ id }`
 once the broker **confirmed** the message; `key` is the Kafka partition key, the SQS FIFO group or the
-Pub/Sub ordering key, `delay` is not supported by Kafka nor Pub/Sub.
+Pub/Sub ordering key, `delay` is not supported by Kafka nor Pub/Sub (Redis Streams supports it through a sorted set).
 
 ## Drivers
 
-| Driver               | Import                       | Peer dependency        | Native delayed retries     |
-| -------------------- | ---------------------------- | ---------------------- | -------------------------- |
-| In memory            | `@znight/messaging/memory`   | —                      | in process                 |
-| RabbitMQ             | `@znight/messaging/rabbitmq` | `amqplib`              | TTL + dead-letter exchange |
-| Amazon SQS           | `@znight/messaging/sqs`      | `@aws-sdk/client-sqs`  | visibility timeout         |
-| Kafka                | `@znight/messaging/kafka`    | `@platformatic/kafka`  | retry topic                |
-| Google Cloud Pub/Sub | `@znight/messaging/pubsub`   | `@google-cloud/pubsub` | ack deadline (≤ 600 s)     |
+| Driver                    | Import                       | Peer dependency        | Native delayed retries     |
+| ------------------------- | ---------------------------- | ---------------------- | -------------------------- |
+| In memory                 | `@znight/messaging/memory`   | —                      | in process                 |
+| RabbitMQ                  | `@znight/messaging/rabbitmq` | `amqplib`              | TTL + dead-letter exchange |
+| Amazon SQS                | `@znight/messaging/sqs`      | `@aws-sdk/client-sqs`  | visibility timeout         |
+| Kafka                     | `@znight/messaging/kafka`    | `@platformatic/kafka`  | retry topic                |
+| Google Cloud Pub/Sub      | `@znight/messaging/pubsub`   | `@google-cloud/pubsub` | ack deadline (≤ 600 s)     |
+| Redis Streams (or Valkey) | `@znight/messaging/redis`    | `ioredis`              | delayed sorted set         |
 
 A driver implements
 `MessagingDriver { name, capabilities, connect(), subscribe(), publish(), close(), deadLetterName() }`;
@@ -176,6 +177,26 @@ import { pubsub } from '@znight/messaging/pubsub'
 MessagingPlugin.configure({
   driver: pubsub({ retries: 'subscription', subscriptions: { notifications: 'events-notifications' } }),
   defaults: { retry: { attempts: 5, backoff: 'fixed', delay: 0 } }, // the subscription's maxDeliveryAttempts
+})
+```
+
+- **Redis Streams** (or Valkey): `publish(queue)` adds an entry to the stream `queue` (body, `id`,
+  `type`, `key`, `content-type`, `timestamp` and `h:<header>` fields) and `@Consumer(queue)` reads it
+  through a consumer group (`znight`, or `@Consumer({ queue, group })`), created at subscribe time.
+  Redis has no redelivery policy, so Znight owns retries and dead letters: a retry, a release or a
+  dead letter adds a copy (to the stream, its delayed sorted set `<queue>:delayed` or the stream
+  `<queue>.dlq`) and acknowledges the original in one Lua script. Entries left pending by a crashed
+  consumer are claimed back (`XAUTOCLAIM`) after `claimIdleMs`, and their deliveries count as
+  attempts. Delayed publishing goes through the same sorted set. `maxLength` trims the streams
+  (`MAXLEN ~`, regardless of the consumers: size it above any backlog), `replicas` waits for replicas
+  (`WAIT`). Built on ioredis, the most widespread Node.js Redis client; Redis Cluster is not supported.
+
+```ts
+import { MessagingPlugin } from '@znight/messaging'
+import { redis } from '@znight/messaging/redis'
+
+MessagingPlugin.configure({
+  driver: redis({ url: process.env['REDIS_URL'], maxLength: 1_000_000, claimIdleMs: 30_000 }),
 })
 ```
 
