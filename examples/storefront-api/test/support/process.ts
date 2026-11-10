@@ -82,20 +82,22 @@ export class AppProcess {
       })
   }
 
-  /** Waits for a log entry (fails early when the process exits). */
-  async waitForLog(message: string, timeoutMs = 30_000): Promise<LogEntry> {
+  /** Waits for a log entry, by message or predicate (fails early when the process exits). */
+  async waitForLog(message: string | ((entry: LogEntry) => boolean), timeoutMs = 30_000): Promise<LogEntry> {
+    const matches = typeof message === 'string' ? (log: LogEntry) => log.msg === message : message
+    const label = typeof message === 'string' ? `"${message}"` : 'the expected entry'
     const deadline = Date.now() + timeoutMs
     let exited = false
     void this.exited.then(() => {
       exited = true
     })
     while (Date.now() < deadline) {
-      const entry = this.logs().find(log => log.msg === message)
+      const entry = this.logs().find(matches)
       if (entry !== undefined) return entry
-      if (exited) throw new Error(`The application exited before logging "${message}":\n${this.#output}`)
+      if (exited) throw new Error(`The application exited before logging ${label}:\n${this.#output}`)
       await Bun.sleep(50)
     }
-    throw new Error(`The application did not log "${message}" within ${timeoutMs} ms:\n${this.#output}`)
+    throw new Error(`The application did not log ${label} within ${timeoutMs} ms:\n${this.#output}`)
   }
 
   /** Sends SIGTERM and waits for the process to exit. */

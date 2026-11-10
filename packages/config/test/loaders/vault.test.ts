@@ -155,6 +155,27 @@ describe('vault()', () => {
     expect(source.has('DB_PASSWORD')).toBe(false)
   })
 
+  it('accepts { path, key, optional } refs, whose key and optional override the loader ones', async () => {
+    const source = await loadConfigSource(
+      [
+        vault({
+          address,
+          token: TOKEN,
+          key: 'vault',
+          path: [
+            'secret/myapp',
+            { path: 'secret/myapp/override', key: 'override' },
+            { path: 'secret/nope', optional: true },
+          ],
+        }),
+      ],
+      { env: {} },
+    )
+    expect(source.get('vault.DB_PASSWORD')).toBe('kv2-password')
+    expect(source.get('override.DB_PASSWORD')).toBe('override-password')
+    expect(source.origin('override.DB_PASSWORD')).toBe('vault:secret/myapp/override')
+  })
+
   it('sends the namespace header', async () => {
     await loadConfigSource([vault({ address, token: TOKEN, path: 'secret/myapp', namespace: 'team-a' })], { env: {} })
     expect(requests[0]?.namespace).toBe('team-a')
@@ -264,7 +285,12 @@ describe('vault()', () => {
       loadConfigSource([vault({ address, token: TOKEN, path: 'secret/unknown' })], { env: {} }),
     )
     expect(error).toBeInstanceOf(ConfigLoaderError)
-    expect(error.message).toBe('ZNIGHT006: Config loader "vault" failed: secret secret/unknown not found (HTTP 404)')
+    expect(error.message).toBe(
+      'ZNIGHT006: Config loader "vault" failed: cannot read secret "secret/unknown": HTTP 404: not found',
+    )
+    expect((error as ZnightError).hints).toEqual([
+      'Check the path, the mount and kvVersion, or mark the secret optional',
+    ])
     expect(requests).toHaveLength(1)
 
     const source = await loadConfigSource(
@@ -280,16 +306,18 @@ describe('vault()', () => {
       loadConfigSource([vault({ address, token: 'wrong-token', path: 'secret/myapp' })], { env: {} }),
     )
     expect(error.message).toBe(
-      'ZNIGHT006: Config loader "vault" failed: cannot read secret secret/myapp: HTTP 403: permission denied',
+      'ZNIGHT006: Config loader "vault" failed: cannot read secret "secret/myapp": HTTP 403: permission denied',
     )
-    expect((error as ZnightError).hints).toEqual(['Check the token and its policies'])
+    expect((error as ZnightError).hints).toEqual([
+      'Check the token (VAULT_TOKEN, tokenFile) and that its policies allow "read" on the path',
+    ])
     expect(error.message).not.toContain('wrong-token')
     expect(requests).toHaveLength(1)
 
     const plain = await caught(() =>
       loadConfigSource([vault({ address, token: TOKEN, path: 'secret/bad-request' })], { env: {} }),
     )
-    expect(plain.message).toContain('cannot read secret secret/bad-request: HTTP 400')
+    expect(plain.message).toContain('cannot read secret "secret/bad-request": HTTP 400')
   })
 
   it('retries transient failures with backoff', async () => {
@@ -305,7 +333,7 @@ describe('vault()', () => {
       loadConfigSource([vault({ address, token: TOKEN, path: 'secret/down', retries: 1, ...fast })], { env: {} }),
     )
     expect(error.message).toBe(
-      'ZNIGHT006: Config loader "vault" failed: cannot read secret secret/down after 2 attempt(s): HTTP 500',
+      'ZNIGHT006: Config loader "vault" failed: cannot read secret "secret/down": HTTP 500: server error, after 2 attempt(s)',
     )
     expect(requests).toHaveLength(2)
   })
@@ -315,7 +343,7 @@ describe('vault()', () => {
       loadConfigSource([vault({ address, token: TOKEN, path: 'secret/slow', timeoutMs: 50, retries: 0 })], { env: {} }),
     )
     expect(error).toBeInstanceOf(ConfigLoaderError)
-    expect(error.message).toContain('cannot read secret secret/slow after 1 attempt(s)')
+    expect(error.message).toContain('cannot read secret "secret/slow": timed out after 50 ms, after 1 attempt(s)')
     expect((error.cause as Error).name).toBe('TimeoutError')
   })
 
@@ -326,16 +354,18 @@ describe('vault()', () => {
       }),
     )
     expect(error).toBeInstanceOf(ConfigLoaderError)
-    expect(error.message).toContain('cannot read secret secret/myapp after 1 attempt(s)')
+    expect(error.message).toContain('cannot read secret "secret/myapp": ')
+    expect(error.message).toEndWith(', after 1 attempt(s)')
   })
 
   it('detects a KV version mismatch', async () => {
     const error = await caught(() =>
       loadConfigSource([vault({ address, token: TOKEN, path: 'secret/kv1-shaped' })], { env: {} }),
     )
-    expect(error.message).toContain(
-      'unexpected response for secret/kv1-shaped: no secret data (is kvVersion 2 correct?)',
-    )
+    expect(error.message).toBe('ZNIGHT006: Config loader "vault" failed: secret "secret/kv1-shaped" has no value')
+    expect((error as ZnightError).hints).toEqual([
+      'The response holds no secret data: check that the mount is a KV version 2 engine (kvVersion)',
+    ])
   })
 
   it('reports a response that is not JSON without its content (it may hold the secret)', async () => {
@@ -371,7 +401,7 @@ describe('vault()', () => {
       )
       expect(error).toBeInstanceOf(ConfigLoaderError)
       expect(error.message).toBe(
-        `ZNIGHT006: Config loader "vault" failed: cannot read secret secret/app after 3 attempt(s): the response body is not valid JSON (${body.length} characters, application/json)`,
+        `ZNIGHT006: Config loader "vault" failed: cannot read secret "secret/app": the response body is not valid JSON (${body.length} characters, application/json), after 3 attempt(s)`,
       )
       // retried like any transient failure
       expect(calls).toBe(3)
@@ -395,7 +425,7 @@ describe('vault()', () => {
           { env: {} },
         ),
       )
-      expect(error.message).toContain('unexpected response for secret/app: no secret data (is kvVersion 2 correct?)')
+      expect(error.message).toContain('secret "secret/app" has no value')
     }
   })
 
@@ -469,7 +499,7 @@ describe('vault()', () => {
       fetch: pending,
     })
     const error = await caught(() => loadConfigSource([loader], { env: {} }))
-    expect(error.message).toContain('cannot read secret secret/denied: HTTP 403')
+    expect(error.message).toContain('cannot read secret "secret/denied": HTTP 403')
     const hanging = signals['https://vault.example.com/v1/secret/data/hanging'] ?? []
     expect(hanging.map(signal => signal.aborted)).toEqual([true])
     await new Promise(resolve => setTimeout(resolve, 20))

@@ -21,6 +21,8 @@
     "vault",
     "aws-secrets-manager",
     "gcp-secret-manager",
+    "azure-key-vault",
+    "oci-vault",
     "yaml",
     "twelve-factor"
   ],
@@ -55,16 +57,32 @@
     "@znight/core": "workspace:*"
   },
   "peerDependencies": {
+    "@azure/identity": "^4.0.0",
+    "@azure/keyvault-secrets": "^4.0.0",
     "@aws-sdk/client-secrets-manager": "^3.0.0",
     "@google-cloud/secret-manager": "^6.0.0 || ^7.0.0 || ^8.0.0",
+    "oci-common": "^2.0.0",
+    "oci-secrets": "^2.0.0",
     "yaml": "^2.0.0",
     "@znight/compiler": "workspace:^"
   },
   "peerDependenciesMeta": {
+    "@azure/identity": {
+      "optional": true
+    },
+    "@azure/keyvault-secrets": {
+      "optional": true
+    },
     "@aws-sdk/client-secrets-manager": {
       "optional": true
     },
     "@google-cloud/secret-manager": {
+      "optional": true
+    },
+    "oci-common": {
+      "optional": true
+    },
+    "oci-secrets": {
       "optional": true
     },
     "yaml": {
@@ -75,8 +93,12 @@
     }
   },
   "devDependencies": {
+    "@azure/identity": "4.14.0",
+    "@azure/keyvault-secrets": "4.12.0",
     "@aws-sdk/client-secrets-manager": "3.1164.0",
     "@google-cloud/secret-manager": "7.2.0",
+    "oci-common": "2.144.0",
+    "oci-secrets": "2.144.0",
     "yaml": "2.9.1",
     "@znight/compiler": "workspace:*"
   },
