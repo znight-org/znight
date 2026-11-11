@@ -1,12 +1,13 @@
 /**
  * An in-memory Redis implementing the commands the Redis Streams driver sends through ioredis'
- * `call()` / `callBuffer()`: streams (XADD with MAXLEN, XGROUP, XREADGROUP with BLOCK, XACK, XAUTOCLAIM,
- * XCLAIM JUSTID, XPENDING), TYPE, WAIT, PING, CLIENT ID / UNBLOCK, and the driver's Lua scripts
+ * `call()` / `callBuffer()`: streams (XADD with MAXLEN, XGROUP, XREADGROUP on several streams with
+ * BLOCK, XACK, XAUTOCLAIM, XCLAIM JUSTID, XPENDING), TYPE, WAIT, PING, INFO, CLIENT ID / UNBLOCK, and
+ * the driver's Lua scripts
  * (EVALSHA answers NOSCRIPT until EVAL loaded the script; a script is recognised by its
  * `-- znight:<name>` first line and run by a JavaScript twin). Every command is recorded.
  *
  * `FakeRedis` is the server; `connection()` and `duplicate()` return clients shaped like ioredis'
- * `Redis` (the subset the driver uses).
+ * `Redis` (the subset the driver uses); `reconnect()` simulates a reconnection (a new client id).
  */
 import { createHash } from 'node:crypto'
 
@@ -26,7 +27,8 @@ interface PendingEntry {
 interface Group {
   lastId: string
   readonly pending: Map<string, PendingEntry>
-  readonly consumers: Set<string>
+  /** Consumers and the time they were last seen (XINFO CONSUMERS `idle`). */
+  readonly consumers: Map<string, number>
 }
 
 interface Stream {
@@ -95,6 +97,8 @@ export class FakeRedis {
   resp3 = false
   /** Replicas acknowledging a WAIT. */
   replicas = 0
+  /** `redis_version` reported by INFO. */
+  version = '7.4.0'
   /** Script SHAs loaded by EVAL. */
   readonly scripts = new Set<string>()
   /** Connections, by id. */
@@ -102,9 +106,15 @@ export class FakeRedis {
   #connectionIds = 0
   readonly #waiters = new Set<() => void>()
 
-  /** A new client connection. */
-  connection(): FakeRedisConnection {
-    const connection = new FakeRedisConnection(this, ++this.#connectionIds)
+  /** The next client id (ids grow, like the server's). */
+  nextClientId(): number {
+    this.#connectionIds += 1
+    return this.#connectionIds
+  }
+
+  /** A new client connection (`id`: its client id, the next one by default). */
+  connection(id = this.nextClientId()): FakeRedisConnection {
+    const connection = new FakeRedisConnection(this, id)
     this.connections.set(connection.id, connection)
     return connection
   }
@@ -140,7 +150,19 @@ export class FakeRedis {
   consumers(key: string, group: string): string[] {
     const value = this.data.get(key)
     if (value?.kind !== 'stream') return []
-    return [...(value.groups.get(group)?.consumers ?? [])]
+    return [...(value.groups.get(group)?.consumers.keys() ?? [])]
+  }
+
+  /** Adds a consumer to a group, idle for `idleMs` (a consumer of a crashed process). */
+  idleConsumer(key: string, group: string, consumer: string, idleMs: number): void {
+    this.#group(key, group).consumers.set(consumer, Date.now() - idleMs)
+  }
+
+  /** Gives a connection another client id (a reconnection), keeping its pending blocking read. */
+  renumber(connection: FakeRedisConnection, id = this.nextClientId()): void {
+    if (this.connections.get(connection.id) === connection) this.connections.delete(connection.id)
+    connection.id = id
+    this.connections.set(id, connection)
   }
 
   /** Members of a sorted set (the delayed messages), with their due time. */
@@ -182,6 +204,8 @@ export class FakeRedis {
         return Buffer.from(this.data.get(strings[0] ?? '')?.kind ?? 'none')
       case 'WAIT':
         return this.replicas
+      case 'INFO':
+        return Buffer.from(`# Server\r\nredis_version:${this.version}\r\nredis_mode:standalone\r\n`)
       case 'CLIENT':
         return this.#client(connection, strings)
       case 'XADD':
@@ -279,7 +303,7 @@ export class FakeRedis {
       if (stream === undefined) throw new FakeReplyError('ERR The XGROUP subcommand requires the key to exist.')
       if (stream.groups.has(group)) throw new FakeReplyError('BUSYGROUP Consumer Group name already exists')
       const start = args[3] === '$' ? stream.lastId : (args[3] ?? '0')
-      stream.groups.set(group, { lastId: start === '0' ? '0-0' : start, pending: new Map(), consumers: new Set() })
+      stream.groups.set(group, { lastId: start === '0' ? '0-0' : start, pending: new Map(), consumers: new Map() })
       return Buffer.from('OK')
     }
     if (sub === 'DELCONSUMER') {
@@ -311,7 +335,7 @@ export class FakeRedis {
   }
 
   async #xreadgroup(connection: FakeRedisConnection, args: readonly string[]): Promise<unknown> {
-    // XREADGROUP GROUP g c [COUNT n] [BLOCK ms] STREAMS key id
+    // XREADGROUP GROUP g c [COUNT n] [BLOCK ms] STREAMS key... id...
     const group = args[1] ?? ''
     const consumer = args[2] ?? ''
     let count = Number.POSITIVE_INFINITY
@@ -323,23 +347,29 @@ export class FakeRedis {
       if (option === 'BLOCK') block = Number(args[index + 1])
       index += 2
     }
-    const key = args[index + 1] ?? ''
-    const from = args[index + 2] ?? '>'
-    if (from !== '>') throw new FakeReplyError('ERR the fake only reads new entries (>)')
+    const rest = args.slice(index + 1)
+    const keys = rest.slice(0, rest.length / 2)
+    if (rest.slice(rest.length / 2).some(id => id !== '>')) {
+      throw new FakeReplyError('ERR the fake only reads new entries (>)')
+    }
     const read = (): unknown => {
-      const stream = this.#stream(key, false)
-      const state = this.#group(key, group)
-      state.consumers.add(consumer)
-      const fresh = (stream?.entries ?? []).filter(entry => compareIds(entry.id, state.lastId) > 0).slice(0, count)
-      if (fresh.length === 0) return undefined
-      const now = Date.now()
-      for (const entry of fresh) {
-        state.lastId = entry.id
-        state.pending.set(entry.id, { consumer, deliveredAt: now, deliveries: 1 })
+      const replies: unknown[] = []
+      for (const key of keys) {
+        const stream = this.#stream(key, false)
+        const state = this.#group(key, group)
+        const now = Date.now()
+        state.consumers.set(consumer, now)
+        const fresh = (stream?.entries ?? []).filter(entry => compareIds(entry.id, state.lastId) > 0).slice(0, count)
+        if (fresh.length === 0) continue
+        for (const entry of fresh) {
+          state.lastId = entry.id
+          state.pending.set(entry.id, { consumer, deliveredAt: now, deliveries: 1 })
+        }
+        replies.push([Buffer.from(key), fresh.map(entry => this.#reply(entry))])
       }
-      const entries = fresh.map(entry => this.#reply(entry))
-      // RESP3 maps reach ioredis' callBuffer() flattened: [stream, entries]
-      return this.resp3 ? [Buffer.from(key), entries] : [[Buffer.from(key), entries]]
+      if (replies.length === 0) return undefined
+      // RESP3 maps reach ioredis' callBuffer() flattened: [stream, entries, stream, entries...]
+      return this.resp3 ? replies.flat(1) : replies
     }
     const immediate = read()
     if (immediate !== undefined || block === undefined) return immediate ?? null
@@ -389,8 +419,8 @@ export class FakeRedis {
     if (countAt >= 0) count = Number(args[countAt + 1])
     const stream = this.#stream(key, false)
     const state = this.#group(key, group)
-    state.consumers.add(consumer)
     const now = Date.now()
+    state.consumers.set(consumer, now)
     const candidates = [...state.pending.entries()]
       .filter(([id]) => compareIds(id, start) >= 0)
       .sort(([a], [b]) => compareIds(a, b))
@@ -425,6 +455,7 @@ export class FakeRedis {
     const justId = rest.some(arg => arg.toUpperCase() === 'JUSTID')
     const state = this.#group(key, group)
     const now = Date.now()
+    state.consumers.set(consumer, now)
     const result: unknown[] = []
     for (const id of rest.filter(arg => arg.toUpperCase() !== 'JUSTID')) {
       const entry = state.pending.get(id)
@@ -474,6 +505,10 @@ export class FakeRedis {
         return this.#due(keys, argv)
       case 'retire':
         return this.#retire(keys, argv)
+      case 'reap':
+        return this.#reap(keys, argv)
+      case 'trim':
+        return this.#trim(keys, argv)
       default:
         throw new FakeReplyError(`ERR the fake does not know the script ${name ?? ''}`)
     }
@@ -538,14 +573,53 @@ export class FakeRedis {
     return due.length
   }
 
-  // KEYS: stream; ARGV: group, consumer
+  // KEYS: streams; ARGV: group, consumer
   #retire(keys: readonly string[], argv: readonly unknown[]): unknown {
+    const group = text(argv[0])
+    const consumer = text(argv[1])
+    const states = keys.map(key => this.#stream(key, false)?.groups.get(group))
+    for (const state of states) {
+      for (const entry of state?.pending.values() ?? []) if (entry.consumer === consumer) return 0
+    }
+    for (const state of states) state?.consumers.delete(consumer)
+    return 1
+  }
+
+  // KEYS: stream; ARGV: group, idle ms, name prefix of the caller's consumers (kept)
+  #reap(keys: readonly string[], argv: readonly unknown[]): unknown {
     const state = this.#stream(keys[0] ?? '', false)?.groups.get(text(argv[0]))
     if (state === undefined) return 0
-    const consumer = text(argv[1])
-    for (const entry of state.pending.values()) if (entry.consumer === consumer) return 0
-    state.consumers.delete(consumer)
-    return 1
+    const now = Date.now()
+    let removed = 0
+    for (const [consumer, seenAt] of state.consumers) {
+      const pending = [...state.pending.values()].some(entry => entry.consumer === consumer)
+      const own = consumer.startsWith(text(argv[2]))
+      if (!own && !pending && now - seenAt >= Number(text(argv[1]))) {
+        state.consumers.delete(consumer)
+        removed++
+      }
+    }
+    return removed
+  }
+
+  // KEYS: stream; ARGV: limit. Trims exactly (the server trims whole macro nodes: `~`).
+  #trim(keys: readonly string[], argv: readonly unknown[]): unknown {
+    const stream = this.#stream(keys[0] ?? '', false)
+    if (stream === undefined) return 0
+    let oldest: string | undefined
+    for (const state of stream.groups.values()) {
+      const pending = [...state.pending.keys()].sort(compareIds)[0]
+      const [ms = '0', seq = '0'] = state.lastId.split('-')
+      // nothing pending: everything up to the last delivered entry is acknowledged
+      const keep = pending ?? `${ms}-${BigInt(seq) + 1n}`
+      if (oldest === undefined || compareIds(keep, oldest) < 0) oldest = keep
+    }
+    if (oldest === undefined) return 0
+    const bound = oldest
+    const kept = stream.entries.findIndex(entry => compareIds(entry.id, bound) >= 0)
+    const removed = Math.min(kept === -1 ? stream.entries.length : kept, Number(text(argv[0])))
+    stream.entries.splice(0, removed)
+    return removed
   }
 }
 
@@ -558,11 +632,27 @@ export class FakeRedisConnection {
   drop: ((error: Error) => void) | undefined
   quits = 0
   disconnects = 0
+  readonly #listeners = new Map<string, (() => void)[]>()
 
   constructor(
     readonly server: FakeRedis,
-    readonly id: number,
+    public id: number,
   ) {}
+
+  /** Registers an event listener (`close` is the one the driver uses). */
+  on(event: string, listener: () => void): this {
+    this.#listeners.set(event, [...(this.#listeners.get(event) ?? []), listener])
+    return this
+  }
+
+  /**
+   * Simulates a reconnection: emits `close`, then takes another client id (`id`, the next one by
+   * default). A pending blocking read is resent on the new connection, as ioredis does.
+   */
+  reconnect(id?: number): void {
+    for (const listener of this.#listeners.get('close') ?? []) listener()
+    this.server.renumber(this, id)
+  }
 
   call(command: string, ...args: unknown[]): Promise<unknown> {
     return this.#run(command, args).then(toStrings)

@@ -11,13 +11,29 @@ import { handler, sleep } from '../helpers.ts'
 import { integration, startApp, stopApps, waitFor } from './support.ts'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test'
 
-/** Redis and Valkey: the same protocol, Lua scripts and stream commands. */
+/** Redis (the oldest supported version and a current one) and Valkey: the same protocol, Lua scripts and stream commands. */
 const SERVERS = [
+  { name: 'redis 7.0', image: 'redis:7.0-alpine', command: ['redis-server'] },
   { name: 'redis', image: 'redis:7.4-alpine', command: ['redis-server'] },
   { name: 'valkey', image: 'valkey/valkey:9.0-alpine', command: ['valkey-server'] },
 ] as const
 
 const silent: CoreLogger = { debug() {}, info() {}, warn() {}, error() {} }
+
+/** Polls an asynchronous `predicate` until it holds. */
+async function eventually(predicate: () => Promise<boolean>, timeoutMs: number, label: string): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (!(await predicate())) {
+    if (Date.now() > deadline) throw new Error(`Timed out after ${timeoutMs} ms waiting for ${label}`)
+    await sleep(50)
+  }
+}
+
+/** Names of the consumers of a group (`XINFO CONSUMERS`). */
+async function consumerNames(client: Redis, stream: string, group: string): Promise<string[]> {
+  const consumers = (await client.xinfo('CONSUMERS', stream, group)) as unknown[][]
+  return consumers.map(fields => String(fields[fields.indexOf('name') + 1]))
+}
 
 for (const server of SERVERS) {
   describe.skipIf(!integration)(`Redis Streams on ${server.name} (testcontainers)`, () => {
@@ -88,9 +104,123 @@ for (const server of SERVERS) {
         'x-znight-attempts': '3',
         'x-znight-original-queue': queue,
       })
-      expect(await client.exists(`${queue}:delayed`)).toBe(0)
+      expect(await client.exists(`${queue}:retry:znight:delayed`)).toBe(0)
       await sleep(100)
       expect((await client.xpending(queue, 'znight'))[0]).toBe(0)
+      expect((await client.xpending(`${queue}:retry:znight`, 'znight'))[0]).toBe(0)
+      // the retries never went back to the queue stream
+      expect(await client.xlen(queue)).toBe(1)
+    })
+
+    it('keeps the retries of a group to that group (fan-out)', async () => {
+      const queue = `fanout-${Date.now()}`
+      const seen: Record<string, number[]> = { billing: [], shipping: [] }
+      const failingOnce = (group: string) =>
+        class {
+          handle(_payload: unknown, message: InboundMessage) {
+            seen[group]?.push(message.attempt)
+            if (message.attempt === 1) throw new Error(`${group} is down`)
+          }
+        }
+      const retry = { attempts: 3, backoff: 'fixed', delay: 200 } as const
+      for (const group of ['billing', 'shipping']) {
+        await startApp(driver({ maxInProcessDelayMs: 0 }), [
+          { class: failingOnce(group), queue, options: { group }, handlers: [handler('handle', { retry })] },
+        ])
+      }
+      await client.xadd(queue, '*', 'id', 'm-1', 'content-type', 'application/json', 'body', '{}')
+      await waitFor(
+        () => seen['billing']?.length === 2 && seen['shipping']?.length === 2,
+        20_000,
+        'one retry per group',
+      )
+      await sleep(800)
+      expect(seen).toEqual({ billing: [1, 2], shipping: [1, 2] })
+      expect(await client.xlen(queue)).toBe(1)
+    })
+
+    it('trims what every group acknowledged, and nothing a group has not read', async () => {
+      const queue = `retention-${Date.now()}`
+      await client.xgroup('CREATE', queue, 'audit', '0', 'MKSTREAM')
+      let handled = 0
+      class Consumer {
+        handle() {
+          handled++
+        }
+      }
+      const created = driver({ claimIdleMs: 200 })
+      await startApp(created, [{ class: Consumer, queue, options: { concurrency: 20 }, handlers: [handler('handle')] }])
+      for (let index = 0; index < 300; index++) {
+        await client.xadd(queue, '*', 'id', String(index), 'content-type', 'text/plain', 'body', String(index))
+      }
+      await waitFor(() => handled === 300, 20_000, 'the messages')
+      await sleep(600)
+      // the audit group has read nothing yet
+      expect(await client.xlen(queue)).toBe(300)
+      await client.xgroup('DESTROY', queue, 'audit')
+      // approximate trimming removes whole macro nodes (100 entries by default)
+      await eventually(async () => (await client.xlen(queue)) <= 100, 10_000, 'the acknowledged entries trimmed')
+    })
+
+    it('removes the consumers of crashed processes, idle without pending entries', async () => {
+      const queue = `reap-${Date.now()}`
+      let handled = 0
+      class Consumer {
+        handle() {
+          handled++
+        }
+      }
+      // idle for ten times claimIdleMs (2 s) without pending entries: removed
+      await startApp(driver({ claimIdleMs: 200, blockMs: 100 }), [
+        { class: Consumer, queue, handlers: [handler('handle')] },
+      ])
+      // Redis 7.0 adds a reading consumer to the group once it delivered an entry to it
+      await client.xadd(queue, '*', 'id', 'm-1', 'content-type', 'text/plain', 'body', 'x')
+      await waitFor(() => handled === 1, 10_000, 'the message')
+      await client.call('XGROUP', 'CREATECONSUMER', queue, 'znight', 'crashed')
+      expect(await consumerNames(client, queue, 'znight')).toHaveLength(2)
+      await eventually(
+        async () => !(await consumerNames(client, queue, 'znight')).includes('crashed'),
+        10_000,
+        'the crashed consumer removed',
+      )
+      // the live consumer, reading every 100 ms, stays
+      expect(await consumerNames(client, queue, 'znight')).toHaveLength(1)
+    })
+
+    it('unblocks the reconnected reading connection by its new client id on stop', async () => {
+      const queue = `reconnect-${Date.now()}`
+      const received: InboundMessage[] = []
+      class Consumer {
+        handle(_payload: unknown, message: InboundMessage) {
+          received.push(message)
+        }
+      }
+      const app = await startApp(driver({ blockMs: 20_000 }), [
+        { class: Consumer, queue, handlers: [handler('handle')] },
+      ])
+      const readers = async (): Promise<string[]> =>
+        String(await client.call('CLIENT', 'LIST'))
+          .split('\n')
+          .filter(line => line.includes('cmd=xreadgroup'))
+          .map(line => /\bid=(\d+)/.exec(line)?.[1] ?? '')
+      await eventually(async () => (await readers()).length === 1, 5000, 'the blocking read')
+      const [killed] = await readers()
+      await client.call('CLIENT', 'KILL', 'ID', killed ?? '')
+      // ioredis reconnects and resends the read; a message ends it, the next read is unblockable again
+      await client.xadd(queue, '*', 'id', 'm-1', 'content-type', 'application/json', 'body', '{}')
+      await waitFor(() => received.length === 1, 10_000, 'the message after the reconnection')
+      await eventually(
+        async () => {
+          const ids = await readers()
+          return ids.length === 1 && ids[0] !== killed
+        },
+        5000,
+        'the next blocking read',
+      )
+      const started = Date.now()
+      await app.stop()
+      expect(Date.now() - started).toBeLessThan(5000)
     })
 
     it('claims back the entries of a crashed consumer (XAUTOCLAIM)', async () => {
@@ -143,11 +273,15 @@ for (const server of SERVERS) {
 
     it('retires its consumers from the group when it stops', async () => {
       const queue = `retire-${Date.now()}`
+      let handled = 0
       class Consumer {
-        handle() {}
+        handle() {
+          handled++
+        }
       }
       const app = await startApp(driver(), [{ class: Consumer, queue, handlers: [handler('handle')] }])
-      await sleep(100)
+      await client.xadd(queue, '*', 'id', 'm-1', 'content-type', 'text/plain', 'body', 'x')
+      await waitFor(() => handled === 1, 10_000, 'the message')
       expect(await client.xinfo('CONSUMERS', queue, 'znight')).toHaveLength(1)
       await app.stop()
       expect(await client.xinfo('CONSUMERS', queue, 'znight')).toEqual([])

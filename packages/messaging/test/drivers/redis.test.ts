@@ -1,7 +1,8 @@
 /**
  * Redis Streams driver against an in-memory Redis (`fake-redis.ts`, passed as the ioredis client):
- * the wire format, consumer groups, flow control, settlements (scripts), the delayed set, reclaiming
- * the entries of crashed consumers, shutdown, and the conformance kit. The Lua scripts and the
+ * the wire format, consumer groups (fan-out with retries), flow control, settlements (scripts), the
+ * delayed sets, reclaiming the entries of crashed consumers, housekeeping (trimming, idle consumers),
+ * reconnections, shutdown, and the conformance kit. The Lua scripts and the
  * behaviour against a real server are covered by `test/integration/redis.test.ts`.
  */
 import type { Redis } from 'ioredis'
@@ -229,12 +230,79 @@ describe('consumer groups and flow control', () => {
       ...subscribeOptions,
       options: { group: 'audit' },
     })
-    expect(fake.callsOf('XGROUP').map(call => call.args[2])).toEqual(['billing', 'billing', 'audit'])
+    expect(fake.callsOf('XGROUP').map(call => call.args.slice(1, 3))).toEqual([
+      ['orders', 'billing'],
+      ['orders:retry:billing', 'billing'],
+      ['orders', 'billing'],
+      ['orders:retry:billing', 'billing'],
+      ['orders', 'audit'],
+      ['orders:retry:audit', 'audit'],
+    ])
     for (const subscription of [one, two, three]) {
       await subscription.cancel()
       await subscription.close()
     }
     await first.close()
+  })
+
+  it('keeps the retries of a group to that group: the other groups of a fan-out see the message once', async () => {
+    const fake = new FakeRedis()
+    const billing: InboundMessage[] = []
+    const shipping: InboundMessage[] = []
+    class Billing {
+      handle(_payload: unknown, message: InboundMessage) {
+        billing.push(message)
+        if (message.attempt === 1) throw new Error('billing is down')
+      }
+    }
+    class Shipping {
+      handle(_payload: unknown, message: InboundMessage) {
+        shipping.push(message)
+        if (message.attempt === 1) throw new Error('shipping is down')
+      }
+    }
+    const retry = { attempts: 3, backoff: 'fixed', delay: 0 } as const
+    // two services, one group each
+    const { broker } = await startApp(driverFor(fake, { maxInProcessDelayMs: 0 }), [
+      { class: Billing, queue: 'orders', options: { group: 'billing' }, handlers: [handler('handle', { retry })] },
+    ])
+    await startApp(driverFor(fake, { maxInProcessDelayMs: 0 }), [
+      { class: Shipping, queue: 'orders', options: { group: 'shipping' }, handlers: [handler('handle', { retry })] },
+    ])
+    await broker.publish('orders', { id: 1 })
+    await waitFor(() => billing.length === 2 && shipping.length === 2, 'one retry per group')
+    await sleep(150)
+    expect(billing.map(message => message.attempt)).toEqual([1, 2])
+    expect(shipping.map(message => message.attempt)).toEqual([1, 2])
+    // the copies went to the retry stream of each group, never to the shared queue stream
+    expect(fake.entries('orders')).toHaveLength(1)
+    expect(fake.entries('orders:retry:billing')).toHaveLength(1)
+    expect(fake.entries('orders:retry:shipping')).toHaveLength(1)
+    expect(fake.pending('orders:retry:billing', 'billing')).toEqual([])
+    expect(fake.pending('orders:retry:shipping', 'shipping')).toEqual([])
+  })
+
+  it('reads the queue stream and the retry stream, holding extra entries until a slot is free', async () => {
+    const fake = new FakeRedis()
+    const driver = driverFor(fake)
+    const { received, subscription } = await deliveries(driver, 'orders', { maxAttempts: 3 })
+    fake.add('orders', { body: 'first', id: 'm-1' })
+    await waitFor(() => received.length === 1, 'the first delivery')
+    // a released copy (retry stream) and a new entry (queue stream) are read together, one slot only
+    fake.add('orders', { body: 'second', id: 'm-2' })
+    await received[0]?.release()
+    await waitFor(() => received.length === 2, 'the second delivery')
+    await sleep(80)
+    expect(received).toHaveLength(2)
+    await received[1]?.ack()
+    await waitFor(() => received.length === 3, 'the entry held back')
+    expect(received.map(delivery => delivery.id).sort()).toEqual(['m-1', 'm-1', 'm-2'])
+    await received[2]?.ack()
+    expect(fake.pending('orders', 'znight')).toEqual([])
+    expect(fake.pending('orders:retry:znight', 'znight')).toEqual([])
+    await subscription.cancel()
+    await subscription.close()
+    await driver.close()
   })
 
   it('never holds more entries than the consumer concurrency', async () => {
@@ -260,7 +328,13 @@ describe('consumer groups and flow control', () => {
   })
 
   it('refuses a queue, a dead-letter stream or a delayed set holding another type (ZNIGHT011)', async () => {
-    for (const key of ['orders', 'orders.dlq', 'orders:delayed']) {
+    for (const key of [
+      'orders',
+      'orders.dlq',
+      'orders:delayed',
+      'orders:retry:znight',
+      'orders:retry:znight:delayed',
+    ]) {
       const fake = new FakeRedis()
       fake.set(key, 'oops')
       const driver = driverFor(fake)
@@ -281,6 +355,24 @@ describe('consumer groups and flow control', () => {
     const error = await caught(() => driverFor(fake).connect({ logger: memoryLogger() }))
     expect(error).toBeInstanceOf(ZnightError)
     expect((error as Error).message).toContain('ECONNREFUSED')
+  })
+
+  it('refuses servers older than Redis 7.0, and connects when INFO is not allowed', async () => {
+    const old = new FakeRedis()
+    old.version = '6.2.14'
+    const error = await caught(() => driverFor(old).connect({ logger: memoryLogger() }))
+    expect(error).toBeInstanceOf(ZnightError)
+    expect((error as Error).message).toContain('Redis 7.0 or later')
+    const restricted = new FakeRedis()
+    restricted.failures = command => (command === 'INFO' ? new FakeReplyError('NOPERM no permissions') : undefined)
+    const driver = driverFor(restricted)
+    await driver.connect({ logger: memoryLogger() })
+    await driver.close()
+    const valkey = new FakeRedis()
+    valkey.version = '7.2.4'
+    const current = driverFor(valkey)
+    await current.connect({ logger: memoryLogger() })
+    await current.close()
   })
 
   it('keeps reading after a failed read', async () => {
@@ -330,9 +422,12 @@ describe('settlements', () => {
     await received[0]?.retry({ attempt: 2, delayMs: 0, error: new Error('boom') })
     await waitFor(() => received.length === 2, 'the copy')
     expect(received[1]).toMatchObject({ id: 'm-1', attempt: 2, redelivered: true, headers: { keep: 'me' } })
-    expect(fake.entries('orders')[1]?.fields).toMatchObject({ 'h:x-znight-attempt': '2', 'h:keep': 'me' })
+    expect(received[1]?.raw).toMatchObject({ stream: 'orders:retry:znight', group: 'znight' })
+    expect(fake.entries('orders')).toHaveLength(1)
+    expect(fake.entries('orders:retry:znight')[0]?.fields).toMatchObject({ 'h:x-znight-attempt': '2', 'h:keep': 'me' })
     await received[1]?.ack()
     expect(fake.pending('orders', 'znight')).toEqual([])
+    expect(fake.pending('orders:retry:znight', 'znight')).toEqual([])
     // the copy and the acknowledgement are one script
     expect(fake.callsOf('EVALSHA').length + fake.callsOf('EVAL').length).toBeGreaterThan(0)
     await subscription.cancel()
@@ -348,12 +443,12 @@ describe('settlements', () => {
     await waitFor(() => received.length === 1, 'the first delivery')
     const started = Date.now()
     await received[0]?.retry({ attempt: 2, delayMs: 150, error: new Error('boom') })
-    expect(fake.delayed('orders:delayed')).toHaveLength(1)
+    expect(fake.delayed('orders:retry:znight:delayed')).toHaveLength(1)
     expect(fake.pending('orders', 'znight')).toEqual([])
     await waitFor(() => received.length === 2, 'the delayed copy')
     expect(Date.now() - started).toBeGreaterThanOrEqual(140)
     expect(received[1]?.attempt).toBe(2)
-    expect(fake.delayed('orders:delayed')).toEqual([])
+    expect(fake.delayed('orders:retry:znight:delayed')).toEqual([])
     await received[1]?.ack()
     await subscription.cancel()
     await subscription.close()
@@ -432,6 +527,7 @@ describe('settlements', () => {
     await fake.connection().call('XACK', 'orders', 'znight', entryId)
     await received[0]?.retry({ attempt: 2, delayMs: 0, error: new Error('x') })
     expect(fake.entries('orders')).toHaveLength(1)
+    expect(fake.entries('orders:retry:znight')).toEqual([])
     await subscription.cancel()
     await subscription.close()
     await driver.close()
@@ -585,6 +681,143 @@ describe('crashed consumers', () => {
     await sleep(600)
     expect(received).toHaveLength(1)
     expect(fake.callsOf('XCLAIM').some(call => call.args.includes('JUSTID'))).toBe(true)
+  })
+})
+
+describe('housekeeping', () => {
+  it('trims what every group acknowledged, never what a group still has to read or settle', async () => {
+    const fake = new FakeRedis()
+    const driver = driverFor(fake, { claimIdleMs: 40 })
+    const { received, subscription } = await deliveries(driver, 'orders', { concurrency: 3 })
+    // a second group that has read nothing yet holds every entry
+    await fake.connection().call('XGROUP', 'CREATE', 'orders', 'audit', '0')
+    for (const index of [1, 2, 3]) fake.add('orders', { body: String(index) })
+    await waitFor(() => received.length === 3, 'three deliveries')
+    for (const delivery of received) await delivery.ack()
+    await sleep(100)
+    expect(fake.entries('orders')).toHaveLength(3)
+    // the second group reads the first two and settles one: the second one is still pending
+    const audit = fake.connection()
+    await audit.call('XREADGROUP', 'GROUP', 'audit', 'a-1', 'COUNT', '2', 'STREAMS', 'orders', '>')
+    const [first, second] = fake.pending('orders', 'audit')
+    await audit.call('XACK', 'orders', 'audit', first?.id ?? '')
+    await waitFor(() => fake.entries('orders').length === 2, 'the first entry trimmed')
+    expect(fake.entries('orders')[0]?.id).toBe(second?.id ?? '')
+    expect(fake.callsOf('EVAL').some(call => call.args[0]?.startsWith('-- znight:trim'))).toBe(true)
+    await subscription.cancel()
+    await subscription.close()
+    await driver.close()
+  })
+
+  it('keeps the acknowledged entries of the queue streams with keepAcknowledged, not of the retry streams', async () => {
+    const fake = new FakeRedis()
+    const driver = driverFor(fake, { claimIdleMs: 40, keepAcknowledged: true })
+    const { received, subscription } = await deliveries(driver, 'orders', { maxAttempts: 2 })
+    fake.add('orders', { body: 'x' })
+    await waitFor(() => received.length === 1, 'the delivery')
+    await received[0]?.retry({ attempt: 2, delayMs: 0, error: new Error('x') })
+    await waitFor(() => received.length === 2, 'the retry')
+    await received[1]?.ack()
+    await waitFor(() => fake.entries('orders:retry:znight').length === 0, 'the retry stream trimmed')
+    expect(fake.entries('orders')).toHaveLength(1)
+    await subscription.cancel()
+    await subscription.close()
+    await driver.close()
+  })
+
+  it('removes the consumers of crashed processes idle without pending entries', async () => {
+    const fake = new FakeRedis()
+    // a long blocking read: the consumer of this process is not seen again during the test
+    const driver = driverFor(fake, { claimIdleMs: 40, blockMs: 10_000, consumerName: 'me' })
+    const { received, subscription } = await deliveries(driver, 'orders')
+    fake.add('orders', { body: 'x' })
+    await waitFor(() => received.length === 1, 'the delivery')
+    await received[0]?.ack()
+    // idle for ten times max(claimIdleMs, blockMs) (100 s here): removed; recently seen, or a consumer
+    // of this process: kept
+    fake.idleConsumer('orders', 'znight', 'crashed-old', 600_000)
+    fake.idleConsumer('orders', 'znight', 'crashed-recent', 0)
+    fake.idleConsumer('orders', 'znight', 'me-1', 600_000)
+    fake.idleConsumer('orders:retry:znight', 'znight', 'crashed-old', 600_000)
+    await waitFor(() => !fake.consumers('orders', 'znight').includes('crashed-old'), 'the idle consumer removed')
+    expect(fake.consumers('orders:retry:znight', 'znight')).not.toContain('crashed-old')
+    expect(fake.consumers('orders', 'znight').sort()).toEqual(['crashed-recent', 'me-1'])
+    expect(fake.callsOf('EVAL').some(call => call.args[0]?.startsWith('-- znight:reap'))).toBe(true)
+    await subscription.cancel()
+    await subscription.close()
+    await driver.close()
+  })
+
+  it('logs a failed housekeeping run once, and keeps going', async () => {
+    const fake = new FakeRedis()
+    const logger = memoryLogger()
+    const driver = driverFor(fake, { claimIdleMs: 20 })
+    await driver.connect({ logger })
+    const subscription = await driver.subscribe('orders', () => Promise.resolve(), subscribeOptions)
+    fake.failures = command => (command === 'EVALSHA' || command === 'EVAL' ? new FakeReplyError('BUSY') : undefined)
+    await sleep(120)
+    fake.failures = () => undefined
+    const warnings = logger.entries.filter(entry => entry.message.includes('housekeeping failed'))
+    expect(warnings.filter(entry => entry.level === 'warn')).toHaveLength(1)
+    await subscription.cancel()
+    await subscription.close()
+    await driver.close()
+  })
+})
+
+describe('reconnections', () => {
+  async function blockingRead(fake: FakeRedis) {
+    const client = fake.connection()
+    const driver = redis({ client: client as unknown as Redis, blockMs: 300 })
+    const received: DriverDelivery[] = []
+    await driver.connect({ logger: memoryLogger() })
+    const subscription = await driver.subscribe(
+      'orders',
+      async delivery => {
+        received.push(delivery)
+        await delivery.ack()
+      },
+      subscribeOptions,
+    )
+    await waitFor(() => fake.callsOf('XREADGROUP').length === 1, 'the blocking read')
+    const reading = fake.connections.get(fake.callsOf('XREADGROUP')[0]?.connection ?? 0)
+    if (reading === undefined) throw new Error('no reading connection')
+    return { driver, subscription, reading, received }
+  }
+
+  it('never unblocks a stale client id after a reconnection, and reads the new one', async () => {
+    const fake = new FakeRedis()
+    const { driver, subscription, reading, received } = await blockingRead(fake)
+    const stale = reading.id
+    // the server restarted: the reading connection got another id, another client the old one
+    reading.reconnect()
+    fake.connection(stale)
+    // the resent read returns, then the next read starts with a fresh CLIENT ID
+    fake.add('orders', { body: 'x' })
+    await waitFor(() => received.length === 1, 'the delivery')
+    await waitFor(() => fake.callsOf('XREADGROUP').length === 2, 'the next blocking read')
+    const started = Date.now()
+    await subscription.cancel()
+    expect(Date.now() - started).toBeLessThan(250)
+    const ids = fake.callsOf('CLIENT').filter(call => call.args[0] === 'ID')
+    expect(ids).toHaveLength(2)
+    const unblocked = fake.callsOf('CLIENT').filter(call => call.args[0] === 'UNBLOCK')
+    expect(unblocked.length).toBeGreaterThan(0)
+    expect(unblocked.every(call => call.args[1] === String(reading.id))).toBe(true)
+    await subscription.close()
+    await driver.close()
+  })
+
+  it('waits for a read resent after a reconnection instead of unblocking an unknown client', async () => {
+    const fake = new FakeRedis()
+    const { driver, subscription, reading } = await blockingRead(fake)
+    reading.reconnect()
+    const started = Date.now()
+    await subscription.cancel()
+    expect(Date.now() - started).toBeLessThan(1000)
+    expect(fake.callsOf('CLIENT').filter(call => call.args[0] === 'UNBLOCK')).toEqual([])
+    await subscription.close()
+    await driver.close()
   })
 })
 
