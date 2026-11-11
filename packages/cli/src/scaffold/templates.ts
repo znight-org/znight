@@ -61,7 +61,8 @@ export function renderProject(options: ProjectOptions): ProjectFile[] {
     { path: 'znight.config.ts', content: znightConfig(flags) },
     { path: '.gitignore', content: gitignore() },
     { path: 'README.md', content: readme(options, flags) },
-    { path: 'src/main.ts', content: mainTs(flags) },
+    { path: 'src/app.ts', content: appTs(flags) },
+    { path: 'src/main.ts', content: mainTs() },
     { path: 'src/app/greeting.schemas.ts', content: greetingSchemas(flags) },
     { path: 'src/app/greeting.service.ts', content: greetingService(flags) },
     { path: 'src/app/greeting.controller.ts', content: greetingController(flags) },
@@ -137,7 +138,7 @@ function packageJson(options: ProjectOptions, flags: Flags): string {
   }
   if (flags.bun) devDependencies['@types/bun'] = versionOf('@types/bun')
   else devDependencies['vitest'] = versionOf('vitest')
-  // logging.pretty in src/main.ts, loaded only in development: the production image does not ship it
+  // logging.pretty in src/app.ts, loaded only in development: the production image does not ship it
   if (flags.observability) devDependencies['pino-pretty'] = versionOf('pino-pretty')
   if (flags.adapter === 'express') devDependencies['@types/express'] = versionOf('@types/express')
   // in-memory requests (TestApp.inject) with the node and express adapters
@@ -406,30 +407,42 @@ function adapterCall(adapter: HttpAdapterName): string | undefined {
   return adapter === 'node' ? undefined : `${adapter}Adapter()`
 }
 
-function mainTs(flags: Flags): string {
+function mainTs(): string {
+  return `// Written by the compiler from your decorated classes: the whole wiring, no module to declare
+import { createApplication } from './.znight/container.generated.js'
+import { plugins } from './app.js'
+
+const app = await createApplication({ plugins: plugins() })
+
+// SIGINT / SIGTERM stop the application gracefully (in-flight requests are drained)
+await app.start()
+`
+}
+
+/** `src/app.ts`: the plugins of the application, shared by `src/main.ts` and the `TestApp` tests. */
+function appTs(flags: Flags): string {
   const imports = [
     flags.config ? "import { ConfigPlugin } from '@znight/config'" : undefined,
-    "import { Application } from '@znight/core'",
+    "import type { Plugin } from '@znight/core'",
     flags.graphql ? "import { GraphQLPlugin } from '@znight/graphql'" : undefined,
     "import { HttpPlugin } from '@znight/http'",
     adapterImport(flags.adapter),
     flags.messaging ? "import { MessagingPlugin } from '@znight/messaging'" : undefined,
     flags.messaging ? "import { memory } from '@znight/messaging/memory'" : undefined,
-    flags.observability ? "import { ObservabilityPlugin } from '@znight/observability'" : undefined,
+    flags.observability ? "import { type LoggerLevel, ObservabilityPlugin } from '@znight/observability'" : undefined,
     flags.openapi ? "import { OpenApiPlugin } from '@znight/openapi'" : undefined,
     flags.schedule ? "import { SchedulePlugin } from '@znight/schedule'" : undefined,
     flags.websocket ? "import { WebSocketPlugin } from '@znight/websocket'" : undefined,
   ].filter(line => line !== undefined)
-  const localImports = [
-    "import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'",
-    flags.config ? "import { AppConfig } from './app/app.config.js'" : undefined,
-  ].filter(line => line !== undefined)
+  const localImports = flags.config ? ["import { AppConfig } from './app/app.config.js'"] : []
 
   const plugins: string[] = []
   if (flags.observability) {
     const logging = [
       '      logging: {',
       `        name: ${quote(flags.name)},`,
+      '        // default: the LOG_LEVEL environment variable, otherwise info',
+      '        level: options.logLevel,',
       '        // human-readable logs in development (`znight dev`), JSON logs in production',
       flags.config
         ? "        pretty: container.get(AppConfig).environment === 'development',"
@@ -468,11 +481,11 @@ function mainTs(flags: Flags): string {
     plugins.push(
       '    HttpPlugin.configure(container => ({',
       ...(adapter === undefined ? [] : [`      adapter: ${adapter},`]),
-      '      port: container.get(AppConfig).port,',
+      '      port: options.port ?? container.get(AppConfig).port,',
       '    })),',
     )
   } else {
-    const port = 'port: Number(process.env.PORT ?? 3000)'
+    const port = 'port: options.port ?? Number(process.env.PORT ?? 3000)'
     plugins.push(
       adapter === undefined
         ? `    HttpPlugin.configure({ ${port} }),`
@@ -504,20 +517,34 @@ function mainTs(flags: Flags): string {
       '    WebSocketPlugin.configure(),',
     )
   }
+  const portDefault = flags.config ? 'AppConfig.port (PORT, 3000)' : 'PORT, otherwise 3000'
+  const options = [
+    '/** What the tests change in the production wiring. */',
+    'export interface AppOptions {',
+    `  /** HTTP port. Default: ${portDefault}. Tests pass 0 (TestApp sends requests in memory). */`,
+    '  readonly port?: number',
+    ...(flags.observability
+      ? [
+          "  /** Minimum log level. Default: LOG_LEVEL, otherwise info. Tests pass 'silent'. */",
+          '  readonly logLevel?: LoggerLevel',
+        ]
+      : []),
+    '}',
+  ]
 
   return `${imports.join('\n')}
+${localImports.length > 0 ? `\n${localImports.join('\n')}\n` : ''}
+${options.join('\n')}
 
-${localImports.join('\n')}
-
-const app = await Application.create({
-  metadata: __ZNIGHT_METADATA__,
-  plugins: [
+/**
+ * The plugins of the application, used by src/main.ts and by the tests (TestApp.create): the tests
+ * run the production wiring.
+ */
+export function plugins(options: AppOptions = {}): Plugin[] {
+  return [
 ${plugins.join('\n')}
-  ],
-})
-
-// SIGINT / SIGTERM stop the application gracefully (in-flight requests are drained)
-await app.start()
+  ]
+}
 `
 }
 
@@ -802,7 +829,7 @@ import { SchedulePlugin, SchedulerRegistry } from '@znight/schedule'
 import { createTestClock } from '@znight/schedule/testing'
 import { TestApp } from '@znight/testing'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
 import { HeartbeatJobs } from '../src/app/heartbeat.jobs.js'
 
 // virtual time: the clock only moves when the test advances it, and waits for the runs it starts
@@ -853,7 +880,7 @@ function greetingServiceTest(flags: Flags): string {
     : ''
   return `${imports.join('\n')}
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
 import { GreetingService } from '../src/app/greeting.service.js'
 
 // TestBed builds GreetingService with its generated factory and auto-mocks its dependencies
@@ -870,39 +897,21 @@ describe('GreetingService', () => {
 `
 }
 
-/** Imports and `plugins` array of a `TestApp` test, with the plugins the providers need. */
+/** Imports and `plugins` expression of a `TestApp` test: the plugins of `src/app.ts`. */
 function testAppPlugins(
   flags: Flags,
   names: string,
-  extra: { readonly graphql?: boolean; readonly websocket?: boolean } = {},
-): { imports: string; plugins: string } {
+  extra: { readonly graphql?: boolean } = {},
+): {
+  imports: string
+  plugins: string
+} {
   const imports = [testImports(flags, names)]
-  if (extra.graphql === true) {
-    imports.push("import { GraphQLPlugin } from '@znight/graphql'")
-    imports.push("import { executeOperation } from '@znight/graphql/testing'")
-  }
-  imports.push("import { HttpPlugin } from '@znight/http'")
-  if (flags.messaging) {
-    imports.push("import { MessagingPlugin } from '@znight/messaging'")
-    imports.push("import { memory } from '@znight/messaging/memory'")
-  }
-  if (flags.observability) imports.push("import { ObservabilityPlugin } from '@znight/observability'")
+  if (extra.graphql === true) imports.push("import { executeOperation } from '@znight/graphql/testing'")
   imports.push("import { TestApp } from '@znight/testing'")
-  if (extra.websocket === true) imports.push("import { WebSocketPlugin } from '@znight/websocket'")
-  const plugins: string[] = []
-  // metrics off: no metrics server colliding on :9464 with `dev` or other test files, and no need for
-  // prom-client (any metrics object requires it)
-  if (flags.observability) {
-    plugins.push("ObservabilityPlugin.configure({ logging: { level: 'silent' }, metrics: false })")
-  }
-  if (flags.messaging) plugins.push('MessagingPlugin.configure({ driver: memory() })')
   // port 0: TestApp.inject() sends requests in memory, the server listens on a free port
-  plugins.push('HttpPlugin.configure({ port: 0 })')
-  if (extra.graphql === true) plugins.push('GraphQLPlugin.configure()')
-  if (extra.websocket === true) plugins.push('WebSocketPlugin.configure()')
-  const list =
-    plugins.length === 1 ? `[${plugins[0]}]` : `[\n${plugins.map(plugin => `        ${plugin},`).join('\n')}\n      ]`
-  return { imports: imports.join('\n'), plugins: list }
+  const plugins = flags.observability ? "plugins({ port: 0, logLevel: 'silent' })" : 'plugins({ port: 0 })'
+  return { imports: imports.join('\n'), plugins }
 }
 
 function greetingControllerTest(flags: Flags): string {
@@ -910,7 +919,8 @@ function greetingControllerTest(flags: Flags): string {
   const greeting = 'Hello'
   return `${imports}
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
+import { plugins } from '../src/app.js'
 
 // TestApp starts the application (without signal handlers) and sends requests in memory
 describe('GreetingController', () => {
@@ -950,7 +960,8 @@ function greetingResolverTest(flags: Flags): string {
   const { imports, plugins } = testAppPlugins(flags, 'describe, expect, test', { graphql: true })
   return `${imports}
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
+import { plugins } from '../src/app.js'
 
 // executeOperation() sends the operation through the whole HTTP pipeline, in memory
 describe('GreetingResolver', () => {
@@ -974,10 +985,11 @@ describe('GreetingResolver', () => {
 }
 
 function greetingGatewayTest(flags: Flags): string {
-  const { imports, plugins } = testAppPlugins(flags, 'describe, expect, test', { websocket: true })
+  const { imports, plugins } = testAppPlugins(flags, 'describe, expect, test')
   return `${imports}
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
+import { plugins } from '../src/app.js'
 
 // app.connect() opens an in-memory connection, through the real handshake
 describe('GreetingGateway', () => {
@@ -1010,9 +1022,9 @@ function readme(options: ProjectOptions, flags: Flags): string {
     `- **HTTP** with \`@znight/http\` (${flags.adapter === 'node' ? 'built-in node:http server' : `${flags.adapter} adapter`})`,
     flags.config ? '- **Configuration** with `@znight/config` (`src/app/app.config.ts`, `.env` files)' : undefined,
     flags.observability
-      ? '- **Observability** with `@znight/observability` (structured logs: pretty-printed by `pino-pretty` in development, JSON in production; metrics and tracing are off in `src/main.ts`)'
+      ? '- **Observability** with `@znight/observability` (structured logs: pretty-printed by `pino-pretty` in development, JSON in production; metrics and tracing are off in `src/app.ts`)'
       : undefined,
-    flags.messaging ? '- **Messaging** with `@znight/messaging` (in-memory broker in `src/main.ts`)' : undefined,
+    flags.messaging ? '- **Messaging** with `@znight/messaging` (in-memory broker in `src/app.ts`)' : undefined,
     flags.schedule ? '- **Scheduled jobs** with `@znight/schedule` (`src/app/heartbeat.jobs.ts`)' : undefined,
     flags.openapi
       ? `- **OpenAPI** with \`@znight/openapi\` (\`/openapi.json\`, ${flags.openapiUi === 'none' ? '' : `${OPENAPI_UI_LABELS[flags.openapiUi]} API reference at \`/docs\`, `}options in \`src/openapi.ts\`)`
@@ -1037,7 +1049,8 @@ function readme(options: ProjectOptions, flags: Flags): string {
   ].filter(line => line !== undefined)
   const tree = [
     'src/',
-    '├─ main.ts                    # Application.create() + plugins + start()',
+    '├─ app.ts                     # the plugins, shared by main.ts and the TestApp tests',
+    '├─ main.ts                    # createApplication({ plugins }) + start()',
     flags.openapi
       ? '├─ openapi.ts                 # @OpenApiDocument: title, description, version of openapi.json'
       : undefined,
