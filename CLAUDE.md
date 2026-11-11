@@ -383,7 +383,8 @@ and docs updated with the code.
   security, 0002 openapi, 0003 websocket, 0004 schedule, 0005 graphql, 0006 cookies and SSE, 0007
   graphql schema-first, 0008 graphql errors as data, 0009 graphql drivers, 0010 custom parameter
   decorators, 0011 application events).
-- Guides (`docs/guide/`): introduction, getting-started, project-structure, dependency-injection,
+- Guides (`docs/guide/`): introduction, getting-started, project-structure, automatic-wiring (no
+  modules: the page to link when explaining what replaces NestJS modules), dependency-injection,
   scopes, lifecycle, plugins, aop, custom-parameters, compiler, data-access, testing, security,
   scheduling, graphql, websockets, events, deployment, migrating-from-nestjs.
 - Reference: `docs/packages/<name>.md` (one page per package), `docs/reference/decorators.md`,

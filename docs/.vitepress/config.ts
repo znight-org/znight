@@ -158,6 +158,7 @@ function sidebarGuide(): DefaultTheme.SidebarItem[] {
     {
       text: 'Concepts',
       items: [
+        { text: 'Automatic wiring (no modules)', link: '/guide/automatic-wiring' },
         { text: 'Dependency injection', link: '/guide/dependency-injection' },
         { text: 'Scopes', link: '/guide/scopes' },
         { text: 'Lifecycle', link: '/guide/lifecycle' },

@@ -8,7 +8,7 @@ pageClass: zn-home
 hero:
   name: Znight
   text: Compile-time dependency injection for TypeScript
-  tagline: A backend framework whose compiler wires and checks your dependency graph at build time. In production, only generated code runs.
+  tagline: "Write classes, not modules: the compiler finds your providers, wires every constructor and checks the whole graph at build time. In production, only generated code runs."
   image:
     src: /mark.svg
     alt: Znight
@@ -25,10 +25,10 @@ hero:
 
 features:
   - icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg>
-    title: Compile-time DI
-    details: The compiler binds every constructor parameter to a provider, from classes, interfaces, qualifiers and factories to optional, lazy and multi dependencies. One flat container, no modules, no reflect-metadata.
-    link: /guide/dependency-injection
-    linkText: Dependency injection
+    title: No modules, automatic wiring
+    details: Mark a class, export it, inject it by type anywhere. The compiler finds every provider by scanning your sources, binds interfaces to the class that implements them and orders the factories. No @Module, no providers arrays, no tokens, no reflect-metadata.
+    link: /guide/automatic-wiring
+    linkText: How wiring works
   - icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>
     title: Errors at build time
     details: Missing providers, cycles, scope mismatches, ambiguous injections and invalid routes, consumers or jobs fail the build with a ZNIGHT code, a code frame and a hint, before anything is deployed.
@@ -158,7 +158,9 @@ export const metadata: ZnightMetadata = {
 :::
 
 `UserRepository` is an interface: the compiler found its only implementation, `PgUserRepository`, and
-bound it. Nothing is looked up by name or reflected at runtime.
+bound it. Nothing is looked up by name or reflected at runtime. You registered none of these classes:
+there is no module and no providers list. Add a file with an exported provider and it is part of the
+graph at the next build.
 
 <div class="zn-section-head">
 
@@ -172,6 +174,76 @@ runtime plugin. Third-party integrations are optional peer dependencies.
 </div>
 
 <PackageGrid />
+
+<div class="zn-section-head">
+
+<p class="zn-eyebrow">No modules</p>
+
+## Add a file, not a module entry {#no-modules}
+
+In NestJS, every provider is declared in a module, and modules import and export what the others
+need. In Znight there is nothing to declare: the compiler scans `src/`, and the graph is the code.
+
+</div>
+
+<div class="zn-split zn-compare">
+
+<div class="zn-split-item">
+
+### NestJS {#no-modules-nestjs}
+
+```ts
+// users/users.module.ts
+@Module({
+  imports: [DatabaseModule],
+  controllers: [UserController],
+  providers: [UserService, { provide: USER_REPOSITORY, useClass: PgUserRepository }],
+  exports: [UserService],
+})
+export class UsersModule {}
+
+// app.module.ts
+@Module({ imports: [DatabaseModule, UsersModule, OrdersModule] })
+export class AppModule {}
+
+// users/user.service.ts
+@Injectable()
+export class UserService {
+  constructor(@Inject(USER_REPOSITORY) private readonly users: UserRepository) {}
+}
+```
+
+</div>
+
+<div class="zn-split-item">
+
+### Znight {#no-modules-znight}
+
+```ts
+// users/pg-user.repository.ts
+@Injectable()
+export class PgUserRepository implements UserRepository {}
+
+// users/user.service.ts
+@Injectable()
+export class UserService {
+  constructor(private readonly users: UserRepository) {} // → PgUserRepository
+}
+
+// users/user.controller.ts
+@Controller('/users')
+export class UserController {
+  constructor(private readonly users: UserService) {}
+}
+
+// No users.module.ts, no app.module.ts, no token.
+```
+
+</div>
+
+</div>
+
+[How automatic wiring works →](/guide/automatic-wiring)
 
 <div class="zn-section-head">
 

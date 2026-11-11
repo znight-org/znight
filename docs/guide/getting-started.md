@@ -283,6 +283,12 @@ export class UserService {
 
 :::
 
+::: tip Nothing to register
+You did not list `InMemoryUserRepository` or `UserService` anywhere: no module, no `providers`
+array. The compiler found them because they are exported and decorated, and bound `UserRepository`
+to its only implementation. See [Automatic wiring](./automatic-wiring).
+:::
+
 ::: tip Type-only imports are fine
 The compiler reads types from the source, so `import type` works for injected interfaces. Injected
 classes can be imported either way.
@@ -290,7 +296,7 @@ classes can be imported either way.
 
 ## Add a controller
 
-Controllers are providers too. Route parameters are extracted and coerced for you: `id` arrives as a
+Controllers are providers too, found the same way: there is no `controllers` list either. Route parameters are extracted and coerced for you: `id` arrives as a
 `number` (an invalid value is answered with `400 Bad Request`).
 
 ::: code-group
@@ -425,6 +431,8 @@ export const metadata: ZnightMetadata = {
 ```
 
 The `UserRepository` parameter of `UserService` was bound to `InMemoryUserRepository` at build time.
+This file is the whole wiring of the application: it replaces the modules you would write by hand in
+NestJS.
 
 ## Break it on purpose
 
@@ -446,6 +454,8 @@ The mistake never reaches production. Every code is explained in the
 
 ## Next steps
 
+- [Automatic wiring](./automatic-wiring): why there is nothing to register, and what replaces
+  NestJS modules.
 - [Project structure](./project-structure): how to organise a growing application.
 - [Dependency injection](./dependency-injection): qualifiers, factories, optional and lazy
   dependencies.

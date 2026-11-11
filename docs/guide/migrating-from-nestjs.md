@@ -7,7 +7,7 @@ description: Move a NestJS application to Znight - decorator mapping, modules to
 Znight deliberately looks familiar if you know NestJS: classes, decorators, constructor injection,
 guards, interceptors, lifecycle hooks. The differences come from one design decision: the dependency
 graph is resolved by a **compiler**, not at runtime. This page maps NestJS concepts to Znight and
-walks through a migration.
+walks through a migration. The biggest change is what you delete: every `*.module.ts` file.
 
 ## What changes, in short
 
@@ -121,13 +121,25 @@ export class UserService {
 }
 ```
 
-What modules gave you, and how to get it back:
+Feature folders stay; they simply do not need a module file. Every part of a module maps to
+something simpler, most of the time to nothing:
 
-- **Encapsulation**: use the language. Do not export what other features must not use, or keep
-  internal code in a separate package exposing a narrow public entry.
-- **Feature folders**: keep them; they simply do not need a module file.
-- **Dynamic modules** (`forRoot`): become plugins with options, see below.
-- **Shared libraries**: become [provider libraries](./compiler#provider-libraries).
+| NestJS                                            | Znight                                                                      |
+| ------------------------------------------------- | --------------------------------------------------------------------------- |
+| `providers: [X]`                                  | Nothing: an exported `@Injectable()` under `src/` is a provider             |
+| `controllers: [X]`                                | Nothing: an exported `@Controller()` is found the same way                  |
+| `imports` / `exports`                             | Nothing: one container, ES exports for visibility                           |
+| `AppModule`                                       | `createApplication()`, written by the compiler; `src/main.ts` lists plugins |
+| `@Global()`                                       | Not needed: every provider is visible everywhere                            |
+| `{ provide: TOKEN, useClass }` + `@Inject(TOKEN)` | `implements` + the interface type                                           |
+| `forwardRef()`                                    | Nothing between modules; `Lazy<T>` for a cycle between providers            |
+| `forRoot` / `forRootAsync`                        | `XxxPlugin.configure(...)` ([below](#forrootasync-to-plugin-options))       |
+| `forFeature`                                      | `@Factory()` / `@Provides()`                                                |
+| Shared library module                             | A [provider library](./compiler#provider-libraries)                         |
+| `Test.createTestingModule()`                      | `TestBed` / `TestApp`                                                       |
+| `LazyModuleLoader`                                | No equivalent: the graph is fixed at build time                             |
+
+Details: [Automatic wiring](./automatic-wiring#what-replaces-modules).
 
 ## `forRootAsync` → options as a function of the container {#forrootasync-to-plugin-options}
 
@@ -472,8 +484,8 @@ Ctrl+click steps into plain code. Shutdown hooks are on by default. Tests import
    remove `reflect-metadata` and `emitDecoratorMetadata`, keep `experimentalDecorators`.
 2. **Imports**: replace `@nestjs/common` imports with `@znight/core` / `@znight/http` equivalents
    (table above). `@Injectable()` classes usually need no other change.
-3. **Modules**: delete them. Turn `useClass`/`useFactory`/`useValue` providers into `implements`,
-   `@Factory()`/`@Provides()` and `providers` values.
+3. **Modules**: delete every `@Module` file, `AppModule` included. Turn `useClass`/`useFactory`/`useValue`
+   providers into `implements`, `@Factory()`/`@Provides()` and `providers` values.
 4. **Tokens**: replace `@Inject(TOKEN)` on interfaces by the interface type; keep qualifiers only
    where several implementations coexist.
 5. **Validation**: convert DTO classes to schemas.

@@ -8,6 +8,13 @@ Znight wires your application from **type annotations**. You declare what a clas
 constructor; the compiler finds a provider for each parameter, checks the whole graph and generates
 the code that creates everything in the right order.
 
+## No registration, no modules {#no-modules}
+
+You never register a provider. The compiler scans your sources, keeps every exported class with a
+provider decorator, and binds each constructor parameter from its **type**. There is one container
+for the whole application: any provider can inject any other. This page details the binding rules;
+[Automatic wiring](./automatic-wiring) explains what replaces NestJS modules.
+
 ## Providers
 
 A provider is a class the container instantiates. Declare it with `@Injectable()` and export it:
@@ -32,7 +39,7 @@ export class PasswordHasher {
 | `primary` | `false`       | Preferred candidate, same as [`@Primary()`](#several-implementations-primary) |
 
 Other decorators also declare providers: `@Controller()` ([HTTP](/packages/http)), `@Resolver()`
-([GraphQL](/packages/graphql)), `@Gateway()` ([WebSocket](/packages/websocket)), `@Consumer()`
+([GraphQL](/guide/graphql)), `@Gateway()` ([WebSocket](/guide/websockets)), `@Consumer()`
 ([messaging](/packages/messaging)), `@Config()` ([config](/packages/config)), `@Factory()`
 ([below](#factories-factory-and-provides)).
 
