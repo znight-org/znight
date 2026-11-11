@@ -382,9 +382,16 @@ and docs updated with the code.
   security, 0002 openapi, 0003 websocket, 0004 schedule, 0005 graphql, 0006 cookies and SSE, 0007
   graphql schema-first, 0008 graphql errors as data, 0009 graphql drivers, 0010 custom parameter
   decorators, 0011 application events).
-- Guides (`docs/guide/`): introduction, getting-started, project-structure, dependency-injection,
-  scopes, lifecycle, plugins, aop, custom-parameters, compiler, data-access, testing, security,
-  scheduling, graphql, websockets, events, deployment, migrating-from-nestjs.
+- Guides (`docs/guide/`, grouped in the sidebar of `docs/.vitepress/config.ts`): getting started
+  (introduction, getting-started, project-structure, migrating-from-nestjs); essentials
+  (automatic-wiring, the page to link when explaining what replaces NestJS modules,
+  dependency-injection, scopes, lifecycle, configuration, validation, compiler); HTTP APIs (http,
+  files-and-streaming, security, openapi, graphql, websockets); messaging and background work
+  (messaging, events, scheduling); data and operations (data-access, observability, testing,
+  deployment); advanced (plugins, aop, custom-parameters). Guides hold the how-to; the package
+  pages (`docs/packages/<name>.md`) hold the reference (options, decorators, exports, limitations)
+  and link to their guide. When a section moves from a package page to a guide, keep a short stub
+  under the same heading so that old anchors still land somewhere.
 - Reference: `docs/packages/<name>.md` (one page per package), `docs/reference/decorators.md`,
   `docs/reference/error-codes.md`; the package READMEs (`packages/<name>/README.md`) hold the full
   details.

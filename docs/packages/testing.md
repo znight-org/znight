@@ -13,6 +13,10 @@ on Node.js and Bun.
 npm install -D @znight/testing
 ```
 
+::: tip Guide
+This page is the reference. To test an application step by step, read the [Testing guide](/guide/testing).
+:::
+
 ## TestBed
 
 ```ts

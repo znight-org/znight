@@ -15,6 +15,11 @@ npm install -D @znight/compiler vite   # vite: for the Vite plugin (optional pee
 
 Runs on Node.js 24+ and Bun 1.3+.
 
+::: tip Guide
+This page is the reference. How the compiler finds and wires your providers is explained in
+[Automatic wiring](/guide/automatic-wiring) and [The compiler](/guide/compiler).
+:::
+
 ## Entry points
 
 | Import                 | Description                                                                                                                                                                                                              |

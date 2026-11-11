@@ -8,7 +8,8 @@
 
 <p align="center">
   Write services and controllers the NestJS way. A compiler checks the wiring at build time and
-  generates the container: no <code>reflect-metadata</code>, no modules, no wiring surprises at boot.
+  generates the container: no <code>reflect-metadata</code>, <strong>no modules to maintain</strong>, no wiring
+  surprises at boot.
 </p>
 
 <p align="center">
@@ -82,6 +83,9 @@ Znight does that work once, in the compiler.
 | Startup work            | Graph discovered and sorted on every boot        | Generated factories called in a precomputed order        |
 | What runs in production | Decorators, metadata maps, resolution logic      | Plain code: decorators are stripped from the bundle      |
 | Debugging the wiring    | Framework internals                              | A readable `container.generated.ts` you can step through |
+
+There are no modules: an exported provider anywhere under `src/` is part of the graph, and interfaces
+are bound to the class that implements them ([automatic wiring](./docs/guide/automatic-wiring.md)).
 
 You keep what makes these frameworks productive: decorators, constructor injection, scopes,
 lifecycle hooks, plugins, guards, interceptors and tests with auto-mocks. Coming from NestJS? Read
@@ -408,15 +412,22 @@ with `bun run docs:dev`.
   [Getting started](./docs/guide/getting-started.md) ·
   [Project structure](./docs/guide/project-structure.md) ·
   [Migrating from NestJS](./docs/guide/migrating-from-nestjs.md)
-- **Concepts**: [Dependency injection](./docs/guide/dependency-injection.md) ·
+- **Essentials**: [Automatic wiring](./docs/guide/automatic-wiring.md) ·
+  [Dependency injection](./docs/guide/dependency-injection.md) ·
   [Scopes](./docs/guide/scopes.md) · [Lifecycle](./docs/guide/lifecycle.md) ·
-  [The compiler](./docs/guide/compiler.md) · [Plugins](./docs/guide/plugins.md) ·
-  [Method interceptors](./docs/guide/aop.md) ·
+  [Configuration](./docs/guide/configuration.md) · [Validation](./docs/guide/validation.md) ·
+  [The compiler](./docs/guide/compiler.md)
+- **HTTP APIs**: [Controllers and routes](./docs/guide/http.md) ·
+  [Files and streaming](./docs/guide/files-and-streaming.md) · [Security](./docs/guide/security.md) ·
+  [OpenAPI](./docs/guide/openapi.md) · [GraphQL](./docs/guide/graphql.md) ·
+  [WebSockets](./docs/guide/websockets.md)
+- **Messaging and background work**: [Messaging](./docs/guide/messaging.md) ·
+  [Application events](./docs/guide/events.md) · [Scheduling](./docs/guide/scheduling.md)
+- **Data and operations**: [Data access](./docs/guide/data-access.md) ·
+  [Observability](./docs/guide/observability.md) · [Testing](./docs/guide/testing.md) ·
+  [Deployment](./docs/guide/deployment.md)
+- **Advanced**: [Plugins](./docs/guide/plugins.md) · [Method interceptors](./docs/guide/aop.md) ·
   [Custom parameter decorators](./docs/guide/custom-parameters.md)
-- **Guides**: [Security](./docs/guide/security.md) · [Data access](./docs/guide/data-access.md) ·
-  [Scheduling](./docs/guide/scheduling.md) · [GraphQL](./docs/guide/graphql.md) ·
-  [WebSockets](./docs/guide/websockets.md) · [Application events](./docs/guide/events.md) ·
-  [Testing](./docs/guide/testing.md) · [Deployment](./docs/guide/deployment.md)
 - **Reference**: [Packages](./docs/packages/index.md) · [Decorators](./docs/reference/decorators.md) ·
   [Error codes](./docs/reference/error-codes.md), and the README of each package in
   [`packages/`](./packages)

@@ -51,6 +51,11 @@ Nothing else is needed: the title, version and description come from `package.js
 operation per route, and the compiler extension is discovered because a scanned file imports
 `@znight/openapi`.
 
+::: tip Guide
+This page is the reference. To document an API step by step (operations, security, emitting the
+file in CI, typed clients, contract tests), read the [OpenAPI guide](/guide/openapi).
+:::
+
 ## What is inferred
 
 | From your code                                                         | In the document                                                              |
@@ -84,46 +89,8 @@ The success response follows what the serialiser sends:
 
 ## Documenting operations
 
-```ts
-import { Body, Controller, Get, HttpResponse, Param, Post, Query } from '@znight/http'
-import { ApiResponse, ApiTags } from '@znight/openapi'
-
-/** Books of the shelf. */
-@Controller('/books')
-@ApiTags('Books')
-export class BookController {
-  constructor(private readonly books: BookService) {}
-
-  /**
-   * List books
-   *
-   * Sorted and paginated, filtered by text.
-   * @param search Case-insensitive search in titles and authors.
-   */
-  @Get()
-  async list(@Query('q') search?: string, @Query('limit') limit = 20): Promise<Page<BookResponse>> {
-    /* ... */
-  }
-
-  /** Get a book */
-  @Get('/:id')
-  @ApiResponse(404, { description: 'No book with this id' })
-  async get(@Param('id') id: number): Promise<BookResponse> {
-    /* ... */
-  }
-
-  /**
-   * Add a book
-   * @returns The new book. Its URL is in the `location` header.
-   */
-  @Post()
-  @ApiResponse(409, { description: 'A book with this ISBN is already on the shelf' })
-  async create(@Body(CreateBook) input: CreateBook): Promise<HttpResponse<BookResponse>> {
-    const book = await this.books.add(input)
-    return HttpResponse.created(toResponse(book), `/books/${book.id}`) // 201 + location
-  }
-}
-```
+JSDoc gives the summary, the description and the deprecation of each operation; the decorators add
+what the signature does not say. A complete controller: [Document operations](/guide/openapi#operations).
 
 | Decorator                                                     | Purpose                                                                    |
 | ------------------------------------------------------------- | -------------------------------------------------------------------------- |
@@ -233,30 +200,10 @@ file emitted from another build of the application is reported at boot, and so i
 
 ## Testing
 
-`TestApp` boots the plugin like any other; the `OpenApi` provider gives the document:
-
-```ts
-import { OpenApi } from '@znight/openapi'
-import { validateResponse } from '@znight/openapi/testing'
-
-test('the served document is the one of the OpenApi provider', async () => {
-  await using app = await createTestApp()
-  const served = await app.inject({ url: '/openapi.json' })
-  expect(served.status).toBe(200)
-  expect(served.json()).toEqual(await app.get(OpenApi).document())
-})
-
-test('GET /books/:id answers what its documentation says', async () => {
-  await using app = await createTestApp()
-  const document = await app.get(OpenApi).document()
-  const response = await app.inject({ url: '/books/1', headers: { authorization: `Bearer ${token}` } })
-  expect(validateResponse(document, { method: 'GET', path: '/books/{id}', response })).toEqual([])
-})
-```
-
-`validateResponse()` checks the status, the media type, the required headers and the JSON body
-against the documented schema (with the optional peer `@cfworker/json-schema`): the contract is
-tested, not only the code.
+Moved to [Test the contract](/guide/openapi#testing) in the OpenAPI guide: the `OpenApi` provider
+gives the document in `TestApp`, and `validateResponse()` of `@znight/openapi/testing` checks a
+response (status, media type, required headers, JSON body) against it, with the optional peer
+`@cfworker/json-schema`.
 
 ## Diagnostics
 

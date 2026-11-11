@@ -847,6 +847,27 @@
   }
 }
 
+/* Two code samples compared side by side (NestJS modules next to Znight's automatic wiring) */
+.zn-home .vp-doc .zn-split.zn-compare {
+  gap: 24px;
+  margin-top: 32px;
+}
+
+.zn-home .vp-doc .zn-compare .zn-split-item > h3 {
+  font-size: 16px;
+  color: var(--vp-c-text-2);
+}
+
+.zn-home .vp-doc .zn-compare .zn-split-item > div[class*="language-"] {
+  margin: 0;
+}
+
+@media (min-width: 960px) {
+  .zn-home .vp-doc .zn-split.zn-compare {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
 /* The terminal: a night window in both color schemes */
 .zn-home .vp-doc .zn-terminal {
   margin-top: 20px;

@@ -26,13 +26,24 @@ export class NotificationService {
 It is the approach of [Micronaut](https://micronaut.io/) and [Dagger](https://dagger.dev/) in the
 JVM world, brought to TypeScript.
 
+## No modules: the wiring is automatic {#no-modules}
+
+There is no module to declare and no list of providers to keep in sync. Mark a class
+(`@Injectable()`, `@Controller()`, `@Consumer()`...), export it, and inject it by type anywhere:
+the compiler finds it by scanning `src/`, binds every constructor parameter (an interface to the
+class that `implements` it), orders the factories, and fails the build when something is missing,
+ambiguous or circular. The `createApplication()` your `main.ts` calls is written by the compiler
+from those classes. [Automatic wiring](./automatic-wiring) shows a NestJS module next to its Znight
+equivalent, and what replaces each feature of modules.
+
 ## Principles
 
 1. **Compile-time DI.** No `reflect-metadata`, no `emitDecoratorMetadata`, no runtime type lookup.
 2. **Decorators are markers.** Every Znight decorator is a no-op at runtime: the compiler reads them
    from the source code, and the Vite plugin strips them from the bundle.
-3. **Flat DI.** One container, no modules. Providers are discovered by scanning your sources (and
-   provider libraries).
+3. **Flat DI, no modules.** One container. Providers are discovered by scanning your sources (and
+   provider libraries), interfaces are bound through `implements`: adding a provider is adding a
+   file.
 4. **Composable.** HTTP, OpenAPI, GraphQL, WebSocket, messaging, application events, scheduling,
    configuration and observability are separate packages, made of marker decorators, a compiler
    extension (or manifest entries) and a runtime plugin.
@@ -74,10 +85,11 @@ plugins, guards and interceptors, testing utilities with auto-mocking.
 - [`@znight/compiler`](/packages/compiler) analyses the code and generates the container module:
   its `metadata` and the `createApplication()` function your `main.ts` calls.
 - [`@znight/core`](/packages/core) executes it: container, scopes, lifecycle, plugins, hooks, AOP.
-- Feature packages ([HTTP](/packages/http), [OpenAPI](/packages/openapi),
-  [GraphQL](/packages/graphql), [WebSocket](/packages/websocket), [messaging](/packages/messaging),
-  [events](/packages/events), [scheduling](/packages/schedule), [config](/packages/config),
-  [observability](/packages/observability)) add decorators, compiler support and a runtime plugin.
+- Feature packages ([HTTP](/guide/http), [OpenAPI](/guide/openapi), [GraphQL](/guide/graphql),
+  [WebSocket](/guide/websockets), [messaging](/guide/messaging), [events](/guide/events),
+  [scheduling](/guide/scheduling), [configuration](/guide/configuration),
+  [observability](/guide/observability)) add decorators, compiler support and a runtime plugin; their
+  [package pages](/packages/) are the reference.
 - [`@znight/testing`](/packages/testing) and [`@znight/cli`](/packages/cli) cover tests, scaffolding
   and the development loop.
 
@@ -106,6 +118,7 @@ and contributions are welcome on [GitHub](https://github.com/znight-org/znight).
 
 ## Next steps
 
+- [Automatic wiring](./automatic-wiring): why there are no modules, and what replaces them.
 - [Getting started](./getting-started): create your first application.
 - [Dependency injection](./dependency-injection): providers, interfaces, qualifiers, factories.
 - [The compiler](./compiler): what happens at build time, options and the generated module.

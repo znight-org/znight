@@ -36,40 +36,22 @@ HttpPlugin.configure({ adapter: fastifyAdapter(), port: 3000, trustProxy: 1 }) /
 
 The complete reference (every option, the compiler contract, how to write an adapter) is the
 [package README](../../packages/http/README.md).
+::: tip Guide
+This page is the reference. To learn how to build an API, read the guides:
+[Controllers and routes](/guide/http), [Validation](/guide/validation),
+[Files and streaming](/guide/files-and-streaming) and [Security](/guide/security).
+:::
+
+## Entry points
+
+| Import                 | What it provides                                                                        |
+| ---------------------- | --------------------------------------------------------------------------------------- |
+| `@znight/http`         | Decorators, `HttpPlugin`, `HttpResponse`, exceptions, `nodeAdapter()` (built-in server) |
+| `@znight/http/fastify` | `fastifyAdapter()` (peer: `fastify`)                                                    |
+| `@znight/http/express` | `expressAdapter()` (peer: `express`)                                                    |
+| `@znight/http/hono`    | `honoAdapter()` (peers: `hono`, `@hono/node-server` on Node.js)                         |
 
 ## Controllers and routes
-
-```ts
-import { Body, Controller, Delete, Get, HttpResponse, NotFoundException, Param, Post, Query } from '@znight/http'
-
-@Controller('/users')
-export class UserController {
-  constructor(private readonly users: UserService) {}
-
-  @Get()
-  list(@Query('page') page = 1, @Query('tag') tags: string[] = []) {
-    return this.users.list({ page, tags })
-  }
-
-  @Get('/:id')
-  async get(@Param('id') id: number) {
-    const user = await this.users.findById(id)
-    if (user === undefined) throw new NotFoundException(`User ${id} not found`)
-    return user
-  }
-
-  @Post()
-  async create(@Body(CreateUser) input: CreateUser) {
-    const user = await this.users.create(input)
-    return HttpResponse.created(user, `/users/${user.id}`) // 201 + location
-  }
-
-  @Delete('/:id')
-  remove(@Param('id') id: number) {
-    return this.users.remove(id) // undefined → 204 No Content
-  }
-}
-```
 
 - `@Controller(path?)` or `@Controller({ path?, scope? })`: a provider (singleton by default) whose
   decorated methods are routes.
@@ -89,6 +71,8 @@ export class UserController {
   option of `HttpResponse.file()`. Exception: `Bun.serve()` gives the Hono adapter a normalised URL.
 - Paths can be built from constants: ``@Controller(`${API_V1}/users`)`` is evaluated at build time.
 
+How to write controllers: [Controllers and routes](/guide/http#controllers).
+
 ## Parameters
 
 | Decorator                    | Injects                                                              |
@@ -98,68 +82,43 @@ export class UserController {
 | `@Body(schema?)`             | The parsed request body                                              |
 | `@Headers(name?)`            | A header (lower-cased name) or all headers                           |
 | `@Cookie(name?, schema?)`    | A request cookie (or all of them), coerced like a header             |
-| `@SignedCookie(name, s?)`    | The verified value of a [signed cookie](#cookies)                    |
-| `@UploadedFile(field?, o?)`  | An uploaded `File` of a multipart body ([Files](#files))             |
+| `@SignedCookie(name, s?)`    | The verified value of a [signed cookie](#signed-cookies)             |
+| `@UploadedFile(field?, o?)`  | An uploaded `File` of a multipart body ([uploads](#uploads))         |
 | `@UploadedFiles(field?, o?)` | The uploaded files of a field (`File[]`)                             |
 | `@Ctx()`                     | The adapter-neutral `HttpContext`                                    |
 | `@Req()` / `@Res()`          | The native adapter request / response (escape hatch; `@Res()` warns) |
 
-**Coercion.** Path, query and header values are strings on the wire; Znight coerces them from the
-**declared parameter type** in generated code: `string`, `number`, `boolean`, `bigint`, `Date`,
-literal unions, enums, branded primitives and arrays of those (`T[]` also accepts a single value).
-A `Date` is an ISO 8601 date (`2024-01-02`), a date-time **with** an offset
-(`2024-01-02T10:00:00Z`, `+02:00`) or a millisecond timestamp: impossible dates and date-times
-without offset (they would depend on the server time zone) are rejected. An invalid value is a
-`400 Bad Request` naming the parameter. A type that cannot be coerced from a
-string is a build error ([`ZNIGHT007`](/reference/error-codes#znight007)) for `@Param` / `@Headers`.
-
-Parameters with a default value, `?` or `| undefined` may be absent (`undefined` is injected, so
-default values apply).
+**Coercion.** Path, query and header values are coerced from the **declared parameter type** in
+generated code: `string`, `number`, `boolean`, `bigint`, `Date`, literal unions, enums, branded
+primitives and arrays of those (`T[]` also accepts a single value). A `Date` is an ISO 8601 date
+(`2024-01-02`), a date-time **with** an offset (`2024-01-02T10:00:00Z`, `+02:00`) or a millisecond
+timestamp: impossible dates and date-times without offset are rejected. An invalid value is a
+`400 Bad Request` naming the parameter. A type that cannot be coerced from a string is a build error
+([`ZNIGHT007`](/reference/error-codes#znight007)) for `@Param` / `@Headers`. Parameters with a
+default value, `?` or `| undefined` may be absent (`undefined` is injected, so default values
+apply).
 
 ## Validation
 
-Pass any [Standard Schema](https://standardschema.dev) (Zod 3.24+/4, Valibot 1, ArkType 2, Effect
-Schema...) to `@Body()`, `@Query()` or `@Param()`, or use `@Validate(schema)` on the method as sugar
-for `@Body(schema)`:
-
-```ts
-import { z } from 'zod'
-
-export const CreateUser = z.object({
-  email: z.email(),
-  name: z.string().min(2),
-  role: z.enum(['admin', 'member']).default('member'),
-})
-export type CreateUser = z.output<typeof CreateUser>
-
-@Post()
-create(@Body(CreateUser) input: CreateUser) {
-  // input.role is 'member' when omitted: handlers receive the schema output
-}
-```
-
-- Handlers receive the schema **output** (defaults, transforms, stripped keys); async schemas work.
-- Failures answer `400` with `details: [{ path, message }]`, the first 100 issues (a
-  `ValidationException` carrying all the raw issues, to map with an exception mapper).
-- Schemas must be **exported** (the generated module imports them).
-- A non-primitive `@Body()` or `@Query()` without a schema is reported as
-  [`ZNIGHT017`](/reference/error-codes#znight017): a warning, or an error with the compiler's
-  `strictValidation` option.
+Moved to the [Validation guide](/guide/validation): Standard Schema libraries, the schema output,
+the error format and `ValidationException`, and [`ZNIGHT017`](/reference/error-codes#znight017)
+for unvalidated inputs.
 
 ## Request bodies
 
 Bodies are parsed by Znight (identically on every adapter), after the guards and before the
 interceptors, for routes declaring `@Body()` or upload parameters; other routes read them lazily
-with `ctx.parseBody()`, `ctx.rawBody()` (bytes, e.g. for webhook signatures) or `ctx.bodyStream()`.
+with `ctx.parseBody()`, `ctx.rawBody()` or `ctx.bodyStream()`
+([how](/guide/http#request-bodies)).
 
-| `content-type`                      | Body                                                              |
-| ----------------------------------- | ----------------------------------------------------------------- |
-| (empty body)                        | `undefined`                                                       |
-| `application/json`, `*/*+json`      | parsed JSON (`400` when malformed)                                |
-| `text/*`                            | string (charset honoured)                                         |
-| `application/x-www-form-urlencoded` | record, repeated keys as arrays                                   |
-| `multipart/form-data`               | record of the text fields; files in `ctx.files` ([Files](#files)) |
-| anything else / none                | `Uint8Array`                                                      |
+| `content-type`                      | Body                                                                  |
+| ----------------------------------- | --------------------------------------------------------------------- |
+| (empty body)                        | `undefined`                                                           |
+| `application/json`, `*/*+json`      | parsed JSON (`400` when malformed)                                    |
+| `text/*`                            | string (charset honoured)                                             |
+| `application/x-www-form-urlencoded` | record, repeated keys as arrays                                       |
+| `multipart/form-data`               | record of the text fields; files in `ctx.files` ([uploads](#uploads)) |
+| anything else / none                | `Uint8Array`                                                          |
 
 Bodies above the body limit answer `413` (plugin `bodyLimit`, 1 MiB by default, or
 `@BodyLimit('10mb')` on a route or a controller); a `content-encoding` other than `identity` answers
@@ -167,17 +126,17 @@ Bodies above the body limit answer `413` (plugin `bodyLimit`, 1 MiB by default, 
 
 ## Responses
 
-| Handler returns                                 | Response                             |
-| ----------------------------------------------- | ------------------------------------ |
-| Object / array / number / boolean / `null`      | JSON                                 |
-| `string`                                        | `text/plain; charset=utf-8`          |
-| `Uint8Array` / `ArrayBuffer`                    | `application/octet-stream`           |
-| `ReadableStream` / Node.js `Readable`           | streamed `application/octet-stream`  |
-| `Blob` / `File`                                 | its bytes, with its type and size    |
-| `HttpResponse.file()` / `HttpResponse.stream()` | a file or a stream ([Files](#files)) |
-| `HttpResponse`                                  | its body, status and headers         |
-| Web `Response`                                  | sent as is                           |
-| `undefined`                                     | empty body, `204` (`201` for `POST`) |
+| Handler returns                                 | Response                                                       |
+| ----------------------------------------------- | -------------------------------------------------------------- |
+| Object / array / number / boolean / `null`      | JSON                                                           |
+| `string`                                        | `text/plain; charset=utf-8`                                    |
+| `Uint8Array` / `ArrayBuffer`                    | `application/octet-stream`                                     |
+| `ReadableStream` / Node.js `Readable`           | streamed `application/octet-stream`                            |
+| `Blob` / `File`                                 | its bytes, with its type and size                              |
+| `HttpResponse.file()` / `HttpResponse.stream()` | a file or a stream ([Files](/guide/files-and-streaming#files)) |
+| `HttpResponse`                                  | its body, status and headers                                   |
+| Web `Response`                                  | sent as is                                                     |
+| `undefined`                                     | empty body, `204` (`201` for `POST`)                           |
 
 Status precedence: `@HttpCode(status)` > `HttpResponse.status` > default (`201` for `POST`, `204`
 without body, `200` otherwise). Headers: content type < `@Header` < `ctx.setHeader()` <
@@ -185,35 +144,13 @@ without body, `200` otherwise). Headers: content type < `@Header` < `ctx.setHead
 
 ## Files
 
-### Uploads
+Moved to [Files and streaming](/guide/files-and-streaming#files): uploads, downloads, lazy files,
+streaming responses, large files and their security. The options and limits stay here.
 
-```ts
-import { Body, Controller, Post, UploadedFile, UploadedFiles } from '@znight/http'
-import { z } from 'zod'
+### Upload options {#uploads}
 
-export const AvatarForm = z.object({ title: z.string().min(1) })
-
-@Controller('/profile')
-export class ProfileController {
-  @Post('/avatar')
-  avatar(
-    @UploadedFile('avatar', { maxSize: '2mb', mimeTypes: ['image/png', 'image/jpeg'] }) avatar: File,
-    @Body(AvatarForm) form: z.output<typeof AvatarForm>, // the text fields of the form
-  ) {
-    return { size: avatar.size, type: avatar.type, title: form.title }
-  }
-
-  @Post('/documents')
-  add(
-    @UploadedFiles('documents', { maxFiles: 5, maxSize: '20mb' }) documents: File[],
-    @UploadedFile('cover') cover?: File, // optional: undefined when absent
-  ) {}
-}
-```
-
-Uploaded files are standard `File` objects (`name`, `type`, `size`, `arrayBuffer()`, `text()`,
-`stream()`), held in memory. `@UploadedFile()` / `@UploadedFiles()` without field take the files of
-any field; `@Body(schema?)` receives the text fields (`Record<string, string | string[]>`).
+`@UploadedFile(field?, options?)` and `@UploadedFiles(field?, options?)`; without a field, they take
+the files of any field.
 
 | Option      | Default                                  | Description                                                  |
 | ----------- | ---------------------------------------- | ------------------------------------------------------------ |
@@ -238,150 +175,38 @@ its upload parameters accept plus `bodyLimit`; `@BodyLimit(size)` caps it.
 
 ### Downloads
 
-```ts
-@Get('/reports/*')
-download(@Param('*') name: string) {
-  return HttpResponse.file(name, { root: REPORTS_DIR }) // '../../etc/passwd' → 404
-}
-
-@Get('/invoices/:id')
-async invoice(@Param('id') id: string) {
-  return HttpResponse.file(await this.invoices.pathOf(id), { filename: `Facture ${id}.pdf` }) // attachment
-}
-```
-
-`HttpResponse.file(path | URL | Blob | LazyFile, { root?, dotfiles?, filename?, disposition?, contentType? })` streams the
-file with `Content-Type` (from the extension), `Content-Length`, `Last-Modified`, `ETag` and
-`Accept-Ranges`, and handles conditional requests (`If-None-Match` / `If-Modified-Since` → `304`,
-`If-Match` / `If-Unmodified-Since` → `412`) and single byte ranges (`206`, `416` when unsatisfiable).
-`Content-Disposition` follows RFC 6266 with a UTF-8 `filename*` for non-ASCII names. Missing files
-and paths leaving `root` (`..`, absolute paths, symbolic links) or naming dotfiles (`.env`, `.git/`)
-answer `404`.
-
-Content stored elsewhere (a database row, an object storage) is passed as a **lazy file**: its
-metadata up front, its bytes behind `load()`. The preconditions and the range are evaluated from the
-metadata; `load()` runs only when a body is sent (`200` / `206`), never for a `304`, a `412` or a
-`HEAD` request:
-
-```ts
-@Get('/books/:id/cover')
-async cover(@Param('id') id: number) {
-  const cover = await this.covers.info(id) // type, size and date, without the bytes
-  return HttpResponse.file({
-    size: cover.size,
-    lastModified: cover.updatedAt, // or etag: '"v42"'
-    type: cover.contentType,
-    load: () => this.covers.bytes(id, cover.updatedAt), // Uint8Array, Blob or stream: the whole content
-  })
-}
-```
-
-An error of `load()` goes through the exception mappers like an error of the handler; a stream it
-returns is read as the client receives it and cancelled when the client disconnects. The content
-must have the declared `size`, and `load()` should read the version the metadata describes (it runs
-later, after a concurrent update the bytes may belong to another version). See the
-[package README](../../packages/http/README.md#lazy-files) for the details.
+Moved to [Downloads](/guide/files-and-streaming#downloads):
+`HttpResponse.file(path | URL | Blob | LazyFile, { root?, dotfiles?, filename?, disposition?, contentType? })`,
+and [lazy files](/guide/files-and-streaming#lazy-files) for content stored elsewhere.
 
 ### Streaming responses
 
-```ts
-@Get('/export.csv')
-export() {
-  async function* lines(users: UserService) {
-    yield 'id,email\n'
-    for await (const user of users.iterate()) yield `${user.id},${user.email}\n`
-  }
-  return HttpResponse.stream(lines(this.users), { filename: 'users.csv' })
-}
-```
-
-`HttpResponse.stream()` accepts a Web `ReadableStream`, a Node.js `Readable` or an async iterable of
-`Uint8Array` / `string` chunks. The source is read as fast as the client receives the data
-(backpressure), cancelled when the client disconnects, and runs in the request scope:
-**request-scoped instances are disposed only after the stream has been sent** (or cancelled), and
-the graceful shutdown waits for streamed responses.
+Moved to [Streaming responses](/guide/files-and-streaming#streaming-responses):
+`HttpResponse.stream(source, options?)`.
 
 ### Large files
 
-::: tip Recommended
-For large files, let clients upload **directly to object storage** with presigned URLs (S3, GCS,
-R2...): the API authorises the upload and returns the URL, your servers never carry the bytes.
-:::
+Moved to [Large files](/guide/files-and-streaming#large-files).
 
-To receive a large file through the API, send it as the raw request body and stream it with
-`ctx.bodyStream()` (nothing is buffered; backpressure applies; the route limit still applies):
+### Security {#security}
 
-```ts
-@Put('/files/:id')
-@BodyLimit('5gb')
-async store(@Param('id', FileId) id: string, @Ctx() ctx: HttpContext) {
-  await pipeline(Readable.fromWeb(ctx.bodyStream()), createWriteStream(join(UPLOADS_DIR, id)))
-}
-```
-
-### Security
-
-::: warning Never trust what the client sends
-
-- `File.name` is chosen by the client: never use it as a path. Store files under generated
-  identifiers and keep the name as metadata.
-- `File.type` and `mimeTypes` rely on the type the client declares: check the content (magic
-  numbers) when it matters.
-- Always pass `root` to `HttpResponse.file()` when the path comes from the request.
-- Store uploads outside of the web root, and serve user content as an `attachment` (or from another
-  domain): an uploaded HTML or SVG file served inline runs scripts in your origin. The default
-  [security headers](#security-headers) (`nosniff` and a `default-src 'none'` CSP) are a second line
-  of defence: keep them on.
-- Keep limits tight (`maxSize`, `maxFiles`, `@BodyLimit`, plugin `uploads`): uploaded files live in
-  memory.
-  :::
+Moved to [Security](/guide/files-and-streaming#file-security): client file names and types, `root`,
+where to store uploads and limits.
 
 ## Errors
 
-Throw `HttpException(status, message?, details?)` (or a subclass: `NotFoundException`,
-`ConflictException`...) for expected failures:
-
-```ts
-import { HttpException, NotFoundException } from '@znight/http'
-
-if (user === undefined) throw new NotFoundException(`User ${id} not found`)
-throw new HttpException(409, 'Email already used', { field: 'email' })
-```
-
-```json
-{ "statusCode": 409, "error": "Conflict", "message": "Email already used", "details": { "field": "email" } }
-```
-
-Any other error becomes `{ "statusCode": 500, "error": "Internal Server Error" }`: the message is
-only exposed with `exposeErrors: true`, and the error is reported to hooks and the logger. Map your
-own error types to responses with the `exceptionMappers` option.
+Moved to [Controllers and routes](/guide/http#errors): `HttpException` and its subclasses, the error
+body, `exposeErrors` and exception mappers (the `exceptionMappers` option). The
+[package README](../../packages/http/README.md) lists every exception class.
 
 ## Guards
 
-A guard is a provider deciding whether a request may proceed. Apply it with `@UseGuard()` on a
-controller or a route, or globally with the `guards` option:
-
-```ts
-import { type CanActivate, type HttpContext, UseGuard } from '@znight/http'
-
-@Injectable()
-export class ApiKeyGuard implements CanActivate {
-  constructor(private readonly config: SecurityConfig) {}
-
-  canActivate(ctx: HttpContext): boolean {
-    return ctx.header('x-api-key') === this.config.apiKey // anything but true → 403
-  }
-}
-
-@Controller('/admin')
-@UseGuard(ApiKeyGuard)
-export class AdminController {}
-```
-
-Order: global guards → controller guards → route guards. Guards are injected like any provider, and
-the [scope rules](/guide/scopes#rules-between-scopes) apply to them. A guard that enforces
+A guard is a provider implementing `CanActivate` (`canActivate(ctx)`: anything but `true` answers
+`403`), applied with `@UseGuard()` on a controller or a route, or globally with the `guards` option.
+Order: global guards → controller guards → route guards. A guard that enforces
 [route decisions](#route-metadata-and-decisions) declares them in a static `enforces` array, checked
-when the plugin boots.
+when the plugin boots. How to write one:
+[Guards and interceptors](/guide/http#guards-and-interceptors).
 
 ## Route metadata and decisions
 
@@ -426,8 +251,8 @@ The [Security guide](/guide/security) builds authentication and authorization on
 
 ## Interceptors
 
-`@UseInterceptor()` wraps route execution (global → controller → route, the first one being the
-outermost), seeing the context and the result: response mapping, caching, timing. For
+Moved to [Guards and interceptors](/guide/http#guards-and-interceptors): `@UseInterceptor()` wraps
+route execution (global → controller → route, the first one being the outermost). For
 business-level interception of any provider method, use [`@Intercept()`](/guide/aop).
 
 ## CORS
@@ -497,34 +322,9 @@ then follows the Znight option and ignores the framework's address.
 
 ## Cookies
 
-Cookies are handled by the plugin itself, identically on every adapter: no `cookie-parser`,
-`@fastify/cookie` or `hono/cookie`, secure defaults, strict validation and optional signing.
+How to read, set, sign and test cookies: [Cookies](/guide/http#cookies). The reference follows.
 
 ### Reading cookies
-
-```ts
-import { Body, Controller, Cookie, Ctx, Get, type HttpContext, HttpResponse, Post } from '@znight/http'
-import { z } from 'zod'
-
-export const ThemeInput = z.object({ theme: z.enum(['light', 'dark']) })
-export type ThemeInput = z.output<typeof ThemeInput>
-// a stale or forged value falls back instead of answering 400 until the cookie expires
-export const ThemeCookie = z.enum(['light', 'dark']).catch('light')
-
-@Controller('/prefs')
-export class PrefsController {
-  @Get()
-  read(@Cookie('theme', ThemeCookie) theme: 'light' | 'dark', @Cookie('visits') visits = 0) {
-    return { theme, visits }
-  }
-
-  @Post('/theme')
-  setTheme(@Body(ThemeInput) input: ThemeInput, @Ctx() ctx: HttpContext) {
-    ctx.setCookie('theme', input.theme, { maxAge: 365 * 86_400, httpOnly: false }) // readable by the front-end
-    return HttpResponse.noContent()
-  }
-}
-```
 
 | Decorator / member          | Injects                                                                                      |
 | --------------------------- | -------------------------------------------------------------------------------------------- |
@@ -535,21 +335,10 @@ export class PrefsController {
 | `ctx.cookies`               | Every request cookie (a frozen record without prototype, parsed on first access)             |
 | `ctx.signedCookie(name)`    | The verified value, or `undefined`                                                           |
 
-When a name repeats, the first cookie wins (browsers send the most specific path first). An
-invalid value answers 400 (`Invalid cookie "visits": expected a number`) and the message never
-echoes the value (the issues of a schema read `Invalid value`: some libraries quote the value in
-them): cookies outlive deployments, so give the ones that may go stale a schema with a fallback, as
-above.
+### Cookie options {#setting-cookies}
 
-### Setting cookies
-
-```ts
-ctx.setCookie('theme', 'dark', { maxAge: 365 * 86_400, httpOnly: false })
-ctx.clearCookie('__Host-uid') // Max-Age=0 with the same Path and Secure
-
-return HttpResponse.ok({ id: user.id }).withCookie('__Host-uid', user.id, { signed: true, maxAge: 8 * 3600 })
-return HttpResponse.noContent().withoutCookie('session')
-```
+`ctx.setCookie(name, value, options?)`, `ctx.clearCookie(name, options?)` and
+`HttpResponse.withCookie(name, value, options?)` / `withoutCookie(name, options?)`:
 
 | Option                    | Default | Description                                                                |
 | ------------------------- | ------- | -------------------------------------------------------------------------- |
@@ -585,10 +374,6 @@ What the plugin guarantees:
 
 ### Signed cookies
 
-```ts
-HttpPlugin.configure(c => ({ cookies: { secrets: c.get(AppConfig).cookieSecrets } })) // the first signs, all verify
-```
-
 `{ signed: true }`, `@SignedCookie` and `ctx.signedCookie()` use an HMAC-SHA256 bound to the cookie
 name, checked in constant time; a tampered value, or one signed with a retired key, is treated as
 absent (no "bad signature" error to probe). Each secret is at least 32 bytes
@@ -604,72 +389,13 @@ and see the [CSRF recipe](/guide/security#csrf) for cookie authentication.
 
 ### Testing cookies
 
-`inject()` (and [`TestApp.inject()`](/guide/testing#testapp-end-to-end-tests)) sends request
-cookies with `cookies`, signs `signedCookies` with the current secret, and returns the parsed
-`set-cookie` lines by name in `response.cookies` (`{ name, value, maxAge, path, secure, httpOnly,
-sameSite... }`). Values round-trip, signed ones included:
-
-```ts
-const login = await app.inject({ method: 'POST', url: '/auth/login', body: { email, password } })
-expect(login.cookies['__Host-uid']).toMatchObject({ httpOnly: true, secure: true, sameSite: 'lax' })
-
-const me = await app.inject({
-  method: 'GET',
-  url: '/auth/me',
-  cookies: { '__Host-uid': login.cookies['__Host-uid'].value },
-})
-const signed = await app.inject({ method: 'GET', url: '/auth/me', signedCookies: { '__Host-uid': 'u-1' } })
-```
+Moved to [Testing cookies](/guide/http#testing-cookies).
 
 ## Server-Sent Events
 
-`@Sse(path?, options?)` declares a `GET` route serving an event stream. No dependency, identical
-on every adapter, Node.js and Bun.
-
-```ts
-import {
-  Controller,
-  Ctx,
-  Headers,
-  type HttpContext,
-  HttpResponse,
-  NotFoundException,
-  Param,
-  Sse,
-  type SseEvent,
-} from '@znight/http'
-
-@Controller('/orders')
-export class OrderEventsController {
-  constructor(
-    private readonly orders: OrderService,
-    private readonly hub: OrderHub,
-  ) {}
-
-  /** An async method checks first, then returns the source of events. */
-  @Sse('/:id/events', { retry: 5_000, maxDuration: 30 * 60_000 })
-  async events(
-    @Param('id') id: string,
-    @Headers('last-event-id') lastEventId: string | undefined, // sent by EventSource when it reconnects
-    @Ctx() ctx: HttpContext,
-  ): Promise<AsyncIterable<SseEvent<OrderEvent>> | HttpResponse> {
-    const order = await this.orders.find(id)
-    if (order === undefined) throw new NotFoundException(`Order ${id} not found`) // EventSource stops
-    if (order.closed) return HttpResponse.noContent() // 204: EventSource stops reconnecting
-    return this.hub.subscribe(id, { after: lastEventId, signal: ctx.signal })
-  }
-}
-```
-
-- The handler returns an `AsyncIterable`, an `Iterable` or a `ReadableStream` of `SseEvent`
-  (`{ data, event, id, retry, comment }`; non-string `data` is sent as JSON, user content can never
-  inject fields). `Uint8Array` chunks are written as is, to proxy an upstream event stream.
-  Any other `HttpResponse`, a thrown exception or a Web `Response` is sent as usual.
-- Prefer an `async` method that returns the source over an `async *` generator: the body of a
-  generator only runs once the 200 is sent, too late to answer 404 or 204.
-- `HttpResponse.sse(source, options?)` serves an event stream from any route and method (`POST`
-  streaming for `fetch()` clients, 200 by default).
-- `encodeSseEvent()` and `parseSseStream()` (a `ReadableStream` to its events) are exported.
+Moved to [Files and streaming](/guide/files-and-streaming#server-sent-events): `@Sse()`, the event
+sources, `EventChannel`, the stream lifecycle and shutdown. The options of `@Sse(path?, options?)`
+and `HttpResponse.sse(source, options?)`:
 
 | Option        | Default                           | Description                                                                                              |
 | ------------- | --------------------------------- | -------------------------------------------------------------------------------------------------------- |
@@ -677,75 +403,28 @@ export class OrderEventsController {
 | `retry`       | plugin `sse.retry` (none)         | Client reconnection delay, sent first                                                                    |
 | `maxDuration` | none                              | Ends the stream gracefully after this many ms (1 000 to 2^31 − 1, about 24.8 days): rebalancing, re-auth |
 
+`encodeSseEvent()` and `parseSseStream()` (a `ReadableStream` to its events) are exported.
+
 ### Stream lifecycle
 
-- **Open**: the status, the headers (`content-type: text/event-stream`,
-  `cache-control: no-cache, no-transform`, `x-accel-buffering: no`) and a first chunk are sent at
-  once, on every adapter. Guards run before, once: use `maxDuration` to force re-authentication.
-- **Backpressure**: events are pulled one at a time, nothing is read ahead. `EventChannel` bridges
-  push sources (a bus, an `EventEmitter`) with a bounded buffer per client (`capacity`, `overflow`:
-  `'drop-oldest'`, `'drop-newest'` or `'close'`).
-- **Client disconnect**: `ctx.signal` aborts (a `RequestAbortedError` with `kind: 'client'`) and
-  the source is stopped. Pass `ctx.signal` to the source: the request scope waits for it to stop
-  (5 s at most, with a warning).
-- **Errors**: a source that throws ends the stream cleanly, logged; the client reconnects.
-- **`maxDuration` and shutdown**: `ctx.signal` aborts (`'expired'` / `'shutdown'`), the source gets
-  `sse.shutdownGraceMs` to send final events, then the client receives a jittered `retry` and
-  reconnects, to another instance during a rolling deployment. `onStop` closes the streams before
-  the drain; keep `sse.shutdownGraceMs` < `drainTimeoutMs`.
-- **Observability**: `http:request` resolves when the stream opens; `plugin.streams` counts the
-  open streams.
-
-`ctx.signal` exists on every route: it aborts when the client leaves before the response was
-written, never after a normal completion. `EventSource` cannot send an `Authorization` header:
-authenticate browser streams with a cookie. Proxies and timeouts (nginx, Cloudflare, `Bun.serve()`
-`idleTimeout`) are covered by the heartbeat and the headers above; the
-[README](../../packages/http/README.md) has the details.
+Moved to [Stream lifecycle](/guide/files-and-streaming#stream-lifecycle): backpressure, client
+disconnects, errors, `maxDuration` and shutdown.
 
 ### Testing event streams
 
-`inject()` rejects an event stream instead of waiting for its end. `injectSse()` (on the plugin and
-on [`TestApp`](/guide/testing#testapp-end-to-end-tests)) reads it in memory like `EventSource`;
-`injectStream()` gives the raw `ReadableStream`:
-
-```ts
-await using stream = await app.injectSse({ url: '/orders/o-1/events' })
-expect(stream.status).toBe(200)
-
-hub.publish({ orderId: 'o-1', sequence: 42, type: 'status', status: 'paid' })
-const event = await stream.next() // rejects after 2 000 ms by default
-expect(event).toMatchObject({ event: 'status', id: '42' })
-expect(event.json()).toMatchObject({ status: 'paid' })
-
-const resumed = await stream.reconnect() // sends last-event-id: 42, like EventSource
-```
-
-Events are read only when asked for (`next()`, `take(n)`, `for await`), so the test sets the pace
-of the client; `close()` (or the end of the `await using` block) is a client disconnect. Opening
-never hangs a test: `injectSse()` resolves at the first chunk of the stream, or after 2 000 ms for a
-stream that sends nothing yet (a hand-written or proxied one), and rejects, naming the request, when
-the response headers do not arrive within 2 000 ms.
+Moved to [Files and streaming](/guide/files-and-streaming#testing-event-streams): `injectSse()` and
+`injectStream()`, on the plugin and on `TestApp`.
 
 ## Request context
 
-Each request runs in its own [request scope](/guide/scopes#request-scopes) seeded with request-scoped
-externals:
-
-- `HttpContext`: the adapter-neutral request/response context (`params`, `query`, `headers`, `body`,
-  `files`, `cookies`, `route`, `state`, `ip`, `protocol`, `signal`, `setHeader()`, `setCookie()`,
-  `parseBody()`, `rawBody()`, `bodyStream()`...);
-- `RequestId`: the request identifier (the incoming `x-request-id` when valid, else a UUID).
-
-Inject them in request-scoped providers, or through `Lazy<HttpContext>` in singletons. Request-scoped
-instances are disposed once the response has been sent (streams and files included, so a
-request-scoped provider may own a temporary file it deletes when disposed).
+`HttpContext` (the adapter-neutral request and response) and `RequestId` are request-scoped
+externals: inject them in request-scoped providers, or through `Lazy<HttpContext>` in singletons.
+[The request context](/guide/http#request-context) shows how; the
+[package README](../../packages/http/README.md) lists every member of `HttpContext`.
 
 ## The request pipeline
 
-![HTTP request pipeline: in a request scope (HttpContext, RequestId) and inside the http:request hook, a CORS preflight is answered directly (204, 403, 404); otherwise guards, body parsing, interceptors around the invocation (extract, coerce, validate, handler) and serialisation run, anything thrown becoming an error response; then cookies, request id, CORS and security headers are added and the scope closes once the body has been sent](/diagrams/http-pipeline.svg)
-
-Observers such as `@znight/observability` wrap `http:request` to log, measure and trace every
-request.
+Moved to [The request pipeline](/guide/http#pipeline).
 
 ## Plugin options
 

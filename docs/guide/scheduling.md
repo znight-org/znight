@@ -22,13 +22,13 @@ the production build runs on both runtimes.
 
 ## Choose a trigger {#triggers}
 
-| You need                                                       | Use                                             | In the example                             |
-| -------------------------------------------------------------- | ----------------------------------------------- | ------------------------------------------ |
-| A wall-clock time: 08:00 in Paris on weekdays, 03:30 every day | `@Cron(expression, { timeZone })`               | `digest.daily`, `probes.purge`             |
-| A period, whatever the time of day                             | `@Interval(every)`                              | `status-cache.refresh`                     |
-| Once, shortly after the start                                  | `@Timeout(delay)` (or `runOnStart: true`)       | `status-cache.warm`                        |
-| Schedules that come from data or users                         | `registry.addCron()`, `addInterval()`           | `monitor.<id>`                             |
-| Retries with backoff, durable work, catch-up after downtime    | not a scheduler: publish a message from the job | [`@znight/messaging`](/packages/messaging) |
+| You need                                                       | Use                                             | In the example                          |
+| -------------------------------------------------------------- | ----------------------------------------------- | --------------------------------------- |
+| A wall-clock time: 08:00 in Paris on weekdays, 03:30 every day | `@Cron(expression, { timeZone })`               | `digest.daily`, `probes.purge`          |
+| A period, whatever the time of day                             | `@Interval(every)`                              | `status-cache.refresh`                  |
+| Once, shortly after the start                                  | `@Timeout(delay)` (or `runOnStart: true`)       | `status-cache.warm`                     |
+| Schedules that come from data or users                         | `registry.addCron()`, `addInterval()`           | `monitor.<id>`                          |
+| Retries with backoff, durable work, catch-up after downtime    | not a scheduler: publish a message from the job | [`@znight/messaging`](/guide/messaging) |
 
 ```ts [src/status/status.cache.ts (simplified)]
 import { Interval, type JobContext, Timeout } from '@znight/schedule'

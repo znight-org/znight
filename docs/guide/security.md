@@ -1293,7 +1293,7 @@ export class WebhookController {
 APIs authenticated with bearer tokens or API keys need nothing: browsers never attach these headers
 by themselves. CSRF only concerns **cookie authentication**. The web front-end of the example signs
 in with a password (`POST /session`) and receives two cookies (and a
-[device cookie](#sign-in-throttling)), set with the [cookie helpers](/packages/http#cookies) of
+[device cookie](#sign-in-throttling)), set with the [cookie helpers](/guide/http#cookies) of
 `@znight/http`:
 
 ```ts [src/session/session-cookies.ts (excerpt)]

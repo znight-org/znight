@@ -4,8 +4,8 @@ description: How a Znight application is laid out, which files the compiler scan
 
 # Project structure
 
-Znight has no modules, so there is no structure to declare: the compiler scans your sources and
-every decorated class becomes a provider. You are free to organise files as you like. This page shows
+Znight [has no modules](./automatic-wiring), so there is no structure to declare: the compiler
+scans your sources and every decorated class becomes a provider. You are free to organise files as you like. This page shows
 the layout we recommend and the few rules that do matter.
 
 ## Recommended layout

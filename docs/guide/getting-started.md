@@ -283,6 +283,12 @@ export class UserService {
 
 :::
 
+::: tip Nothing to register
+You did not list `InMemoryUserRepository` or `UserService` anywhere: no module, no `providers`
+array. The compiler found them because they are exported and decorated, and bound `UserRepository`
+to its only implementation. See [Automatic wiring](./automatic-wiring).
+:::
+
 ::: tip Type-only imports are fine
 The compiler reads types from the source, so `import type` works for injected interfaces. Injected
 classes can be imported either way.
@@ -290,7 +296,7 @@ classes can be imported either way.
 
 ## Add a controller
 
-Controllers are providers too. Route parameters are extracted and coerced for you: `id` arrives as a
+Controllers are providers too, found the same way: there is no `controllers` list either. Route parameters are extracted and coerced for you: `id` arrives as a
 `number` (an invalid value is answered with `400 Bad Request`).
 
 ::: code-group
@@ -375,7 +381,7 @@ add it to `bunfig.toml`. See [Bun preload](./compiler#bun-preload).
 
 `--no-env-file` (or `env = false` in `bunfig.toml`) stops Bun from loading `.env` files into
 `process.env` by itself, so that `@znight/config` reads them the same way as on Node.js (see
-[Bun's automatic `.env` loading](/packages/config#bun-env-loading)).
+[Bun's automatic `.env` loading](/guide/configuration#bun-env-loading)).
 :::
 
 ::: details Why not `node src/main.ts`?
@@ -425,6 +431,8 @@ export const metadata: ZnightMetadata = {
 ```
 
 The `UserRepository` parameter of `UserService` was bound to `InMemoryUserRepository` at build time.
+This file is the whole wiring of the application: it replaces the modules you would write by hand in
+NestJS.
 
 ## Break it on purpose
 
@@ -446,10 +454,13 @@ The mistake never reaches production. Every code is explained in the
 
 ## Next steps
 
+- [Automatic wiring](./automatic-wiring): why there is nothing to register, and what replaces
+  NestJS modules.
 - [Project structure](./project-structure): how to organise a growing application.
 - [Dependency injection](./dependency-injection): qualifiers, factories, optional and lazy
   dependencies.
-- [HTTP](/packages/http): routing, validation, guards and interceptors.
+- [Controllers and routes](./http): routing, parameters, errors, guards and cookies;
+  [Validation](./validation) with schemas.
 - [Data access](./data-access): replace the in-memory repository with a database (Drizzle).
 - [Security](./security): access decisions checked at build time, authentication recipes.
 - [Testing](./testing): unit tests with auto-mocks and end-to-end tests without a network.

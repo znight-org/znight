@@ -375,7 +375,7 @@ mode, is written when it changed — a read-only file system only gives a warnin
 resolves only when the file exists: generate it when you build an image), prints the diagnostics
 on stderr and, on errors, throws a `ZnightError`: `bun test` exits with code 1 and `bun --watch`
 waits for a fix. `--no-env-file` keeps Bun from loading `.env` files into `process.env` itself
-([why](/packages/config#bun-env-loading)). The Znight decorators of the analysed files are
+([why](/guide/configuration#bun-env-loading)). The Znight decorators of the analysed files are
 blanked out (replaced by spaces: line and column numbers are unchanged, no source map needed).
 
 Bun restarts `--watch` processes only for files it loaded: the preload makes Bun watch every file

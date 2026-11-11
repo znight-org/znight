@@ -28,35 +28,25 @@ await app.start()
 
 :::
 
+::: tip Guide
+This page is the reference. To write consumers and workers step by step (validation, failures,
+idempotency, publishing, shutdown, tests), read the [Messaging guide](/guide/messaging).
+:::
+
 ## Consumers
 
 ```ts
-import { Consumer, type InboundMessage, Message, NonRetryableError, OnError, OnMessage, Retry } from '@znight/messaging'
-import { z } from 'zod'
-
-export const OrderCreatedSchema = z.object({ orderId: z.string(), total: z.number() })
-export type OrderCreated = z.output<typeof OrderCreatedSchema>
+import { Consumer, Message, OnMessage, Retry } from '@znight/messaging'
 
 @Consumer('orders')
 export class OrderConsumer {
-  constructor(private readonly orders: OrderService) {}
-
   @OnMessage('order.created')
   @Retry({ attempts: 5, backoff: 'exponential', delay: 1_000, maxDelay: 60_000 })
-  async onCreated(@Message(OrderCreatedSchema) event: OrderCreated) {
-    if (event.total < 0) throw new NonRetryableError('negative total') // straight to the dead-letter queue
-    await this.orders.process(event)
-  }
-
-  @OnMessage() // default handler: messages without a more specific match
-  async onOther(@Message() payload: unknown) {}
-
-  @OnError()
-  onFailure(error: unknown, message: InboundMessage): 'ack' | void {
-    // the message will not be retried anymore; return 'ack' to drop it instead of dead-lettering it
-  }
+  async onCreated(@Message(OrderCreatedSchema) event: OrderCreated) {}
 }
 ```
+
+A complete consumer, with `@OnError` and `NonRetryableError`: [Write a consumer](/guide/messaging#consumers).
 
 | Decorator                                                                                         | Target | Description                                                                                                      |
 | ------------------------------------------------------------------------------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------- |
@@ -75,9 +65,8 @@ by a single `@Consumer` class. A `@Message()` parameter without schema is
 
 ## Delivery semantics
 
-Delivery is **at least once**: handlers must be idempotent.
-
-![Message delivery: receive, request scope with the InboundMessage, decode, select the handler by type, invoke (validate, then the handler). Success: ack. A failure with attempts left: retry, waiting in process or delayed by the broker, then redelivered. A terminal failure (last attempt, NonRetryableError, invalid payload, undecodable body, no matching handler): @OnError returning 'ack' drops the message, otherwise it is dead-lettered (copy published and confirmed, then ack; released and redelivered if the publish fails)](/diagrams/messaging-delivery.svg)
+Delivery is **at least once**: handlers must be idempotent. The delivery diagram, failures and
+idempotency are explained in the guide ([Handle failures](/guide/messaging#failures)); the rules:
 
 1. Each delivery runs in its own [request scope](/guide/scopes#request-scopes) (`InboundMessage` is a
    request-scoped external) through the `messaging:message` hook.
@@ -102,21 +91,7 @@ receiving, in-process retry delays are aborted (those messages are released to t
 
 ## Publishing
 
-`MessageBroker` is provided by the plugin; inject it anywhere:
-
-```ts
-import { MessageBroker } from '@znight/messaging'
-
-@Injectable()
-export class CheckoutService {
-  constructor(private readonly broker: MessageBroker) {}
-
-  async complete(order: Order) {
-    await this.broker.publish('orders', { orderId: order.id, total: order.total }, { type: 'order.created' })
-  }
-}
-```
-
+`MessageBroker` is provided by the plugin; inject it anywhere ([how](/guide/messaging#publish)).
 `publish(queue, payload, { type?, headers?, key?, delay?, id?, contentType? })` resolves with `{ id }`
 once the broker **confirmed** the message; `key` is the Kafka partition key, the SQS FIFO group or the
 Pub/Sub ordering key or the Service Bus session id, `delay` is not supported by Kafka nor Pub/Sub (Redis Streams supports it through a sorted set).
@@ -568,22 +543,13 @@ conformance kit in your CI.
 
 ## Concurrency
 
-`@Consumer({ queue: 'orders', concurrency: 10 })` processes up to ten messages of that consumer at
-once. Each delivery has its own scope, so request-scoped providers are never shared between messages.
+`@Consumer({ queue, concurrency })` (plugin default `defaults.concurrency`, 1) bounds the messages of
+a consumer handled at once; each delivery has its own request scope
+([Concurrency and per-message scope](/guide/messaging#concurrency)).
 
 ## Testing
 
-Use the in-memory driver with [`TestApp`](/guide/testing#messages) to send messages and assert on
-outcomes without a broker:
-
-```ts
-const driver = memory()
-await using app = await TestApp.create({ metadata, plugins: [MessagingPlugin.configure({ driver })] })
-
-driver.send('orders', { payload: { orderId: '1', total: 10 }, type: 'order.created' })
-await driver.idle()
-expect(driver.settlements('orders')).toMatchObject([{ action: 'ack' }])
-```
-
-`driver.published()`, `driver.deadLetters()`, `driver.pending()` and `driver.fail()` (failure
-injection) complete it. Integration tests against real brokers can use Testcontainers.
+Moved to [Testing](/guide/messaging#testing) in the Messaging guide: unit tests of handlers with
+`TestBed`, application tests with the in-memory driver (`memory()`: `send()`, `idle()`,
+`settlements()`, `published()`, `deadLetters()`, `pending()`, `fail()`), and integration tests against
+real brokers with Testcontainers.
