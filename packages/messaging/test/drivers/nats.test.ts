@@ -127,6 +127,17 @@ describe('names', () => {
 })
 
 describe('messages', () => {
+  it('keeps the exact millisecond of a JetStream timestamp (nanoseconds beyond 2^53)', async () => {
+    const fake = fakeWithQueues('orders')
+    const { received, consumer } = collector('orders')
+    const { broker } = await startApp(driverFor(fake), [consumer])
+    for (let i = 0; i < 40; i++) await broker.publish('orders', { i })
+    await waitFor(() => received.length === 40, 'every message')
+    const stored = fake.messages('orders').map(message => message.time)
+    // a Number of nanoseconds near 1.8e18 is not exact: the conversion used to lose a millisecond
+    expect(received.map(message => message.timestamp)).toEqual(stored)
+  })
+
   it('round-trips the body, the transport headers, the application headers and the key', async () => {
     const fake = fakeWithQueues('orders')
     const { received, consumer } = collector('orders')

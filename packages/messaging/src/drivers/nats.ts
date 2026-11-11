@@ -887,8 +887,13 @@ function plural(count: number, one: string, many: string): string {
   return `${count} ${count === 1 ? one : many}`
 }
 
-/** Epoch milliseconds of a JetStream timestamp in nanoseconds. */
-function timestampOf(nanos: number): number | undefined {
-  const millis = Math.floor(Number(nanos) / NANOS_PER_MS)
+/**
+ * Epoch milliseconds of a JetStream timestamp in nanoseconds. A bigint is divided exactly; a number
+ * beyond 2^53 has lost its last digits, so a value just below a whole millisecond counts as that
+ * millisecond (otherwise the floor could lose one).
+ */
+function timestampOf(nanos: number | bigint): number | undefined {
+  const millis =
+    typeof nanos === 'bigint' ? Number(nanos / BigInt(NANOS_PER_MS)) : Math.floor(nanos / NANOS_PER_MS + 1e-3)
   return Number.isFinite(millis) && millis > 0 ? millis : undefined
 }
