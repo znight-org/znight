@@ -1,5 +1,13 @@
 # @znight/openapi
 
+## 0.8.0
+
+### Patch Changes
+
+- @znight/compiler@0.8.0
+  - @znight/core@0.8.0
+  - @znight/http@0.8.0
+
 ## 0.7.3
 
 ### Patch Changes
