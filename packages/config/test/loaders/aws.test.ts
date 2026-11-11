@@ -160,6 +160,28 @@ describe('awsSecretsManager() with a client', () => {
     expect((error.cause as Error).name).toBe('AccessDeniedException')
   })
 
+  it('gives a hint per kind of failure: permissions, missing secret, KMS, credentials', async () => {
+    const hintsOf = async (error: Error): Promise<readonly string[]> => {
+      const client: SecretsManagerClientLike = { getSecretValue: () => Promise.reject(error) }
+      const failure = await caught(() =>
+        loadConfigSource([awsSecretsManager({ secretId: 'prod/app', client })], { env: {} }),
+      )
+      expect(failure).toBeInstanceOf(ConfigLoaderError)
+      return (failure as ZnightError).hints
+    }
+    expect(await hintsOf(new NamedError('AccessDeniedException', 'not authorized'))).toEqual([
+      'Allow secretsmanager:GetSecretValue on the secret to the identity the application runs as (and kms:Decrypt on its key when the secret uses a customer managed KMS key)',
+    ])
+    expect(await hintsOf(new NamedError('ResourceNotFoundException', 'not found'))).toEqual([
+      'Check the secret name or ARN and the region, or mark the secret optional',
+    ])
+    expect((await hintsOf(new NamedError('DecryptionFailure', 'KMS')))[0]).toContain('kms:Decrypt')
+    for (const name of ['CredentialsProviderError', 'UnrecognizedClientException', 'ExpiredTokenException']) {
+      expect((await hintsOf(new NamedError(name, 'no credentials')))[0]).toStartWith('Check the AWS credentials')
+    }
+    expect(await hintsOf(new Error('socket hang up'))).toEqual([])
+  })
+
   it('reports secrets without value', async () => {
     const error = await caught(() =>
       loadConfigSource([awsSecretsManager({ secretId: 'prod/empty', client: fakeClient() })], { env: {} }),

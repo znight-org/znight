@@ -183,16 +183,17 @@ MessagingPlugin.configure({
 - **Azure Service Bus**: `publish(queue)` sends to a queue or a topic, `@Consumer(queue)` receives
   from a queue, a topic subscription (`orders/billing`) or a dead-letter sub-queue
   (`orders/$deadletterqueue`); `entities` / `subscriptions` map the names. Peek-lock receives, the
-  lock renewed while a message is handled; attempts combine the delivery count and `x-znight-attempt`.
-  `retries: 'znight'` (default) abandons for an immediate retry, schedules a copy on the queue for a
-  delayed one (a subscription keeps the message locked during the delay instead), and dead-letters to
-  the entity's native sub-queue; `retries: 'entity'` abandons every retryable failure so that
-  `maxDeliveryCount` and the sub-queue own redelivery, and dead-letters terminal failures
-  (non-retryable, validation, decoding, no handler) to the sub-queue at once. Delayed publishing schedules the message;
-  `key` is the session id (session-enabled entities are refused for now). Connection string, or
-  `fullyQualifiedNamespace` with a credential (`DefaultAzureCredential` of `@azure/identity` by
-  default). Entities are checked with the administration client and only created with
-  `provision: true`; the opt-in tests run the conformance kit against the Service Bus emulator.
+  lock renewed while a message is handled; attempts combine the delivery count and
+  `x-znight-attempt`. `retries: 'znight'` (default) abandons for an immediate retry, schedules a
+  copy on the queue for a delayed one (a subscription keeps the message locked during the delay
+  instead), and dead-letters to the entity's native sub-queue; `retries: 'entity'` abandons every
+  retryable failure so that `maxDeliveryCount` and the sub-queue own redelivery, and dead-letters
+  terminal failures (non-retryable, validation, decoding, no handler) to the sub-queue at once.
+  Delayed publishing schedules the message; `key` is the session id (session-enabled entities are
+  refused for now). Connection string, or `fullyQualifiedNamespace` with a credential
+  (`DefaultAzureCredential` of `@azure/identity` by default). Entities are checked with the
+  administration client and only created with `provision: true`; the opt-in tests run the
+  conformance kit against the Service Bus emulator.
 
 ```ts
 import { MessagingPlugin } from '@znight/messaging'

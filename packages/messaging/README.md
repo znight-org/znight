@@ -331,6 +331,9 @@ a `defaults.concurrency` that is not a positive integer...) make `Application.cr
 OCI Streaming and Azure Event Hubs work through the Kafka driver ([below](#oracle-cloud-infrastructure-streaming));
 for another broker, [write your own driver](#writing-your-own-driver) and check it with the conformance kit.
 
+OCI Streaming and Azure Event Hubs work through the Kafka driver ([below](#oracle-cloud-infrastructure-streaming));
+for another broker, [write your own driver](#writing-your-own-driver) and check it with the conformance kit.
+
 ### Memory
 
 Deterministic in-process broker: FIFO queues, round-robin between competing subscribers, delays (of

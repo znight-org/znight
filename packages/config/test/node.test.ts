@@ -33,7 +33,7 @@ it.skipIf(node === null)(
         validation: 'ZNIGHT006',
         invalidVaultResponse: {
           message:
-            'ZNIGHT006: Config loader "vault" failed: cannot read secret secret/invalid after 1 attempt(s): the response body is not valid JSON (50 characters, application/json)',
+            'ZNIGHT006: Config loader "vault" failed: cannot read secret "secret/invalid": the response body is not valid JSON (50 characters, application/json), after 1 attempt(s)',
           leaked: false,
         },
       })

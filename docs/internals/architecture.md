@@ -40,7 +40,7 @@ packages/
   compiler/       programmatic API (+ Vite plugin, Bun preload): analysis, binding, validation, codegen
   http/           decorators, compiler extension, HttpPlugin, adapters (node, fastify, express, hono)
   messaging/      decorators, compiler extension, MessagingPlugin, drivers (memory, rabbitmq, sqs, kafka, pubsub, azure-service-bus)
-  config/         decorators, compiler extension, ConfigPlugin, loaders (env, dotenv, json, yaml, vault, aws, inline)
+  config/         decorators, compiler extension, ConfigPlugin, loaders (env, dotenv, json, yaml, vault, aws, gcp, azure, oci, inline)
   observability/  Logger (pino), metrics (prom-client), tracing (OpenTelemetry), interceptors, ObservabilityPlugin
   openapi/        decorators, compiler extension, OpenApiPlugin, OpenAPI 3.1 assembly (buildOpenApiDocument),
                   emission (/emit, /vite: `znight openapi`), validateResponse (/testing) (RFC 0002)
@@ -2812,30 +2812,70 @@ Loaders: `env({ prefix?, keepPrefix?, env? })`; `dotenv({ path?, nodeEnv?, optio
 override? })` (default files `.env`, `.env.local` (skipped in `test`), `.env.<mode>`,
 `.env.<mode>.local`, parsed with `node:util` `parseEnv`, no `${VAR}` expansion, `process.env`
 untouched unless `populate`); `json(path, { optional?, key? })`, `yaml(...)` (optional peer `yaml`);
-`vault({ path, address?, token?, tokenFile?, mount?, kvVersion?: 1 | 2, namespace?, key?, optional?,
-timeoutMs?, retries?, retryDelayMs?, fetch? })` (KV, token auth); `awsSecretsManager({ secretId,
-region?, client?, clientConfig?, optional?, timeoutMs? })` (optional peer
-`@aws-sdk/client-secrets-manager`); `gcpSecretManager({ secrets?, labels?, filter?, projectId?,
-location?, version? = 'latest', stripPrefix?, mapKey?, json? = false, optional?, client?,
-clientOptions?, timeoutMs? })` (optional peer `@google-cloud/secret-manager`: `accessSecretVersion`
-for each secret, `listSecrets` with `labels.<k>=<v>` and/or `filter` to discover them, read before the
-named `secrets`; one value per secret under its `key`, else its id minus `stripPrefix` through
-`mapKey`; two discovered secrets with the same key are a `ConfigLoaderError`; the project is
-`projectId`, `GOOGLE_CLOUD_PROJECT` / `GCLOUD_PROJECT`, then the client's; `NOT_FOUND` is skipped
-when `optional`; one location per loader, `location` or global, whose endpoint the default client
-uses: a resource name of another location is rejected when the loader is created, ZNIGHT012); `inline(values, { name? })`. A failing loader throws
+`inline(values, { name? })`; and the secret stores (RFC 0013): `vault({ path, address?, token?,
+tokenFile?, mount?, kvVersion?: 1 | 2, namespace?, key?, optional?, timeoutMs? = 5000, retries?,
+retryDelayMs?, fetch? })` (KV, token auth); `awsSecretsManager({ secretId, region?, client?,
+clientConfig?, json?, optional?, timeoutMs? })` (optional peer `@aws-sdk/client-secrets-manager`);
+`gcpSecretManager({ secretId, projectId?, location?, client?, clientConfig?, json?, optional?,
+timeoutMs? })` (optional peer `@google-cloud/secret-manager`); `azureKeyVault({ secretId, vaultUrl?,
+credential?, client?, clientConfig?, json?, optional?, timeoutMs? })` (optional peers
+`@azure/keyvault-secrets`, `@azure/identity`); `ociVault({ secretId, vaultId?, region?, endpoint?,
+auth?, configFile?, profile?, authenticationDetailsProvider?, client?, clientConfig?, json?,
+optional?, timeoutMs? })` (optional peers `oci-secrets`, `oci-common`). A failing loader throws
 `ConfigLoaderError` (ZNIGHT006); invalid options or metadata are ZNIGHT012. Loader errors never
 quote values: a JSON or YAML syntax error gives the file, the line, the column and a fixed reason
 (the YAML error code), never the parser message, which quotes the input (a secret, maybe), and the
 parser error is not kept as `cause`; YAML warnings are re-emitted the same way (`YAMLWarning`).
-`vault()`, `awsSecretsManager()` and `gcpSecretManager()` reject, when created, a `timeoutMs` that is not an integer from 1
-to 2^31 − 1, and `vault()` a `retries` or `retryDelayMs` that is not a finite number >= 0 (ZNIGHT012);
-the backoff between retries is capped at 30 s. They read their secrets concurrently and, once one
-read fails, abort the requests and retry waits of the others (`gcpSecretManager()` stops waiting for
-them). The layers of these three loaders are flagged `secret: true` (`ConfigLayer.secret`, also
-available to custom loaders): a field whose value comes from such a layer is masked like a `@Secret`
-field (in validation messages and on the instance, below) even without `@Secret`; `resolveFields`
-returns those properties in `secrets`. `vault()` checks the token and the namespace before any request: a value `fetch` would refuse as a
+
+Secret-store contract (normative for the five loaders above):
+
+- **Secrets.** `path` (Vault) or `secretId` (the others): an identifier, an object
+  `{ <path | secretId>, key?, optional?, json? (not Vault), <provider version fields> }`, or an
+  array of them, in precedence order (one layer per secret, later layers override earlier ones). An
+  empty list or an invalid entry is ZNIGHT012 when the loader is created. Version fields: AWS
+  `versionStage` / `versionId`, GCP `version` (default `latest`, or the `/versions/<v>` of a
+  resource name), Azure `version` (default current), OCI `versionNumber` / `stage` (default
+  `CURRENT`).
+- **Values.** With `json` (per secret, else the loader's, default `true`), a value whose trimmed text
+  parses as a JSON object provides one value per entry, at the root or nested under the secret's
+  `key`; any other value is stored under `key`, else the default key: AWS the `secretId` as written,
+  GCP the secret id (last segment of a resource name), Azure `azureSecretKey(name)` (`--` → `.`,
+  then `-` → `_`), OCI the `secretId` as written. Vault data is always a map, nested under the
+  secret's `key`, else the loader `key`. Origins: `vault:<mount>/<path>`,
+  `aws-secrets-manager:<secretId>`, `gcp-secret-manager:<secretId>`, `azure-key-vault:<name>`,
+  `oci-vault:<secretId>`.
+- **Missing secrets.** A not-found answer (Vault HTTP 404, AWS `ResourceNotFoundException`, GCP
+  `NOT_FOUND`, Azure HTTP 404, OCI HTTP 404 `NotAuthorizedOrNotFound`) skips the secret when it is
+  `optional` (per secret, else the loader's, default `false`) and fails otherwise; every other error
+  fails. OCI cannot tell a missing secret from a missing policy (both are 404), so `ociVault()` MUST
+  emit a `ZnightWarning` (`process.emitWarning`) naming each optional secret it skips. A response
+  without payload is `secret "<id>" has no value`.
+- **Requests.** Each request has a timeout (`timeoutMs`, default 10 000 ms, Vault 5 000 ms; an
+  integer from 1 to 2^31 − 1, ZNIGHT012 otherwise), enforced even when the client ignores the abort
+  signal. The secrets of a loader are read concurrently; once one read fails, the abort signal given
+  to the others is aborted and the loader stops waiting for them. Vault retries network errors,
+  timeouts, HTTP 429, 5xx and bodies that are not JSON (`retries`, `retryDelayMs`: finite numbers
+  from 0, ZNIGHT012 otherwise; backoff capped at 30 s); the SDK loaders keep the retries of their SDK.
+- **Errors.** `cannot read secret "<id>": <provider status>: <message>` (or `timed out after <n>
+  ms`), with the original error as `cause` and hints for permissions, credentials and missing
+  secrets. Vault's provider status is `HTTP <status>`, and once its retries are spent the message
+  ends with `, after <n> attempt(s)`. A loader created without an options object, or with invalid
+  options, throws ZNIGHT012.
+- **Clients.** The SDK is imported lazily (non-literal dynamic import) when the loader runs without
+  `client`; a client the loader created is closed after loading, an injected one is not. Settings
+  read from the context (`VAULT_ADDR`, `VAULT_TOKEN`, `VAULT_NAMESPACE`, `AWS_REGION` /
+  `AWS_DEFAULT_REGION`, `GOOGLE_CLOUD_PROJECT` / `GCLOUD_PROJECT`, `AZURE_KEY_VAULT_URL`,
+  `OCI_VAULT_ID`, `OCI_RESOURCE_PRINCIPAL_VERSION`, `OCI_CONFIG_FILE`, `OCI_CLI_PROFILE`) come from
+  the option, then the previous layers, then the environment. A GCP loader reads the secrets of one
+  location (`location` or global): a resource name of another location is ZNIGHT012. An OCI secret
+  read by name without a vault (`vaultId`, `OCI_VAULT_ID`) is a `ConfigLoaderError`.
+- **Masking and refresh.** Their layers are flagged `secret: true` (`ConfigLayer.secret`, also
+  available to custom loaders): a field whose value comes from such a layer is masked like a
+  `@Secret` field (in validation messages and on the instance, below) even without `@Secret`;
+  `resolveFields` returns those properties in `secrets`. Secrets are read once, in `register()`;
+  nothing is cached or refreshed afterwards.
+
+`vault()` checks the token and the namespace before any request: a value `fetch` would refuse as a
 header (line break, NUL, a character above U+00FF) is a `ConfigLoaderError` naming its origin
 (option, token file, `VAULT_TOKEN`, `VAULT_NAMESPACE`), never the value.
 
