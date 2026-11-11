@@ -41,8 +41,9 @@ Every change must keep these. A change that bends one starts with an RFC (see [R
    (`@znight/<pkg>/compiler`, discovered through `package.json#znight`) and a runtime plugin
    (`XxxPlugin.configure()`). Install only what you use.
 6. **Adapter-agnostic.** HTTP on the built-in `node:http` server, Fastify, Express or Hono;
-   messaging on RabbitMQ, SQS, Kafka, Pub/Sub or in memory. Same behaviour on every adapter, on
-   Node.js and Bun. Integrations are optional peer dependencies behind subpath exports.
+   messaging on RabbitMQ, SQS, Kafka, Pub/Sub, Azure Service Bus or in memory. Same behaviour on
+   every adapter, on Node.js and Bun. Integrations are optional peer dependencies behind subpath
+   exports.
 7. **Observable by default.** `@znight/observability` wires logs, metrics and traces into every HTTP
    request, message delivery and scheduled run.
 8. **Fail loudly, early, precisely.** A misconfiguration detectable at build time is a `ZNIGHTxxx`
@@ -61,7 +62,7 @@ Every change must keep these. A change that bends one starts with an RFC (see [R
 | `@znight/compiler`      | Analysis, binding, validation, code generation; programmatic API, Vite plugin (`znight()`), Bun preload (`@znight/compiler/bun`)                                                                                         |
 | `@znight/http`          | Controllers, Standard Schema validation, guards, interceptors, uploads, streams, cookies, SSE, route decisions, CORS, security headers; `/node`, `/fastify`, `/express`, `/hono`                                         |
 | `@znight/openapi`       | OpenAPI 3.1 document built at compile time, served with Scalar or Swagger UI, emitted by `znight openapi` (RFC 0002)                                                                                                     |
-| `@znight/messaging`     | Consumers, retries, dead letters; `/memory`, `/rabbitmq`, `/sqs`, `/kafka`, `/pubsub` drivers                                                                                                                            |
+| `@znight/messaging`     | Consumers, retries, dead letters; `/memory`, `/rabbitmq`, `/sqs`, `/kafka`, `/pubsub`, `/azure-service-bus` drivers                                                                                                      |
 | `@znight/schedule`      | `@Cron`, `@Interval`, `@Timeout`, `SchedulerRegistry`, lock stores, virtual clock for tests (RFC 0004)                                                                                                                   |
 | `@znight/graphql`       | Code-first GraphQL (schema derived from TypeScript types, RFC 0005) or schema-first (SDL files, resolvers checked against them, RFC 0007), loaders, guards, HTTP and SSE; built-in executor or `/yoga` driver (RFC 0009) |
 | `@znight/events`        | In-process application events: `@OnEvent` listeners wired at build time, `EventPublisher`, inline or detached dispatch (RFC 0011)                                                                                        |
@@ -122,7 +123,7 @@ decision changes.
 | Documentation         | VitePress 1.6 (`docs/`)                                                                                 |
 | HTTP (optional peers) | built-in `node:http`, Fastify 5, Express 5, Hono 4 (+ `@hono/node-server` on Node.js)                   |
 | Validation            | any Standard Schema library (Zod 4 in the examples, Valibot, ArkType...)                                |
-| Messaging (peers)     | `amqplib`, `@aws-sdk/client-sqs`, `@platformatic/kafka`, `@google-cloud/pubsub`                         |
+| Messaging (peers)     | `amqplib`, `@aws-sdk/client-sqs`, `@platformatic/kafka`, `@google-cloud/pubsub`, `@azure/service-bus`   |
 | Observability         | `pino`, `@opentelemetry/api`; optional `prom-client`, `pino-pretty`                                     |
 | CLI                   | `citty`, `@clack/prompts`                                                                               |
 

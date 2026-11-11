@@ -1,11 +1,11 @@
 # @znight/messaging
 
 Message consumers and publishing for [Znight](../../README.md), checked at build time and run on
-RabbitMQ, Amazon SQS, Kafka, Google Cloud Pub/Sub, NATS JetStream or in memory.
+RabbitMQ, Amazon SQS, Kafka, Google Cloud Pub/Sub, NATS JetStream, Azure Service Bus or in memory.
 
 Retries with backoff, dead-letter queues, per-consumer concurrency and graceful shutdown, the same
-on **RabbitMQ**, **Amazon SQS**, **Kafka**, **Google Cloud Pub/Sub** and **NATS JetStream**; the
-in-memory broker serves tests and local development.
+on **RabbitMQ**, **Amazon SQS**, **Kafka**, **Google Cloud Pub/Sub**, **NATS JetStream** and
+**Azure Service Bus**; the in-memory broker serves tests and local development.
 
 Like the rest of Znight, consumers are discovered **at build time**: `@znight/compiler` (with the
 `@znight/messaging/compiler` extension) reads the decorators and generates the consumer metadata. At
@@ -20,6 +20,7 @@ bun add @aws-sdk/client-sqs  # optional: SQS driver
 bun add @platformatic/kafka  # optional: Kafka driver
 bun add @google-cloud/pubsub # optional: Pub/Sub driver
 bun add @nats-io/jetstream @nats-io/transport-node # optional: NATS JetStream driver
+bun add @azure/service-bus   # optional: Azure Service Bus driver (+ @azure/identity for Entra ID)
 
 # npm
 npm install @znight/core @znight/messaging
@@ -29,6 +30,7 @@ npm install @aws-sdk/client-sqs  # optional: SQS driver
 npm install @platformatic/kafka  # optional: Kafka driver
 npm install @google-cloud/pubsub # optional: Pub/Sub driver
 npm install @nats-io/jetstream @nats-io/transport-node # optional: NATS JetStream driver
+npm install @azure/service-bus   # optional: Azure Service Bus driver (+ @azure/identity for Entra ID)
 ```
 
 Runs on Node.js >= 24 and Bun >= 1.3. Broker clients are optional peer dependencies: install only the
@@ -145,7 +147,7 @@ receive ─► wait for a concurrency slot ─► request scope (InboundMessage)
    └─► decode ─► select handler by type ─► invoke (validate → handler)
          ├─ success ───────────────────────────────────────────────► ack
          ├─ failure, attempts left ─► wait in-process (≤ driver budget) ─► redeliver as attempt + 1
-         │                          └─ or native delayed redelivery (SQS visibility, RabbitMQ delay queue, Kafka retry topic, Pub/Sub ack deadline)
+         │                          └─ or native delayed redelivery (SQS visibility, RabbitMQ delay queue, Kafka retry topic, Pub/Sub ack deadline, Service Bus scheduled copy)
          └─ NonRetryableError / invalid payload / undecodable body / no handler / last attempt
               └─► @OnError ─ 'ack' ─► ack
                            └─ otherwise (or throws) ─► dead-letter: publish (confirmed) then ack
@@ -156,7 +158,7 @@ receive ─► wait for a concurrency slot ─► request scope (InboundMessage)
   republished, dead-lettered or released). A settlement failure (connection loss) leaves the message
   unacknowledged, so the broker redelivers it.
 - **Attempts** are counted by the broker (SQS `ApproximateReceiveCount`, RabbitMQ quorum
-  `x-delivery-count`, Pub/Sub `deliveryAttempt`) and/or the `x-znight-attempt` header of republished retries
+  `x-delivery-count`, Pub/Sub `deliveryAttempt`, Service Bus `deliveryCount`) and/or the `x-znight-attempt` header of republished retries
   (`message.attempt`, 1-based). A redelivery beyond the last attempt is dead-lettered without calling
   the handler.
 - **Ordering** is not guaranteed across retries. Kafka keeps the order of a partition (records of a
@@ -201,7 +203,7 @@ the driver cannot honour (e.g. more than 12 h on SQS).
 The dead-letter destination of a queue is, by priority: `@Consumer({ deadLetter })`,
 `defaults.deadLetter(queue)`, the driver naming (`orders.dlq`; SQS `orders-dlq` or the target of the
 queue's `RedrivePolicy`; Pub/Sub the topic `orders-dlq` or the topic of the subscription's dead-letter
-policy). The copy keeps the body, type, id and headers (without `x-znight-attempt`, so
+policy; Service Bus the dead-letter sub-queue `orders/$deadletterqueue`). The copy keeps the body, type, id and headers (without `x-znight-attempt`, so
 that a redrive starts over) and adds:
 
 | Header                        | Value                                                                   |
@@ -216,12 +218,13 @@ The original is acknowledged only once the copy is confirmed; if the publication
 is released after `defaults.requeueDelay` and redelivered. `deadLetter: false` disables
 dead-lettering: RabbitMQ rejects the message (a queue DLX policy applies), SQS and Kafka discard it,
 Pub/Sub nacks it (the subscription's dead-letter policy applies) or acknowledges it when the
-subscription is known to have no dead-letter policy.
+subscription is known to have no dead-letter policy, Service Bus completes it.
 
 ### Concurrency and graceful shutdown
 
 `concurrency` (default `defaults.concurrency`, 1) bounds the messages a consumer handles at once
-(RabbitMQ prefetch, SQS receive batches, Kafka partitions handled in parallel, Pub/Sub leased messages).
+(RabbitMQ prefetch, SQS receive batches, Kafka partitions handled in parallel, Pub/Sub leased messages, Service Bus
+locked messages).
 
 `app.stop()` (or SIGTERM) stops receiving, aborts in-process retry delays (those messages are released
 to the broker, never dropped), aborts `message.signal`, waits for the handlers in flight, then closes
@@ -250,7 +253,7 @@ interface InboundMessage<T = unknown> {
   type: string | undefined
   payload: T
   headers: Readonly<Record<string, string>>
-  key: string | undefined // Kafka key, SQS FIFO group, Pub/Sub ordering key
+  key: string | undefined // Kafka key, SQS FIFO group, Pub/Sub ordering key, Service Bus session id
   attempt: number // 1-based
   maxAttempts: number
   redelivered: boolean
@@ -259,7 +262,7 @@ interface InboundMessage<T = unknown> {
   contentType: string | undefined
   body: Uint8Array | string // raw body
   driver: string
-  raw: unknown // amqplib ConsumeMessage, SQS Message, Kafka Message, Pub/Sub ReceivedMessage...
+  raw: unknown // amqplib ConsumeMessage, SQS Message, Kafka Message, Pub/Sub ReceivedMessage, ServiceBusReceivedMessage...
   signal: AbortSignal // aborted on shutdown
 }
 ```
@@ -272,14 +275,15 @@ interface InboundMessage<T = unknown> {
 const { id } = await broker.publish('orders', order, {
   type: 'order.placed', // handler selection
   headers: { 'x-tenant': 'acme' }, // string values
-  key: order.customerId, // Kafka partition key / SQS FIFO group / Pub/Sub ordering key
-  delay: 5_000, // ms (RabbitMQ, SQS ≤ 15 min, memory; not Kafka nor Pub/Sub)
+  key: order.customerId, // Kafka partition key / SQS FIFO group / Pub/Sub ordering key / Service Bus session id
+  delay: 5_000, // ms (RabbitMQ, SQS ≤ 15 min, Service Bus, memory; not Kafka nor Pub/Sub)
   id: order.id, // default: random UUID
 })
 ```
 
 `publish()` resolves once the broker **confirmed** the message (publisher confirms, SQS response, Kafka
-acks from all in-sync replicas, Pub/Sub `Publish` response). Payloads are JSON-encoded; `Uint8Array` is sent as
+acks from all in-sync replicas, Pub/Sub `Publish` response, Service Bus send
+disposition). Payloads are JSON-encoded; `Uint8Array` is sent as
 `application/octet-stream`; a string with a `contentType` is sent as is. It works from the plugin's
 bootstrap until the application is disposed (providers' `onStart` and `onStop` included).
 
@@ -294,15 +298,15 @@ MessagingPlugin.configure({
 MessagingPlugin.configure(c => ({ driver: rabbitmq({ url: c.get(AmqpConfig).url }) }))
 ```
 
-| Option                  | Default                      | Description                                                                       |
-| ----------------------- | ---------------------------- | --------------------------------------------------------------------------------- |
-| `driver`                | —                            | `memory()`, `rabbitmq()`, `sqs()`, `kafka()` or `pubsub()` (from their subpaths). |
-| `defaults.retry`        | 3 attempts, 1 s exp., ≤ 30 s | Policy of handlers without `@Retry`; `false` disables retries.                    |
-| `defaults.concurrency`  | `1`                          | Concurrency of consumers without `concurrency`.                                   |
-| `defaults.deadLetter`   | driver naming                | `(queue) => name`, or `false` to disable dead-lettering.                          |
-| `defaults.requeueDelay` | `1000`                       | Pause (ms) before releasing a message whose settlement failed.                    |
-| `codec`                 | `jsonCodec`                  | `{ encode(payload, contentType), decode(body, contentType) }`.                    |
-| `consume`               | `true`                       | `false` for publish-only processes (consumers are not subscribed).                |
+| Option                  | Default                      | Description                                                                                            |
+| ----------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `driver`                | —                            | `memory()`, `rabbitmq()`, `sqs()`, `kafka()`, `pubsub()` or `azureServiceBus()` (from their subpaths). |
+| `defaults.retry`        | 3 attempts, 1 s exp., ≤ 30 s | Policy of handlers without `@Retry`; `false` disables retries.                                         |
+| `defaults.concurrency`  | `1`                          | Concurrency of consumers without `concurrency`.                                                        |
+| `defaults.deadLetter`   | driver naming                | `(queue) => name`, or `false` to disable dead-lettering.                                               |
+| `defaults.requeueDelay` | `1000`                       | Pause (ms) before releasing a message whose settlement failed.                                         |
+| `codec`                 | `jsonCodec`                  | `{ encode(payload, contentType), decode(body, contentType) }`.                                         |
+| `consume`               | `true`                       | `false` for publish-only processes (consumers are not subscribed).                                     |
 
 The plugin (`name: 'messaging'`) exposes `broker`, `driver` and `consumers()` (state, in-flight count,
 dead-letter queue of each consumer).
@@ -313,17 +317,17 @@ a `defaults.concurrency` that is not a positive integer...) make `Application.cr
 
 ## Drivers
 
-| Capability             | memory    | RabbitMQ                                | SQS                              | Kafka                                | Pub/Sub                                          | NATS JetStream                                         |
-| ---------------------- | --------- | --------------------------------------- | -------------------------------- | ------------------------------------ | ------------------------------------------------ | ------------------------------------------------------ |
-| Subpath                | `/memory` | `/rabbitmq`                             | `/sqs`                           | `/kafka`                             | `/pubsub`                                        | `/nats`                                                |
-| Client (optional peer) | —         | `amqplib` ^2                            | `@aws-sdk/client-sqs` ^3         | `@platformatic/kafka` ^2             | `@google-cloud/pubsub` ^6                        | `@nats-io/jetstream` ^3 + `@nats-io/transport-node` ^3 |
-| Attempt counting       | native    | `x-znight-attempt` + `x-delivery-count` | `ApproximateReceiveCount`        | `x-znight-attempt`                   | `deliveryAttempt` (in memory without DLQ policy) | JetStream delivery count                               |
-| Native retry delay     | timers    | delay queues (TTL + DLX), ≤ 49 days     | visibility timeout, ≤ 12 h       | retry topic, ≤ `maxRetryDelayMs`     | ack deadline, ≤ 600 s                            | `nak(delay)`, ≤ 104 days                               |
-| In-process budget      | 1 s       | 5 s                                     | 1 s                              | 0 (always the retry topic)           | 1 s (0 with `retries: 'subscription'`)           | 1 s                                                    |
-| Delayed publish        | yes       | yes (32 shared delay levels), ≤ 49 days | ≤ 15 min (not FIFO)              | no                                   | no                                               | no                                                     |
-| Dead letters           | `<q>.dlq` | `<q>.dlq` (publish confirmed + ack)     | `<q>-dlq` / RedrivePolicy target | `<topic>.dlq` (acks all + commit)    | topic `<q>-dlq` / dead-letter policy topic       | `<q>.dlq` (deduplicated copy + `term()`)               |
-| Ordering               | FIFO      | none across retries                     | FIFO groups                      | per partition                        | ordering keys (ordered subscriptions)            | per subject with `concurrency: 1`                      |
-| Topology               | implicit  | declared (`assertTopology`) or verified | verified (queues must exist)     | verified or created (`createTopics`) | verified or created (`provision`)                | streams verified or created (`provision`)              |
+| Capability             | memory    | RabbitMQ                                | SQS                              | Kafka                                | Pub/Sub                                          | NATS JetStream                                         | Azure Service Bus                                  |
+| ---------------------- | --------- | --------------------------------------- | -------------------------------- | ------------------------------------ | ------------------------------------------------ | ------------------------------------------------------ | -------------------------------------------------- |
+| Subpath                | `/memory` | `/rabbitmq`                             | `/sqs`                           | `/kafka`                             | `/pubsub`                                        | `/nats`                                                | `/azure-service-bus`                               |
+| Client (optional peer) | —         | `amqplib` ^2                            | `@aws-sdk/client-sqs` ^3         | `@platformatic/kafka` ^2             | `@google-cloud/pubsub` ^6                        | `@nats-io/jetstream` ^3 + `@nats-io/transport-node` ^3 | `@azure/service-bus` ^7                            |
+| Attempt counting       | native    | `x-znight-attempt` + `x-delivery-count` | `ApproximateReceiveCount`        | `x-znight-attempt`                   | `deliveryAttempt` (in memory without DLQ policy) | JetStream delivery count                               | `deliveryCount` + `x-znight-attempt`               |
+| Native retry delay     | timers    | delay queues (TTL + DLX), ≤ 49 days     | visibility timeout, ≤ 12 h       | retry topic, ≤ `maxRetryDelayMs`     | ack deadline, ≤ 600 s                            | `nak(delay)`, ≤ 104 days                               | scheduled copy (queues), lock held (subscriptions) |
+| In-process budget      | 1 s       | 5 s                                     | 1 s                              | 0 (always the retry topic)           | 1 s (0 with `retries: 'subscription'`)           | 1 s                                                    | 1 s (0 with `retries: 'entity'`)                   |
+| Delayed publish        | yes       | yes (32 shared delay levels), ≤ 49 days | ≤ 15 min (not FIFO)              | no                                   | no                                               | no                                                     | yes (scheduled messages)                           |
+| Dead letters           | `<q>.dlq` | `<q>.dlq` (publish confirmed + ack)     | `<q>-dlq` / RedrivePolicy target | `<topic>.dlq` (acks all + commit)    | topic `<q>-dlq` / dead-letter policy topic       | `<q>.dlq` (deduplicated copy + `term()`)               | sub-queue `<q>/$deadletterqueue`                   |
+| Ordering               | FIFO      | none across retries                     | FIFO groups                      | per partition                        | ordering keys (ordered subscriptions)            | per subject with `concurrency: 1`                      | none (sessions refused)                            |
+| Topology               | implicit  | declared (`assertTopology`) or verified | verified (queues must exist)     | verified or created (`createTopics`) | verified or created (`provision`)                | streams verified or created (`provision`)              | verified or created (`provision`)                  |
 
 OCI Streaming and Azure Event Hubs work through the Kafka driver ([below](#oracle-cloud-infrastructure-streaming));
 for another broker, [write your own driver](#writing-your-own-driver) and check it with the conformance kit.
@@ -550,6 +554,106 @@ are released), keeps extending the deadline of the messages in flight until the 
 then closes the clients it created. A long drain needs `shutdown.hookTimeoutMs` above it. Permissions:
 `pubsub.subscriptions.consume`, `pubsub.topics.publish`, and `pubsub.subscriptions.get` /
 `pubsub.topics.get` for the checks. Design notes: [RFC 0012](../../rfcs/0012-messaging-pubsub.md).
+
+### Azure Service Bus
+
+```ts
+import { azureServiceBus } from '@znight/messaging/azure-service-bus'
+
+azureServiceBus({ connectionString: process.env['SERVICE_BUS_CONNECTION_STRING'] })
+// Microsoft Entra ID: DefaultAzureCredential (@azure/identity) unless `credential` is given
+azureServiceBus({
+  fullyQualifiedNamespace: 'acme.servicebus.windows.net',
+  subscriptions: { billing: 'orders/billing' },
+})
+```
+
+| Option                           | Default                  | Description                                                                                       |
+| -------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------- |
+| `connectionString`               | —                        | Connection string of the namespace (or of the emulator).                                          |
+| `fullyQualifiedNamespace`        | —                        | `<namespace>.servicebus.windows.net`, authenticated with `credential`.                            |
+| `credential`                     | `DefaultAzureCredential` | A `TokenCredential`; the default comes from `@azure/identity` (optional peer, loaded on connect). |
+| `client`                         | —                        | An existing `ServiceBusClient` (not closed). One of these three options is required.              |
+| `clientOptions`                  | `{}`                     | Options of the client created by the driver (retry options, web sockets...).                      |
+| `administrationClient`           | from the credentials     | A `ServiceBusAdministrationClient` for the checks and `provision`; `false` skips them.            |
+| `entities`                       | the queue name           | Queue or topic of each published queue: `{ queue: name }` or `(queue) => name`.                   |
+| `subscriptions`                  | the queue name           | Entity of each `@Consumer` queue: `queue`, `topic/subscription`, with `/$deadletterqueue` or not. |
+| `retries`                        | `'znight'`               | Who retries and dead-letters: `'znight'` or `'entity'` (below).                                   |
+| `maxInProcessDelayMs`            | `1000`                   | Longest retry delay waited in-process (`0` with `retries: 'entity'`).                             |
+| `maxWaitTimeMs`                  | `30000`                  | Longest wait of a receive for messages.                                                           |
+| `maxAutoLockRenewalDurationInMs` | `300000`                 | How long the SDK renews the lock of a message after receiving it.                                 |
+| `deadLetterName`                 | `<q>/$deadletterqueue`   | Default dead-letter queue: the entity's native sub-queue, or another queue or topic.              |
+| `provision`                      | `false`                  | Create missing queues, topics and subscriptions (development, emulator).                          |
+
+`publish(queue)` sends to the **queue or topic** named after the queue (`entities` maps it).
+`@Consumer(queue)` receives from a queue, from a **topic subscription** written `topic/subscription`
+(or `topic/subscriptions/subscription`, the Service Bus path), or from the **dead-letter sub-queue**
+of either (`orders/$deadletterqueue`); `subscriptions` maps a consumer queue to such a path.
+`message.queue` and `x-znight-original-queue` keep the `@Consumer` queue. For a fan-out, publish to
+the topic and give each consumer its subscription.
+
+The driver receives in peek-lock mode (`receiveMessages`), never more messages than the free
+concurrency slots (a message held for a retry delay keeps its slot), and the SDK renews the lock of each message while it is handled, up to
+`maxAutoLockRenewalDurationInMs` after it was received. `ack` completes the message, `release`
+abandons it. Attempts combine the delivery count (abandoned or expired deliveries) and the
+`x-znight-attempt` property of scheduled retry copies.
+
+**Who retries.** Service Bus can own redelivery (`maxDeliveryCount`, then the dead-letter
+sub-queue). To never stack both layers, pick one owner with `retries`:
+
+- `'znight'` (default): `@Retry` applies. A retry without delay (or after an in-process wait)
+  abandons the message. A longer delay on a queue schedules a copy on the queue
+  (`scheduledEnqueueTimeUtc`, with `x-znight-attempt`), then completes the original: the JS SDK has no
+  transactions, so a crash in between duplicates the message, never loses it. On a subscription (a
+  copy sent to the topic would reach every subscription) or a dead-letter sub-queue, the message
+  stays locked during the delay, then is abandoned: such delays must fit within
+  `maxAutoLockRenewalDurationInMs` (the boot fails otherwise; forward the subscription to a queue
+  with `forwardTo` for long delays). Dead letters go to the entity's **dead-letter sub-queue**
+  (`deadLetterMessage()`, with `DeadLetterReason` / `DeadLetterErrorDescription` and the
+  `x-znight-dead-letter-reason`... properties); another `deadLetter` name (a queue or topic) receives a
+  copy before the original is completed. `deadLetter: false` completes (discards) the message. The
+  entity's `maxDeliveryCount` must allow every attempt of the consumer (the boot fails otherwise).
+- `'entity'`: every retryable failure abandons the message at once (the `@Retry` delays are
+  ignored), and the entity dead-letters it after `maxDeliveryCount` deliveries; set the `@Retry`
+  attempts (or `defaults.retry.attempts`) to `maxDeliveryCount` (a warning when they differ).
+  Non-retryable failures (`NonRetryableError`, validation, decoding, no handler) are dead-lettered to
+  the sub-queue at once. Under `azureServiceBus({ retries: 'entity' })`, a consumer can take the
+  ownership back with `@Consumer({ queue, retries: 'znight' })` (a dead-letter collector);
+  `@Consumer({ retries: 'entity' })` under a `'znight'` driver fails the boot (ZNIGHT011).
+
+The sub-queue keeps the delivery count of a message: the driver records it on the messages it
+dead-letters, so that a consumer of the sub-queue starts over at attempt 1. A message the entity
+dead-lettered itself (after `maxDeliveryCount`) also starts at attempt 1, counted from the first
+delivery from the sub-queue this process sees (approximate across restarts and instances). The
+recorded count only applies on a dead-letter sub-queue: a dead letter resubmitted to its entity
+starts over at attempt 1.
+
+Headers are application properties; the id is the message id (so duplicate detection applies to
+`publish(..., { id })`; retry and dead-letter copies get their own message id and keep the Znight id
+in `x-znight-id`), the type is the subject, the content type the content type, and the body is sent as
+bytes. `key` becomes the session id and the partition key (at most 128 characters). Trace context
+(`traceparent`, `tracestate`) travels as application properties; the `Diagnostic-Id` the Azure SDK
+writes is exposed as `traceparent` when there is none. Delayed publishing schedules the message
+(`scheduleMessages`, no practical limit).
+
+Session-enabled entities are refused (ZNIGHT011): session receivers, for ordered processing, are
+planned. Nothing is created by default: at subscribe time the administration client reads the queue
+or subscription (missing, session-enabled or with a `maxDeliveryCount` below the attempts: the boot
+fails) and the dead-letter queue named after another entity. Without the Manage right (a warning is
+logged) or with `administrationClient: false`, a first short receive checks the entity instead: the
+boot still fails when it is missing or session-enabled, but its `maxDeliveryCount` is not checked
+(messages it returns are delivered as usual). An entity made session-enabled after the boot stops its
+consumer with an error (ZNIGHT011) instead of retrying forever. `provision: true` creates the missing queue (`maxDeliveryCount` covering the
+attempts, at least 10), topic and subscription of a consumer, the queues published to and the
+dead-letter queues. With the [emulator](https://learn.microsoft.com/azure/service-bus-messaging/overview-emulator),
+use its connection string (`UseDevelopmentEmulator=true`) and point `administrationClient` at its
+administration port (5300).
+
+On stop, the driver stops receiving (a receive in flight is aborted: messages it was getting stay
+locked until their lock expires), waits for the deliveries in flight, abandons the messages held for
+a retry, then closes the receivers, the senders and the client it created. Rights: Listen and Send
+(`Azure Service Bus Data Receiver` / `Data Sender` roles), Manage for the checks and `provision`.
+Design notes: [RFC 0014](../../rfcs/0014-messaging-drivers.md) §4.1.
 
 ### Kafka
 
