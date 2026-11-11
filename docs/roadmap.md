@@ -151,8 +151,8 @@ graphql-js 17. The engine and the GraphQL Yoga driver are in place.
 
 [RFC 0015](https://github.com/znight-org/znight/blob/main/rfcs/0015-bootstrap-api.md), implemented
 and unreleased: the generated module exports `metadata` and `createApplication()`, the convention
-of `main.ts` ([Getting started](/guide/getting-started)). The old export name stays as a deprecated
-alias of `metadata` in 0.9 and is removed in 0.10.
+of `main.ts` ([Getting started](/guide/getting-started)). The old export name is renamed `metadata`
+in 0.9, with no alias (a breaking change before 1.0).
 
 ### Messaging drivers
 

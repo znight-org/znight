@@ -176,12 +176,11 @@ describe('end-to-end: import naming', () => {
     const generated = (await import(result.outFile)) as {
       metadata: ZnightMetadata
       createApplication(options?: { shutdown?: { signals: false } }): Promise<Application>
-      __ZNIGHT_METADATA__: ZnightMetadata
-      default: ZnightMetadata
     }
-    // The deprecated alias and the default export are the `metadata` object itself (RFC 0015).
-    expect(generated.__ZNIGHT_METADATA__).toBe(generated.metadata)
-    expect(generated.default).toBe(generated.metadata)
+    // The generated module exports `metadata` and `createApplication`, nothing else (RFC 0015).
+    expect(Object.keys(generated).sort()).toEqual(['createApplication', 'metadata'])
+    expect(result.code).not.toContain('__ZNIGHT_METADATA__')
+    expect(result.code).not.toContain('export default')
     // `createApplication` is bound to `metadata`, even though user classes named `Application`,
     // `metadata` and `createApplication` are imported in the same module.
     const app = await generated.createApplication({ shutdown: { signals: false } })

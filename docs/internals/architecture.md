@@ -300,10 +300,6 @@ export const metadata: ZnightMetadata = {
 export function createApplication(options: CreateApplicationOptions = {}): Promise<Application> {
   return Application.create({ ...options, metadata })
 }
-
-/** @deprecated Import `metadata` (or call `createApplication()`). Removed in 0.10. */
-export const __ZNIGHT_METADATA__: ZnightMetadata = metadata
-export default metadata
 ```
 
 Rules for generated code:
@@ -314,14 +310,12 @@ Rules for generated code:
 - **Layout** (RFC 0015): the three header lines, the imports, the module-level constants, then the
   exports, in this order and each with its JSDoc: `export const metadata: ZnightMetadata = {...}`;
   `export function createApplication(options: CreateApplicationOptions = {}): Promise<Application>`
-  returning `Application.create({ ...options, metadata })`; the deprecated alias
-  `export const __ZNIGHT_METADATA__: ZnightMetadata = metadata` (`@deprecated`, removed in 0.10); and
-  `export default metadata`. `Application` (value) and `CreateApplicationOptions` (type) are imports
+  returning `Application.create({ ...options, metadata })`. These are the only exports: no default
+  export, no other name for `metadata`. `Application` (value) and `CreateApplicationOptions` (type) are imports
   of `@znight/core` like any other (a user class named `Application` is imported as
   `Application$1`). `CreateApplicationOptions` is `Omit<ApplicationOptions, 'metadata'>` (§8.2).
-- **Reserved names**: `metadata`, `createApplication`, the deprecated alias and `d` (the factory
-  parameter) are never bound by an import or a constant: a user class named `metadata` is imported
-  as `metadata$1`.
+- **Reserved names**: `metadata`, `createApplication` and `d` (the factory parameter) are never
+  bound by an import or a constant: a user class named `metadata` is imported as `metadata$1`.
 - **Keys**: the fixed keys of the metadata format (`version`, `providers`, `scope`, `deps`,
   `factory`, `chain`...) are bare identifiers. Every key that comes from data — tokens, alias keys,
   method names in `interceptors`, extension names and every key of an extension section or of a
@@ -361,9 +355,8 @@ Rules for generated code:
   relative to the project root for application files and `<package>/<path in the package>` for
   package files (independent of symlinks and of the `node_modules` layout).
 - **Error module**: when the compilation has errors, the module served instead
-  (`renderErrorModule`, §6.2) keeps the header and the exports of the generated module (`metadata`,
-  `createApplication`, the deprecated alias and the default export, typed: importers keep linking
-  and type-checking) but throws a `ZnightError` carrying the formatted diagnostics when imported. It is never written to disk by `generate()`.
+  (`renderErrorModule`, §6.2) keeps the header and the exports of the generated module (`metadata` and
+  `createApplication`, typed: importers keep linking and type-checking) but throws a `ZnightError` carrying the formatted diagnostics when imported. It is never written to disk by `generate()`.
 - **Impl.** formatting: a Prettier-like printer (120 columns, single quotes, no semicolons,
   trailing commas).
 - Git policy: the generated file is ignored; `znight generate` (or the Vite plugin / Bun preload)

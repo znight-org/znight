@@ -108,14 +108,14 @@ against the file's directory.
 
 The output is a regular TypeScript module. It exports:
 
-- `metadata`: the compiled graph (also the default export), for `TestApp.create({ metadata })`,
+- `metadata`: the compiled graph, for `TestApp.create({ metadata })`,
   `TestBed.create(X, { metadata })` and the explicit `Application.create({ metadata, ... })`;
 - `createApplication(options)`: `Application.create({ ...options, metadata })`, what `main.ts`
   calls. It takes the options of `Application.create` without `metadata`
   (`CreateApplicationOptions` of `@znight/core`).
 
-`__ZNIGHT_METADATA__`, the name of `metadata` before 0.9, is still exported as a deprecated alias
-and is removed in 0.10: import `metadata` instead.
+These are its only exports: there is no default export. Before 0.9, `metadata` had another name;
+rename the import (see the 0.9 release notes).
 
 ::: code-group
 
@@ -221,10 +221,6 @@ export const metadata: ZnightMetadata = {
 export function createApplication(options: CreateApplicationOptions = {}): Promise<Application> {
   return Application.create({ ...options, metadata })
 }
-
-/** @deprecated Import `metadata` (or call `createApplication()`). Removed in 0.10. */
-export const __ZNIGHT_METADATA__: ZnightMetadata = metadata
-export default metadata
 ```
 
 :::

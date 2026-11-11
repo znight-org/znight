@@ -47,14 +47,9 @@ interface Loaded {
   close(): Promise<void>
 }
 
-/** Exports of the generated module read here (RFC 0015; the default export for older compilers). */
+/** Exports of the generated module read here (RFC 0015). */
 interface GeneratedModule {
-  readonly metadata?: ZnightMetadata
-  readonly default?: ZnightMetadata
-}
-
-function metadataOf(module: GeneratedModule): ZnightMetadata {
-  return (module.metadata ?? module.default) as ZnightMetadata
+  readonly metadata: ZnightMetadata
 }
 
 async function loadWithBun(): Promise<Loaded> {
@@ -70,7 +65,7 @@ async function loadWithBun(): Promise<Loaded> {
     payload.converters === undefined
       ? []
       : convertersOf(await import(pathToFileURL(payload.converters).href), payload.converters)
-  return { metadata: metadataOf(module), converters, close: async () => {} }
+  return { metadata: module.metadata, converters, close: async () => {} }
 }
 
 interface ViteLike {
@@ -120,7 +115,7 @@ async function loadWithVite(): Promise<Loaded> {
     const module = (await runner.import(payload.outFile)) as GeneratedModule
     const converters =
       payload.converters === undefined ? [] : convertersOf(await runner.import(payload.converters), payload.converters)
-    return { metadata: metadataOf(module), converters, close: () => server.close() }
+    return { metadata: module.metadata, converters, close: () => server.close() }
   } catch (error) {
     await server.close()
     throw error

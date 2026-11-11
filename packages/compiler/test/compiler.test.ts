@@ -320,8 +320,9 @@ describe('error module', () => {
       'export function createApplication(options: CreateApplicationOptions = {}): Promise<Application> {',
     )
     expect(code).toContain('return Application.create({ ...options, metadata })')
-    expect(code).toContain('export const __ZNIGHT_METADATA__: ZnightMetadata = metadata')
-    expect(code).toContain('export default metadata')
+    // `metadata` and `createApplication` only: no `__ZNIGHT_METADATA__` alias, no default export.
+    expect(code).not.toContain('__ZNIGHT_METADATA__')
+    expect(code).not.toContain('export default')
   })
 })
 
