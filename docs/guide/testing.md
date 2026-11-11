@@ -212,7 +212,7 @@ it('validates the id', async () => {
 runs `Application.create()` then `app.start()` (unless `start: false`), with signal handlers
 disabled. It applies `overrides` last and by default instantiates only the dependency closure of the
 HTTP controllers (with their guards and interceptors), the message consumers, the hosts of
-[scheduled jobs](/packages/schedule#observability-and-testing), the GraphQL resolvers (with their
+[scheduled jobs](/guide/scheduling#testing), the GraphQL resolvers (with their
 guards and loaders), the WebSocket gateways (with their guards), the overridden providers and the
 providers each plugin lists in its [`initRoots(context)`](/packages/core#plugins): the global
 guards, interceptors and exception mappers of `HttpPlugin.configure({ ... })`, the `guards` of
@@ -331,7 +331,7 @@ test('order events follow the order', async () => {
 `take(n)`, `for await`, `comments` (heartbeats), `retry`, `lastEventId` and `done` are available
 too; a stream that answered an error or a 204 exposes its `body` and `json()`. `app.injectStream()`
 gives the raw body as a `ReadableStream` (other streamed responses), and both accept a `signal`.
-See [testing event streams](/packages/http#testing-event-streams).
+See [testing event streams](/guide/files-and-streaming#testing-event-streams).
 
 ### Uploads and downloads
 
@@ -366,7 +366,7 @@ it('GET /reports/:name supports ranges', async () => {
 ```
 
 The upload rules of the route (`maxSize`, `maxFiles`, `mimeTypes`, required files) apply exactly as
-over the network: see [files](/packages/http#files).
+over the network: see [files](/guide/files-and-streaming#files).
 
 ### Messages
 
@@ -419,7 +419,7 @@ pending on purpose.
 
 Tests that do not exercise the schedule pass `SchedulePlugin.configure({ enabled: false })` and can
 still run a job on demand with `app.get(SchedulerRegistry).trigger(name)`. See
-[@znight/schedule](/packages/schedule#observability-and-testing).
+[@znight/schedule](/guide/scheduling#testing).
 
 ### WebSockets, GraphQL and events
 

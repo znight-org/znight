@@ -13,6 +13,13 @@ npm install @znight/core
 
 Runs on Node.js 24+ and Bun 1.3+ (ESM only). Decorators require `"experimentalDecorators": true`.
 
+::: tip Guide
+This page is the reference. The concepts are explained in the guides:
+[Automatic wiring](/guide/automatic-wiring), [Dependency injection](/guide/dependency-injection),
+[Scopes](/guide/scopes), [Lifecycle](/guide/lifecycle), [Plugins & hooks](/guide/plugins) and
+[Method interceptors](/guide/aop).
+:::
+
 ## At a glance
 
 ```ts

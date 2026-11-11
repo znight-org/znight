@@ -25,6 +25,11 @@ registry) and the guarantees of a compile-time framework:
 npm install @znight/schedule
 ```
 
+::: tip Guide
+This page is the reference. To write and operate scheduled jobs step by step, read the
+[Scheduling guide](/guide/scheduling).
+:::
+
 ## Quick start
 
 ```ts [src/digest/digest.jobs.ts]

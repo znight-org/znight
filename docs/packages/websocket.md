@@ -24,6 +24,11 @@ The
   connection and outbound buffer limits, heartbeats, handler timeouts and a graceful shutdown with
   close frames.
 
+::: tip Guide
+This page is the reference. To build WebSocket gateways step by step, read the
+[WebSockets guide](/guide/websockets).
+:::
+
 ## Install
 
 ```sh
@@ -97,5 +102,5 @@ and the [observability reference](/packages/observability) for the WebSocket spa
 - The [WebSockets guide](/guide/websockets) walks through a complete chat (tickets, rooms, guards, a
   raw binary feed).
 - The [`realtime-chat` example](/examples#realtime-chat) runs it, with its tests.
-- For server-to-client streams only, [Server-Sent Events](/packages/http#server-sent-events) need no
+- For server-to-client streams only, [Server-Sent Events](/guide/files-and-streaming#server-sent-events) need no
   extra package.

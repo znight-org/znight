@@ -58,7 +58,7 @@ NODE_ENV=production bun --no-env-file dist/main.js
 - `--enable-source-maps` makes Node.js stack traces point to your TypeScript sources.
 - `--no-env-file` stops Bun from loading `.env`, `.env.production` and `.env.local` into
   `process.env` by itself (with its own precedence and `${VAR}` expansion): with
-  [`@znight/config`](/packages/config#bun-env-loading), `dotenv()` loads them, the same way
+  [`@znight/config`](/guide/configuration#bun-env-loading), `dotenv()` loads them, the same way
   as on Node.js. `env = false` in `bunfig.toml` does the same for every `bun` command of the project.
 - Bun can also run the sources directly (`bun src/main.ts`) if you generate the container first
   (`znight generate` or the [Bun preload](./compiler#bun-preload)); the build output is still the most
@@ -179,7 +179,7 @@ When a signal-triggered shutdown fails, the process exits with code `1`; a secon
 code `130`.
 
 Event streams and scheduled jobs never finish by themselves, so they are stopped actively:
-`HttpPlugin` closes the open [Server-Sent Events](/packages/http#server-sent-events) streams first
+`HttpPlugin` closes the open [Server-Sent Events](/guide/files-and-streaming#server-sent-events) streams first
 (their sources get `sse.shutdownGraceMs`, 1 s, to send final events, then the clients receive a
 jittered `retry` and reconnect to another instance), and `SchedulePlugin` aborts the `ctx.signal` of
 the running [jobs](/packages/schedule) and waits for them up to its `drainTimeoutMs`. Keep
@@ -296,6 +296,6 @@ work they would do in factories (or lazy) for such deployments.
 4. `shutdown.timeoutMs` is below the platform's grace period.
 5. Configuration is validated at boot (`@znight/config`); secrets come from the environment or a
    secret store.
-6. Logs, metrics and traces are wired with [`@znight/observability`](/packages/observability).
+6. Logs, metrics and traces are wired with [`@znight/observability`](/guide/observability).
 7. With several instances, database migrations run once per release, not at every boot
    ([Data access](./data-access#migrations)).

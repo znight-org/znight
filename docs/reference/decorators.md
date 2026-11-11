@@ -155,7 +155,7 @@ read route decorators on their own classes and methods with `readRouteMeta`, `ef
 and `requiredRouteGroups` from `@znight/http/compiler`
 ([reference](../../packages/http/README.md#route-metadata-in-other-extensions)).
 
-Guide: [HTTP](/packages/http) · [Files](/packages/http#files) · [Security](/guide/security)
+Guide: [Controllers and routes](/guide/http) · [Validation](/guide/validation) · [Files](/guide/files-and-streaming#files) · [Security](/guide/security)
 
 ## `@znight/messaging`
 
@@ -177,7 +177,7 @@ a parameter that is not `unknown` or a primitive is [`ZNIGHT017`](/reference/err
 (a warning, an error with `strictValidation`). Handlers and `@OnError` are inherited from base
 classes the compiler can analyse.
 
-Guide: [Messaging](/packages/messaging)
+Guide: [Messaging](/guide/messaging) · Reference: [`@znight/messaging`](/packages/messaging)
 
 ## `@znight/openapi`
 
@@ -197,7 +197,7 @@ definition)` declares a security scheme, statically evaluated like a route decor
 with a [custom parameter decorator](/guide/custom-parameters) are not documented: describe the
 header or cookie it reads with `@ApiHeader` or `@ApiSecurity`.
 
-Guide: [OpenAPI](/packages/openapi)
+Guide: [OpenAPI](/guide/openapi) · Reference: [`@znight/openapi`](/packages/openapi)
 
 ## `@znight/schedule`
 
@@ -304,7 +304,7 @@ injection). Problems with a field, its type or its names are
 [`ZNIGHT012`](/reference/error-codes#znight012); a decorator on a wrong target, applied twice or with
 a non-evaluable argument is [`ZNIGHT005`](/reference/error-codes#znight005).
 
-Guide: [Config](/packages/config)
+Guide: [Configuration](/guide/configuration) · Reference: [`@znight/config`](/packages/config)
 
 ## `@znight/observability`
 
@@ -319,4 +319,4 @@ fails `Application.create()` with [`ZNIGHT005`](/reference/error-codes#znight005
 | `@Traced(opts?)` | `TracedInterceptor` | A span per call                            | `name`, `attributes`, `kind`                       |
 | `@Metric(opts?)` | `MetricInterceptor` | A duration histogram (or a call counter)   | `type`, `name`, `help`, `labels`, `buckets`        |
 
-Guide: [Observability](/packages/observability)
+Guide: [Observability](/guide/observability) · Reference: [`@znight/observability`](/packages/observability)

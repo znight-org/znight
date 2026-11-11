@@ -17,12 +17,33 @@ what you use.
 | [`@znight/graphql`](./graphql)             | GraphQL: schema from TypeScript types or SDL files checked at build time, loaders, subscriptions over SSE         | dependency    | <Badge type="tip" text="available" /> |
 | [`@znight/websocket`](./websocket)         | WebSocket gateways on the HTTP server: validated events, replies, rooms, backpressure                             | dependency    | <Badge type="tip" text="available" /> |
 | [`@znight/events`](./events)               | In-process application events: `@OnEvent` listeners checked at build time, inline or detached dispatch            | dependency    | <Badge type="tip" text="available" /> |
-| [`@znight/messaging`](./messaging)         | Consumers, retries, dead-letter queues; RabbitMQ, SQS, Kafka, in-memory                                           | dependency    | <Badge type="tip" text="available" /> |
+| [`@znight/messaging`](./messaging)         | Consumers, retries, dead-letter queues; RabbitMQ, SQS, Kafka, Pub/Sub, NATS, Service Bus, Redis, in-memory        | dependency    | <Badge type="tip" text="available" /> |
 | [`@znight/schedule`](./schedule)           | Cron, interval and timeout jobs checked at build time; locks across instances                                     | dependency    | <Badge type="tip" text="available" /> |
 | [`@znight/config`](./config)               | Typed config classes from env, `.env`, JSON/YAML, Vault, AWS/GCP/Azure/OCI secrets                                | dependency    | <Badge type="tip" text="available" /> |
 | [`@znight/observability`](./observability) | Pino logger, Prometheus metrics, OpenTelemetry tracing                                                            | dependency    | <Badge type="tip" text="available" /> |
 | [`@znight/testing`](./testing)             | `TestBed` with auto-mocks, `TestApp` for in-memory end-to-end tests                                               | devDependency | <Badge type="tip" text="available" /> |
 | [`@znight/cli`](./cli)                     | `znight new`, `generate`, `dev`, `build`, `start`, `openapi`, code generators                                     | devDependency | <Badge type="tip" text="available" /> |
+
+## Guides and reference
+
+Package pages are the reference (install, options, decorators, exports, the compiler contract,
+limitations); the guide explains how to use them.
+
+| Package                 | Guide                                                                                                                                                  | Reference                        |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------- |
+| `@znight/core`          | [Dependency injection](/guide/dependency-injection), [Lifecycle](/guide/lifecycle), [Plugins](/guide/plugins), [AOP](/guide/aop)                       | [core](./core)                   |
+| `@znight/compiler`      | [Automatic wiring](/guide/automatic-wiring), [The compiler](/guide/compiler)                                                                           | [compiler](./compiler)           |
+| `@znight/http`          | [Controllers and routes](/guide/http), [Validation](/guide/validation), [Files and streaming](/guide/files-and-streaming), [Security](/guide/security) | [http](./http)                   |
+| `@znight/openapi`       | [OpenAPI](/guide/openapi)                                                                                                                              | [openapi](./openapi)             |
+| `@znight/graphql`       | [GraphQL](/guide/graphql)                                                                                                                              | [graphql](./graphql)             |
+| `@znight/websocket`     | [WebSockets](/guide/websockets)                                                                                                                        | [websocket](./websocket)         |
+| `@znight/events`        | [Application events](/guide/events)                                                                                                                    | [events](./events)               |
+| `@znight/messaging`     | [Messaging](/guide/messaging)                                                                                                                          | [messaging](./messaging)         |
+| `@znight/schedule`      | [Scheduling](/guide/scheduling)                                                                                                                        | [schedule](./schedule)           |
+| `@znight/config`        | [Configuration](/guide/configuration)                                                                                                                  | [config](./config)               |
+| `@znight/observability` | [Observability](/guide/observability)                                                                                                                  | [observability](./observability) |
+| `@znight/testing`       | [Testing](/guide/testing)                                                                                                                              | [testing](./testing)             |
+| `@znight/cli`           | [Getting started](/guide/getting-started), [Deployment](/guide/deployment)                                                                             | [cli](./cli)                     |
 
 ## Not a package (on purpose)
 

@@ -254,7 +254,7 @@ export class BookService {
 
 `DrizzleBookRepository` is the only class implementing `BookRepository`, so the compiler binds every
 `BookRepository` injection to it ([how](./dependency-injection#injecting-interfaces-and-base-classes)).
-The service throws domain errors; an [exception mapper](/packages/http#errors) turns them into
+The service throws domain errors; an [exception mapper](/guide/http#exception-mappers) turns them into
 `404` / `409` responses.
 
 ### Migrations
@@ -444,7 +444,7 @@ export class DrizzleOrderRepository implements OrderRepository {
   ([Testing](./testing#testbed-unit-tests-with-auto-mocks)).
 
 ::: details A whole HTTP request in one transaction
-An [HTTP interceptor](/packages/http#interceptors) can wrap the handler instead
+An [HTTP interceptor](/guide/http#guards-and-interceptors) can wrap the handler instead
 (`@UseInterceptor(TransactionPerRequest)` on a controller or a route):
 
 ```ts

@@ -85,10 +85,11 @@ plugins, guards and interceptors, testing utilities with auto-mocking.
 - [`@znight/compiler`](/packages/compiler) analyses the code and generates the container module:
   its `metadata` and the `createApplication()` function your `main.ts` calls.
 - [`@znight/core`](/packages/core) executes it: container, scopes, lifecycle, plugins, hooks, AOP.
-- Feature packages ([HTTP](/packages/http), [OpenAPI](/packages/openapi),
-  [GraphQL](/packages/graphql), [WebSocket](/packages/websocket), [messaging](/packages/messaging),
-  [events](/packages/events), [scheduling](/packages/schedule), [config](/packages/config),
-  [observability](/packages/observability)) add decorators, compiler support and a runtime plugin.
+- Feature packages ([HTTP](/guide/http), [OpenAPI](/guide/openapi), [GraphQL](/guide/graphql),
+  [WebSocket](/guide/websockets), [messaging](/guide/messaging), [events](/guide/events),
+  [scheduling](/guide/scheduling), [configuration](/guide/configuration),
+  [observability](/guide/observability)) add decorators, compiler support and a runtime plugin; their
+  [package pages](/packages/) are the reference.
 - [`@znight/testing`](/packages/testing) and [`@znight/cli`](/packages/cli) cover tests, scaffolding
   and the development loop.
 

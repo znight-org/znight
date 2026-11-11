@@ -30,6 +30,10 @@ npm install @znight/graphql @znight/http graphql
 [package README](../../packages/graphql/README.md); the [GraphQL guide](/guide/graphql) walks
 through a complete API, and the [`graphql-api` example](/examples#graphql-api) runs it.
 
+::: tip Guide
+This page is the reference. To build a GraphQL API step by step, read the [GraphQL guide](/guide/graphql).
+:::
+
 ## Quick start
 
 ```ts [src/catalog/book.resolver.ts]

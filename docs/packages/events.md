@@ -15,7 +15,10 @@ In-process application events, with the guarantees of a compile-time framework:
   operation; detached ones run after it, in their own scope, with errors reported.
 - **Zero cost when unused.** An application without `@OnEvent` generates the same module as before.
 
-The guide is [Application events](/guide/events); this page is the reference.
+::: tip Guide
+This page is the reference. To publish and listen to events step by step, read the
+[Application events guide](/guide/events).
+:::
 
 ## Install
 

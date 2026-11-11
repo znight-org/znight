@@ -17,6 +17,11 @@ npm install @azure/keyvault-secrets @azure/identity  # optional, for azureKeyVau
 npm install oci-secrets oci-common            # optional, for ociVault()
 ```
 
+::: tip Guide
+This page is the reference. To configure an application step by step (config classes, layering,
+secrets, plugin options, tests), read the [Configuration guide](/guide/configuration).
+:::
+
 ## Config classes
 
 ```ts
@@ -42,17 +47,8 @@ export class DatabaseConfig {
 }
 ```
 
-Inject it anywhere:
-
-```ts
-@Factory()
-export class DatabaseFactory {
-  @Provides({ dispose: 'end' })
-  async createPool(config: DatabaseConfig): Promise<Pool> {
-    return new Pool({ host: config.host, port: config.port, password: config.password, ssl: config.ssl })
-  }
-}
-```
+A config class is a singleton provider: inject it anywhere
+([how](/guide/configuration#config-classes)).
 
 | Decorator          | Target   | Description                                                                          |
 | ------------------ | -------- | ------------------------------------------------------------------------------------ |
@@ -545,42 +541,20 @@ with the original error as `cause`.
 
 ## Bun's automatic `.env` loading {#bun-env-loading}
 
-Bun loads `.env`, `.env.<mode>`, `.env.local` (not in tests) and `.env.<mode>.local` into
-`process.env` **before** your code runs, with its own rules: the mode is `production` or `test` when
-`NODE_ENV` is exactly that and `development` otherwise, `.env.local` wins over `.env.<mode>`, and
-`${VAR}` references are expanded. `env()` then reads those values as if they were the real
-environment: they win over `dotenv()`, are reported as coming from `process.env`, and are loaded even
-without `dotenv()`. The same files give different values on Node.js and on Bun.
-
-Turn Bun's loading off and let `dotenv()` load the files, the same way on both runtimes:
-
-::: code-group
-
-```toml [bunfig.toml]
-env = false
-```
-
-:::
-
-or run `bun --no-env-file dist/main.js` (also with `--preload`). On Bun, `env()` warns once per
-process (`ZnightWarning`) when `process.env` holds variables of the files Bun loaded, naming them. To
-use Bun's loading on purpose, read `process.env` explicitly: `env({ env: process.env })` skips the
-check.
+Moved to the [Configuration guide](/guide/configuration#bun-env-loading). In short: Bun loads `.env`
+files into `process.env` before your code runs, with its own rules, so that `env()` reads them as the
+real environment. Turn it off with `env = false` in `bunfig.toml` (or `bun --no-env-file`) and let
+`dotenv()` load the files the same way on Node.js and Bun. On Bun, `env()` warns once per process
+when `process.env` holds variables of the files Bun loaded.
 
 ## Using config in plugin options
 
-Config classes are ordinary providers, so plugins can read them through the
-[container-function form](/guide/plugins#options-computed-from-the-container) of their options:
-
-```ts
-plugins: [ConfigPlugin.configure(), HttpPlugin.configure(container => ({ port: container.get(ServerConfig).port }))]
-```
+Moved to [Config in plugin options](/guide/configuration#plugin-options): plugins read config
+classes through the container-function form of their options.
 
 ## Testing
 
-In [`TestBed`](/guide/testing#testbed-unit-tests-with-auto-mocks), config classes are real instances
-built from their defaults plus the `config` values you pass (`config: { database: { host: 'db' } }`).
-In application tests, supply an instance with
-`overrides: [[DatabaseConfig, { host: 'localhost', port: 5432 }]]`. `ConfigPlugin` validates every
-config class before overrides are applied: with the plugin, pass the values with `inline()` or use
-`ConfigPlugin.configure({ validate: false })`.
+Moved to [Testing](/guide/configuration#testing) in the Configuration guide: `TestBed` builds config
+classes from their defaults plus the `config` values you pass, application tests pass fixed values
+with `inline()`, and `ConfigPlugin` validates before `overrides` are applied
+(`ConfigPlugin.configure({ validate: false })` turns that off).

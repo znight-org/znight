@@ -57,11 +57,11 @@ walks through a migration. The biggest change is what you delete: every `*.modul
 | `@SetMetadata('roles', [...])` + `Reflector`       | `createRouteDecorator<T>('roles')`                            | See [route metadata](#reflector-createroutedecorator).                                                |
 | `createParamDecorator((data, ctx) => ...)`         | `createParamDecorator<T, D>({ http, graphql, messaging })`    | One resolver per transport, checked at build time. See [below](#createparamdecorator).                |
 | `@UploadedFile()` + `FileInterceptor('file')`      | `@UploadedFile('file', { maxSize, mimeTypes })`               | No interceptor nor Multer: standard `File` objects, limits checked while reading.                     |
-| `cookie-parser` + `@Req() req.cookies`             | `@Cookie('name')`, `@SignedCookie('name')`, `ctx.cookies`     | Coerced like headers; signed cookies with key rotation ([cookies](/packages/http#cookies)).           |
+| `cookie-parser` + `@Req() req.cookies`             | `@Cookie('name')`, `@SignedCookie('name')`, `ctx.cookies`     | Coerced like headers; signed cookies with key rotation ([cookies](/guide/http#cookies)).              |
 | `res.cookie()`                                     | `ctx.setCookie()` / `HttpResponse.withCookie()`               | Secure defaults: `Secure; HttpOnly; SameSite=Lax`.                                                    |
 | `@Sse()` returning `Observable<MessageEvent>`      | `@Sse()` returning an `AsyncIterable<SseEvent>`               | No RxJS; `EventChannel` instead of a `Subject`.                                                       |
 | `app.enableCors()`, `helmet()`                     | `cors` and `securityHeaders` options of `HttpPlugin`          | Handled by the plugin on every adapter ([Security](./security)).                                      |
-| `@nestjs/swagger` (`@ApiProperty`, `@ApiResponse`) | [`@znight/openapi`](/packages/openapi)                        | Schemas from TypeScript types and JSDoc, checked at build time; no `@ApiProperty`.                    |
+| `@nestjs/swagger` (`@ApiProperty`, `@ApiResponse`) | [`@znight/openapi`](/guide/openapi)                           | Schemas from TypeScript types and JSDoc, checked at build time; no `@ApiProperty`.                    |
 
 ### Messaging, config, lifecycle, data
 
@@ -312,7 +312,7 @@ export class AddAttendeeUseCase {
 }
 ```
 
-In Znight the `Logger` of [`@znight/observability`](/packages/observability#logging) is injected
+In Znight the `Logger` of [`@znight/observability`](/guide/observability#logging) is injected
 like any provider, and it is the recommended form: it is visible in the dependency graph and a
 `TestBed` hands a mock. Injecting it adds a constructor parameter, though, which breaks every spec
 calling `new AddAttendeeUseCase(...)` with positional arguments. `getLogger()` keeps the static form

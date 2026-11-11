@@ -33,6 +33,11 @@ const app = await createApplication({
 
 :::
 
+::: tip Guide
+This page is the reference. To set up logs, metrics and traces step by step, read the
+[Observability guide](/guide/observability).
+:::
+
 Register `ObservabilityPlugin` **before** the plugins it observes, so its wrappers are the outermost.
 Each part can be turned off (`metrics: false`, `tracing: false`, `logging: { requests: false }`...),
 and the options may be a function of the container (`configure(c => ({ logging: { level:
@@ -57,72 +62,32 @@ it, so nothing is logged twice. See [Report errors](/guide/plugins#report-errors
 
 ## Logging
 
-```ts
-import { Logger } from '@znight/observability'
+How to log, with the request context, levels, pretty output and static loggers:
+[Logging](/guide/observability#logging) in the guide. The reference:
 
-@Injectable()
-export class PaymentService {
-  constructor(private readonly logger: Logger) {}
-
-  async charge(order: Order) {
-    this.logger.info('charging order', { orderId: order.id, amount: order.total })
-  }
-}
-```
-
-Every entry written while handling a request or a message automatically carries `requestId` (from
-the request scope) and `traceId` / `spanId` (from the active span). The logger accepts
-`(message, context | Error)` and pino's `(context, message)`; `child()`, `isLevelEnabled()`, `level`
-and `flush()` work as in pino. The level comes from the option, else `LOG_LEVEL`, else `info`.
-
-Options include `redact` (paths censored by pino), `pretty` (`pino-pretty`), `base`, `timestamp` and
-`transport`: `consoleTransport()` (default, JSON lines on stdout), `prettyTransport()`,
-`cloudwatchTransport()` (Lambda / CloudWatch JSON format) and `datadogTransport()` (HTTP intake with
-batching and retries; entry fields clashing with Datadog's reserved attributes, such as the HTTP
-`status` of request logs, are kept under other names instead of overwriting them). The plugin also
-writes one entry per HTTP request (`request completed`) and per message delivery. It flushes the
-logger on shutdown, and entries written after that (the final `Application stopped`) are flushed
-as soon as they are written, so they are delivered before the process exits.
-
-With `pretty: true` (development, `pino-pretty`), each entry is one line: the instrumentation entries
-get a short message, named loggers a `[name]` prefix, the remaining fields a compact `{...}`, and
-errors their stack below. `pid`, `hostname`, `traceId` and `spanId` are hidden; the JSON output is
-unchanged:
-
-```txt
-[14:38:00.040] INFO (users-api): [UserService] User created {"requestId":"req-7f3a","userId":42}
-[14:38:00.041] INFO (users-api): [GET] [/users/42] - [200] 3.3ms {"requestId":"req-7f3a"}
-[14:38:00.041] INFO (users-api): [queue orders] message processed 12ms {"type":"order.created","messageId":"msg-1","attempt":1,"consumer":"OrderConsumer","handler":"onCreated"}
-[14:38:00.042] INFO (users-api): [job cleanup] run completed 40ms {"runId":"run-1","trigger":"schedule","scheduledAt":"2026-11-10T08:00:00.000Z"}
-[14:38:00.042] INFO (users-api): [GraphQL query GetUser] 5ms {"transport":"http","documentId":"a1b2c3","requestId":"req-7f3a"}
-```
-
-`PrettyOptions` (`ignore`, `singleLine`, `colorize`, `translateTime`, raw `options`) override these
-defaults; see the [README](../../packages/observability/README.md#pretty-output-development).
+- `Logger` accepts `(message, context | Error)` and pino's `(context, message)`; `child()`,
+  `isLevelEnabled()`, `level` and `flush()` work as in pino. The level comes from the option, else
+  `LOG_LEVEL`, else `info`. Every entry written while handling a request or a message carries
+  `requestId`, `traceId` and `spanId`.
+- Options include `redact` (paths censored by pino), `pretty` (`pino-pretty`), `base`, `timestamp`
+  and `transport`: `consoleTransport()` (default, JSON lines on stdout), `prettyTransport()`,
+  `cloudwatchTransport()` (Lambda / CloudWatch JSON format) and `datadogTransport()` (HTTP intake
+  with batching and retries; entry fields clashing with Datadog's reserved attributes, such as the
+  HTTP `status` of request logs, are kept under other names instead of overwriting them).
+- The plugin writes one entry per HTTP request (`request completed`) and per message delivery. It
+  flushes the logger on shutdown, and entries written after that (the final `Application stopped`)
+  are flushed as soon as they are written.
+- With `pretty: true`, each entry is one line; `pid`, `hostname`, `traceId` and `spanId` are hidden.
+  `PrettyOptions` (`ignore`, `singleLine`, `colorize`, `translateTime`, raw `options`) override these
+  defaults; see the [README](../../packages/observability/README.md#pretty-output-development).
 
 ### Static loggers
 
-Inject the `Logger` by default. For code outside dependency injection, or to migrate static loggers
-(NestJS `new Logger(X.name)`) without changing constructors, `getLogger()` returns a logger usable
-anywhere, even at module load, before any application exists:
-
-```ts
-import { getLogger } from '@znight/observability'
-
-export class UserImporter {
-  private readonly logger = getLogger(UserImporter.name)
-
-  import(rows: readonly unknown[]): void {
-    this.logger.info('Importing users', { count: rows.length })
-  }
-}
-```
-
-Its entries go through the logger of the running application (the one whose request scope is
-active when several run, otherwise the latest), as a child with `{ logger: name }`: same level,
-redaction, transports and request context. Entries written before the application exists are
-buffered (the first 1000) and written once it does. In tests that create no application,
-`setFallbackLogger(new Logger({ level: 'silent' }))` in the test preload silences them. The
+`getLogger(name)` returns a logger usable outside dependency injection, even at module load
+([how](/guide/observability#static-loggers)). Its entries go through the logger of the running
+application (the one whose request scope is active when several run, otherwise the latest), as a
+child with `{ logger: name }`; entries written before the application exists are buffered (the first
+1000). `setFallbackLogger()` sets the logger used when no application runs. The
 [package README](../../packages/observability/README.md) details the routing rules.
 
 ## Metrics

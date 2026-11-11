@@ -381,7 +381,7 @@ add it to `bunfig.toml`. See [Bun preload](./compiler#bun-preload).
 
 `--no-env-file` (or `env = false` in `bunfig.toml`) stops Bun from loading `.env` files into
 `process.env` by itself, so that `@znight/config` reads them the same way as on Node.js (see
-[Bun's automatic `.env` loading](/packages/config#bun-env-loading)).
+[Bun's automatic `.env` loading](/guide/configuration#bun-env-loading)).
 :::
 
 ::: details Why not `node src/main.ts`?
@@ -459,7 +459,8 @@ The mistake never reaches production. Every code is explained in the
 - [Project structure](./project-structure): how to organise a growing application.
 - [Dependency injection](./dependency-injection): qualifiers, factories, optional and lazy
   dependencies.
-- [HTTP](/packages/http): routing, validation, guards and interceptors.
+- [Controllers and routes](./http): routing, parameters, errors, guards and cookies;
+  [Validation](./validation) with schemas.
 - [Data access](./data-access): replace the in-memory repository with a database (Drizzle).
 - [Security](./security): access decisions checked at build time, authentication recipes.
 - [Testing](./testing): unit tests with auto-mocks and end-to-end tests without a network.

@@ -15,6 +15,12 @@ npm install -D @znight/cli @znight/compiler vite
 in your project and only loads them for the commands that need them (`generate`, `dev`, `build`), so
 `npx @znight/cli new` installs neither.
 
+::: tip Guide
+This page is the reference. The commands in context: [Getting started](/guide/getting-started),
+[development workflow](/guide/compiler#development-workflow), [Git and CI](/guide/compiler#git-and-ci)
+and [Deployment](/guide/deployment).
+:::
+
 ## Commands
 
 | Command                       | Description                                                                                                  |

@@ -38,9 +38,9 @@ export class PasswordHasher {
 | `name`    | —             | A qualifier, same as [`@Named()`](#qualifiers-named-and-inject)               |
 | `primary` | `false`       | Preferred candidate, same as [`@Primary()`](#several-implementations-primary) |
 
-Other decorators also declare providers: `@Controller()` ([HTTP](/packages/http)), `@Resolver()`
+Other decorators also declare providers: `@Controller()` ([HTTP](/guide/http)), `@Resolver()`
 ([GraphQL](/guide/graphql)), `@Gateway()` ([WebSocket](/guide/websockets)), `@Consumer()`
-([messaging](/packages/messaging)), `@Config()` ([config](/packages/config)), `@Factory()`
+([messaging](/guide/messaging)), `@Config()` ([configuration](/guide/configuration)), `@Factory()`
 ([below](#factories-factory-and-provides)).
 
 ::: info Arguments must be static
@@ -207,7 +207,7 @@ export class ApiClient {
 }
 ```
 
-For configuration values, prefer typed [`@Config()` classes](/packages/config): they are injected by
+For configuration values, prefer typed [`@Config()` classes](/guide/configuration): they are injected by
 class, validated at boot and testable.
 
 ## Multi injection
