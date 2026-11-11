@@ -230,6 +230,12 @@ with [`ZNIGHT015`](/reference/error-codes#znight015) ("its factory is async"): l
 (`only: [UserController, AuthGuard]`), or pass `only: 'all'`.
 :::
 
+`app.inject({ method?, url, headers?, body?, query?, cookies?, signedCookies? })` resolves with
+`{ status, headers, body, bytes, cookies, json() }`: `body` is the response decoded as UTF-8, `bytes`
+the raw bytes (downloads), `cookies` the cookies the response sets. Request bodies are encoded for
+you: objects as JSON, strings and bytes as is, a `FormData` as `multipart/form-data`, a `Blob` /
+`File` with its type.
+
 ### Test the production wiring {#production-wiring}
 
 A plugin list written again in the tests drifts from the one of `main.ts`. Export it from
@@ -274,14 +280,11 @@ await using app = await TestApp.create({ metadata, plugins: plugins({ port: 0, l
 
 :::
 
-The `rest-api` and `storefront-api` examples do the same with configuration loaders
-(`inline()` values in the tests) and HTTP options merged over the production ones.
-
-`app.inject({ method?, url, headers?, body?, query?, cookies?, signedCookies? })` resolves with
-`{ status, headers, body, bytes, cookies, json() }`: `body` is the response decoded as UTF-8, `bytes`
-the raw bytes (downloads), `cookies` the cookies the response sets. Request bodies are encoded for
-you: objects as JSON, strings and bytes as is, a `FormData` as `multipart/form-data`, a `Blob` /
-`File` with its type.
+With `@znight/config`, add the `ConfigPlugin` options to `AppOptions` and pass `inline()` values in
+the tests (`config: { loaders: [inline({})] }`, as `znight new` does): the loaders replace the `.env`
+files and the environment, so a value in `.env.local` does not change the outcome of a test. The
+`rest-api` and `storefront-api` examples do the same, and merge HTTP options over the production
+ones.
 
 ### Cookies
 

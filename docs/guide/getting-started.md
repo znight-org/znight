@@ -98,7 +98,7 @@ ObservabilityPlugin.configure(container => ({
 ```
 
 `AppConfig.environment` reads `NODE_ENV`, `'production'` when it is unset, so only `znight dev`
-pretty-prints (without `config`, `main.ts` reads `process.env['NODE_ENV']` directly). The `Dockerfile` builds a production image (see [Deployment](/guide/deployment#docker))
+pretty-prints (without `config`, `src/app.ts` reads `process.env['NODE_ENV']` directly). The `Dockerfile` builds a production image (see [Deployment](/guide/deployment#docker))
 with `NODE_ENV=production` and without `pino-pretty`, a dev dependency. Start it in development
 mode:
 

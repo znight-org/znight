@@ -22,7 +22,7 @@ const sha256 = (value: string): Buffer => createHash('sha256').update(value).dig
  * Enforces the access decision of every route (`@Public`, `@Authenticated`, `@Roles`): authenticates
  * the caller with an API key (`x-api-key` header), then checks the roles the route requires.
  *
- * Registered **globally** in `main.ts` (`HttpPlugin.configure({ guards: [AuthGuard] })`), so it runs
+ * Registered **globally** in `src/app.ts` (`HttpPlugin.configure({ guards: [AuthGuard] })`), so it runs
  * before the guards of controllers and routes. Returning `false` answers `403 Forbidden`; throwing an
  * `HttpException` answers its status (`401` here).
  *

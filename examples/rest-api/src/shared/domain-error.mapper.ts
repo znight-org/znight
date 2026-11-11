@@ -18,7 +18,7 @@ import {
 
 /**
  * Turns the domain errors into HTTP errors, so that services throw meaningful errors without
- * knowing about HTTP. Registered in `main.ts` (`exceptionMappers`); mappers are tried in order for
+ * knowing about HTTP. Registered in `src/app.ts` (`exceptionMappers`); mappers are tried in order for
  * every error and the first one returning something wins. `undefined` lets the default rendering
  * apply (`HttpException`s keep their status, anything else is a 500).
  */

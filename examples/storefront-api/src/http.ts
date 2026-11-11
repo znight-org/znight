@@ -10,7 +10,7 @@ import converters from './openapi.converters.js'
 import { DomainErrorMapper } from './shared/domain-error.mapper.js'
 
 /**
- * Options of `HttpPlugin`, shared by `main.ts` and the tests so that both serve the API the same
+ * Options of `HttpPlugin`, used by `src/app.ts`, so by `main.ts` and the tests: both serve the API the same
  * way. Called once per application (`HttpPlugin.configure(container => httpOptions(...))`): an
  * adapter instance serves a single application.
  *

@@ -261,7 +261,7 @@ describe.skipIf(!ENABLED)('end to end (production build)', () => {
         headers: { 'x-api-key': 'wrong', 'x-forwarded-for': '203.0.113.7' },
       })
       expect(wrongKey.status).toBe(401)
-      // security headers, on by default; no-store for the API (configured in main.ts)
+      // security headers, on by default; no-store for the API (src/shared/http-security.ts)
       expect(wrongKey.headers.get('cache-control')).toBe('no-store')
       expect(wrongKey.headers.get('x-content-type-options')).toBe('nosniff')
       // CORS_ORIGINS: the preflight is answered without API key, before the guard
