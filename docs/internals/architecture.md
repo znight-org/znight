@@ -39,7 +39,7 @@ packages/
   core/           runtime: container, application, plugins, hooks, AOP, scopes, decorators, errors
   compiler/       programmatic API (+ Vite plugin, Bun preload): analysis, binding, validation, codegen
   http/           decorators, compiler extension, HttpPlugin, adapters (node, fastify, express, hono)
-  messaging/      decorators, compiler extension, MessagingPlugin, drivers (memory, rabbitmq, sqs, kafka, pubsub, azure-service-bus)
+  messaging/      decorators, compiler extension, MessagingPlugin, drivers (memory, rabbitmq, sqs, kafka, pubsub, nats, azure-service-bus)
   config/         decorators, compiler extension, ConfigPlugin, loaders (env, dotenv, json, yaml, vault, aws, gcp, azure, oci, inline)
   observability/  Logger (pino), metrics (prom-client), tracing (OpenTelemetry), interceptors, ObservabilityPlugin
   openapi/        decorators, compiler extension, OpenApiPlugin, OpenAPI 3.1 assembly (buildOpenApiDocument),
@@ -1389,7 +1389,7 @@ Manifests of the `@znight/*` packages:
 
 `@znight/compiler`, `@znight/testing` and `@znight/cli` have no manifest. Subpath exports:
 `@znight/http` (`/node`, `/fastify`, `/express`, `/hono`, `/path`, `/compiler`), `@znight/messaging`
-(`/memory`, `/rabbitmq`, `/sqs`, `/kafka`, `/pubsub`, `/azure-service-bus`, `/compiler`), `@znight/config` (`/compiler`),
+(`/memory`, `/rabbitmq`, `/sqs`, `/kafka`, `/pubsub`, `/nats`, `/azure-service-bus`, `/testing`, `/compiler`), `@znight/config` (`/compiler`),
 `@znight/openapi` (`/compiler`, `/emit`, `/vite`, `/testing`; RFC 0002), `@znight/schedule`
 (`/compiler`, `/testing`; RFC 0004), `@znight/graphql` (`/compiler`, `/testing`, `/yoga`; RFCs 0005,
 0009), `@znight/events` (`/compiler`, `/testing`; RFC 0011), `@znight/websocket` (`/ws`, `/bun`,
@@ -2456,7 +2456,7 @@ interface MessagingMetadata {
 }
 interface ConsumerDefinition {
   token
-  queue // queue (RabbitMQ, SQS, Service Bus), topic (Kafka) or subscription (Pub/Sub, Service Bus topic/subscription)
+  queue // queue (RabbitMQ, SQS, Service Bus), topic (Kafka), subscription (Pub/Sub, published to as a topic; Service Bus topic/subscription) or subject (NATS)
   options?: { concurrency?: number; deadLetter?: string | false; [driverOption: string]: unknown }
   handlers: MessageHandlerDefinition[] // declaration order
   errorHandler?: string // @OnError method: consumer[name](error, message)
@@ -2497,7 +2497,7 @@ Delivery state machine (at-least-once; handlers must be idempotent and may dedup
   `maxInProcessDelayMs` (the message stays locked) and the message is then **redelivered through the
   broker** (never re-invoked locally); longer delays use the driver-native delayed redelivery. The
   attempt count comes from the broker (SQS `ApproximateReceiveCount`, RabbitMQ `x-delivery-count`,
-  Pub/Sub `deliveryAttempt`, Service Bus `deliveryCount`)
+  Pub/Sub `deliveryAttempt`, JetStream delivery count, Service Bus `deliveryCount`)
   or the `x-znight-attempt` header. When the driver cannot schedule the retry, the message is
   released after `defaults.requeueDelay`. Boot fails (ZNIGHT011) if a `@Retry` cannot be honoured;
 - terminal failure (last attempt, non-retryable, validation, decode, no handler) → `@OnError`:
@@ -2508,8 +2508,8 @@ Delivery state machine (at-least-once; handlers must be idempotent and may dedup
   message is released after `defaults.requeueDelay` (1 s) and redelivered. The destination is
   `@Consumer({ deadLetter })` > `defaults.deadLetter(queue)` > `driver.deadLetterName(queue)`;
   `false` disables dead-lettering (RabbitMQ rejects natively, SQS/Kafka discard, Pub/Sub nacks so
-  that a subscription dead-letter policy applies, or acks when the subscription has none; Service Bus
-  completes). The copy keeps
+  that a subscription dead-letter policy applies, or acks when the subscription has none; NATS
+  terminates the message with `term()`; Service Bus completes). The copy keeps
   body, type, id and headers (minus `x-znight-attempt`) and adds `x-znight-dead-letter-reason`,
   `x-znight-error`, `x-znight-original-queue`, `x-znight-attempts`;
 - nothing is dropped: every path ends with the broker owning the message (acked, republished,
@@ -2612,6 +2612,7 @@ specifics:
 | `/sqs` (client-sqs ^3.600)                   | `ApproximateReceiveCount`                                                                              | visibility timeout (≤ 12 h)                                                                                                                                                                                                        | 1 s                                    | `<q>-dlq` or `RedrivePolicy` target                                                               | queues never created; `maxReceiveCount` ≥ attempts checked; lease extension (stopped before each settlement); FIFO groups by `key`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `/kafka` (@platformatic/kafka)               | `x-znight-attempt`                                                                                     | retry topic `<group>.retry` (`x-znight-not-before`, ≤ 15 min: `maxRetryDelayMs`)                                                                                                                                                   | 0                                      | `<topic>.dlq`                                                                                     | one consumer group per `@Consumer` (`<groupId>.<topic>`, override with `groupId`), manual commits (never moving back), partitions sequential, deduplication after a rebalance, back-pressure per stream, no delayed publish                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `/pubsub` (@google-cloud/pubsub ^6)          | `deliveryAttempt` (subscriptions with a dead-letter policy), else the retries it requested (in memory) | ack deadline (`ModifyAckDeadline`, ≤ 600 s)                                                                                                                                                                                        | 1 s (0 with `retries: 'subscription'`) | topic `<q>-dlq` or the dead-letter policy topic                                                   | `@Consumer` queue = subscription, published queue = topic (`topics` / `subscriptions` maps); unary Pull, at most `concurrency` messages leased, lease extension (stopped before each settlement); `retries: 'subscription'` nacks every failure (subscription retry and dead-letter policies own redelivery; a dead-letter policy is required); `maxDeliveryAttempts` ≥ attempts checked otherwise; ordering keys serialised; no delayed publish; topology verified (`provision` creates it)                                                                                                                                       |
+| `/nats` (@nats-io/jetstream ^3)              | JetStream delivery count                                                                               | `nak(delay)` (≤ 2^53 ns, about 104 days)                                                                                                                                                                                           | 1 s                                    | subject `<q>.dlq`, then `term()`                                                                  | durable pull consumer `<durablePrefix>-<queue>` filtering `subjects(queue)` on the stream capturing it (or `streams(queue)`), created when missing (explicit acks, `max_deliver: -1`), verified otherwise (filter subject, `max_deliver` ≥ attempts); fetches of at most the free slots; ack wait extended (`working()`); `ackAck()`; `nak` / `term` then a flush; dead-letter copies deduplicated per durable; `MAX_DELIVERIES` advisories dead-lettered; streams verified (`provision`)                                                                                                                                          |
 | `/azure-service-bus` (@azure/service-bus ^7) | `deliveryCount` (0-based, + 1) + `x-znight-attempt` of scheduled copies                                | queues: copy scheduled on the queue (`scheduledEnqueueTimeUtc`) then original completed; subscriptions and dead-letter sub-queues: message kept locked during the delay, then abandoned (delay ≤ `maxAutoLockRenewalDurationInMs`) | 1 s (0 with `retries: 'entity'`)       | sub-queue `<q>/$deadletterqueue` (`deadLetterMessage()`), or a copy sent to another queue / topic | `@Consumer` queue = queue, `topic/subscription` or `<entity>/$deadletterqueue` (`subscriptions` map), published queue = queue or topic (`entities` map); peek-lock `receiveMessages` for the free concurrency slots, lock renewed by the SDK; `retries: 'entity'` abandons every retryable failure (`maxDeliveryCount` and the sub-queue own redelivery); `maxDeliveryCount` ≥ attempts checked under `'znight'`; delayed publish scheduled; `key` = session id and partition key; session-enabled entities refused; entities verified with the administration client, else probed with a first receive (`provision` creates them) |
 
 More on the drivers:
@@ -2702,6 +2703,40 @@ More on the drivers:
   values ≤ 1024 bytes, no `goog` prefix) are checked before publishing; `googclient_traceparent` is
   exposed as `traceparent` when absent. A Pull in flight when the subscription stops is abandoned
   (unary calls cannot be cancelled) and the messages it returns are released.
+- **NATS JetStream** (RFC 0014 §4.2). `publish(queue)` publishes to the subject `subjects(queue)`
+  (default: the queue name) with the Znight id as `Nats-Msg-Id` (deduplicated within the stream's
+  duplicate window) and resolves on the `PubAck`; `JetStreamNotEnabled` / no responders means no
+  stream captures the subject (ZNIGHT011, or a stream named after the subject with `provision`). At
+  subscribe time the driver resolves the stream (`streams(queue)` or `@Consumer({ stream })`,
+  verified to exist and to capture the subject through its `subjects`, unless a mirror or sources
+  fill it; otherwise the stream capturing the subject), checks a stream captures the dead-letter
+  subject (a mapped one through its `subjects`), then reads the durable (`@Consumer({ durable })` or `<durablePrefix>-<queue>`, characters
+  outside `[A-Za-z0-9_-]` replaced by `_`): a missing one is created (`ack_policy: explicit`,
+  `ack_wait: ackWaitMs`, `max_deliver: -1`, `deliver_policy: all`, then `consumerConfig`), an existing
+  one is never updated and must be a pull consumer with explicit acks, filtering exactly the subject
+  (`filter_subject`, or `filter_subjects` = `[subject]`), whose `max_deliver` is unlimited or ≥ the
+  consumer's attempts (ZNIGHT011 otherwise). Back-pressure is per process: one
+  fetch at a time asks for at most `concurrency − inflight` messages (`max_ack_pending` stays the
+  consumer's, shared by every replica; a message nak'ed with a delay stays pending until its
+  redelivery and holds one of those slots). Messages handed to the runtime get `working()` every half
+  ack wait until their settlement. `ack` is `ackAck()` (confirmed); `release` is `nak()`; `retry`
+  is `nak(max(1, delayMs))` (an explicit delay, so a consumer `backoff` never adds to it); `deadLetter`
+  publishes the copy (transport headers, headers, dead-letter headers on one line each,
+  `Nats-Msg-Id` `znight-dlq-<stream>-<durable>-<seq>`, so that consumers of one stream never
+  deduplicate each other's copies) then `term(reason)`, or only `term()` with
+  `deadLetter: false`. `nak` and `term` are fire-and-forget in NATS: each is followed by a
+  connection flush, so it resolves once the server received it. When the consumer has a finite
+  `max_deliver`, the driver subscribes to `$JS.EVENT.ADVISORY.CONSUMER.MAX_DELIVERIES.<stream>.<durable>`
+  in a queue group: a message JetStream stopped delivering (deliveries spent by releases or expired
+  ack waits) is read from the stream and dead-lettered with reason `max-attempts`, the same
+  `Nats-Msg-Id` deduplicating it against a runtime dead letter (the stream message stays; without a
+  dead-letter queue, an error is logged). Impl.: advisories are core NATS messages, so one published
+  while no replica is subscribed is lost (the message stays in the stream, undelivered). Headers are
+  NATS headers (values are single lines, trimmed); `Nats-*` headers reach JetStream on publish
+  (`Nats-TTL`...) and are hidden from handlers; `key` travels in `x-znight-key`; the timestamp is
+  the stream time. Cancel stops the fetch in flight (messages it still yields are given back with
+  `nak()`); close waits for the deliveries in flight, then drains the connection it created, or
+  flushes the one it was given.
 - **Azure Service Bus** (RFC 0014 §4.1). A `@Consumer` queue maps (`subscriptions`, default: the
   queue name) to `queue`, `topic/subscription` (or `topic/subscriptions/subscription`), each optionally
   followed by `/$deadletterqueue` (a receiver with `subQueueType: 'deadLetter'`); a published queue maps
