@@ -1,5 +1,17 @@
 # @znight/messaging
 
+## 0.8.0
+
+### Patch Changes
+
+- babdc79: Azure Service Bus driver at `@znight/messaging/azure-service-bus` (optional peer `@azure/service-bus`, and `@azure/identity` for `DefaultAzureCredential`): queues, topic subscriptions and dead-letter sub-queues, peek-lock receives with lock renewal, retries owned by Znight (scheduled copies, native dead-letter sub-queue) or by the entity (`retries: 'entity'`, `maxDeliveryCount`), scheduled delayed publishing, entities verified with the administration client and created with `provision: true` (RFC 0014).
+- 434b251: Public driver conformance kit: `describeDriverConformance()` from `@znight/messaging/testing` runs the scenarios every first-party driver passes against a third-party driver, with the `describe`/`it` of any test framework; `deadLetterHeaders()` is exported from the root, and the README documents how to write, test and publish your own driver (RFC 0014).
+- cc6e4f0: NATS JetStream driver (`@znight/messaging/nats`, RFC 0014): durable pull consumers with confirmed acks, native attempts, `nak(delay)` retries, deduplicated dead letters, ack-wait extension, `max_deliver` advisories and optional stream provisioning.
+- 5557128: Redis Streams driver at `@znight/messaging/redis` (Redis 7.0+ or Valkey, ioredis 5.4+ or 6 as an optional peer): a stream per queue read through consumer groups, retries and releases as an atomic copy plus `XACK` to a retry stream per group (fan-outs never see another group's retries), dead letters to a dead-letter stream, delayed retries and delayed publishing through sorted sets, crashed consumers' entries claimed back with `XAUTOCLAIM`, a housekeeping pass that trims what every group acknowledged and removes the consumers of crashed processes, `MAXLEN ~` and `WAIT` for replicas (RFC 0014).
+- b04d06c: NATS JetStream driver: `InboundMessage.timestamp` keeps the exact millisecond of a JetStream timestamp (a nanosecond count beyond 2^53 used to lose one).
+- @znight/compiler@0.8.0
+  - @znight/core@0.8.0
+
 ## 0.7.3
 
 ### Patch Changes

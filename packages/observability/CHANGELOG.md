@@ -1,5 +1,11 @@
 # @znight/observability
 
+## 0.8.0
+
+### Patch Changes
+
+- @znight/core@0.8.0
+
 ## 0.7.3
 
 ### Patch Changes
