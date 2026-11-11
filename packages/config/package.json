@@ -1,6 +1,6 @@
 {
   "name": "@znight/config",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Znight config plugin: type-safe configuration classes loaded from env, files and secret stores",
   "license": "MIT",
   "author": "Ugho STEPHAN",

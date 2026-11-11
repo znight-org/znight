@@ -1,5 +1,15 @@
 # @znight/openapi
 
+## 0.9.0
+
+### Patch Changes
+
+- 394c247: `znight openapi` reads the `metadata` export of the generated module, and the `@znight/testing` messages and JSDoc name `{ metadata }` instead of `__ZNIGHT_METADATA__` (RFC 0015).
+- Updated dependencies [394c247]
+  - @znight/compiler@0.9.0
+  - @znight/core@0.9.0
+  - @znight/http@0.9.0
+
 ## 0.8.0
 
 ### Patch Changes
