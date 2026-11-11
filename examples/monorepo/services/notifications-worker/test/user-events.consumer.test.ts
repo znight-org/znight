@@ -6,7 +6,7 @@ import { ObservabilityPlugin } from '@znight/observability'
 import { TestApp } from '@znight/testing'
 import { CLOCK, type Clock, USER_EVENTS_QUEUE, UserDirectory, UserEventType } from '@znight-examples/shared'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
 import { afterEach, beforeEach, describe, expect, test as it } from 'bun:test'
 
 const frozenClock: Clock = { now: () => new Date('2026-01-02T00:00:00.000Z') }

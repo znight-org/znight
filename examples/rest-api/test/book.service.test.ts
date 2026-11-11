@@ -4,7 +4,7 @@ import { EventPublisher } from '@znight/events'
 import { Logger } from '@znight/observability'
 import { TestBed } from '@znight/testing'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
 import { BookAdded } from '../src/books/book.events.js'
 import { BookNotFoundError, CoverChangedError, CoverNotFoundError, UnsupportedCoverError } from '../src/books/book.js'
 import { BookService } from '../src/books/book.service.js'

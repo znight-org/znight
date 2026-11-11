@@ -243,16 +243,17 @@ export class Unused {}
   it('reports provider modules importing the generated module (ZNIGHT020)', async () => {
     const app = tempApp({
       'src/service.ts': `import { Injectable } from '@znight/core'
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated.ts'
+import { metadata } from './.znight/container.generated.ts'
 @Injectable()
 export class Service {
-  readonly metadata = __ZNIGHT_METADATA__
+  readonly metadata = metadata
 }
 `,
     })
     try {
       const result = await compile({ root: app.root })
       expect(codesOf(app.root, result.diagnostics)).toEqual(['ZNIGHT020 src/service.ts:2'])
+      expect(result.diagnostics[0]?.hints?.some(hint => hint.includes('editor auto-import'))).toBe(true)
     } finally {
       app.cleanup()
     }
@@ -309,7 +310,19 @@ describe('error module', () => {
     expect(code).toContain(
       "throw new ZnightError('ZNIGHT018', 'The Znight compilation failed, the generated container is unusable.\\n\\nUnknown error')",
     )
-    expect(code).toContain('export const __ZNIGHT_METADATA__: ZnightMetadata = fail()')
+    expect(code).toContain('export const metadata: ZnightMetadata = fail()')
+  })
+
+  it('exports the names of the generated module (RFC 0015)', () => {
+    const code = renderErrorModule([], { version: '9.9.9' })
+    expect(code).toContain("import { Application, ZnightError } from '@znight/core'")
+    expect(code).toContain(
+      'export function createApplication(options: CreateApplicationOptions = {}): Promise<Application> {',
+    )
+    expect(code).toContain('return Application.create({ ...options, metadata })')
+    // `metadata` and `createApplication` only: no `__ZNIGHT_METADATA__` alias, no default export.
+    expect(code).not.toContain('__ZNIGHT_METADATA__')
+    expect(code).not.toContain('export default')
   })
 })
 

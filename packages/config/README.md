@@ -71,11 +71,9 @@ export class Database {
 ```ts
 // src/main.ts
 import { ConfigPlugin } from '@znight/config'
-import { Application } from '@znight/core'
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
+import { createApplication } from './.znight/container.generated.js'
 
-const app = await Application.create({
-  metadata: __ZNIGHT_METADATA__,
+const app = await createApplication({
   plugins: [ConfigPlugin.configure()], // loads .env files, then process.env
 })
 await app.start()
@@ -833,7 +831,7 @@ const DatabaseConfig$fields: readonly ConfigFieldDefinition[] = [
   },
 ]
 
-export const __ZNIGHT_METADATA__: ZnightMetadata = {
+export const metadata: ZnightMetadata = {
   providers: {
     ['src/config/database.config.ts#DatabaseConfig']: {
       scope: 'singleton',

@@ -91,8 +91,7 @@ const CONNECTION_HOOK = 'websocket:connection'
  * `HttpPlugin`: gateways are served on its server and port, whatever the plugin order.
  *
  * ```ts
- * await Application.create({
- *   metadata: __ZNIGHT_METADATA__,
+ * await createApplication({
  *   plugins: [HttpPlugin.configure({ port: 3000 }), WebSocketPlugin.configure({ maxPayload: '64kb' })],
  * })
  * ```

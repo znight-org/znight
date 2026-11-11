@@ -6,7 +6,7 @@ import { parseCron, SchedulerRegistry } from '@znight/schedule'
 import { createJobContext } from '@znight/schedule/testing'
 import { TestBed } from '@znight/testing'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
 import { DigestJobs, digestMail, previousRun } from '../src/digest/digest.jobs.js'
 import { ReportService } from '../src/digest/report.service.js'
 import { describe, expect, test as it } from 'bun:test'

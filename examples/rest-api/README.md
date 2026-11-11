@@ -21,7 +21,7 @@ constructor types, validates the graph and generates the container (`src/.znight
 | ------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
 | CRUD controller, `@Param` / `@Query` coercion, Zod body schemas                                               | [`books/book.controller.ts`](src/books/book.controller.ts), [`book.schemas.ts`](src/books/book.schemas.ts)                       |
 | Access decisions `@Public()` / `@Authenticated()` / `@Roles()`: one required group, checked at build and boot | [`auth/auth.decorators.ts`](src/auth/auth.decorators.ts), [`auth/auth.guard.ts`](src/auth/auth.guard.ts)                         |
-| CORS, security headers and trusted proxies                                                                    | [`shared/http-security.ts`](src/shared/http-security.ts), [`main.ts`](src/main.ts)                                               |
+| CORS, security headers and trusted proxies                                                                    | [`shared/http-security.ts`](src/shared/http-security.ts), [`app.ts`](src/app.ts)                                                 |
 | Request-scoped provider filled by the guard, read through `Lazy<T>`                                           | [`auth/request-user.ts`](src/auth/request-user.ts), [`auth/me.controller.ts`](src/auth/me.controller.ts)                         |
 | HTTP interceptor                                                                                              | [`shared/server-timing.interceptor.ts`](src/shared/server-timing.interceptor.ts)                                                 |
 | Domain errors mapped to HTTP (`BookNotFoundError` → 404, duplicate → 409)                                     | [`books/book.ts`](src/books/book.ts), [`shared/domain-error.mapper.ts`](src/shared/domain-error.mapper.ts)                       |
@@ -29,7 +29,7 @@ constructor types, validates the graph and generates the container (`src/.znight
 | Drizzle + PGlite through a `@Factory`: async init, migrations, dispose                                        | [`db/database.factory.ts`](src/db/database.factory.ts), [`drizzle/`](drizzle)                                                    |
 | Repository behind an interface, injected by interface                                                         | [`books/book.repository.ts`](src/books/book.repository.ts), [`drizzle-book.repository.ts`](src/books/drizzle-book.repository.ts) |
 | `@Config` classes, `@Env`, `@Secret`, `.env` files                                                            | [`config/`](src/config), [`.env.development`](.env.development)                                                                  |
-| JSON logs with request ids, Prometheus `/metrics`, `@Logged`, `@Metric`                                       | [`main.ts`](src/main.ts), [`books/book.service.ts`](src/books/book.service.ts)                                                   |
+| JSON logs with request ids, Prometheus `/metrics`, `@Logged`, `@Metric`                                       | [`app.ts`](src/app.ts), [`books/book.service.ts`](src/books/book.service.ts)                                                     |
 | Application events: `BookAdded` published by the service, an inline and a detached `@OnEvent` listener        | [`books/book.events.ts`](src/books/book.events.ts), [`book.listeners.ts`](src/books/book.listeners.ts)                           |
 | Lifecycle hooks (`onReady`, `onStop`) and graceful shutdown                                                   | [`app.lifecycle.ts`](src/app.lifecycle.ts), [`main.ts`](src/main.ts)                                                             |
 | Unit tests (`TestBed`), repository tests on a real database, HTTP tests (`TestApp`), end-to-end tests         | [`test/`](test)                                                                                                                  |
@@ -165,7 +165,8 @@ every log line of the request, and the [security headers](#browsers-and-proxies)
 
 ```txt
 src/
-├─ main.ts                          # Application.create(): plugins, global guard, mapper, shutdown
+├─ main.ts                          # createApplication(): the plugins of app.ts, shutdown
+├─ app.ts                           # plugins(): global guard, mapper, events..., shared with the tests
 ├─ app.lifecycle.ts                 # onReady / onStop hooks
 ├─ config/                          # @Config classes: server, database, auth (@Secret)
 ├─ db/
@@ -374,9 +375,9 @@ storage instead (see [Large files](../../packages/http/README.md#large-files)).
 
 ### Browsers and proxies
 
-[`http-security.ts`](src/shared/http-security.ts) gives `HttpPlugin` three options, shared by
-`main.ts` and the tests, and validated at boot (ZNIGHT005: a malformed origin or proxy address stops
-the application instead of silently matching nothing):
+[`http-security.ts`](src/shared/http-security.ts) gives `HttpPlugin` three options, applied by
+[`app.ts`](src/app.ts) (so by `main.ts` and the tests), and validated at boot (ZNIGHT005: a
+malformed origin or proxy address stops the application instead of silently matching nothing):
 
 ```ts
 HttpPlugin.configure(container => {
@@ -409,7 +410,8 @@ HttpPlugin.configure(container => {
 
 ### Observability
 
-`ObservabilityPlugin` comes first in `main.ts`, so its hooks wrap everything:
+`ObservabilityPlugin` comes first in the plugins of [`app.ts`](src/app.ts), so its hooks wrap
+everything:
 
 - one JSON log line per request (`request completed`, warnings for 4xx, errors for 5xx) with its
   `requestId`; every log written while handling the request carries it too;

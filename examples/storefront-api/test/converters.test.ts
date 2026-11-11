@@ -1,7 +1,7 @@
 import { buildOpenApiDocument } from '@znight/openapi'
 import * as v from 'valibot'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
 import { AddCartItem } from '../src/carts/cart.schemas.js'
 import { CreateProduct } from '../src/catalog/product.schemas.js'
 import converters, { valibotDiscriminators } from '../src/openapi.converters.js'

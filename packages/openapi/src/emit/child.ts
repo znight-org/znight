@@ -47,6 +47,11 @@ interface Loaded {
   close(): Promise<void>
 }
 
+/** Exports of the generated module read here (RFC 0015). */
+interface GeneratedModule {
+  readonly metadata: ZnightMetadata
+}
+
 async function loadWithBun(): Promise<Loaded> {
   const compiler = (await importFromProject('@znight/compiler')) as {
     createPreload(options: Record<string, unknown>): Promise<unknown>
@@ -55,12 +60,12 @@ async function loadWithBun(): Promise<Loaded> {
   const config = await compiler.loadZnightConfig(payload.root)
   const options = config.file === undefined ? payload.compilerOptions : config.options
   await compiler.createPreload({ ...options, root: payload.root, mode: 'serve', logLevel: 'silent' })
-  const module = (await import(pathToFileURL(payload.outFile).href)) as { __ZNIGHT_METADATA__: ZnightMetadata }
+  const module = (await import(pathToFileURL(payload.outFile).href)) as GeneratedModule
   const converters =
     payload.converters === undefined
       ? []
       : convertersOf(await import(pathToFileURL(payload.converters).href), payload.converters)
-  return { metadata: module.__ZNIGHT_METADATA__, converters, close: async () => {} }
+  return { metadata: module.metadata, converters, close: async () => {} }
 }
 
 interface ViteLike {
@@ -107,10 +112,10 @@ async function loadWithVite(): Promise<Loaded> {
     }
     const runner = environment.runner
     if (runner === undefined) throw new Error('the ssr environment of the Vite config has no module runner')
-    const module = (await runner.import(payload.outFile)) as { __ZNIGHT_METADATA__: ZnightMetadata }
+    const module = (await runner.import(payload.outFile)) as GeneratedModule
     const converters =
       payload.converters === undefined ? [] : convertersOf(await runner.import(payload.converters), payload.converters)
-    return { metadata: module.__ZNIGHT_METADATA__, converters, close: () => server.close() }
+    return { metadata: module.metadata, converters, close: () => server.close() }
   } catch (error) {
     await server.close()
     throw error

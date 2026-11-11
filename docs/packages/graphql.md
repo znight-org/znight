@@ -59,14 +59,12 @@ export class BookResolver {
 ```
 
 ```ts [src/main.ts]
-import { Application } from '@znight/core'
 import { GraphQLPlugin } from '@znight/graphql'
 import { HttpPlugin } from '@znight/http'
 
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
+import { createApplication } from './.znight/container.generated.js'
 
-const app = await Application.create({
-  metadata: __ZNIGHT_METADATA__,
+const app = await createApplication({
   plugins: [HttpPlugin.configure({ port: 3000 }), GraphQLPlugin.configure()],
 })
 await app.start() // POST /graphql, GET /graphql (queries; GraphiQL in development), SSE subscriptions

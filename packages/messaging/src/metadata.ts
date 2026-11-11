@@ -1,5 +1,5 @@
 /**
- * Messaging section of the generated metadata (`__ZNIGHT_METADATA__.extensions.messaging`), produced
+ * Messaging section of the generated metadata (`metadata.extensions.messaging`), produced
  * by the `@znight/messaging/compiler` extension and consumed by `MessagingPlugin`.
  * See docs/internals/architecture.md §9.2.
  */

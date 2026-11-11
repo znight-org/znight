@@ -111,6 +111,6 @@ export async function compileAndLoad(
   const errors = result.diagnostics.filter(diagnostic => diagnostic.severity === 'error')
   if (errors.length > 0) throw new Error(`compile failed:\n${render(app.root, errors).join('\n')}`)
   app.write(path.relative(app.root, result.outFile), result.code)
-  const module = (await import(result.outFile)) as { __ZNIGHT_METADATA__: ZnightMetadata }
-  return { result, metadata: module.__ZNIGHT_METADATA__ }
+  const module = (await import(result.outFile)) as { metadata: ZnightMetadata }
+  return { result, metadata: module.metadata }
 }

@@ -50,7 +50,7 @@ export const STEPS: readonly HomeStep[] = [
   },
   {
     title: 'The runtime calls factories',
-    text: 'Application.create() receives the generated metadata and calls its factories in a precomputed order. Nothing is looked up or reflected at boot.',
+    text: 'createApplication(), written by the compiler, calls the generated factories in a precomputed order. Nothing is looked up or reflected at boot.',
     icon: '<path d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/>',
     link: '/guide/lifecycle',
     linkText: 'Application lifecycle',

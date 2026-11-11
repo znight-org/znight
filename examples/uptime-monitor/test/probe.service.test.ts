@@ -5,7 +5,7 @@ import { Logger } from '@znight/observability'
 import { createJobContext } from '@znight/schedule/testing'
 import { TestBed } from '@znight/testing'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
 import { ProbeService } from '../src/monitors/probe.service.js'
 import { ProbeEvents } from '../src/monitors/probe-events.js'
 import { ProbeResultRepository } from '../src/monitors/probe-result.repository.js'

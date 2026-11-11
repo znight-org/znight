@@ -59,7 +59,8 @@ It creates a small greeting API with its tests:
 ```txt
 my-service/
 ├─ src/
-│  ├─ main.ts                    # Application.create() with the plugins, then start()
+│  ├─ app.ts                     # the plugins, shared by main.ts and the TestApp tests
+│  ├─ main.ts                    # createApplication({ plugins }), then start()
 │  ├─ openapi.ts                 # @OpenApiDocument: title, description, version      (openapi)
 │  └─ app/
 │     ├─ app.config.ts           # @Config('app'): PORT, APP_GREETING, NODE_ENV      (config)
@@ -97,7 +98,7 @@ ObservabilityPlugin.configure(container => ({
 ```
 
 `AppConfig.environment` reads `NODE_ENV`, `'production'` when it is unset, so only `znight dev`
-pretty-prints (without `config`, `main.ts` reads `process.env['NODE_ENV']` directly). The `Dockerfile` builds a production image (see [Deployment](/guide/deployment#docker))
+pretty-prints (without `config`, `src/app.ts` reads `process.env['NODE_ENV']` directly). The `Dockerfile` builds a production image (see [Deployment](/guide/deployment#docker))
 with `NODE_ENV=production` and without `pino-pretty`, a dev dependency. Start it in development
 mode:
 
@@ -319,18 +320,19 @@ such as `NotFoundException` set the status for you.
 
 ## Bootstrap the application
 
-`main.ts` imports the generated metadata and creates the application with its plugins:
+`main.ts` calls `createApplication()`, written by the compiler in the generated module from your
+decorated classes: it creates the application from the compiled graph, with the plugins you list.
+There is no module to declare. (`znight new` puts the plugin list in `src/app.ts`, shared with the
+tests: see [Test the production wiring](/guide/testing#production-wiring).)
 
 ::: code-group
 
 ```ts [src/main.ts]
-import { Application } from '@znight/core'
 import { HttpPlugin } from '@znight/http'
 import { fastifyAdapter } from '@znight/http/fastify'
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
+import { createApplication } from './.znight/container.generated.js'
 
-const app = await Application.create({
-  metadata: __ZNIGHT_METADATA__,
+const app = await createApplication({
   plugins: [HttpPlugin.configure({ adapter: fastifyAdapter(), port: 3000 })],
 })
 
@@ -388,7 +390,7 @@ Open `src/.znight/container.generated.ts` (run `npx znight generate` to create i
 It is plain TypeScript:
 
 ```ts
-export const __ZNIGHT_METADATA__: ZnightMetadata = {
+export const metadata: ZnightMetadata = {
   version: 1,
   compiler: '0.6.1',
   providers: {

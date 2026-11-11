@@ -112,7 +112,7 @@ export interface GenCode {
 
 /**
  * A reference to a module-level `const` declared with {@link GenerateContext.constant} (printed
- * before `__ZNIGHT_METADATA__`).
+ * before the `metadata` export).
  */
 export interface GenConstant {
   readonly kind: 'gen:constant'
@@ -204,7 +204,7 @@ export interface GenerateContext<TData = unknown> extends GenBuilders {
   importFrom(module: string, name: string, options?: { readonly type?: boolean }): GenNode
   tokenOf(target: ClassInfo | ClassRef | string): Token | undefined
   /**
-   * Declares a module-level `const` printed before `__ZNIGHT_METADATA__` and returns a reference to
+   * Declares a module-level `const` printed before the `metadata` export and returns a reference to
    * it: `const <name>: <type> = <value>`. Use it for values referenced several times (a provider
    * factory and the extension section). `name` must be an identifier; it is de-duplicated against
    * the other bindings of the module (`DatabaseConfig$fields`, `DatabaseConfig$fields$1`).

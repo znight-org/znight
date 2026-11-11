@@ -43,8 +43,7 @@ describe.skipIf(typeof compile !== 'function')('compiled cookies and SSE applica
     outFile = result.outFile
     fs.mkdirSync(path.dirname(outFile), { recursive: true })
     fs.writeFileSync(outFile, code)
-    metadata = ((await import(pathToFileURL(outFile).href)) as { __ZNIGHT_METADATA__: ZnightMetadata })
-      .__ZNIGHT_METADATA__
+    metadata = ((await import(pathToFileURL(outFile).href)) as { metadata: ZnightMetadata }).metadata
     http = HttpPlugin.configure({ port: 0, host: '127.0.0.1', cookies: { secrets: SECRET } })
     application = await Application.create({
       metadata,

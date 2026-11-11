@@ -43,7 +43,7 @@ GET /orders/:id ──► the order and its status
 
 ```txt
 src/
-├─ main.ts                          # Application.create() with the plugins, then start()
+├─ main.ts                          # createApplication() with the plugins, then start()
 ├─ .znight/                         # generated DI container (git-ignored)
 ├─ config/                          # @Config classes: HTTP, messaging, observability
 ├─ health/health.controller.ts      # GET /health (readiness)

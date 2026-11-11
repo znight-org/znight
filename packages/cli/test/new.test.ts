@@ -89,7 +89,7 @@ describe('project templates', () => {
   it('schedule: the plugin before HttpPlugin, a sample job and its test-clock test', () => {
     const project = files({ packageManager: 'bun', features: ['config', 'schedule'] })
     expect(packageJson(project).dependencies['@znight/schedule']).toBe('^0.1.0')
-    const main = file(project, 'src/main.ts')
+    const main = file(project, 'src/app.ts')
     expect(main).toContain("import { SchedulePlugin } from '@znight/schedule'")
     expect(main.indexOf('SchedulePlugin.configure()')).toBeLessThan(main.indexOf('HttpPlugin.configure('))
     expect(file(project, 'src/app/heartbeat.jobs.ts')).toContain("@Cron('* * * * *', { name: 'heartbeat' })")
@@ -107,7 +107,7 @@ describe('project templates', () => {
     expect(manifest.dependencies['@znight/openapi']).toBe('^0.1.0')
     expect(manifest.scripts['openapi']).toBe('znight openapi')
     expect(manifest.scripts['openapi:check']).toBe('znight openapi --check')
-    const main = file(project, 'src/main.ts')
+    const main = file(project, 'src/app.ts')
     expect(main.indexOf("OpenApiPlugin.configure({ ui: 'scalar' })")).toBeGreaterThan(
       main.indexOf('HttpPlugin.configure('),
     )
@@ -150,10 +150,12 @@ export class Api {}
   })
 
   it('observability: logs named after the service, pretty in development (AppConfig), metrics and tracing off', () => {
-    const main = file(files({ name: 'my-service-znight' }), 'src/main.ts')
+    const main = file(files({ name: 'my-service-znight' }), 'src/app.ts')
     expect(main).toContain(`    ObservabilityPlugin.configure(container => ({
       logging: {
         name: 'my-service-znight',
+        // default: the LOG_LEVEL environment variable, otherwise info
+        level: options.logLevel,
         // human-readable logs in development (\`znight dev\`), JSON logs in production
         pretty: container.get(AppConfig).environment === 'development',
       },
@@ -163,10 +165,10 @@ export class Api {}
 `)
     expect(main).not.toContain('pretty: true')
     expect(main.indexOf('ObservabilityPlugin.configure(')).toBeLessThan(main.indexOf('HttpPlugin.configure('))
-    expect(file(files({ name: '@acme/orders' }), 'src/main.ts')).toContain("        name: '@acme/orders',\n")
+    expect(file(files({ name: '@acme/orders' }), 'src/app.ts')).toContain("        name: '@acme/orders',\n")
     // renderProject() is public: any name is quoted safely
-    expect(file(files({ name: "it's\\a\nname" }), 'src/main.ts')).toContain("        name: 'it\\'s\\\\a\\nname',\n")
-    expect(file(files({ features: [] }), 'src/main.ts')).not.toContain('ObservabilityPlugin')
+    expect(file(files({ name: "it's\\a\nname" }), 'src/app.ts')).toContain("        name: 'it\\'s\\\\a\\nname',\n")
+    expect(file(files({ features: [] }), 'src/app.ts')).not.toContain('ObservabilityPlugin')
   })
 
   it('config: AppConfig.environment reads NODE_ENV, production by default', () => {
@@ -179,10 +181,12 @@ export class Api {}
   })
 
   it('observability without config: pretty when NODE_ENV is development, plain options', () => {
-    const main = file(files({ features: ['observability'] }), 'src/main.ts')
+    const main = file(files({ features: ['observability'] }), 'src/app.ts')
     expect(main).toContain(`    ObservabilityPlugin.configure({
       logging: {
         name: 'my-service',
+        // default: the LOG_LEVEL environment variable, otherwise info
+        level: options.logLevel,
         // human-readable logs in development (\`znight dev\`), JSON logs in production
         pretty: process.env['NODE_ENV'] === 'development',
       },
@@ -208,7 +212,7 @@ export class Api {}
     ['swagger', 'swagger', 'Swagger UI'],
   ] as const)('openapi: the %s UI option configures the %s UI', (openapiUi, ui, label) => {
     const project = files({ features: ['openapi'], ...(openapiUi === undefined ? {} : { openapiUi }) })
-    const main = file(project, 'src/main.ts')
+    const main = file(project, 'src/app.ts')
     expect(main).toContain(`    OpenApiPlugin.configure({ ui: '${ui}' }),`)
     expect(main).toContain(`the API reference at /docs, with ${label}`)
     expect(file(project, 'README.md')).toContain(`${label} API reference at \`/docs\``)
@@ -216,7 +220,7 @@ export class Api {}
 
   it('openapi: no UI configures no ui option and mentions no /docs', () => {
     const project = files({ features: ['openapi'], openapiUi: 'none' })
-    const main = file(project, 'src/main.ts')
+    const main = file(project, 'src/app.ts')
     expect(main).toContain('    // GET /openapi.json, no API reference UI (document options: src/openapi.ts)\n')
     expect(main).toContain('    OpenApiPlugin.configure(),\n')
     expect(main).not.toContain('ui:')
@@ -233,7 +237,7 @@ export class Api {}
     const manifest = packageJson(project)
     expect(manifest.dependencies['@znight/graphql']).toBe('^0.1.0')
     expect(manifest.dependencies['graphql']).toStartWith('^17')
-    const main = file(project, 'src/main.ts')
+    const main = file(project, 'src/app.ts')
     expect(main).toContain("import { GraphQLPlugin } from '@znight/graphql'")
     expect(main.indexOf('GraphQLPlugin.configure()')).toBeGreaterThan(main.indexOf('HttpPlugin.configure('))
     const resolver = file(project, 'src/app/greeting.resolver.ts')
@@ -242,13 +246,15 @@ export class Api {}
     expect(resolver).toContain("greeting(@Args('name') name: string): Greeting {")
     const test = file(project, 'test/greeting.resolver.test.ts')
     expect(test).toContain("import { executeOperation } from '@znight/graphql/testing'")
-    expect(test).toContain('        GraphQLPlugin.configure(),')
+    expect(test).toContain(
+      "      plugins: plugins({ port: 0, logLevel: 'silent', config: { loaders: [inline({})] } }),",
+    )
     expect(test).toContain('{ greeting(name: "Ada") { message } }')
     expect(file(project, 'README.md')).toContain('curl localhost:3000/graphql')
     const without = files()
     expect(without.has('src/app/greeting.resolver.ts')).toBe(false)
     expect(packageJson(without).dependencies['graphql']).toBeUndefined()
-    expect(file(without, 'src/main.ts')).not.toContain('GraphQLPlugin')
+    expect(file(without, 'src/app.ts')).not.toContain('GraphQLPlugin')
   })
 
   it('websocket: @znight/websocket and ws, WebSocketPlugin after HttpPlugin, a gateway and its test', () => {
@@ -256,7 +262,7 @@ export class Api {}
     const manifest = packageJson(project)
     expect(manifest.dependencies['@znight/websocket']).toBe('^0.1.0')
     expect(manifest.dependencies['ws']).toStartWith('^8')
-    const main = file(project, 'src/main.ts')
+    const main = file(project, 'src/app.ts')
     expect(main).toContain("import { WebSocketPlugin } from '@znight/websocket'")
     expect(main.indexOf('WebSocketPlugin.configure()')).toBeGreaterThan(main.indexOf('HttpPlugin.configure('))
     const gateway = file(project, 'src/app/greeting.gateway.ts')
@@ -364,7 +370,7 @@ export class Api {}
     const manifest = packageJson(files({ adapter }))
     expect(dependencies.filter(name => manifest.dependencies[name] === undefined)).toEqual([])
     expect(devDependencies.filter(name => manifest.devDependencies[name] === undefined)).toEqual([])
-    const main = file(files({ adapter }), 'src/main.ts')
+    const main = file(files({ adapter }), 'src/app.ts')
     expect(main.includes('Adapter')).toBe(option !== undefined)
     expect(option === undefined || main.includes(option)).toBe(true)
   })
@@ -399,10 +405,42 @@ export class Api {}
     expect(file(files({ packageManager: 'bun', features: [] }), 'bunfig.toml')).not.toContain('env = false')
   })
 
-  it('the TestApp test turns metrics off (no server colliding on :9464, no prom-client needed)', () => {
-    const test = file(files(), 'test/greeting.controller.test.ts')
-    expect(test).toContain("ObservabilityPlugin.configure({ logging: { level: 'silent' }, metrics: false })")
-    expect(file(files({ features: [] }), 'test/greeting.controller.test.ts')).not.toContain('ObservabilityPlugin')
+  it('main.ts creates the application with the generated createApplication() and the plugins of src/app.ts', () => {
+    const main = file(files(), 'src/main.ts')
+    expect(main).toContain("import { createApplication } from './.znight/container.generated.js'")
+    expect(main).toContain("import { plugins } from './app.js'")
+    expect(main).toContain('const app = await createApplication({ plugins: plugins() })')
+    expect(main).not.toContain('__ZNIGHT_METADATA__')
+    expect(file(files(), 'src/app.ts')).toContain('export function plugins(options: AppOptions = {}): Plugin[] {')
+  })
+
+  it('the TestApp tests run the plugins of src/app.ts, metrics off (no server on :9464, no prom-client)', () => {
+    const project = files({ features: ['config', 'observability', 'graphql', 'websocket'] })
+    for (const name of ['greeting.controller', 'greeting.resolver', 'greeting.gateway']) {
+      const test = file(project, `test/${name}.test.ts`)
+      expect(test).toContain("import { metadata } from '../src/.znight/container.generated.js'")
+      expect(test).toContain("import { plugins } from '../src/app.js'")
+      expect(test).toContain("plugins: plugins({ port: 0, logLevel: 'silent', config: { loaders: [inline({})] } }),")
+      expect(test).toContain("import { inline } from '@znight/config'")
+    }
+    expect(file(project, 'src/app.ts')).toContain('      metrics: false,\n')
+    expect(file(files({ features: [] }), 'test/greeting.controller.test.ts')).toContain(
+      'plugins: plugins({ port: 0 }),',
+    )
+    expect(file(files({ features: [] }), 'src/app.ts')).not.toContain('logLevel')
+  })
+
+  it('the TestApp tests replace the .env files and the environment with inline() values (config)', () => {
+    const app = file(files({ features: ['config'] }), 'src/app.ts')
+    expect(app).toContain("import { ConfigPlugin, type ConfigPluginOptions } from '@znight/config'")
+    expect(app).toContain('  readonly config?: ConfigPluginOptions\n')
+    expect(app).toContain('    ConfigPlugin.configure(options.config),\n')
+    expect(file(files({ features: ['config'] }), 'test/greeting.controller.test.ts')).toContain(
+      'plugins: plugins({ port: 0, config: { loaders: [inline({})] } }),',
+    )
+    const without = files({ features: ['observability'] })
+    expect(file(without, 'src/app.ts')).not.toContain('ConfigPlugin')
+    expect(file(without, 'test/greeting.controller.test.ts')).not.toContain('inline')
   })
 
   it('other package managers test with Vitest (the znight() plugin regenerates the container)', () => {
@@ -442,11 +480,13 @@ export class Api {}
   it('the sample application follows the features', () => {
     const minimal = files({ features: [] })
     expect(minimal.has('src/app/app.config.ts')).toBe(false)
-    expect(file(minimal, 'src/main.ts')).toContain('HttpPlugin.configure({ port: Number(process.env.PORT ?? 3000) })')
+    expect(file(minimal, 'src/app.ts')).toContain(
+      'HttpPlugin.configure({ port: options.port ?? Number(process.env.PORT ?? 3000) })',
+    )
     expect(file(minimal, 'src/app/greeting.service.ts')).not.toContain('constructor')
 
     const full = files({ features: ['config', 'observability', 'messaging'] })
-    expect(file(full, 'src/main.ts')).toContain('port: container.get(AppConfig).port')
+    expect(file(full, 'src/app.ts')).toContain('port: options.port ?? container.get(AppConfig).port')
     expect(file(full, 'src/app/greeting.consumer.ts')).toContain("@Consumer('greetings')")
     expect(file(full, 'src/app/greeting.controller.ts')).toContain('private readonly broker: MessageBroker')
     expect(file(full, 'test/greeting.service.test.ts')).toContain("config: { app: { greeting: 'Hi' } }")
@@ -539,12 +579,12 @@ describe('znight new', () => {
     expect(manifest.dependencies['@znight/observability']).toBeDefined()
     expect(manifest.devDependencies['pino-pretty']).toBeDefined()
     expect(manifest.dependencies['@znight/messaging']).toBeUndefined()
-    expect(readFileSync(join(workspace.path, 'svc/src/main.ts'), 'utf8')).toContain(
+    expect(readFileSync(join(workspace.path, 'svc/src/app.ts'), 'utf8')).toContain(
       "        pretty: container.get(AppConfig).environment === 'development',\n",
     )
     // Fastify by default, a Dockerfile, the Scalar UI when openapi is selected
     expect(manifest.dependencies.fastify).toBeDefined()
-    expect(readFileSync(join(workspace.path, 'svc/src/main.ts'), 'utf8')).toContain('adapter: fastifyAdapter(),')
+    expect(readFileSync(join(workspace.path, 'svc/src/app.ts'), 'utf8')).toContain('adapter: fastifyAdapter(),')
     expect(existsSync(join(workspace.path, 'svc/Dockerfile'))).toBe(true)
     expect(existsSync(join(workspace.path, 'svc/.dockerignore'))).toBe(true)
   })
@@ -567,7 +607,7 @@ describe('znight new', () => {
       { cwd: workspace.path },
     )
     expect(run.code).toBe(0)
-    const main = readFileSync(join(workspace.path, 'ui/src/main.ts'), 'utf8')
+    const main = readFileSync(join(workspace.path, 'ui/src/app.ts'), 'utf8')
     expect(main).toContain("OpenApiPlugin.configure({ ui: 'swagger' })")
     expect(main).not.toContain('Adapter')
     expect(existsSync(join(workspace.path, 'ui/Dockerfile'))).toBe(false)
@@ -577,7 +617,7 @@ describe('znight new', () => {
       { cwd: workspace.path },
     )
     expect(none.code).toBe(0)
-    const noUi = readFileSync(join(workspace.path, 'no-ui/src/main.ts'), 'utf8')
+    const noUi = readFileSync(join(workspace.path, 'no-ui/src/app.ts'), 'utf8')
     expect(noUi).toContain('    OpenApiPlugin.configure(),\n')
     expect(noUi).not.toContain('/docs')
     expect(existsSync(join(workspace.path, 'no-ui/src/openapi.ts'))).toBe(true)
@@ -800,7 +840,7 @@ describe('znight new', () => {
     // observability is selected by default
     expect(initialFeatures).toEqual(['config', 'observability'])
     const root = join(workspace.path, 'ui-app')
-    const main = readFileSync(join(root, 'src/main.ts'), 'utf8')
+    const main = readFileSync(join(root, 'src/app.ts'), 'utf8')
     expect(main).toContain('adapter: fastifyAdapter()')
     expect(main).toContain("OpenApiPlugin.configure({ ui: 'swagger' })")
     expect(main).toContain("        name: 'ui-app',")
@@ -832,7 +872,7 @@ describe('znight new', () => {
     })
     expect(run.code).toBe(0)
     expect(labels).toEqual(['Scalar', 'Swagger UI', 'No UI (openapi.json only)'])
-    const main = readFileSync(join(workspace.path, 'bare-api/src/main.ts'), 'utf8')
+    const main = readFileSync(join(workspace.path, 'bare-api/src/app.ts'), 'utf8')
     expect(main).toContain('    OpenApiPlugin.configure(),\n')
     expect(main).not.toContain('ui:')
   })

@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 688 460" width="688" height="460" role="img" aria-labelledby="title desc">
 <title id="title">How Znight fits together</title>
-<desc id="desc">At build time, @znight/compiler (Vite plugin, CLI or Bun preload) reads your decorated classes in src, scans, analyses, binds and validates them, and generates src/.znight/container.generated.ts exporting __ZNIGHT_METADATA__; ZNIGHT errors fail the build. At run time, main.ts imports that module and passes it to Application.create with the plugins: the @znight/core container calls the generated factories in order, and plugins such as HttpPlugin, MessagingPlugin and ConfigPlugin add the runtime features.</desc>
+<desc id="desc">At build time, @znight/compiler (Vite plugin, CLI or Bun preload) reads your decorated classes in src, scans, analyses, binds and validates them, and generates src/.znight/container.generated.ts exporting the metadata and createApplication(); ZNIGHT errors fail the build. At run time, main.ts imports that module and calls createApplication with the plugins: the @znight/core container calls the generated factories in order, and plugins such as HttpPlugin, MessagingPlugin and ConfigPlugin add the runtime features.</desc>
 <defs>
 <linearGradient id="zn-card" x1="0" y1="0" x2="0" y2="1">
 <stop offset="0" stop-color="#1A2350"/>
@@ -33,7 +33,7 @@
 <text x="474" y="78" class="m" font-size="12.5" fill="#A9B4D6">src/.znight/</text>
 <text x="474" y="97" class="m" font-size="12.5" font-weight="600" fill="#F4F6FC">container.generated.ts</text>
 <rect x="474" y="113" width="156.3" height="22" rx="11" fill="#251E5C" stroke="#A78BFA" stroke-width="1"/>
-<text x="552.1" y="128.2" text-anchor="middle" class="m" font-size="12" fill="#EDE9FE">__ZNIGHT_METADATA__</text>
+<text x="552.1" y="128.2" text-anchor="middle" class="m" font-size="12" fill="#EDE9FE">createApplication()</text>
 <text x="474" y="160" class="s" font-size="12.5" fill="#A9B4D6">providers, deps, order</text>
 <path d="M178,114 L198.5,114" fill="none" stroke="#A9B4D6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
 <path d="M206,114 L197.5,118.6 L197.5,109.4 Z" fill="#A9B4D6"/>
@@ -49,7 +49,7 @@
 <path d="M562,282 L557.4,273.5 L566.6,273.5 Z" fill="#A9B4D6"/>
 <text x="552" y="232.4" text-anchor="end" class="s" font-size="12.5" fill="#A9B4D6">imported by <tspan class="m">main.ts</tspan></text>
 <rect x="24" y="284" width="640" height="152" rx="12" fill="#F4F6FC" fill-opacity="0.035" stroke="#4A5AA6" stroke-width="1.25"/>
-<text x="38" y="310" class="m" font-size="13" font-weight="600" fill="#F4F6FC">Application.create({ metadata, plugins })</text>
+<text x="38" y="310" class="m" font-size="13" font-weight="600" fill="#F4F6FC">createApplication({ plugins })</text>
 <rect x="38" y="326" width="270" height="96" rx="10" fill="#1E2858" stroke="#4A5AA6" stroke-width="1.25"/>
 <text x="52" y="350" class="m" font-size="14" font-weight="600" fill="#F4F6FC">@znight/core</text>
 <text x="52" y="375" class="s" font-size="12.5" fill="#D6DCEE">container · scopes · lifecycle</text>

@@ -2,7 +2,7 @@ import { MessageBroker } from '@znight/messaging'
 import { Logger } from '@znight/observability'
 import { TestBed } from '@znight/testing'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
 import { JobContext } from '../src/messaging/job-context.js'
 import { ReportConsumer } from '../src/reports/report.consumer.js'
 import { ReportGenerator } from '../src/reports/report.generator.js'

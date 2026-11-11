@@ -4,7 +4,7 @@ import type { GraphQLPlugin, GraphQLPluginOptions, MemoryPubSub } from '@znight/
 import { inline } from '@znight/config'
 import { TestApp } from '@znight/testing'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../../src/.znight/container.generated.js'
+import { metadata } from '../../src/.znight/container.generated.js'
 import { plugins } from '../../src/plugins.js'
 
 export const EDITOR_KEY = 'test-editor-key'

@@ -102,8 +102,8 @@ describe.skipIf(typeof compile !== 'function')('route decisions (e2e)', () => {
     code = result.code
     fs.mkdirSync(path.dirname(result.outFile), { recursive: true })
     fs.writeFileSync(result.outFile, result.code)
-    const generated = (await import(pathToFileURL(result.outFile).href)) as { __ZNIGHT_METADATA__: ZnightMetadata }
-    metadata = generated.__ZNIGHT_METADATA__
+    const generated = (await import(pathToFileURL(result.outFile).href)) as { metadata: ZnightMetadata }
+    metadata = generated.metadata
   })
 
   afterAll(cleanupApps)
@@ -221,8 +221,8 @@ describe.skipIf(typeof compile !== 'function')('legacy keys and forgotten guards
     fs.mkdirSync(path.dirname(result.outFile), { recursive: true })
     fs.writeFileSync(result.outFile, result.code)
     // importing the generated module loads the decorators keyed 'auth:public' and 'app/tag'
-    const generated = (await import(pathToFileURL(result.outFile).href)) as { __ZNIGHT_METADATA__: ZnightMetadata }
-    metadata = generated.__ZNIGHT_METADATA__
+    const generated = (await import(pathToFileURL(result.outFile).href)) as { metadata: ZnightMetadata }
+    metadata = generated.metadata
   })
 
   afterAll(cleanupApps)

@@ -1,5 +1,5 @@
 /**
- * Schedule section of the generated metadata (`__ZNIGHT_METADATA__.extensions.schedule`), produced
+ * Schedule section of the generated metadata (`metadata.extensions.schedule`), produced
  * by the `@znight/schedule/compiler` extension and consumed by `SchedulePlugin` (RFC 0004 §6). The
  * plugin validates it at boot, because metadata can be hand-written.
  */

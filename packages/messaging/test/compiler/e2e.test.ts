@@ -269,11 +269,11 @@ describe('@znight/compiler compile()', () => {
       const result = await (compile as Compile)({ root: app.root, conditions: ['@znight/source'] })
       expect(result.diagnostics.filter(diagnostic => diagnostic.severity === 'error')).toEqual([])
       app.write(path.relative(app.root, result.outFile), result.code)
-      const module = (await import(result.outFile)) as { __ZNIGHT_METADATA__: ZnightMetadata }
-      expect(module.__ZNIGHT_METADATA__.extensions?.messaging?.consumers.map(consumer => consumer.token)).toEqual([
+      const module = (await import(result.outFile)) as { metadata: ZnightMetadata }
+      expect(module.metadata.extensions?.messaging?.consumers.map(consumer => consumer.token)).toEqual([
         'src/orders.ts#OrderConsumer',
       ])
-      await runScenario(app, module.__ZNIGHT_METADATA__)
+      await runScenario(app, module.metadata)
     },
     60_000,
   )

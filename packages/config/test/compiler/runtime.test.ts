@@ -267,7 +267,7 @@ describe.skipIf(typeof compile !== 'function')('end to end (compile())', () => {
     code = result.code
     fs.mkdirSync(path.dirname(result.outFile), { recursive: true })
     fs.writeFileSync(result.outFile, code)
-    metadata = (await import(result.outFile)).__ZNIGHT_METADATA__
+    metadata = (await import(result.outFile)).metadata
     const database = await import(path.join(app.root, 'src/config/database.config.ts'))
     const http = await import(path.join(app.root, 'src/config/http.config.ts'))
     classes = { [DATABASE]: database.DatabaseConfig, [HTTP]: http.HttpConfig }

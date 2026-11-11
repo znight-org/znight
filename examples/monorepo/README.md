@@ -48,7 +48,7 @@ examples/monorepo/
 └─ services/
    ├─ users-api/
    │  ├─ src/
-   │  │  ├─ main.ts                    Application.create() + plugins + start()
+   │  │  ├─ main.ts                    createApplication() + plugins + start()
    │  │  ├─ http.ts                    HttpPlugin (Express adapter, error mapper), shared with the tests
    │  │  ├─ api.config.ts              @Config('api'): PORT, USERS_SNAPSHOT_FILE, API_EXPOSE_ERRORS
    │  │  ├─ ids/sortable-id.generator.ts   @Primary() IdGenerator: overrides the library default
@@ -60,7 +60,7 @@ examples/monorepo/
    │  ├─ vite.config.ts, znight.config.ts, bunfig.toml, tsconfig.json
    └─ notifications-worker/
       ├─ src/
-      │  ├─ main.ts                    Application.create() + MessagingPlugin (in-memory broker)
+      │  ├─ main.ts                    createApplication() + MessagingPlugin (in-memory broker)
       │  ├─ worker.config.ts           @Config('worker'): WORKER_STDIN_EVENTS, WORKER_HEARTBEAT_MS
       │  ├─ notifications/             UserEventsConsumer, NotificationService, NotificationChannel
       │  ├─ health/heartbeat.ts        liveness log, shutdown summary (onStart / onStop)
@@ -189,7 +189,7 @@ for the decorators only (they are no-ops at runtime).
 import { CreateUserInput, SystemClock, UpdateUserInput, UserDirectory } from '@znight-examples/shared'
 import { SortableIdGenerator } from '../ids/sortable-id.generator.js'
 
-export const __ZNIGHT_METADATA__: ZnightMetadata = {
+export const metadata: ZnightMetadata = {
   providers: {
     ['@znight-examples/shared#SystemClock']: {
       scope: 'singleton',

@@ -33,8 +33,7 @@ export interface ObservabilityPluginInstance extends Plugin {
  * Logging, metrics and tracing for a Znight application.
  *
  * ```ts
- * const app = await Application.create({
- *   metadata: __ZNIGHT_METADATA__,
+ * const app = await createApplication({
  *   plugins: [
  *     ObservabilityPlugin.configure({ logging: { level: 'debug', redact: ['*.password'] } }),
  *     HttpPlugin.configure({ port: 3000 }),

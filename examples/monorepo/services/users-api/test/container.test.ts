@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
 import { describe, expect, test as it } from 'bun:test'
 
 // What the compiler generated from this service and the shared source library (the bunfig.toml

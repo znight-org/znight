@@ -97,7 +97,8 @@ The package manager defaults to the one that launched the CLI (`npx`, `pnpm dlx`
 ```txt
 my-service/
 ├─ src/
-│  ├─ main.ts                    # Application.create() with the plugins, then start()
+│  ├─ app.ts                     # the plugins, shared by main.ts and the TestApp tests
+│  ├─ main.ts                    # createApplication({ plugins }), then start()
 │  ├─ openapi.ts                 # @OpenApiDocument: info of openapi.json          (openapi)
 │  └─ app/
 │     ├─ app.config.ts           # @Config('app'): PORT, APP_GREETING, NODE_ENV (config)
@@ -173,9 +174,15 @@ my-service/
   provides its own), `WebSocketPlugin.configure()` after `HttpPlugin`, a gateway on `/ws`
   (`src/app/greeting.gateway.ts`, a validated `greet` event with a reply) and its test
   (`TestApp.connect()`).
-- The `TestApp` tests configure `ObservabilityPlugin` with `metrics: false`: with `prom-client`
-  installed, the metrics server (`:9464`) would collide with `znight dev` or with other test files
-  running in parallel, and any metrics option object requires `prom-client`.
+- `src/main.ts` calls the generated `createApplication({ plugins: plugins() })`, and `src/app.ts`
+  exports `plugins(options)`: the plugin list, shared by `main.ts` and the `TestApp` tests, which run
+  the production wiring with `plugins({ port: 0, logLevel: 'silent', config: { loaders: [inline({})] } })`:
+  with `config`, the `inline()` loader replaces the `.env` files and the environment, so a value in
+  `.env.local` does not change the outcome of the tests. The tests import
+  `{ metadata }` from the generated module.
+- `ObservabilityPlugin` is configured with `metrics: false`: with `prom-client` installed, the
+  metrics server (`:9464`) would collide with `znight dev` or with test files running in parallel,
+  and any metrics option object requires `prom-client`.
 - The `Dockerfile` (unless `--no-docker`) is multi-stage: a `deps` stage installs the production
   dependencies only from the lockfile, a `build` stage installs everything and runs the build (the
   compiler runs there), and the runtime stage (`node:24-slim`, or `oven/bun:1-slim` for Bun projects)

@@ -6,7 +6,9 @@
  *   `package.json#exports` subpaths, and only names that subpath exports (values and types);
  * - the root README, the landing page on GitHub that scaffolded projects and examples link to,
  *   only names existing packages, links to existing files and headings, and bootstraps the
- *   application with the generated metadata.
+ *   application with the generated `createApplication()`;
+ * - no page or README names `__ZNIGHT_METADATA__`, the pre-0.9 name of `metadata` (RFC 0015):
+ *   samples import `metadata` or `createApplication`.
  * - a fenced block right after `<!-- sample: <repository path> -->` is that file, verbatim: the
  *   sample compiles and runs with the tests of its package (`bun run typecheck`, `bun run test`).
  *
@@ -350,6 +352,17 @@ describe('samples in Markdown', () => {
   })
 })
 
+/** The pre-0.9 name of the `metadata` export of the generated module (RFC 0015), split so this file does not name it. */
+const OLD_EXPORT = ['__ZNIGHT', 'METADATA__'].join('_')
+
+describe('the pre-0.9 metadata export', () => {
+  const rootDocuments = readdirSync(repoRoot).filter(name => name.endsWith('.md') && !name.startsWith('CHANGELOG'))
+
+  it.each([...new Set([...rootDocuments, ...documents])])('%s does not name it', document => {
+    expect(readFileSync(join(repoRoot, document), 'utf8')).not.toContain(OLD_EXPORT)
+  })
+})
+
 describe('README.md', () => {
   const readme = readFileSync(join(repoRoot, 'README.md'), 'utf8')
 
@@ -389,12 +402,13 @@ describe('README.md', () => {
     expect(targets.length).toBeGreaterThan(10)
   })
 
-  it('bootstraps applications with the generated metadata', () => {
-    const calls = codeOf(readme)
-      .flatMap(createCalls)
-      .filter(call => /^Application\.create\(\s*\{/.test(call))
+  it('bootstraps applications with the generated createApplication() (RFC 0015)', () => {
+    const code = codeOf(readme)
+    // the explicit form, when used, still passes the generated metadata
+    const calls = code.flatMap(createCalls).filter(call => /^Application\.create\(\s*\{/.test(call))
     expect(calls.filter(call => !/\bmetadata\b/.test(call))).toEqual([])
-    expect(calls.length).toBeGreaterThan(1)
+    expect(code.join('\n').match(/\bcreateApplication\(/g)?.length ?? 0).toBeGreaterThan(1)
+    expect(code.join('\n')).toContain("import { createApplication } from './.znight/container.generated.js'")
   })
 
   it('documents the repository workflow (Bun, znight-org/znight)', () => {

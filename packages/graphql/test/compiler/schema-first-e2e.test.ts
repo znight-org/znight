@@ -79,10 +79,10 @@ describe('schema-first application (e2e)', () => {
     sdl = result.extraFiles.find(file => file.file === app.path('schema.graphql'))?.content ?? ''
     fs.mkdirSync(path.dirname(result.outFile), { recursive: true })
     fs.writeFileSync(result.outFile, result.code)
-    const generated = (await import(pathToFileURL(result.outFile).href)) as { __ZNIGHT_METADATA__: ZnightMetadata }
-    section = generated.__ZNIGHT_METADATA__.extensions?.graphql as GraphQLMetadata
+    const generated = (await import(pathToFileURL(result.outFile).href)) as { metadata: ZnightMetadata }
+    section = generated.metadata.extensions?.graphql as GraphQLMetadata
     test = await TestApp.create({
-      metadata: generated.__ZNIGHT_METADATA__,
+      metadata: generated.metadata,
       plugins: [HttpPlugin.configure({ port: 0, host: '127.0.0.1' }), GraphQLPlugin.configure({ introspection: true })],
       logger: captureLogger(),
     })

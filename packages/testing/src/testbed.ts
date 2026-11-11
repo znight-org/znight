@@ -16,7 +16,7 @@ export type AopMode = 'none' | 'real'
 
 /** Options of {@link TestBed.create}. */
 export interface TestBedOptions {
-  /** The generated metadata (`__ZNIGHT_METADATA__`). */
+  /** The generated metadata: the `metadata` export of `src/.znight/container.generated.ts`. */
   readonly metadata: ZnightMetadata
   /**
    * Values injected instead of auto-mocks, keyed by class, token, alias or display name. Required
@@ -68,7 +68,7 @@ export interface TestBedResult<T> {
  * | interceptor (`@Intercept`)                   | nothing, not applied (unless `aop: 'real'`)         |
  *
  * ```ts
- * const { instance, mocks } = await TestBed.create(UserService, { metadata: __ZNIGHT_METADATA__ })
+ * const { instance, mocks } = await TestBed.create(UserService, { metadata })
  * mocks.get(UserRepository).findById.mockResolvedValue({ id: '1' })
  * await instance.findById('1')
  * expect(mocks.get(UserRepository).findById).toHaveBeenCalledWith('1')

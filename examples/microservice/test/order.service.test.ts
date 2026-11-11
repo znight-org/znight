@@ -4,7 +4,7 @@ import type { CreateOrder } from '../src/orders/order.schemas.js'
 import { MessageBroker } from '@znight/messaging'
 import { TestBed } from '@znight/testing'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
 import { ORDER_CREATED, ORDERS_CREATED_QUEUE } from '../src/orders/order.events.js'
 import { OrderRepository } from '../src/orders/order.repository.js'
 import { OrderService } from '../src/orders/order.service.js'

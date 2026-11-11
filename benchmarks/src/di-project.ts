@@ -57,11 +57,11 @@ function main(framework: DiFramework): string {
       return [
         'const started = performance.now()',
         "const { Application } = await import('@znight/core')",
-        "const { __ZNIGHT_METADATA__ } = await import('./.znight/container.generated.js')",
+        "const { metadata } = await import('./.znight/container.generated.js')",
         "const { counter } = await import('./counter.js')",
         'const imported = performance.now()',
         // Every singleton is created by Application.create(), in the order computed at build time
-        'await Application.create({ metadata: __ZNIGHT_METADATA__ })',
+        'await Application.create({ metadata })',
         ...report,
       ].join('\n')
     case 'nestjs':

@@ -37,7 +37,7 @@ describe('end-to-end: core features', () => {
   beforeAll(async () => {
     const result = await generateFixture('app')
     expect(result.diagnostics).toEqual([])
-    metadata = (await import(result.outFile)).__ZNIGHT_METADATA__
+    metadata = (await import(result.outFile)).metadata
     events = (await import(`${root}/src/events.ts`)).events
     logging = (await import(`${root}/node_modules/@fixture/logging/index.js`)) as LoggingModule
     source = {
@@ -173,8 +173,19 @@ describe('end-to-end: core features', () => {
 describe('end-to-end: import naming', () => {
   it('imports colliding, default, aliased, unicode and quoted bindings and instantiates them', async () => {
     const result = await generateFixture('naming')
-    const metadata = (await import(result.outFile)).__ZNIGHT_METADATA__ as ZnightMetadata
-    const app = await Application.create({ metadata, shutdown: { signals: false } })
+    const generated = (await import(result.outFile)) as {
+      metadata: ZnightMetadata
+      createApplication(options?: { shutdown?: { signals: false } }): Promise<Application>
+    }
+    // The generated module exports `metadata` and `createApplication`, nothing else (RFC 0015).
+    expect(Object.keys(generated).sort()).toEqual(['createApplication', 'metadata'])
+    expect(result.code).not.toContain('__ZNIGHT_METADATA__')
+    expect(result.code).not.toContain('export default')
+    // `createApplication` is bound to `metadata`, even though user classes named `Application`,
+    // `metadata` and `createApplication` are imported in the same module.
+    const app = await generated.createApplication({ shutdown: { signals: false } })
+    expect(app).toBeInstanceOf(Application)
+    expect(app.metadata).toBe(generated.metadata)
     const consumer: { all: { origin?: string; kind?: string }[] } = get(app.container, 'src/consumer.ts#Consumer')
     expect(consumer.all.map(item => item.origin ?? item.kind)).toEqual([
       'a',
@@ -189,6 +200,9 @@ describe('end-to-end: import naming', () => {
       'unicode',
       "it's",
       'thing',
+      'user-application',
+      'user-metadata-export',
+      'user-create-application',
     ])
     expect(get(app.container, "src/it's/weird.ts#Thing")).toBe(consumer.all[11])
     await app.stop()
@@ -199,7 +213,7 @@ describe('end-to-end: compiler extension', () => {
   it('generates custom factories, shared constants, typed invokers and every literal kind', async () => {
     const result = await generateFixture('web', { extensions: [webExtension] })
     expect(result.diagnostics).toEqual([])
-    const metadata = (await import(result.outFile)).__ZNIGHT_METADATA__ as ZnightMetadata
+    const metadata = (await import(result.outFile)).metadata as ZnightMetadata
     const web = await import(`${fixtureRoot('web')}/node_modules/@fixture/web/index.js`)
     const lines: string[] = []
     const app = await Application.create({

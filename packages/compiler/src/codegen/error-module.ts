@@ -1,7 +1,8 @@
 /**
  * The error module: what the generated module becomes in watch/serve modes when the compilation
- * fails. It still exports a typed `__ZNIGHT_METADATA__` (importers keep type-checking and linking),
- * but importing it throws a `ZnightError` carrying the formatted diagnostics.
+ * fails. It still exports a typed `metadata` and `createApplication` (importers keep
+ * type-checking and linking), but importing it throws a `ZnightError` carrying the formatted
+ * diagnostics.
  */
 import type { Diagnostic } from '../project/index.ts'
 
@@ -9,7 +10,7 @@ import { ErrorCode } from '@znight/core'
 
 import { formatDiagnostics } from '../diagnostics/format.ts'
 import { COMPILER_VERSION } from '../version.ts'
-import { generatedHeader, METADATA_EXPORT } from './container.ts'
+import { CREATE_APPLICATION_EXPORT, EXPORT_DOCS, generatedHeader, METADATA_EXPORT } from './container.ts'
 import { quote } from './syntax.ts'
 
 /** Options of {@link renderErrorModule}. */
@@ -34,15 +35,20 @@ export function renderErrorModule(diagnostics: readonly Diagnostic[], options: R
   const message = `The Znight compilation failed, the generated container is unusable.\n\n${formatted || 'Unknown error'}`
   return [
     ...generatedHeader(options.version ?? COMPILER_VERSION),
-    "import type { ZnightMetadata } from '@znight/core'",
-    "import { ZnightError } from '@znight/core'",
+    "import type { CreateApplicationOptions, ZnightMetadata } from '@znight/core'",
+    "import { Application, ZnightError } from '@znight/core'",
     '',
     'function fail(): never {',
     `  throw new ZnightError(${quote(code)}, ${quote(message)})`,
     '}',
     '',
+    EXPORT_DOCS.metadata,
     `export const ${METADATA_EXPORT}: ZnightMetadata = fail()`,
-    `export default ${METADATA_EXPORT}`,
+    '',
+    EXPORT_DOCS.createApplication,
+    `export function ${CREATE_APPLICATION_EXPORT}(options: CreateApplicationOptions = {}): Promise<Application> {`,
+    `  return Application.create({ ...options, ${METADATA_EXPORT} })`,
+    '}',
     '',
   ].join('\n')
 }

@@ -1,5 +1,5 @@
 /**
- * GraphQL section of the generated metadata (`__ZNIGHT_METADATA__.extensions.graphql`, RFC 0005
+ * GraphQL section of the generated metadata (`metadata.extensions.graphql`, RFC 0005
  * §7), produced by the `@znight/graphql/compiler` extension and consumed by `GraphQLPlugin`, which
  * validates it at boot (ZNIGHT066), because metadata can be hand-written.
  *

@@ -80,7 +80,7 @@ a mock, using the compiled metadata to know what the dependencies are:
 ```ts
 import { describe, expect, it } from 'bun:test'
 import { TestBed } from '@znight/testing'
-import { __ZNIGHT_METADATA__ as metadata } from '../../src/.znight/container.generated.js'
+import { metadata } from '../../src/.znight/container.generated.js'
 import { UserRepository } from '../../src/users/user.repository.js'
 import { UserService } from '../../src/users/user.service.js'
 
@@ -139,7 +139,7 @@ highest precedence and accept classes or tokens as keys:
 ```ts
 import { afterAll, beforeAll, expect, it } from 'bun:test'
 import { Application } from '@znight/core'
-import { __ZNIGHT_METADATA__ } from '../src/.znight/container.generated.js'
+import { createApplication } from '../src/.znight/container.generated.js'
 import { UserRepository } from '../src/users/user.repository.js'
 import { UserService } from '../src/users/user.service.js'
 
@@ -147,8 +147,7 @@ const fakeUsers = new FakeUserRepository([{ id: 1, name: 'Ada' }]) // a hand-wri
 let app: Application
 
 beforeAll(async () => {
-  app = await Application.create({
-    metadata: __ZNIGHT_METADATA__,
+  app = await createApplication({
     overrides: [[UserRepository, fakeUsers]], // keys: classes or tokens
     init: { only: [UserService] }, // only build what this test needs
     shutdown: { signals: false },
@@ -181,7 +180,7 @@ import { afterAll, beforeAll, expect, it } from 'bun:test'
 import { HttpPlugin } from '@znight/http'
 import { fastifyAdapter } from '@znight/http/fastify'
 import { TestApp } from '@znight/testing'
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
 import { UserRepository } from '../src/users/user.repository.js'
 
 let app: TestApp
@@ -236,6 +235,56 @@ with [`ZNIGHT015`](/reference/error-codes#znight015) ("its factory is async"): l
 the raw bytes (downloads), `cookies` the cookies the response sets. Request bodies are encoded for
 you: objects as JSON, strings and bytes as is, a `FormData` as `multipart/form-data`, a `Blob` /
 `File` with its type.
+
+### Test the production wiring {#production-wiring}
+
+A plugin list written again in the tests drifts from the one of `main.ts`. Export it from
+`src/app.ts` instead, as `znight new` does, and let the tests change only what differs:
+
+::: code-group
+
+```ts [src/app.ts]
+import type { Plugin } from '@znight/core'
+import { HttpPlugin } from '@znight/http'
+import { type LoggerLevel, ObservabilityPlugin } from '@znight/observability'
+
+/** What the tests change in the production wiring. */
+export interface AppOptions {
+  readonly port?: number
+  readonly logLevel?: LoggerLevel
+}
+
+export function plugins(options: AppOptions = {}): Plugin[] {
+  return [
+    ObservabilityPlugin.configure({ logging: { level: options.logLevel }, metrics: false }),
+    HttpPlugin.configure({ port: options.port ?? Number(process.env['PORT'] ?? 3000) }),
+  ]
+}
+```
+
+```ts [src/main.ts]
+import { createApplication } from './.znight/container.generated.js'
+import { plugins } from './app.js'
+
+const app = await createApplication({ plugins: plugins() })
+await app.start()
+```
+
+```ts [test/users.test.ts]
+import { TestApp } from '@znight/testing'
+import { metadata } from '../src/.znight/container.generated.js'
+import { plugins } from '../src/app.js'
+
+await using app = await TestApp.create({ metadata, plugins: plugins({ port: 0, logLevel: 'silent' }) })
+```
+
+:::
+
+With `@znight/config`, add the `ConfigPlugin` options to `AppOptions` and pass `inline()` values in
+the tests (`config: { loaders: [inline({})] }`, as `znight new` does): the loaders replace the `.env`
+files and the environment, so a value in `.env.local` does not change the outcome of a test. The
+`rest-api` and `storefront-api` examples do the same, and merge HTTP options over the production
+ones.
 
 ### Cookies
 

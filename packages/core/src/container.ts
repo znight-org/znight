@@ -138,7 +138,7 @@ let internals: ContainerInternals
  * singleton is a single `Map` lookup.
  *
  * ```ts
- * const container = Container.create(__ZNIGHT_METADATA__)
+ * const container = Container.create(metadata)
  * container.registerValue('@acme/clock#Clock', systemClock)
  * await container.init()
  * const users = container.get(UserService)

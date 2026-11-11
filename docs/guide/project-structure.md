@@ -15,7 +15,7 @@ Group code by **feature**, not by technical layer:
 ```txt
 my-service/
 ├─ src/
-│  ├─ main.ts                      # entry point: Application.create() + start()
+│  ├─ main.ts                      # entry point: createApplication() + start()
 │  ├─ .znight/
 │  │  └─ container.generated.ts    # generated, git-ignored
 │  ├─ config/
@@ -80,15 +80,13 @@ application, chooses plugins and starts it:
 ::: code-group
 
 ```ts [src/main.ts]
-import { Application } from '@znight/core'
 import { ConfigPlugin } from '@znight/config'
 import { HttpPlugin } from '@znight/http'
 import { ObservabilityPlugin } from '@znight/observability'
 import { AppConfig } from './config/app.config.js'
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
+import { createApplication } from './.znight/container.generated.js'
 
-const app = await Application.create({
-  metadata: __ZNIGHT_METADATA__,
+const app = await createApplication({
   plugins: [
     ObservabilityPlugin.configure({ logging: { level: 'info' } }), // first: its hooks wrap everything
     ConfigPlugin.configure(), // .env files + environment, every @Config class validated at boot

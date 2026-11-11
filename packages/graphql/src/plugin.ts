@@ -88,8 +88,7 @@ export type MaybePromise<T> = T | Promise<T>
  * The GraphQL plugin: `GraphQLPlugin.configure(options)` (name `graphql`).
  *
  * ```ts
- * await Application.create({
- *   metadata: __ZNIGHT_METADATA__,
+ * await createApplication({
  *   plugins: [HttpPlugin.configure(), GraphQLPlugin.configure({ guards: [AccessGuard] })],
  * })
  * ```

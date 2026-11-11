@@ -47,13 +47,11 @@ uses it too.
 
 ```ts
 // src/main.ts
-import { Application } from '@znight/core'
 import { HttpPlugin } from '@znight/http'
 import { ObservabilityPlugin } from '@znight/observability'
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
+import { createApplication } from './.znight/container.generated.js'
 
-const app = await Application.create({
-  metadata: __ZNIGHT_METADATA__,
+const app = await createApplication({
   plugins: [
     ObservabilityPlugin.configure({
       logging: { level: 'info', redact: ['*.password', 'req.headers.authorization'] },

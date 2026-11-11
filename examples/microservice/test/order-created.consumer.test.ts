@@ -5,7 +5,7 @@ import type { OrderCreatedEvent } from '../src/orders/order.schemas.js'
 import { isNonRetryable } from '@znight/messaging'
 import { createMock, TestBed } from '@znight/testing'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
 import { OrderService } from '../src/orders/order.service.js'
 import { OrderCreatedConsumer } from '../src/orders/order-created.consumer.js'
 import {

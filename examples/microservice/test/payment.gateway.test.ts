@@ -1,7 +1,7 @@
 import { isNonRetryable } from '@znight/messaging'
 import { TestBed } from '@znight/testing'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
 import {
   type ChargeRequest,
   PaymentDeclinedError,

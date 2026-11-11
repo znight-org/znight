@@ -7,7 +7,7 @@ import { GraphQLException, PubSub } from '@znight/graphql'
 import { fakeLoader } from '@znight/graphql/testing'
 import { TestBed } from '@znight/testing'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
 import { CurrentUser } from '../src/auth/current-user.js'
 import { ViewerResolver } from '../src/auth/viewer.resolver.js'
 import { AuthorRepository } from '../src/catalog/author.repository.js'

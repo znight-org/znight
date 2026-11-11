@@ -3,7 +3,7 @@ import type { Principal } from '../src/auth/principal.js'
 
 import { TestBed } from '@znight/testing'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
 import { RequestUser } from '../src/auth/request-user.js'
 import { CsrfGuard } from '../src/security/csrf.guard.js'
 import { SessionCookies } from '../src/session/session-cookies.js'

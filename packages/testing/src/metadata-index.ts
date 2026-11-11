@@ -142,10 +142,10 @@ function assertMetadata(metadata: ZnightMetadata): void {
   ) {
     throw new ZnightError(
       ErrorCode.MissingProvider,
-      'No compiled metadata: expected the generated __ZNIGHT_METADATA__',
+      'No compiled metadata: expected the `metadata` export of the generated module',
       {
         hints: [
-          'Pass { metadata: __ZNIGHT_METADATA__ } imported from src/.znight/container.generated.ts',
+          'Pass { metadata } imported from src/.znight/container.generated.ts',
           'Generate it before running tests: `znight generate`, the Bun preload `@znight/compiler/bun` or the Vite plugin under Vitest',
         ],
       },

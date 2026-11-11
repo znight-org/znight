@@ -4,11 +4,12 @@ description: How a Znight application boots, starts and shuts down gracefully, t
 
 # Lifecycle
 
-An application goes through three calls: `Application.create()`, `app.start()` and `app.stop()`.
+An application goes through three calls: `createApplication()` (the function of the generated module,
+which calls `Application.create()` with its metadata), `app.start()` and `app.stop()`.
 Providers take part by implementing lifecycle methods; plugins have hooks at every step.
 
 ```ts
-const app = await Application.create({ metadata: __ZNIGHT_METADATA__, plugins }) // build
+const app = await createApplication({ plugins }) // build
 await app.start() // accept traffic
 // ...
 await app.stop() // graceful shutdown (also triggered by SIGINT / SIGTERM)
@@ -167,8 +168,7 @@ Failures are collected into one `ZnightAggregateError`
 ([`ZNIGHT021`](/reference/error-codes#znight021)) whose `errors` lists each failed step.
 
 ```ts
-const app = await Application.create({
-  metadata: __ZNIGHT_METADATA__,
+const app = await createApplication({
   plugins,
   shutdown: {
     signals: ['SIGINT', 'SIGTERM'], // default; false disables signal handling
@@ -209,8 +209,7 @@ request scope even when a request uses them first. It is handy for CLI commands 
 handlers that only need part of the graph:
 
 ```ts
-const app = await Application.create({
-  metadata: __ZNIGHT_METADATA__,
+const app = await createApplication({
   init: { only: [ReportService] },
   shutdown: { signals: false },
 })
@@ -224,7 +223,7 @@ When the entry module can be replaced (`import.meta.hot`), pass it so the applic
 new one starts:
 
 ```ts
-const app = await Application.create({ metadata: __ZNIGHT_METADATA__, plugins, hot: import.meta.hot })
+const app = await createApplication({ plugins, hot: import.meta.hot })
 ```
 
 The dispose callback returns the `stop()` promise: HMR runtimes that await it (Vite's module runner,
@@ -242,9 +241,10 @@ instance), the cleanup error is attached instead of hiding the original one. Rea
 
 ```ts
 import { getSuppressedErrors } from '@znight/core'
+import { createApplication } from './.znight/container.generated.js'
 
 try {
-  await Application.create({ metadata: __ZNIGHT_METADATA__, plugins })
+  await createApplication({ plugins })
 } catch (error) {
   console.error(error)
   for (const cleanup of getSuppressedErrors(error)) console.error('while cleaning up:', cleanup)

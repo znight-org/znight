@@ -74,7 +74,7 @@ time** — no \`reflect-metadata\`, errors reported by the compiler with their l
 
 - **HTTP** with \`@znight/http\` (built-in node:http server)
 - **Configuration** with \`@znight/config\` (\`src/app/app.config.ts\`, \`.env\` files)
-- **Observability** with \`@znight/observability\` (structured logs: pretty-printed by \`pino-pretty\` in development, JSON in production; metrics and tracing are off in \`src/main.ts\`)
+- **Observability** with \`@znight/observability\` (structured logs: pretty-printed by \`pino-pretty\` in development, JSON in production; metrics and tracing are off in \`src/app.ts\`)
 
 ## Scripts
 
@@ -98,7 +98,8 @@ curl -X POST localhost:3000/greetings -H 'content-type: application/json' -d '{"
 
 \`\`\`txt
 src/
-├─ main.ts                    # Application.create() + plugins + start()
+├─ app.ts                     # the plugins, shared by main.ts and the TestApp tests
+├─ main.ts                    # createApplication({ plugins }) + start()
 ├─ .znight/                   # generated DI container (git-ignored)
 └─ app/
    ├─ app.config.ts            # @Config: settings read from the environment
@@ -183,6 +184,51 @@ Vitest uses \`vite.config.ts\`, so the \`znight()\` plugin regenerates the conta
     "vite": "^8.0.0",
     "vitest": "^4.1.0"
   }
+}
+"
+,
+  "src/app.ts": 
+"import { ConfigPlugin, type ConfigPluginOptions } from '@znight/config'
+import type { Plugin } from '@znight/core'
+import { HttpPlugin } from '@znight/http'
+import { type LoggerLevel, ObservabilityPlugin } from '@znight/observability'
+
+import { AppConfig } from './app/app.config.js'
+
+/** What the tests change in the production wiring. */
+export interface AppOptions {
+  /** HTTP port. Default: AppConfig.port (PORT, 3000). Tests pass 0 (TestApp sends requests in memory). */
+  readonly port?: number
+  /** Minimum log level. Default: LOG_LEVEL, otherwise info. Tests pass 'silent'. */
+  readonly logLevel?: LoggerLevel
+  /** Options of ConfigPlugin. Default: .env files, then the environment. Tests pass inline() values. */
+  readonly config?: ConfigPluginOptions
+}
+
+/**
+ * The plugins of the application, used by src/main.ts and by the tests (TestApp.create): the tests
+ * run the production wiring.
+ */
+export function plugins(options: AppOptions = {}): Plugin[] {
+  return [
+    // first, so that its hooks wrap everything; metrics (with prom-client) and tracing are off
+    ObservabilityPlugin.configure(container => ({
+      logging: {
+        name: 'my-service',
+        // default: the LOG_LEVEL environment variable, otherwise info
+        level: options.logLevel,
+        // human-readable logs in development (\`znight dev\`), JSON logs in production
+        pretty: container.get(AppConfig).environment === 'development',
+      },
+      metrics: false,
+      tracing: false,
+    })),
+    // loads .env files and the environment, validates every @Config class before anything starts
+    ConfigPlugin.configure(options.config),
+    HttpPlugin.configure(container => ({
+      port: options.port ?? container.get(AppConfig).port,
+    })),
+  ]
 }
 "
 ,
@@ -279,34 +325,11 @@ export class HealthController {
 "
 ,
   "src/main.ts": 
-"import { ConfigPlugin } from '@znight/config'
-import { Application } from '@znight/core'
-import { HttpPlugin } from '@znight/http'
-import { ObservabilityPlugin } from '@znight/observability'
+"// Written by the compiler from your decorated classes: the whole wiring, no module to declare
+import { createApplication } from './.znight/container.generated.js'
+import { plugins } from './app.js'
 
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
-import { AppConfig } from './app/app.config.js'
-
-const app = await Application.create({
-  metadata: __ZNIGHT_METADATA__,
-  plugins: [
-    // first, so that its hooks wrap everything; metrics (with prom-client) and tracing are off
-    ObservabilityPlugin.configure(container => ({
-      logging: {
-        name: 'my-service',
-        // human-readable logs in development (\`znight dev\`), JSON logs in production
-        pretty: container.get(AppConfig).environment === 'development',
-      },
-      metrics: false,
-      tracing: false,
-    })),
-    // loads .env files and the environment, validates every @Config class before anything starts
-    ConfigPlugin.configure(),
-    HttpPlugin.configure(container => ({
-      port: container.get(AppConfig).port,
-    })),
-  ],
-})
+const app = await createApplication({ plugins: plugins() })
 
 // SIGINT / SIGTERM stop the application gracefully (in-flight requests are drained)
 await app.start()
@@ -314,11 +337,11 @@ await app.start()
 ,
   "test/greeting.controller.test.ts": 
 "import { afterEach, beforeEach, describe, expect, test } from 'vitest'
-import { HttpPlugin } from '@znight/http'
-import { ObservabilityPlugin } from '@znight/observability'
+import { inline } from '@znight/config'
 import { TestApp } from '@znight/testing'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
+import { plugins } from '../src/app.js'
 
 // TestApp starts the application (without signal handlers) and sends requests in memory
 describe('GreetingController', () => {
@@ -327,10 +350,7 @@ describe('GreetingController', () => {
   beforeEach(async () => {
     app = await TestApp.create({
       metadata,
-      plugins: [
-        ObservabilityPlugin.configure({ logging: { level: 'silent' }, metrics: false }),
-        HttpPlugin.configure({ port: 0 }),
-      ],
+      plugins: plugins({ port: 0, logLevel: 'silent', config: { loaders: [inline({})] } }),
     })
   })
 
@@ -361,7 +381,7 @@ describe('GreetingController', () => {
 import { Logger } from '@znight/observability'
 import { TestBed } from '@znight/testing'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
 import { GreetingService } from '../src/app/greeting.service.js'
 
 // TestBed builds GreetingService with its generated factory and auto-mocks its dependencies
@@ -515,8 +535,8 @@ time** — no \`reflect-metadata\`, errors reported by the compiler with their l
 
 - **HTTP** with \`@znight/http\` (fastify adapter)
 - **Configuration** with \`@znight/config\` (\`src/app/app.config.ts\`, \`.env\` files)
-- **Observability** with \`@znight/observability\` (structured logs: pretty-printed by \`pino-pretty\` in development, JSON in production; metrics and tracing are off in \`src/main.ts\`)
-- **Messaging** with \`@znight/messaging\` (in-memory broker in \`src/main.ts\`)
+- **Observability** with \`@znight/observability\` (structured logs: pretty-printed by \`pino-pretty\` in development, JSON in production; metrics and tracing are off in \`src/app.ts\`)
+- **Messaging** with \`@znight/messaging\` (in-memory broker in \`src/app.ts\`)
 
 ## Scripts
 
@@ -540,7 +560,8 @@ curl -X POST localhost:3000/greetings -H 'content-type: application/json' -d '{"
 
 \`\`\`txt
 src/
-├─ main.ts                    # Application.create() + plugins + start()
+├─ app.ts                     # the plugins, shared by main.ts and the TestApp tests
+├─ main.ts                    # createApplication({ plugins }) + start()
 ├─ .znight/                   # generated DI container (git-ignored)
 └─ app/
    ├─ app.config.ts            # @Config: settings read from the environment
@@ -640,6 +661,57 @@ preload = ["@znight/compiler/bun"]
     "typescript": "^7.0.0",
     "vite": "^8.0.0"
   }
+}
+"
+,
+  "src/app.ts": 
+"import { ConfigPlugin, type ConfigPluginOptions } from '@znight/config'
+import type { Plugin } from '@znight/core'
+import { HttpPlugin } from '@znight/http'
+import { fastifyAdapter } from '@znight/http/fastify'
+import { MessagingPlugin } from '@znight/messaging'
+import { memory } from '@znight/messaging/memory'
+import { type LoggerLevel, ObservabilityPlugin } from '@znight/observability'
+
+import { AppConfig } from './app/app.config.js'
+
+/** What the tests change in the production wiring. */
+export interface AppOptions {
+  /** HTTP port. Default: AppConfig.port (PORT, 3000). Tests pass 0 (TestApp sends requests in memory). */
+  readonly port?: number
+  /** Minimum log level. Default: LOG_LEVEL, otherwise info. Tests pass 'silent'. */
+  readonly logLevel?: LoggerLevel
+  /** Options of ConfigPlugin. Default: .env files, then the environment. Tests pass inline() values. */
+  readonly config?: ConfigPluginOptions
+}
+
+/**
+ * The plugins of the application, used by src/main.ts and by the tests (TestApp.create): the tests
+ * run the production wiring.
+ */
+export function plugins(options: AppOptions = {}): Plugin[] {
+  return [
+    // first, so that its hooks wrap everything; metrics (with prom-client) and tracing are off
+    ObservabilityPlugin.configure(container => ({
+      logging: {
+        name: 'my-service',
+        // default: the LOG_LEVEL environment variable, otherwise info
+        level: options.logLevel,
+        // human-readable logs in development (\`znight dev\`), JSON logs in production
+        pretty: container.get(AppConfig).environment === 'development',
+      },
+      metrics: false,
+      tracing: false,
+    })),
+    // loads .env files and the environment, validates every @Config class before anything starts
+    ConfigPlugin.configure(options.config),
+    // in-memory broker for development: use rabbitmq(), sqs() or kafka() in production
+    MessagingPlugin.configure({ driver: memory() }),
+    HttpPlugin.configure(container => ({
+      adapter: fastifyAdapter(),
+      port: options.port ?? container.get(AppConfig).port,
+    })),
+  ]
 }
 "
 ,
@@ -774,40 +846,11 @@ export class HealthController {
 "
 ,
   "src/main.ts": 
-"import { ConfigPlugin } from '@znight/config'
-import { Application } from '@znight/core'
-import { HttpPlugin } from '@znight/http'
-import { fastifyAdapter } from '@znight/http/fastify'
-import { MessagingPlugin } from '@znight/messaging'
-import { memory } from '@znight/messaging/memory'
-import { ObservabilityPlugin } from '@znight/observability'
+"// Written by the compiler from your decorated classes: the whole wiring, no module to declare
+import { createApplication } from './.znight/container.generated.js'
+import { plugins } from './app.js'
 
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
-import { AppConfig } from './app/app.config.js'
-
-const app = await Application.create({
-  metadata: __ZNIGHT_METADATA__,
-  plugins: [
-    // first, so that its hooks wrap everything; metrics (with prom-client) and tracing are off
-    ObservabilityPlugin.configure(container => ({
-      logging: {
-        name: 'my-service',
-        // human-readable logs in development (\`znight dev\`), JSON logs in production
-        pretty: container.get(AppConfig).environment === 'development',
-      },
-      metrics: false,
-      tracing: false,
-    })),
-    // loads .env files and the environment, validates every @Config class before anything starts
-    ConfigPlugin.configure(),
-    // in-memory broker for development: use rabbitmq(), sqs() or kafka() in production
-    MessagingPlugin.configure({ driver: memory() }),
-    HttpPlugin.configure(container => ({
-      adapter: fastifyAdapter(),
-      port: container.get(AppConfig).port,
-    })),
-  ],
-})
+const app = await createApplication({ plugins: plugins() })
 
 // SIGINT / SIGTERM stop the application gracefully (in-flight requests are drained)
 await app.start()
@@ -815,13 +858,11 @@ await app.start()
 ,
   "test/greeting.controller.test.ts": 
 "import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { HttpPlugin } from '@znight/http'
-import { MessagingPlugin } from '@znight/messaging'
-import { memory } from '@znight/messaging/memory'
-import { ObservabilityPlugin } from '@znight/observability'
+import { inline } from '@znight/config'
 import { TestApp } from '@znight/testing'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
+import { plugins } from '../src/app.js'
 
 // TestApp starts the application (without signal handlers) and sends requests in memory
 describe('GreetingController', () => {
@@ -830,11 +871,7 @@ describe('GreetingController', () => {
   beforeEach(async () => {
     app = await TestApp.create({
       metadata,
-      plugins: [
-        ObservabilityPlugin.configure({ logging: { level: 'silent' }, metrics: false }),
-        MessagingPlugin.configure({ driver: memory() }),
-        HttpPlugin.configure({ port: 0 }),
-      ],
+      plugins: plugins({ port: 0, logLevel: 'silent', config: { loaders: [inline({})] } }),
     })
   })
 
@@ -865,7 +902,7 @@ describe('GreetingController', () => {
 import { Logger } from '@znight/observability'
 import { TestBed } from '@znight/testing'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
 import { GreetingService } from '../src/app/greeting.service.js'
 
 // TestBed builds GreetingService with its generated factory and auto-mocks its dependencies
@@ -1046,7 +1083,8 @@ curl -X POST localhost:3000/greetings -H 'content-type: application/json' -d '{"
 
 \`\`\`txt
 src/
-├─ main.ts                    # Application.create() + plugins + start()
+├─ app.ts                     # the plugins, shared by main.ts and the TestApp tests
+├─ main.ts                    # createApplication({ plugins }) + start()
 ├─ .znight/                   # generated DI container (git-ignored)
 └─ app/
    ├─ greeting.controller.ts   # @Controller: /greetings routes
@@ -1126,6 +1164,28 @@ Vitest uses \`vite.config.ts\`, so the \`znight()\` plugin regenerates the conta
 }
 "
 ,
+  "src/app.ts": 
+"import type { Plugin } from '@znight/core'
+import { HttpPlugin } from '@znight/http'
+import { expressAdapter } from '@znight/http/express'
+
+/** What the tests change in the production wiring. */
+export interface AppOptions {
+  /** HTTP port. Default: PORT, otherwise 3000. Tests pass 0 (TestApp sends requests in memory). */
+  readonly port?: number
+}
+
+/**
+ * The plugins of the application, used by src/main.ts and by the tests (TestApp.create): the tests
+ * run the production wiring.
+ */
+export function plugins(options: AppOptions = {}): Plugin[] {
+  return [
+    HttpPlugin.configure({ adapter: expressAdapter(), port: options.port ?? Number(process.env.PORT ?? 3000) }),
+  ]
+}
+"
+,
   "src/app/greeting.controller.ts": 
 "import { Body, Controller, Get, Param, Post, Query } from '@znight/http'
 
@@ -1186,18 +1246,11 @@ export class HealthController {
 "
 ,
   "src/main.ts": 
-"import { Application } from '@znight/core'
-import { HttpPlugin } from '@znight/http'
-import { expressAdapter } from '@znight/http/express'
+"// Written by the compiler from your decorated classes: the whole wiring, no module to declare
+import { createApplication } from './.znight/container.generated.js'
+import { plugins } from './app.js'
 
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
-
-const app = await Application.create({
-  metadata: __ZNIGHT_METADATA__,
-  plugins: [
-    HttpPlugin.configure({ adapter: expressAdapter(), port: Number(process.env.PORT ?? 3000) }),
-  ],
-})
+const app = await createApplication({ plugins: plugins() })
 
 // SIGINT / SIGTERM stop the application gracefully (in-flight requests are drained)
 await app.start()
@@ -1205,10 +1258,10 @@ await app.start()
 ,
   "test/greeting.controller.test.ts": 
 "import { afterEach, beforeEach, describe, expect, test } from 'vitest'
-import { HttpPlugin } from '@znight/http'
 import { TestApp } from '@znight/testing'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
+import { plugins } from '../src/app.js'
 
 // TestApp starts the application (without signal handlers) and sends requests in memory
 describe('GreetingController', () => {
@@ -1217,7 +1270,7 @@ describe('GreetingController', () => {
   beforeEach(async () => {
     app = await TestApp.create({
       metadata,
-      plugins: [HttpPlugin.configure({ port: 0 })],
+      plugins: plugins({ port: 0 }),
     })
   })
 
@@ -1247,7 +1300,7 @@ describe('GreetingController', () => {
 "import { describe, expect, test } from 'vitest'
 import { TestBed } from '@znight/testing'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
 import { GreetingService } from '../src/app/greeting.service.js'
 
 // TestBed builds GreetingService with its generated factory and auto-mocks its dependencies
@@ -1391,7 +1444,7 @@ A [Znight](https://github.com/znight-org/znight) application: dependency injecti
 time** — no \`reflect-metadata\`, errors reported by the compiler with their location.
 
 - **HTTP** with \`@znight/http\` (hono adapter)
-- **Messaging** with \`@znight/messaging\` (in-memory broker in \`src/main.ts\`)
+- **Messaging** with \`@znight/messaging\` (in-memory broker in \`src/app.ts\`)
 
 ## Scripts
 
@@ -1415,7 +1468,8 @@ curl -X POST localhost:3000/greetings -H 'content-type: application/json' -d '{"
 
 \`\`\`txt
 src/
-├─ main.ts                    # Application.create() + plugins + start()
+├─ app.ts                     # the plugins, shared by main.ts and the TestApp tests
+├─ main.ts                    # createApplication({ plugins }) + start()
 ├─ .znight/                   # generated DI container (git-ignored)
 └─ app/
    ├─ greeting.consumer.ts     # @Consumer: handles the "greetings" queue
@@ -1493,6 +1547,32 @@ Vitest uses \`vite.config.ts\`, so the \`znight()\` plugin regenerates the conta
     "vite": "^8.0.0",
     "vitest": "^4.1.0"
   }
+}
+"
+,
+  "src/app.ts": 
+"import type { Plugin } from '@znight/core'
+import { HttpPlugin } from '@znight/http'
+import { honoAdapter } from '@znight/http/hono'
+import { MessagingPlugin } from '@znight/messaging'
+import { memory } from '@znight/messaging/memory'
+
+/** What the tests change in the production wiring. */
+export interface AppOptions {
+  /** HTTP port. Default: PORT, otherwise 3000. Tests pass 0 (TestApp sends requests in memory). */
+  readonly port?: number
+}
+
+/**
+ * The plugins of the application, used by src/main.ts and by the tests (TestApp.create): the tests
+ * run the production wiring.
+ */
+export function plugins(options: AppOptions = {}): Plugin[] {
+  return [
+    // in-memory broker for development: use rabbitmq(), sqs() or kafka() in production
+    MessagingPlugin.configure({ driver: memory() }),
+    HttpPlugin.configure({ adapter: honoAdapter(), port: options.port ?? Number(process.env.PORT ?? 3000) }),
+  ]
 }
 "
 ,
@@ -1590,22 +1670,11 @@ export class HealthController {
 "
 ,
   "src/main.ts": 
-"import { Application } from '@znight/core'
-import { HttpPlugin } from '@znight/http'
-import { honoAdapter } from '@znight/http/hono'
-import { MessagingPlugin } from '@znight/messaging'
-import { memory } from '@znight/messaging/memory'
+"// Written by the compiler from your decorated classes: the whole wiring, no module to declare
+import { createApplication } from './.znight/container.generated.js'
+import { plugins } from './app.js'
 
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
-
-const app = await Application.create({
-  metadata: __ZNIGHT_METADATA__,
-  plugins: [
-    // in-memory broker for development: use rabbitmq(), sqs() or kafka() in production
-    MessagingPlugin.configure({ driver: memory() }),
-    HttpPlugin.configure({ adapter: honoAdapter(), port: Number(process.env.PORT ?? 3000) }),
-  ],
-})
+const app = await createApplication({ plugins: plugins() })
 
 // SIGINT / SIGTERM stop the application gracefully (in-flight requests are drained)
 await app.start()
@@ -1613,12 +1682,10 @@ await app.start()
 ,
   "test/greeting.controller.test.ts": 
 "import { afterEach, beforeEach, describe, expect, test } from 'vitest'
-import { HttpPlugin } from '@znight/http'
-import { MessagingPlugin } from '@znight/messaging'
-import { memory } from '@znight/messaging/memory'
 import { TestApp } from '@znight/testing'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
+import { plugins } from '../src/app.js'
 
 // TestApp starts the application (without signal handlers) and sends requests in memory
 describe('GreetingController', () => {
@@ -1627,10 +1694,7 @@ describe('GreetingController', () => {
   beforeEach(async () => {
     app = await TestApp.create({
       metadata,
-      plugins: [
-        MessagingPlugin.configure({ driver: memory() }),
-        HttpPlugin.configure({ port: 0 }),
-      ],
+      plugins: plugins({ port: 0 }),
     })
   })
 
@@ -1660,7 +1724,7 @@ describe('GreetingController', () => {
 "import { describe, expect, test } from 'vitest'
 import { TestBed } from '@znight/testing'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
 import { GreetingService } from '../src/app/greeting.service.js'
 
 // TestBed builds GreetingService with its generated factory and auto-mocks its dependencies
@@ -1829,7 +1893,8 @@ curl localhost:3000/openapi.json        # the API reference is at http://localho
 
 \`\`\`txt
 src/
-├─ main.ts                    # Application.create() + plugins + start()
+├─ app.ts                     # the plugins, shared by main.ts and the TestApp tests
+├─ main.ts                    # createApplication({ plugins }) + start()
 ├─ openapi.ts                 # @OpenApiDocument: title, description, version of openapi.json
 ├─ .znight/                   # generated DI container (git-ignored)
 └─ app/
@@ -1911,6 +1976,33 @@ Vitest uses \`vite.config.ts\`, so the \`znight()\` plugin regenerates the conta
     "vite": "^8.0.0",
     "vitest": "^4.1.0"
   }
+}
+"
+,
+  "src/app.ts": 
+"import type { Plugin } from '@znight/core'
+import { HttpPlugin } from '@znight/http'
+import { OpenApiPlugin } from '@znight/openapi'
+import { SchedulePlugin } from '@znight/schedule'
+
+/** What the tests change in the production wiring. */
+export interface AppOptions {
+  /** HTTP port. Default: PORT, otherwise 3000. Tests pass 0 (TestApp sends requests in memory). */
+  readonly port?: number
+}
+
+/**
+ * The plugins of the application, used by src/main.ts and by the tests (TestApp.create): the tests
+ * run the production wiring.
+ */
+export function plugins(options: AppOptions = {}): Plugin[] {
+  return [
+    // before HttpPlugin: plugins stop in reverse order, so HTTP stops first, then running jobs drain
+    SchedulePlugin.configure(),
+    HttpPlugin.configure({ port: options.port ?? Number(process.env.PORT ?? 3000) }),
+    // GET /openapi.json and the API reference at /docs, with Scalar (document options: src/openapi.ts)
+    OpenApiPlugin.configure({ ui: 'scalar' }),
+  ]
 }
 "
 ,
@@ -1997,23 +2089,11 @@ export class HeartbeatJobs {
 "
 ,
   "src/main.ts": 
-"import { Application } from '@znight/core'
-import { HttpPlugin } from '@znight/http'
-import { OpenApiPlugin } from '@znight/openapi'
-import { SchedulePlugin } from '@znight/schedule'
+"// Written by the compiler from your decorated classes: the whole wiring, no module to declare
+import { createApplication } from './.znight/container.generated.js'
+import { plugins } from './app.js'
 
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
-
-const app = await Application.create({
-  metadata: __ZNIGHT_METADATA__,
-  plugins: [
-    // before HttpPlugin: plugins stop in reverse order, so HTTP stops first, then running jobs drain
-    SchedulePlugin.configure(),
-    HttpPlugin.configure({ port: Number(process.env.PORT ?? 3000) }),
-    // GET /openapi.json and the API reference at /docs, with Scalar (document options: src/openapi.ts)
-    OpenApiPlugin.configure({ ui: 'scalar' }),
-  ],
-})
+const app = await createApplication({ plugins: plugins() })
 
 // SIGINT / SIGTERM stop the application gracefully (in-flight requests are drained)
 await app.start()
@@ -2036,10 +2116,10 @@ export class Api {}
 ,
   "test/greeting.controller.test.ts": 
 "import { afterEach, beforeEach, describe, expect, test } from 'vitest'
-import { HttpPlugin } from '@znight/http'
 import { TestApp } from '@znight/testing'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
+import { plugins } from '../src/app.js'
 
 // TestApp starts the application (without signal handlers) and sends requests in memory
 describe('GreetingController', () => {
@@ -2048,7 +2128,7 @@ describe('GreetingController', () => {
   beforeEach(async () => {
     app = await TestApp.create({
       metadata,
-      plugins: [HttpPlugin.configure({ port: 0 })],
+      plugins: plugins({ port: 0 }),
     })
   })
 
@@ -2078,7 +2158,7 @@ describe('GreetingController', () => {
 "import { describe, expect, test } from 'vitest'
 import { TestBed } from '@znight/testing'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
 import { GreetingService } from '../src/app/greeting.service.js'
 
 // TestBed builds GreetingService with its generated factory and auto-mocks its dependencies
@@ -2100,7 +2180,7 @@ import { SchedulePlugin, SchedulerRegistry } from '@znight/schedule'
 import { createTestClock } from '@znight/schedule/testing'
 import { TestApp } from '@znight/testing'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
 import { HeartbeatJobs } from '../src/app/heartbeat.jobs.js'
 
 // virtual time: the clock only moves when the test advances it, and waits for the runs it starts
@@ -2252,7 +2332,7 @@ A [Znight](https://github.com/znight-org/znight) application: dependency injecti
 time** — no \`reflect-metadata\`, errors reported by the compiler with their location.
 
 - **HTTP** with \`@znight/http\` (fastify adapter)
-- **Observability** with \`@znight/observability\` (structured logs: pretty-printed by \`pino-pretty\` in development, JSON in production; metrics and tracing are off in \`src/main.ts\`)
+- **Observability** with \`@znight/observability\` (structured logs: pretty-printed by \`pino-pretty\` in development, JSON in production; metrics and tracing are off in \`src/app.ts\`)
 - **OpenAPI** with \`@znight/openapi\` (\`/openapi.json\`, Swagger UI API reference at \`/docs\`, options in \`src/openapi.ts\`)
 - **GraphQL** with \`@znight/graphql\` (code-first: the schema is derived from \`src/app/greeting.resolver.ts\`)
 - **WebSocket** with \`@znight/websocket\` (\`src/app/greeting.gateway.ts\`, on the HTTP port at \`/ws\`)
@@ -2282,7 +2362,8 @@ curl localhost:3000/graphql -H 'content-type: application/json' -d '{"query":"{ 
 
 \`\`\`txt
 src/
-├─ main.ts                    # Application.create() + plugins + start()
+├─ app.ts                     # the plugins, shared by main.ts and the TestApp tests
+├─ main.ts                    # createApplication({ plugins }) + start()
 ├─ openapi.ts                 # @OpenApiDocument: title, description, version of openapi.json
 ├─ .znight/                   # generated DI container (git-ignored)
 └─ app/
@@ -2369,6 +2450,52 @@ Vitest uses \`vite.config.ts\`, so the \`znight()\` plugin regenerates the conta
     "vite": "^8.0.0",
     "vitest": "^4.1.0"
   }
+}
+"
+,
+  "src/app.ts": 
+"import type { Plugin } from '@znight/core'
+import { GraphQLPlugin } from '@znight/graphql'
+import { HttpPlugin } from '@znight/http'
+import { fastifyAdapter } from '@znight/http/fastify'
+import { type LoggerLevel, ObservabilityPlugin } from '@znight/observability'
+import { OpenApiPlugin } from '@znight/openapi'
+import { WebSocketPlugin } from '@znight/websocket'
+
+/** What the tests change in the production wiring. */
+export interface AppOptions {
+  /** HTTP port. Default: PORT, otherwise 3000. Tests pass 0 (TestApp sends requests in memory). */
+  readonly port?: number
+  /** Minimum log level. Default: LOG_LEVEL, otherwise info. Tests pass 'silent'. */
+  readonly logLevel?: LoggerLevel
+}
+
+/**
+ * The plugins of the application, used by src/main.ts and by the tests (TestApp.create): the tests
+ * run the production wiring.
+ */
+export function plugins(options: AppOptions = {}): Plugin[] {
+  return [
+    // first, so that its hooks wrap everything; metrics (with prom-client) and tracing are off
+    ObservabilityPlugin.configure({
+      logging: {
+        name: 'my-service',
+        // default: the LOG_LEVEL environment variable, otherwise info
+        level: options.logLevel,
+        // human-readable logs in development (\`znight dev\`), JSON logs in production
+        pretty: process.env['NODE_ENV'] === 'development',
+      },
+      metrics: false,
+      tracing: false,
+    }),
+    HttpPlugin.configure({ adapter: fastifyAdapter(), port: options.port ?? Number(process.env.PORT ?? 3000) }),
+    // GET /openapi.json and the API reference at /docs, with Swagger UI (document options: src/openapi.ts)
+    OpenApiPlugin.configure({ ui: 'swagger' }),
+    // POST /graphql, GET /graphql (GraphiQL in development): the schema is derived from the resolvers
+    GraphQLPlugin.configure(),
+    // WebSocket gateways on the HTTP server's port (ws on Node.js, Bun's own WebSocket on Bun)
+    WebSocketPlugin.configure(),
+  ]
 }
 "
 ,
@@ -2491,38 +2618,11 @@ export class HealthController {
 "
 ,
   "src/main.ts": 
-"import { Application } from '@znight/core'
-import { GraphQLPlugin } from '@znight/graphql'
-import { HttpPlugin } from '@znight/http'
-import { fastifyAdapter } from '@znight/http/fastify'
-import { ObservabilityPlugin } from '@znight/observability'
-import { OpenApiPlugin } from '@znight/openapi'
-import { WebSocketPlugin } from '@znight/websocket'
+"// Written by the compiler from your decorated classes: the whole wiring, no module to declare
+import { createApplication } from './.znight/container.generated.js'
+import { plugins } from './app.js'
 
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
-
-const app = await Application.create({
-  metadata: __ZNIGHT_METADATA__,
-  plugins: [
-    // first, so that its hooks wrap everything; metrics (with prom-client) and tracing are off
-    ObservabilityPlugin.configure({
-      logging: {
-        name: 'my-service',
-        // human-readable logs in development (\`znight dev\`), JSON logs in production
-        pretty: process.env['NODE_ENV'] === 'development',
-      },
-      metrics: false,
-      tracing: false,
-    }),
-    HttpPlugin.configure({ adapter: fastifyAdapter(), port: Number(process.env.PORT ?? 3000) }),
-    // GET /openapi.json and the API reference at /docs, with Swagger UI (document options: src/openapi.ts)
-    OpenApiPlugin.configure({ ui: 'swagger' }),
-    // POST /graphql, GET /graphql (GraphiQL in development): the schema is derived from the resolvers
-    GraphQLPlugin.configure(),
-    // WebSocket gateways on the HTTP server's port (ws on Node.js, Bun's own WebSocket on Bun)
-    WebSocketPlugin.configure(),
-  ],
-})
+const app = await createApplication({ plugins: plugins() })
 
 // SIGINT / SIGTERM stop the application gracefully (in-flight requests are drained)
 await app.start()
@@ -2545,11 +2645,10 @@ export class Api {}
 ,
   "test/greeting.controller.test.ts": 
 "import { afterEach, beforeEach, describe, expect, test } from 'vitest'
-import { HttpPlugin } from '@znight/http'
-import { ObservabilityPlugin } from '@znight/observability'
 import { TestApp } from '@znight/testing'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
+import { plugins } from '../src/app.js'
 
 // TestApp starts the application (without signal handlers) and sends requests in memory
 describe('GreetingController', () => {
@@ -2558,10 +2657,7 @@ describe('GreetingController', () => {
   beforeEach(async () => {
     app = await TestApp.create({
       metadata,
-      plugins: [
-        ObservabilityPlugin.configure({ logging: { level: 'silent' }, metrics: false }),
-        HttpPlugin.configure({ port: 0 }),
-      ],
+      plugins: plugins({ port: 0, logLevel: 'silent' }),
     })
   })
 
@@ -2589,23 +2685,17 @@ describe('GreetingController', () => {
 ,
   "test/greeting.gateway.test.ts": 
 "import { describe, expect, test } from 'vitest'
-import { HttpPlugin } from '@znight/http'
-import { ObservabilityPlugin } from '@znight/observability'
 import { TestApp } from '@znight/testing'
-import { WebSocketPlugin } from '@znight/websocket'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
+import { plugins } from '../src/app.js'
 
 // app.connect() opens an in-memory connection, through the real handshake
 describe('GreetingGateway', () => {
   test('answers "greet" requests', async () => {
     const app = await TestApp.create({
       metadata,
-      plugins: [
-        ObservabilityPlugin.configure({ logging: { level: 'silent' }, metrics: false }),
-        HttpPlugin.configure({ port: 0 }),
-        WebSocketPlugin.configure(),
-      ],
+      plugins: plugins({ port: 0, logLevel: 'silent' }),
     })
     try {
       const client = await app.connect('/ws')
@@ -2622,24 +2712,18 @@ describe('GreetingGateway', () => {
 ,
   "test/greeting.resolver.test.ts": 
 "import { describe, expect, test } from 'vitest'
-import { GraphQLPlugin } from '@znight/graphql'
 import { executeOperation } from '@znight/graphql/testing'
-import { HttpPlugin } from '@znight/http'
-import { ObservabilityPlugin } from '@znight/observability'
 import { TestApp } from '@znight/testing'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
+import { plugins } from '../src/app.js'
 
 // executeOperation() sends the operation through the whole HTTP pipeline, in memory
 describe('GreetingResolver', () => {
   test('query { greeting }', async () => {
     const app = await TestApp.create({
       metadata,
-      plugins: [
-        ObservabilityPlugin.configure({ logging: { level: 'silent' }, metrics: false }),
-        HttpPlugin.configure({ port: 0 }),
-        GraphQLPlugin.configure(),
-      ],
+      plugins: plugins({ port: 0, logLevel: 'silent' }),
     })
     try {
       const response = await executeOperation(app, { query: '{ greeting(name: "Ada") { message } }' })
@@ -2659,7 +2743,7 @@ describe('GreetingResolver', () => {
 import { Logger } from '@znight/observability'
 import { TestBed } from '@znight/testing'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
 import { GreetingService } from '../src/app/greeting.service.js'
 
 // TestBed builds GreetingService with its generated factory and auto-mocks its dependencies
@@ -2745,6 +2829,7 @@ exports[`znight new creates a project from flags 1`] = `
   "README.md",
   "bunfig.toml",
   "package.json",
+  "src/app.ts",
   "src/app/app.config.ts",
   "src/app/greeting.consumer.ts",
   "src/app/greeting.controller.ts",

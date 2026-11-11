@@ -43,8 +43,7 @@ export interface ConfigPluginInstance extends Plugin {
  * listing every missing or invalid value.
  *
  * ```ts
- * const app = await Application.create({
- *   metadata: __ZNIGHT_METADATA__,
+ * const app = await createApplication({
  *   plugins: [ConfigPlugin.configure({ loaders: [dotenv(), env(), vault({ path: 'secret/app' })] })],
  * })
  * ```

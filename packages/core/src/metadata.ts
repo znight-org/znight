@@ -2,7 +2,7 @@
  * Runtime metadata contract.
  *
  * `@znight/compiler` analyzes the application at build time and generates a module exporting a
- * {@link ZnightMetadata} object (`__ZNIGHT_METADATA__`). The runtime (container, plugins) only ever
+ * {@link ZnightMetadata} object (`metadata`) and a `createApplication()` function bound to it. The runtime (container, plugins) only ever
  * consumes this object: there is no reflection and no decorator metadata at runtime.
  *
  * This file is the single source of truth shared by the compiler (which emits code matching these

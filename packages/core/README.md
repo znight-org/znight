@@ -4,8 +4,8 @@ The runtime of [Znight](../../README.md): a dependency injection container drive
 metadata**, the application lifecycle, plugins, hooks, request scopes, method interceptors (AOP) and
 the marker decorators.
 
-`@znight/compiler` analyses your sources at build time and generates `__ZNIGHT_METADATA__`: every
-provider, its dependencies, its scope and a precomputed resolution order. `@znight/core` only executes
+`@znight/compiler` analyses your sources at build time and generates the `metadata` of the
+application (and `createApplication()`, bound to it): every provider, its dependencies, its scope and a precomputed resolution order. `@znight/core` only executes
 that plan. There is no `reflect-metadata`, no runtime type lookup, and resolving a singleton is a
 single `Map` lookup.
 
@@ -54,12 +54,10 @@ export class UserService implements OnStart {
 
 ```ts
 // src/main.ts
-import { Application } from '@znight/core'
 import { HttpPlugin } from '@znight/http'
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
+import { createApplication } from './.znight/container.generated.js'
 
-const app = await Application.create({
-  metadata: __ZNIGHT_METADATA__,
+const app = await createApplication({
   plugins: [HttpPlugin.configure({ port: 3000 })],
 })
 await app.start() // SIGINT / SIGTERM trigger a graceful app.stop()
@@ -125,6 +123,10 @@ export const CurrentUser = createParamDecorator<User>({
 
 ## Application
 
+Applications usually call `createApplication(options)`, exported by the generated module: it is
+`Application.create({ ...options, metadata })` with the generated `metadata`, and its options
+(`CreateApplicationOptions`, exported by this package) are the ones below without `metadata`.
+
 `Application.create(options)` builds the container and runs the plugins:
 
 1. supplies `providers`, runs each plugin's `register` (in order), applies `overrides`;
@@ -140,7 +142,7 @@ token; keys may be tokens or classes. Override values that look like a provider 
 
 | Option      | Description                                                                                     |
 | ----------- | ----------------------------------------------------------------------------------------------- |
-| `metadata`  | The generated `__ZNIGHT_METADATA__`.                                                            |
+| `metadata`  | The generated `metadata` (`createApplication()` binds it).                                      |
 | `plugins`   | Runtime features (`HttpPlugin`, `MessagingPlugin`, `ConfigPlugin`...).                          |
 | `providers` | Values for externals or replacements of compiled providers (see below).                         |
 | `overrides` | Same shape as `providers`, applied last with the highest precedence. Ideal for tests.           |
@@ -209,7 +211,7 @@ The `Container` is created by the application (`app.container`); you can also us
 in tests:
 
 ```ts
-const container = Container.create(__ZNIGHT_METADATA__)
+const container = Container.create(metadata)
 container.registerValue('@znight/observability#Logger', fakeLogger)
 await container.init()
 

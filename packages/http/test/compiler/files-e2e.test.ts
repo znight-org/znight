@@ -47,10 +47,10 @@ describe.skipIf(typeof compile !== 'function')('compiled files application (e2e)
     outFile = result.outFile
     fs.mkdirSync(path.dirname(outFile), { recursive: true })
     fs.writeFileSync(outFile, code)
-    const generated = (await import(pathToFileURL(outFile).href)) as { __ZNIGHT_METADATA__: ZnightMetadata }
+    const generated = (await import(pathToFileURL(outFile).href)) as { metadata: ZnightMetadata }
     http = HttpPlugin.configure({ port: 0, host: '127.0.0.1' })
     application = await Application.create({
-      metadata: generated.__ZNIGHT_METADATA__,
+      metadata: generated.metadata,
       plugins: [http],
       logger: silentLogger,
       shutdown: { signals: false },

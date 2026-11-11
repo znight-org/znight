@@ -16,12 +16,10 @@ npm install fastify     # optional: or express, or hono (+ @hono/node-server on 
 ::: code-group
 
 ```ts [src/main.ts]
-import { Application } from '@znight/core'
 import { HttpPlugin } from '@znight/http'
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
+import { createApplication } from './.znight/container.generated.js'
 
-const app = await Application.create({
-  metadata: __ZNIGHT_METADATA__,
+const app = await createApplication({
   plugins: [HttpPlugin.configure({ port: 3000, prefix: '/api' })], // built-in node:http adapter
 })
 await app.start() // SIGINT / SIGTERM: stop accepting connections, drain, close

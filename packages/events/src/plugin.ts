@@ -49,8 +49,7 @@ const SHUTDOWN_DRAIN: TypedToken<AsyncDisposable> = '@znight/events#EventsShutdo
  * In-process application events (RFC 0011).
  *
  * ```ts
- * const app = await Application.create({
- *   metadata: __ZNIGHT_METADATA__,
+ * const app = await createApplication({
  *   plugins: [EventsPlugin.configure(), HttpPlugin.configure({ adapter: honoAdapter(), port: 3000 })],
  * })
  * ```

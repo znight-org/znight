@@ -4,8 +4,9 @@ description: "@znight/compiler - the Vite plugin, CLI and Bun integration that a
 
 # @znight/compiler <Badge type="tip" text="available" />
 
-The compiler analyses your sources at build time and generates `__ZNIGHT_METADATA__`: providers,
-dependencies, scopes, resolution order, routes, consumers and config classes. It is a build-time
+The compiler analyses your sources at build time and generates a module exporting `metadata`
+(providers, dependencies, scopes, resolution order, routes, consumers and config classes) and
+`createApplication()`, bound to it. It is a build-time
 dependency only.
 
 ```sh

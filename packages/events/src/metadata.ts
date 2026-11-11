@@ -1,5 +1,5 @@
 /**
- * Events section of the generated metadata (`__ZNIGHT_METADATA__.extensions.events`), produced by the
+ * Events section of the generated metadata (`metadata.extensions.events`), produced by the
  * `@znight/events/compiler` extension and consumed by `EventsPlugin` (RFC 0011 §5.5, architecture
  * §9.8). The plugin checks it at boot, because metadata can be hand-written.
  */

@@ -8,8 +8,7 @@ Every runtime feature of Znight (HTTP server, message consumers, configuration, 
 **plugin**. Your own infrastructure can be one too: a heartbeat, a gRPC server, a tenant resolver...
 
 ```ts
-const app = await Application.create({
-  metadata: __ZNIGHT_METADATA__,
+const app = await createApplication({
   plugins: [ConfigPlugin.configure(), HttpPlugin.configure({ port: 3000 }), HeartbeatPlugin.configure()],
 })
 ```
@@ -401,6 +400,7 @@ first, so that it is disposed last and flushes after every other plugin stopped:
 import type { Plugin } from '@znight/core'
 
 import * as Sentry from '@sentry/node'
+import { createApplication } from './.znight/container.generated.js'
 
 export const SentryPlugin: Plugin = {
   name: 'sentry',
@@ -423,8 +423,7 @@ export const SentryPlugin: Plugin = {
 }
 
 // src/main.ts
-const app = await Application.create({
-  metadata: __ZNIGHT_METADATA__,
+const app = await createApplication({
   plugins: [SentryPlugin, ObservabilityPlugin.configure(), HttpPlugin.configure({ port: 3000 })],
 })
 ```

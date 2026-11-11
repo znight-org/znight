@@ -63,12 +63,11 @@ export class ChatGateway {
 ```
 
 ```ts
-import { Application } from '@znight/core'
 import { HttpPlugin } from '@znight/http'
 import { WebSocketPlugin } from '@znight/websocket'
+import { createApplication } from './.znight/container.generated.js'
 
-const app = await Application.create({
-  metadata: __ZNIGHT_METADATA__,
+const app = await createApplication({
   plugins: [HttpPlugin.configure({ port: 3000 }), WebSocketPlugin.configure({ maxPayload: '64kb' })],
 })
 ```

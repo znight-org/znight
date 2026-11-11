@@ -338,8 +338,7 @@ Forgot the plugin? `Application.create()` fails with
 You can also supply or replace values yourself when creating the application:
 
 ```ts
-const app = await Application.create({
-  metadata: __ZNIGHT_METADATA__,
+const app = await createApplication({
   providers: [[Clock, systemClock]], // keys: classes or tokens
 })
 ```

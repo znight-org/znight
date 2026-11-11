@@ -25,6 +25,7 @@ and the release that brought it. Until 1.0, minor versions may change APIs; each
 | [0011](https://github.com/znight-org/znight/blob/main/rfcs/0011-application-events.md)          | Application events (`@znight/events`)     | Implemented (0.5.0)                                                                                |
 | [0012](https://github.com/znight-org/znight/blob/main/rfcs/0012-messaging-pubsub.md)            | Pub/Sub driver (`@znight/messaging`)      | Accepted (implemented, unreleased)                                                                 |
 | [0014](https://github.com/znight-org/znight/blob/main/rfcs/0014-messaging-drivers.md)           | Messaging drivers (`@znight/messaging`)   | Accepted (M1, NATS JetStream, Azure Service Bus and Redis Streams drivers implemented, unreleased) |
+| [0015](https://github.com/znight-org/znight/blob/main/rfcs/0015-bootstrap-api.md)               | Generated application entry               | Accepted (implemented, unreleased)                                                                 |
 
 ## Released {#released}
 
@@ -146,6 +147,13 @@ Milestone 3 of [RFC 0009](https://github.com/znight-org/znight/blob/main/rfcs/00
 `@znight/graphql/apollo`, serving the engine with Apollo Server, once Apollo Server accepts
 graphql-js 17. The engine and the GraphQL Yoga driver are in place.
 
+### Generated application entry
+
+[RFC 0015](https://github.com/znight-org/znight/blob/main/rfcs/0015-bootstrap-api.md), implemented
+and unreleased: the generated module exports `metadata` and `createApplication()`, the convention
+of `main.ts` ([Getting started](/guide/getting-started)). The old export name is renamed `metadata`
+in 0.9, with no alias (a breaking change before 1.0).
+
 ### Messaging drivers
 
 Milestone 2 of [RFC 0014](https://github.com/znight-org/znight/blob/main/rfcs/0014-messaging-drivers.md):
@@ -177,6 +185,10 @@ These are tracked in the RFCs as follow-ups. None has a date.
   cookies; a hook measuring the lifetime of event streams; fan-out of events across instances.
 - **WebSocket follow-ups**: rooms shared across instances, a typed client generated from the
   metadata, an AsyncAPI document.
+- **Type-checked interface mocks in tests**: `mocks.get<BookRepository>('BookRepository')` is a string
+  lookup, so a typo is a runtime error and a wrong type argument passes silently. Test-only generated
+  tokens or a typed lookup by the interface's canonical identity need their own RFC (provider modules
+  must not import the generated module, [`ZNIGHT020`](/reference/error-codes#znight020)).
 - **GraphQL follow-ups**: GraphQL interfaces in code-first, `__resolveType` methods and custom
   directives in schema-first, `graphql-ws` subscriptions, `@defer` / `@stream`,
   trusted documents checked at build time, query cost analysis, federation, resolver-level spans

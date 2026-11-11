@@ -51,7 +51,7 @@ export function featurePackage(): string {
   // metadata hand-off: compiler extension -> generated metadata -> runtime plugin
   const cy = top + h + 52
   const mid = (xs[1]! + w / 2 + xs[2]! + w / 2) / 2
-  const [meta] = chip(mid, cy, '__ZNIGHT_METADATA__.extensions.http', {
+  const [meta] = chip(mid, cy, 'metadata.extensions.http', {
     mono: true,
     size: 12,
     anchor: 'middle',
@@ -79,7 +79,7 @@ export function featurePackage(): string {
   return svg({
     h: cy + 13 + 24,
     title: 'Anatomy of a feature package',
-    desc: 'A feature package such as @znight/http has three parts. Decorators (@Controller, @Get, @Body) live in your code: markers that do nothing at run time and are stripped from the bundle. The compiler extension (@znight/http/compiler), found through the package manifest, analyses the controllers at build time and emits extensions.http in __ZNIGHT_METADATA__. The runtime plugin (HttpPlugin.configure()), added to the application, reads extensions.http and serves the requests.',
+    desc: 'A feature package such as @znight/http has three parts. Decorators (@Controller, @Get, @Body) live in your code: markers that do nothing at run time and are stripped from the bundle. The compiler extension (@znight/http/compiler), found through the package manifest, analyses the controllers at build time and emits extensions.http in the generated metadata. The runtime plugin (HttpPlugin.configure()), added to the application, reads extensions.http and serves the requests.',
     body,
   })
 }

@@ -1,9 +1,8 @@
 import type { HttpAdapter } from '@znight/http'
 
-import { Application } from '@znight/core'
 import { HttpPlugin, nodeAdapter } from '@znight/http'
 
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
+import { createApplication } from './.znight/container.generated.js'
 
 /** The adapter named by `ADAPTER`: the same controllers are served by each of them. */
 async function adapter(name = 'node'): Promise<HttpAdapter> {
@@ -21,8 +20,7 @@ async function adapter(name = 'node'): Promise<HttpAdapter> {
   }
 }
 
-const app = await Application.create({
-  metadata: __ZNIGHT_METADATA__,
+const app = await createApplication({
   plugins: [
     HttpPlugin.configure({
       adapter: await adapter(process.env['ADAPTER']),

@@ -142,7 +142,7 @@ export class ${names.className} {
   }
 }
 `,
-  hint: () => 'consumers run with MessagingPlugin.configure({ driver }) in src/main.ts',
+  hint: () => 'consumers run with MessagingPlugin.configure({ driver }) in src/app.ts',
 }
 
 const config: Schematic = {
@@ -163,7 +163,7 @@ export class ${names.className} {
   enabled = true
 }
 `,
-  hint: names => `inject ${names.className} anywhere; values are loaded by ConfigPlugin.configure() in src/main.ts`,
+  hint: names => `inject ${names.className} anywhere; values are loaded by ConfigPlugin.configure() in src/app.ts`,
 }
 
 const guard: Schematic = {
@@ -280,7 +280,7 @@ export class ${names.className} {
 }
 `,
   hint: () =>
-    'jobs run with SchedulePlugin.configure() in src/main.ts; test them with createTestClock() from @znight/schedule/testing',
+    'jobs run with SchedulePlugin.configure() in src/app.ts; test them with createTestClock() from @znight/schedule/testing',
 }
 
 /** Every schematic, in display order. */

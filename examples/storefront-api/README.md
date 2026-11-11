@@ -173,7 +173,8 @@ curl -i $API/carts/$CART                           # 401, www-authenticate: Bear
 
 ```txt
 src/
-├─ main.ts                   # Application.create(): observability, config, HTTP, OpenAPI; shutdown
+├─ main.ts                   # createApplication(): the plugins of app.ts, the document in production; shutdown
+├─ app.ts                    # plugins(): observability, config, HTTP, OpenAPI, shared with the tests
 ├─ http.ts                   # HttpPlugin (Hono) and OpenApiPlugin options, shared with the tests
 ├─ api.ts                    # @OpenApiDocument, securityScheme('bearer'), securityScheme('apiKey')
 ├─ openapi.converters.ts     # schema converters given to every assembly of the document

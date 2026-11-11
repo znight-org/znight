@@ -100,12 +100,10 @@ export class UserController {
 ```
 
 ```ts [main.ts]
-import { Application } from '@znight/core'
 import { HttpPlugin } from '@znight/http'
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
+import { createApplication } from './.znight/container.generated.js'
 
-const app = await Application.create({
-  metadata: __ZNIGHT_METADATA__,
+const app = await createApplication({
   plugins: [HttpPlugin.configure({ port: 3000 })],
 })
 await app.start()
@@ -118,7 +116,7 @@ import { PgUserRepository } from '../users/pg-user.repository.js'
 import { UserService } from '../users/user.service.js'
 // ...
 
-export const __ZNIGHT_METADATA__: ZnightMetadata = {
+export const metadata: ZnightMetadata = {
   version: 1,
   compiler: '0.6.2',
   providers: {

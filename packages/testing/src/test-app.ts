@@ -195,7 +195,7 @@ export type PluginInitRoots = Required<Pick<Plugin, 'initRoots'>>
 
 /** Options of {@link TestApp.create}. */
 export interface TestAppOptions {
-  /** The generated metadata (`__ZNIGHT_METADATA__`). */
+  /** The generated metadata: the `metadata` export of `src/.znight/container.generated.ts`. */
   readonly metadata: ZnightMetadata
   readonly plugins?: readonly Plugin[]
   /** Values supplied by the application (externals, configuration...), as in `Application.create`. */
@@ -233,7 +233,7 @@ export interface TestAppOptions {
  *
  * ```ts
  * await using app = await TestApp.create({
- *   metadata: __ZNIGHT_METADATA__,
+ *   metadata,
  *   plugins: [HttpPlugin.configure({ adapter: fastify() })],
  *   overrides: [[UserRepository, fakeRepository]],
  * })

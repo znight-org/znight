@@ -5,7 +5,7 @@ import type { ServerConfig } from '../config/server.config.js'
 const EXPOSED_HEADERS = ['location', 'x-request-id']
 
 /**
- * The browser-facing security options of `HttpPlugin`, shared by `main.ts` and the tests so that
+ * The browser-facing security options of `HttpPlugin`, used by `src/app.ts`, so by `main.ts` and the tests:
  * both serve the API with the same policies. They are validated at boot (ZNIGHT005): a malformed
  * origin or proxy address stops the application instead of silently matching nothing.
  *
