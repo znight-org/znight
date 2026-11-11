@@ -10,7 +10,7 @@ import { nats } from '../../src/drivers/nats.ts'
 import { MessageBroker, MessagingHeaders } from '../../src/index.ts'
 import { describeDriverConformance } from '../../src/testing.ts'
 import { handler, sleep } from '../helpers.ts'
-import { integration, startApp, stopApps, waitFor } from './support.ts'
+import { integration, startApp, startContainer, stopApps, waitFor } from './support.ts'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test'
 
 const IMAGE = 'nats:2.14.9'
@@ -27,7 +27,7 @@ describe.skipIf(!integration)('NATS JetStream (testcontainers)', () => {
   let jsm: JetStreamManager
 
   beforeAll(async () => {
-    container = await new NatsContainer(IMAGE).withJetStream().start()
+    container = await startContainer(() => new NatsContainer(IMAGE).withJetStream().start())
     const { user, pass } = container.getConnectionOptions()
     base = {
       servers: [`${container.getHost()}:${container.getMappedPort(4222)}`],

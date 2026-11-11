@@ -7,7 +7,7 @@ import { sqs } from '../../src/drivers/sqs.ts'
 import { MessageBroker } from '../../src/index.ts'
 import { describeDriverConformance } from '../../src/testing.ts'
 import { handler, sleep } from '../helpers.ts'
-import { integration, startApp, stopApps, waitFor } from './support.ts'
+import { integration, startApp, startContainer, stopApps, waitFor } from './support.ts'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test'
 
 describe.skipIf(!integration)('SQS (LocalStack testcontainers)', () => {
@@ -18,7 +18,9 @@ describe.skipIf(!integration)('SQS (LocalStack testcontainers)', () => {
   let admin: SQSClient
 
   beforeAll(async () => {
-    container = await new LocalstackContainer('localstack/localstack:4.4').withEnvironment({ SERVICES: 'sqs' }).start()
+    container = await startContainer(() =>
+      new LocalstackContainer('localstack/localstack:4.4').withEnvironment({ SERVICES: 'sqs' }).start(),
+    )
     config = {
       endpoint: container.getConnectionUri(),
       region: 'us-east-1',

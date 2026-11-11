@@ -7,7 +7,7 @@ import { RabbitMQDriver, rabbitmq } from '../../src/drivers/rabbitmq.ts'
 import { MessageBroker, NonRetryableError } from '../../src/index.ts'
 import { describeDriverConformance } from '../../src/testing.ts'
 import { handler, memoryLogger, sleep } from '../helpers.ts'
-import { integration, startApp, stopApps, waitFor } from './support.ts'
+import { integration, startApp, startContainer, stopApps, waitFor } from './support.ts'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test'
 
 describe.skipIf(!integration)('RabbitMQ (testcontainers)', () => {
@@ -17,7 +17,7 @@ describe.skipIf(!integration)('RabbitMQ (testcontainers)', () => {
   let url: string
 
   beforeAll(async () => {
-    container = await new RabbitMQContainer('rabbitmq:4.1-alpine').start()
+    container = await startContainer(() => new RabbitMQContainer('rabbitmq:4.1-alpine').start())
     url = container.getAmqpUrl()
   }, 180_000)
 

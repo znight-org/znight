@@ -6,7 +6,7 @@ import { kafka } from '../../src/drivers/kafka.ts'
 import { MessageBroker } from '../../src/index.ts'
 import { describeDriverConformance } from '../../src/testing.ts'
 import { handler, sleep } from '../helpers.ts'
-import { integration, startApp, stopApps, waitFor } from './support.ts'
+import { integration, startApp, startContainer, stopApps, waitFor } from './support.ts'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test'
 
 describe.skipIf(!integration)('Kafka (testcontainers)', () => {
@@ -16,7 +16,7 @@ describe.skipIf(!integration)('Kafka (testcontainers)', () => {
   let brokers: string[]
 
   beforeAll(async () => {
-    container = await new KafkaContainer('confluentinc/cp-kafka:8.0.0').start()
+    container = await startContainer(() => new KafkaContainer('confluentinc/cp-kafka:8.0.0').start())
     brokers = [`${container.getHost()}:${container.getMappedPort(9093)}`]
   }, 240_000)
 
