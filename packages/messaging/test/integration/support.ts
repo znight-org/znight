@@ -20,6 +20,28 @@ export async function waitFor(predicate: () => boolean, timeoutMs = 30_000, labe
   }
 }
 
+/** Whether `error` is the Testcontainers race in which the Ryuk reaper is created before its image is pulled. */
+function isRyukImageRace(error: unknown): boolean {
+  return error instanceof Error && /No such image: testcontainers\/ryuk/.test(error.message)
+}
+
+/**
+ * Starts a container, retrying when the first container of the run loses the Testcontainers race that
+ * creates the Ryuk reaper before its image has finished pulling ("No such image:
+ * testcontainers/ryuk:..."). Testcontainers caches the reaper only once it started, so a retry pulls
+ * the image again and creates it. Any other error fails at once.
+ */
+export async function startContainer<T>(start: () => Promise<T>, attempts = 3, delayMs = 2_000): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await start()
+    } catch (error) {
+      if (attempt >= attempts || !isRyukImageRace(error)) throw error
+      await sleep(delayMs * attempt)
+    }
+  }
+}
+
 let apps: Application[] = []
 
 /** Creates and starts an application consuming with `driver`; {@link stopApps} stops it. */

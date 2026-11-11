@@ -8,7 +8,7 @@ import { type RedisDriverOptions, redis } from '../../src/drivers/redis.ts'
 import { MessageBroker } from '../../src/index.ts'
 import { describeDriverConformance } from '../../src/testing.ts'
 import { handler, sleep } from '../helpers.ts'
-import { integration, startApp, stopApps, waitFor } from './support.ts'
+import { integration, startApp, startContainer, stopApps, waitFor } from './support.ts'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test'
 
 /** Redis (the oldest supported version and a current one) and Valkey: the same protocol, Lua scripts and stream commands. */
@@ -51,7 +51,7 @@ for (const server of SERVERS) {
     }
 
     beforeAll(async () => {
-      container = await new RedisContainer(server.image).withCommand([...server.command]).start()
+      container = await startContainer(() => new RedisContainer(server.image).withCommand([...server.command]).start())
       url = container.getConnectionUrl()
       client = new Redis(url)
     }, 180_000)

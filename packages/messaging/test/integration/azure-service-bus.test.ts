@@ -7,7 +7,7 @@ import { type AzureServiceBusDriverOptions, azureServiceBus } from '../../src/dr
 import { MessageBroker } from '../../src/index.ts'
 import { describeDriverConformance } from '../../src/testing.ts'
 import { handler, sleep } from '../helpers.ts'
-import { integration, startApp, stopApps, waitFor } from './support.ts'
+import { integration, startApp, startContainer, stopApps, waitFor } from './support.ts'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test'
 
 /** The official Service Bus emulator (it starts a SQL Server container next to it). */
@@ -52,10 +52,9 @@ describe.skipIf(!integration)('Azure Service Bus (emulator testcontainers)', () 
   let admin: ServiceBusAdministrationClient
 
   beforeAll(async () => {
-    container = await new AzureServiceBusContainer(EMULATOR_IMAGE)
-      .acceptLicense()
-      .withConfig(JSON.stringify(EMULATOR_CONFIG))
-      .start()
+    container = await startContainer(() =>
+      new AzureServiceBusContainer(EMULATOR_IMAGE).acceptLicense().withConfig(JSON.stringify(EMULATOR_CONFIG)).start(),
+    )
     connectionString = container.getConnectionString()
     const adminPort = container.getMappedPort(ADMIN_PORT)
     admin = new ServiceBusAdministrationClient(connectionString.replace(/:\d+;/, `:${adminPort};`))

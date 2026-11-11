@@ -8,7 +8,7 @@ import { pubsub } from '../../src/drivers/pubsub.ts'
 import { MessageBroker } from '../../src/index.ts'
 import { describeDriverConformance } from '../../src/testing.ts'
 import { handler, sleep } from '../helpers.ts'
-import { integration, startApp, stopApps, waitFor } from './support.ts'
+import { integration, startApp, startContainer, stopApps, waitFor } from './support.ts'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test'
 
 /** The emulators image of the Google Cloud CLI (gcloud beta emulators pubsub start). */
@@ -25,7 +25,7 @@ describe.skipIf(!integration)('Pub/Sub (emulator testcontainers)', () => {
   let project: string
 
   beforeAll(async () => {
-    container = await new PubSubEmulatorContainer(EMULATOR_IMAGE).start()
+    container = await startContainer(() => new PubSubEmulatorContainer(EMULATOR_IMAGE).start())
     project = container.getProjectId()
     config = { apiEndpoint: container.getEmulatorEndpoint(), projectId: project }
     client = new PubSub(config)
