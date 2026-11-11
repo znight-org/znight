@@ -203,7 +203,6 @@ export const metadata: ZnightMetadata = {
 export function createApplication(options: CreateApplicationOptions = {}): Promise<Application> {
   return Application.create({ ...options, metadata })
 }
-// + the deprecated alias of `metadata` (removed in 0.10) and `export default metadata`
 ```
 
 At runtime, `main.ts` imports that module and calls `createApplication({ plugins: [...] })`, which is

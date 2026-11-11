@@ -1,7 +1,7 @@
 /**
  * The error module: what the generated module becomes in watch/serve modes when the compilation
- * fails. It still exports a typed `metadata`, `createApplication` and the deprecated alias (importers
- * keep type-checking and linking), but importing it throws a `ZnightError` carrying the formatted
+ * fails. It still exports a typed `metadata` and `createApplication` (importers keep
+ * type-checking and linking), but importing it throws a `ZnightError` carrying the formatted
  * diagnostics.
  */
 import type { Diagnostic } from '../project/index.ts'
@@ -10,13 +10,7 @@ import { ErrorCode } from '@znight/core'
 
 import { formatDiagnostics } from '../diagnostics/format.ts'
 import { COMPILER_VERSION } from '../version.ts'
-import {
-  CREATE_APPLICATION_EXPORT,
-  EXPORT_DOCS,
-  generatedHeader,
-  LEGACY_METADATA_EXPORT,
-  METADATA_EXPORT,
-} from './container.ts'
+import { CREATE_APPLICATION_EXPORT, EXPORT_DOCS, generatedHeader, METADATA_EXPORT } from './container.ts'
 import { quote } from './syntax.ts'
 
 /** Options of {@link renderErrorModule}. */
@@ -55,10 +49,6 @@ export function renderErrorModule(diagnostics: readonly Diagnostic[], options: R
     `export function ${CREATE_APPLICATION_EXPORT}(options: CreateApplicationOptions = {}): Promise<Application> {`,
     `  return Application.create({ ...options, ${METADATA_EXPORT} })`,
     '}',
-    '',
-    EXPORT_DOCS.legacy,
-    `export const ${LEGACY_METADATA_EXPORT}: ZnightMetadata = ${METADATA_EXPORT}`,
-    `export default ${METADATA_EXPORT}`,
     '',
   ].join('\n')
 }

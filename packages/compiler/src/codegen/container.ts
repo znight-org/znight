@@ -17,9 +17,6 @@
  * export function createApplication(options: CreateApplicationOptions = {}): Promise<Application> {
  *   return Application.create({ ...options, metadata })
  * }
- *
- * export const __ZNIGHT_METADATA__: ZnightMetadata = metadata // @deprecated, removed in 0.10
- * export default metadata
  * ```
  *
  * The output only depends on the graph (sorted by canonical identities) and the options, never on
@@ -66,19 +63,14 @@ export const METADATA_EXPORT = 'metadata'
 /** Name of the exported function creating the application bound to {@link METADATA_EXPORT} (RFC 0015). */
 export const CREATE_APPLICATION_EXPORT = 'createApplication'
 
-/** Deprecated alias of {@link METADATA_EXPORT}, exported until 0.10 (RFC 0015). */
-export const LEGACY_METADATA_EXPORT = '__ZNIGHT_METADATA__'
-
 /** JSDoc of the exports of the generated module (and of the error module). */
 export const EXPORT_DOCS: {
   readonly metadata: string
   readonly createApplication: string
-  readonly legacy: string
 } = {
   metadata:
     '/** Compiled dependency graph of this application (Application.create, TestApp.create, TestBed.create). */',
   createApplication: '/** Creates this application: `Application.create({ ...options, metadata })`. */',
-  legacy: '/** @deprecated Import `metadata` (or call `createApplication()`). Removed in 0.10. */',
 }
 
 /** Header comments of every generated module. */
@@ -121,7 +113,6 @@ export function generateContainer(input: ContainerInput): ContainerOutput {
   const module = new ModuleBuilder(project, report)
   module.names.reserve(METADATA_EXPORT)
   module.names.reserve(CREATE_APPLICATION_EXPORT)
-  module.names.reserve(LEGACY_METADATA_EXPORT)
   module.names.reserve('d')
   const index = new GraphIndex(graph)
   const stored = new Map(graph.extensions.map(entry => [entry.name, entry.stored]))
@@ -302,15 +293,6 @@ export function generateContainer(input: ContainerInput): ContainerOutput {
     `.create({ ...options, ${METADATA_EXPORT} })`,
     hardline,
     '}',
-    hardline,
-    hardline,
-    EXPORT_DOCS.legacy,
-    hardline,
-    `export const ${LEGACY_METADATA_EXPORT}: `,
-    metadataType,
-    ` = ${METADATA_EXPORT}`,
-    hardline,
-    `export default ${METADATA_EXPORT}`,
   ]
   const rendered = module.render(generatedHeader(input.version), body)
   checkSyntax(rendered.text, rendered.marks, report)

@@ -172,10 +172,6 @@ export const metadata: ZnightMetadata = {
 export function createApplication(options: CreateApplicationOptions = {}): Promise<Application> {
   return Application.create({ ...options, metadata })
 }
-
-/** @deprecated Import \`metadata\` (or call \`createApplication()\`). Removed in 0.10. */
-export const __ZNIGHT_METADATA__: ZnightMetadata = metadata
-export default metadata
 "
 `;
 
@@ -361,10 +357,6 @@ export const metadata: ZnightMetadata = {
 export function createApplication(options: CreateApplicationOptions = {}): Promise<Application> {
   return Application.create({ ...options, metadata })
 }
-
-/** @deprecated Import \`metadata\` (or call \`createApplication()\`). Removed in 0.10. */
-export const __ZNIGHT_METADATA__: ZnightMetadata = metadata
-export default metadata
 "
 `;
 
@@ -464,10 +456,6 @@ export const metadata: ZnightMetadata = {
 export function createApplication(options: CreateApplicationOptions = {}): Promise<Application> {
   return Application.create({ ...options, metadata })
 }
-
-/** @deprecated Import \`metadata\` (or call \`createApplication()\`). Removed in 0.10. */
-export const __ZNIGHT_METADATA__: ZnightMetadata = metadata
-export default metadata
 "
 `;
 
@@ -740,9 +728,5 @@ export const metadata: ZnightMetadata = {
 export function createApplication(options: CreateApplicationOptions = {}): Promise<Application> {
   return Application.create({ ...options, metadata })
 }
-
-/** @deprecated Import \`metadata\` (or call \`createApplication()\`). Removed in 0.10. */
-export const __ZNIGHT_METADATA__: ZnightMetadata = metadata
-export default metadata
 "
 `;
