@@ -422,7 +422,7 @@ await app.start()
 /** `src/app.ts`: the plugins of the application, shared by `src/main.ts` and the `TestApp` tests. */
 function appTs(flags: Flags): string {
   const imports = [
-    flags.config ? "import { ConfigPlugin } from '@znight/config'" : undefined,
+    flags.config ? "import { ConfigPlugin, type ConfigPluginOptions } from '@znight/config'" : undefined,
     "import type { Plugin } from '@znight/core'",
     flags.graphql ? "import { GraphQLPlugin } from '@znight/graphql'" : undefined,
     "import { HttpPlugin } from '@znight/http'",
@@ -461,7 +461,7 @@ function appTs(flags: Flags): string {
   if (flags.config) {
     plugins.push(
       '    // loads .env files and the environment, validates every @Config class before anything starts',
-      '    ConfigPlugin.configure(),',
+      '    ConfigPlugin.configure(options.config),',
     )
   }
   if (flags.messaging) {
@@ -527,6 +527,12 @@ function appTs(flags: Flags): string {
       ? [
           "  /** Minimum log level. Default: LOG_LEVEL, otherwise info. Tests pass 'silent'. */",
           '  readonly logLevel?: LoggerLevel',
+        ]
+      : []),
+    ...(flags.config
+      ? [
+          '  /** Options of ConfigPlugin. Default: .env files, then the environment. Tests pass inline() values. */',
+          '  readonly config?: ConfigPluginOptions',
         ]
       : []),
     '}',
@@ -907,11 +913,17 @@ function testAppPlugins(
   plugins: string
 } {
   const imports = [testImports(flags, names)]
+  if (flags.config) imports.push("import { inline } from '@znight/config'")
   if (extra.graphql === true) imports.push("import { executeOperation } from '@znight/graphql/testing'")
   imports.push("import { TestApp } from '@znight/testing'")
-  // port 0: TestApp.inject() sends requests in memory, the server listens on a free port
-  const plugins = flags.observability ? "plugins({ port: 0, logLevel: 'silent' })" : 'plugins({ port: 0 })'
-  return { imports: imports.join('\n'), plugins }
+  // port 0: TestApp.inject() sends requests in memory, the server listens on a free port. inline()
+  // replaces the .env files and the environment: the tests do not depend on the machine.
+  const options = [
+    'port: 0',
+    ...(flags.observability ? ["logLevel: 'silent'"] : []),
+    ...(flags.config ? ['config: { loaders: [inline({})] }'] : []),
+  ]
+  return { imports: imports.join('\n'), plugins: `plugins({ ${options.join(', ')} })` }
 }
 
 function greetingControllerTest(flags: Flags): string {

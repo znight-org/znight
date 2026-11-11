@@ -246,7 +246,9 @@ export class Api {}
     expect(resolver).toContain("greeting(@Args('name') name: string): Greeting {")
     const test = file(project, 'test/greeting.resolver.test.ts')
     expect(test).toContain("import { executeOperation } from '@znight/graphql/testing'")
-    expect(test).toContain("      plugins: plugins({ port: 0, logLevel: 'silent' }),")
+    expect(test).toContain(
+      "      plugins: plugins({ port: 0, logLevel: 'silent', config: { loaders: [inline({})] } }),",
+    )
     expect(test).toContain('{ greeting(name: "Ada") { message } }')
     expect(file(project, 'README.md')).toContain('curl localhost:3000/graphql')
     const without = files()
@@ -418,13 +420,27 @@ export class Api {}
       const test = file(project, `test/${name}.test.ts`)
       expect(test).toContain("import { metadata } from '../src/.znight/container.generated.js'")
       expect(test).toContain("import { plugins } from '../src/app.js'")
-      expect(test).toContain("plugins: plugins({ port: 0, logLevel: 'silent' }),")
+      expect(test).toContain("plugins: plugins({ port: 0, logLevel: 'silent', config: { loaders: [inline({})] } }),")
+      expect(test).toContain("import { inline } from '@znight/config'")
     }
     expect(file(project, 'src/app.ts')).toContain('      metrics: false,\n')
     expect(file(files({ features: [] }), 'test/greeting.controller.test.ts')).toContain(
       'plugins: plugins({ port: 0 }),',
     )
     expect(file(files({ features: [] }), 'src/app.ts')).not.toContain('logLevel')
+  })
+
+  it('the TestApp tests replace the .env files and the environment with inline() values (config)', () => {
+    const app = file(files({ features: ['config'] }), 'src/app.ts')
+    expect(app).toContain("import { ConfigPlugin, type ConfigPluginOptions } from '@znight/config'")
+    expect(app).toContain('  readonly config?: ConfigPluginOptions\n')
+    expect(app).toContain('    ConfigPlugin.configure(options.config),\n')
+    expect(file(files({ features: ['config'] }), 'test/greeting.controller.test.ts')).toContain(
+      'plugins: plugins({ port: 0, config: { loaders: [inline({})] } }),',
+    )
+    const without = files({ features: ['observability'] })
+    expect(file(without, 'src/app.ts')).not.toContain('ConfigPlugin')
+    expect(file(without, 'test/greeting.controller.test.ts')).not.toContain('inline')
   })
 
   it('other package managers test with Vitest (the znight() plugin regenerates the container)', () => {

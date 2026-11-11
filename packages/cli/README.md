@@ -176,7 +176,9 @@ my-service/
   (`TestApp.connect()`).
 - `src/main.ts` calls the generated `createApplication({ plugins: plugins() })`, and `src/app.ts`
   exports `plugins(options)`: the plugin list, shared by `main.ts` and the `TestApp` tests, which run
-  the production wiring with `plugins({ port: 0, logLevel: 'silent' })`. The tests import
+  the production wiring with `plugins({ port: 0, logLevel: 'silent', config: { loaders: [inline({})] } })`:
+  with `config`, the `inline()` loader replaces the `.env` files and the environment, so a value in
+  `.env.local` does not change the outcome of the tests. The tests import
   `{ metadata }` from the generated module.
 - `ObservabilityPlugin` is configured with `metrics: false`: with `prom-client` installed, the
   metrics server (`:9464`) would collide with `znight dev` or with test files running in parallel,

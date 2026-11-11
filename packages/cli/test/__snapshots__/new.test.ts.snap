@@ -188,7 +188,7 @@ Vitest uses \`vite.config.ts\`, so the \`znight()\` plugin regenerates the conta
 "
 ,
   "src/app.ts": 
-"import { ConfigPlugin } from '@znight/config'
+"import { ConfigPlugin, type ConfigPluginOptions } from '@znight/config'
 import type { Plugin } from '@znight/core'
 import { HttpPlugin } from '@znight/http'
 import { type LoggerLevel, ObservabilityPlugin } from '@znight/observability'
@@ -201,6 +201,8 @@ export interface AppOptions {
   readonly port?: number
   /** Minimum log level. Default: LOG_LEVEL, otherwise info. Tests pass 'silent'. */
   readonly logLevel?: LoggerLevel
+  /** Options of ConfigPlugin. Default: .env files, then the environment. Tests pass inline() values. */
+  readonly config?: ConfigPluginOptions
 }
 
 /**
@@ -222,7 +224,7 @@ export function plugins(options: AppOptions = {}): Plugin[] {
       tracing: false,
     })),
     // loads .env files and the environment, validates every @Config class before anything starts
-    ConfigPlugin.configure(),
+    ConfigPlugin.configure(options.config),
     HttpPlugin.configure(container => ({
       port: options.port ?? container.get(AppConfig).port,
     })),
@@ -335,6 +337,7 @@ await app.start()
 ,
   "test/greeting.controller.test.ts": 
 "import { afterEach, beforeEach, describe, expect, test } from 'vitest'
+import { inline } from '@znight/config'
 import { TestApp } from '@znight/testing'
 
 import { metadata } from '../src/.znight/container.generated.js'
@@ -347,7 +350,7 @@ describe('GreetingController', () => {
   beforeEach(async () => {
     app = await TestApp.create({
       metadata,
-      plugins: plugins({ port: 0, logLevel: 'silent' }),
+      plugins: plugins({ port: 0, logLevel: 'silent', config: { loaders: [inline({})] } }),
     })
   })
 
@@ -662,7 +665,7 @@ preload = ["@znight/compiler/bun"]
 "
 ,
   "src/app.ts": 
-"import { ConfigPlugin } from '@znight/config'
+"import { ConfigPlugin, type ConfigPluginOptions } from '@znight/config'
 import type { Plugin } from '@znight/core'
 import { HttpPlugin } from '@znight/http'
 import { fastifyAdapter } from '@znight/http/fastify'
@@ -678,6 +681,8 @@ export interface AppOptions {
   readonly port?: number
   /** Minimum log level. Default: LOG_LEVEL, otherwise info. Tests pass 'silent'. */
   readonly logLevel?: LoggerLevel
+  /** Options of ConfigPlugin. Default: .env files, then the environment. Tests pass inline() values. */
+  readonly config?: ConfigPluginOptions
 }
 
 /**
@@ -699,7 +704,7 @@ export function plugins(options: AppOptions = {}): Plugin[] {
       tracing: false,
     })),
     // loads .env files and the environment, validates every @Config class before anything starts
-    ConfigPlugin.configure(),
+    ConfigPlugin.configure(options.config),
     // in-memory broker for development: use rabbitmq(), sqs() or kafka() in production
     MessagingPlugin.configure({ driver: memory() }),
     HttpPlugin.configure(container => ({
@@ -853,6 +858,7 @@ await app.start()
 ,
   "test/greeting.controller.test.ts": 
 "import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { inline } from '@znight/config'
 import { TestApp } from '@znight/testing'
 
 import { metadata } from '../src/.znight/container.generated.js'
@@ -865,7 +871,7 @@ describe('GreetingController', () => {
   beforeEach(async () => {
     app = await TestApp.create({
       metadata,
-      plugins: plugins({ port: 0, logLevel: 'silent' }),
+      plugins: plugins({ port: 0, logLevel: 'silent', config: { loaders: [inline({})] } }),
     })
   })
 
