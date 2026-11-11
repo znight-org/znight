@@ -1,7 +1,7 @@
 {
   "name": "@znight/messaging",
   "version": "0.7.3",
-  "description": "Znight messaging plugin: consumers, retries and dead-letter queues with RabbitMQ, SQS, Kafka, Google Cloud Pub/Sub, NATS JetStream or Redis Streams",
+  "description": "Znight messaging plugin: consumers, retries and dead-letter queues with RabbitMQ, SQS, Kafka, Google Cloud Pub/Sub, NATS JetStream, Azure Service Bus or Redis Streams",
   "license": "MIT",
   "author": "Ugho STEPHAN",
   "homepage": "https://znight-org.github.io/znight/packages/messaging",
@@ -22,6 +22,7 @@
     "google-cloud-pubsub",
     "nats",
     "jetstream",
+    "azure-service-bus",
     "redis",
     "redis-streams",
     "valkey",
@@ -71,6 +72,11 @@
       "types": "./dist/nats.d.mts",
       "default": "./dist/nats.mjs"
     },
+    "./azure-service-bus": {
+      "@znight/source": "./src/drivers/azure-service-bus.ts",
+      "types": "./dist/azure-service-bus.d.mts",
+      "default": "./dist/azure-service-bus.mjs"
+    },
     "./redis": {
       "@znight/source": "./src/drivers/redis.ts",
       "types": "./dist/redis.d.mts",
@@ -103,6 +109,8 @@
     "@znight/core": "workspace:*"
   },
   "peerDependencies": {
+    "@azure/identity": "^4.0.0",
+    "@azure/service-bus": "^7.9.0",
     "@aws-sdk/client-sqs": "^3.600.0",
     "@google-cloud/pubsub": "^6.0.0",
     "@nats-io/jetstream": "^3.0.0",
@@ -113,6 +121,12 @@
     "@znight/compiler": "workspace:^"
   },
   "peerDependenciesMeta": {
+    "@azure/identity": {
+      "optional": true
+    },
+    "@azure/service-bus": {
+      "optional": true
+    },
     "@aws-sdk/client-sqs": {
       "optional": true
     },
@@ -140,10 +154,13 @@
   },
   "devDependencies": {
     "@aws-sdk/client-sqs": "3.1164.0",
+    "@azure/identity": "4.14.1",
+    "@azure/service-bus": "7.10.0",
     "@google-cloud/pubsub": "6.3.2",
     "@nats-io/jetstream": "3.4.0",
     "@nats-io/transport-node": "3.4.0",
     "@platformatic/kafka": "2.15.0",
+    "@testcontainers/azureservicebus": "12.2.1",
     "@testcontainers/gcloud": "12.2.1",
     "@testcontainers/kafka": "12.2.1",
     "@testcontainers/localstack": "12.2.1",

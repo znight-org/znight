@@ -9,6 +9,7 @@ export default defineConfig({
     kafka: 'src/drivers/kafka.ts',
     pubsub: 'src/drivers/pubsub.ts',
     nats: 'src/drivers/nats.ts',
+    'azure-service-bus': 'src/drivers/azure-service-bus.ts',
     redis: 'src/drivers/redis.ts',
     testing: 'src/testing.ts',
     compiler: 'src/compiler/index.ts',
@@ -25,6 +26,8 @@ export default defineConfig({
     '@google-cloud/pubsub',
     '@nats-io/jetstream',
     '@nats-io/transport-node',
+    '@azure/service-bus',
+    '@azure/identity',
     'ioredis',
   ],
 })

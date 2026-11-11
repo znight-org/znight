@@ -1,16 +1,16 @@
 ---
-description: "@znight/messaging - message consumers with typed handlers, retries with backoff and dead-letter queues on RabbitMQ, SQS, Kafka, Google Cloud Pub/Sub, NATS JetStream, Redis Streams or in memory."
+description: "@znight/messaging - message consumers with typed handlers, retries with backoff and dead-letter queues on RabbitMQ, SQS, Kafka, Google Cloud Pub/Sub, NATS JetStream, Azure Service Bus, Redis Streams or in memory."
 ---
 
 # @znight/messaging <Badge type="tip" text="available" />
 
 Message consumers for Znight. Consumers are providers whose handlers are analysed by the compiler;
 the `MessagingPlugin` subscribes them through a driver: RabbitMQ, Amazon SQS, Kafka, Google Cloud
-Pub/Sub, NATS JetStream, or in memory for tests. Runs on Node.js 24+ and Bun 1.3+.
+Pub/Sub, NATS JetStream, Azure Service Bus, Redis Streams, or in memory for tests. Runs on Node.js 24+ and Bun 1.3+.
 
 ```sh
 npm install @znight/messaging amqplib   # or @aws-sdk/client-sqs, @platformatic/kafka, @google-cloud/pubsub,
-                                        # @nats-io/jetstream + @nats-io/transport-node, ioredis
+                                        # @nats-io/jetstream + @nats-io/transport-node, @azure/service-bus, ioredis
 ```
 
 ::: code-group
@@ -86,10 +86,10 @@ Delivery is **at least once**: handlers must be idempotent.
 2. The handler is selected by `message.type`: exact match, then patterns, then the default handler.
 3. Success → **ack**.
 4. A retryable failure with attempts left → **retry** as `attempt + 1`, attempts being counted by the
-   broker (`ApproximateReceiveCount`, `x-delivery-count`, `deliveryAttempt`) or an `x-znight-attempt` header. Short
+   broker (`ApproximateReceiveCount`, `x-delivery-count`, `deliveryAttempt`, `deliveryCount`) or an `x-znight-attempt` header. Short
    delays are waited in process (within the driver's budget) and the message is then redelivered
    through the broker; longer ones use the broker's native mechanism (SQS visibility timeout,
-   RabbitMQ delay queues, Kafka retry topic, Pub/Sub ack deadline). The application refuses to boot
+   RabbitMQ delay queues, Kafka retry topic, Pub/Sub ack deadline, Service Bus scheduled copy, Redis Streams delayed sorted set). The application refuses to boot
    ([`ZNIGHT011`](/reference/error-codes#znight011)) if a `@Retry` policy cannot be honoured by the
    driver.
 5. A terminal failure — last attempt, `NonRetryableError`, schema failure (`MessageValidationError`),
@@ -121,19 +121,20 @@ export class CheckoutService {
 
 `publish(queue, payload, { type?, headers?, key?, delay?, id?, contentType? })` resolves with `{ id }`
 once the broker **confirmed** the message; `key` is the Kafka partition key, the SQS FIFO group or the
-Pub/Sub ordering key, `delay` is not supported by Kafka nor Pub/Sub (Redis Streams supports it through a sorted set).
+Pub/Sub ordering key or the Service Bus session id, `delay` is not supported by Kafka nor Pub/Sub (Redis Streams supports it through a sorted set).
 
 ## Drivers
 
-| Driver                    | Import                       | Peer dependency                                 | Native delayed retries     |
-| ------------------------- | ---------------------------- | ----------------------------------------------- | -------------------------- |
-| In memory                 | `@znight/messaging/memory`   | —                                               | in process                 |
-| RabbitMQ                  | `@znight/messaging/rabbitmq` | `amqplib`                                       | TTL + dead-letter exchange |
-| Amazon SQS                | `@znight/messaging/sqs`      | `@aws-sdk/client-sqs`                           | visibility timeout         |
-| Kafka                     | `@znight/messaging/kafka`    | `@platformatic/kafka`                           | retry topic                |
-| Google Cloud Pub/Sub      | `@znight/messaging/pubsub`   | `@google-cloud/pubsub`                          | ack deadline (≤ 600 s)     |
-| NATS JetStream            | `@znight/messaging/nats`     | `@nats-io/jetstream`, `@nats-io/transport-node` | `nak(delay)`               |
-| Redis Streams (or Valkey) | `@znight/messaging/redis`    | `ioredis`                                       | delayed sorted set         |
+| Driver                    | Import                                | Peer dependency                                 | Native delayed retries     |
+| ------------------------- | ------------------------------------- | ----------------------------------------------- | -------------------------- |
+| In memory                 | `@znight/messaging/memory`            | —                                               | in process                 |
+| RabbitMQ                  | `@znight/messaging/rabbitmq`          | `amqplib`                                       | TTL + dead-letter exchange |
+| Amazon SQS                | `@znight/messaging/sqs`               | `@aws-sdk/client-sqs`                           | visibility timeout         |
+| Kafka                     | `@znight/messaging/kafka`             | `@platformatic/kafka`                           | retry topic                |
+| Google Cloud Pub/Sub      | `@znight/messaging/pubsub`            | `@google-cloud/pubsub`                          | ack deadline (≤ 600 s)     |
+| NATS JetStream            | `@znight/messaging/nats`              | `@nats-io/jetstream`, `@nats-io/transport-node` | `nak(delay)`               |
+| Azure Service Bus         | `@znight/messaging/azure-service-bus` | `@azure/service-bus`                            | scheduled messages         |
+| Redis Streams (or Valkey) | `@znight/messaging/redis`             | `ioredis`                                       | delayed sorted set         |
 
 A driver implements
 `MessagingDriver { name, capabilities, connect(), subscribe(), publish(), close(), deadLetterName() }`;
@@ -179,6 +180,33 @@ import { pubsub } from '@znight/messaging/pubsub'
 MessagingPlugin.configure({
   driver: pubsub({ retries: 'subscription', subscriptions: { notifications: 'events-notifications' } }),
   defaults: { retry: { attempts: 5, backoff: 'fixed', delay: 0 } }, // the subscription's maxDeliveryAttempts
+})
+```
+
+- **Azure Service Bus**: `publish(queue)` sends to a queue or a topic, `@Consumer(queue)` receives
+  from a queue, a topic subscription (`orders/billing`) or a dead-letter sub-queue
+  (`orders/$deadletterqueue`); `entities` / `subscriptions` map the names. Peek-lock receives, the
+  lock renewed while a message is handled; attempts combine the delivery count and
+  `x-znight-attempt`. `retries: 'znight'` (default) abandons for an immediate retry, schedules a
+  copy on the queue for a delayed one (a subscription keeps the message locked during the delay
+  instead), and dead-letters to the entity's native sub-queue; `retries: 'entity'` abandons every
+  retryable failure so that `maxDeliveryCount` and the sub-queue own redelivery, and dead-letters
+  terminal failures (non-retryable, validation, decoding, no handler) to the sub-queue at once.
+  Delayed publishing schedules the message; `key` is the session id (session-enabled entities are
+  refused for now). Connection string, or `fullyQualifiedNamespace` with a credential
+  (`DefaultAzureCredential` of `@azure/identity` by default). Entities are checked with the
+  administration client and only created with `provision: true`; the opt-in tests run the
+  conformance kit against the Service Bus emulator.
+
+```ts
+import { MessagingPlugin } from '@znight/messaging'
+import { azureServiceBus } from '@znight/messaging/azure-service-bus'
+
+MessagingPlugin.configure({
+  driver: azureServiceBus({
+    fullyQualifiedNamespace: 'acme.servicebus.windows.net', // DefaultAzureCredential
+    subscriptions: { billing: 'orders/billing' }, // @Consumer('billing') reads the subscription
+  }),
 })
 ```
 
