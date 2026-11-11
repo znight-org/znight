@@ -49,7 +49,8 @@ export interface FakeEntity {
   /** `queue` or `topic/subscription`. */
   readonly path: string
   readonly maxDeliveryCount: number
-  readonly requiresSession: boolean
+  /** Writable: a test can enable sessions once a consumer subscribed. */
+  requiresSession: boolean
   readonly lockDurationMs: number
   readonly active: Stored[]
   readonly deadLetter: Stored[]
@@ -213,7 +214,11 @@ export class FakeServiceBus {
         this.#record('receiveMessages', label, [max, receive])
         const entity = entityOf()
         if (entity.requiresSession) {
-          throw new ServiceBusError(`'${label}' requires sessions: use a session receiver`, 'GeneralError')
+          // what the SDK reports when the service refuses the link (amqp:not-allowed)
+          throw new ServiceBusError(
+            'InvalidOperationError: It is not possible for an entity that requires sessions to create a non-sessionful message receiver.',
+            'GeneralError',
+          )
         }
         const deadline = Date.now() + (receive.maxWaitTimeInMs ?? 60_000)
         for (;;) {

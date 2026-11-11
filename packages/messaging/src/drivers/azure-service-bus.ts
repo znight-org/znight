@@ -128,6 +128,8 @@ const MAX_SCHEDULE_DELAY_MS = 10 * 365 * 24 * 3600 * 1000
 const MAX_KEY_LENGTH = 128
 /** Delivery counts remembered for the messages of dead-letter sub-queues the driver did not dead-letter. */
 const MAX_REMEMBERED_BASES = 10_000
+/** Wait of the receive that probes an entity the administration client could not read. */
+const PROBE_WAIT_MS = 50
 /** `maxDeliveryCount` of the entities the driver creates (Service Bus default). */
 const DEFAULT_MAX_DELIVERY_COUNT = 10
 /**
@@ -491,12 +493,18 @@ export class AzureServiceBusDriver implements MessagingDriver {
       source.subscription === undefined
         ? client.createReceiver(source.entity, receiverOptions)
         : client.createReceiver(source.entity, source.subscription, receiverOptions)
+    // the settings could not be read: a first receive attaches the link, which fails on a missing or
+    // session-enabled entity (a peek would not: it goes through the management link)
+    let probed: readonly ServiceBusReceivedMessage[] = []
     if (!verified) {
       try {
-        await receiver.peekMessages(1)
+        probed = await receiver.receiveMessages(options.concurrency, {
+          maxWaitTimeInMs: Math.min(PROBE_WAIT_MS, this.#maxWaitTimeMs),
+        })
       } catch (error) {
         await receiver.close().catch(() => undefined)
         if (isNotFound(error)) throw this.#notFound(kind, source, queue)
+        if (requiresSessions(error)) throw sessionsRefused(kind, options.consumer)
         throw brokerUnavailableError(`Azure Service Bus: cannot receive from ${kind} (${errorMessage(error)})`, error)
       }
     }
@@ -519,6 +527,7 @@ export class AzureServiceBusDriver implements MessagingDriver {
       loop: undefined,
     }
     this.#subscriptions.add(subscription)
+    for (const message of probed) this.#deliver(subscription, message)
     subscription.loop = this.#receive(subscription)
     return {
       nativeDeadLetter: retries === 'entity',
@@ -541,12 +550,15 @@ export class AzureServiceBusDriver implements MessagingDriver {
    * A delayed retry on an entity that cannot receive a scheduled copy (a subscription: the copy would
    * reach every subscription of the topic; a dead-letter sub-queue): the message stays locked (the
    * SDK renews the lock) and is abandoned once the delay elapsed, which counts the next attempt.
-   * Settled at once for the runtime; given back on close.
+   * Settled at once for the runtime, but it keeps its concurrency slot until it is abandoned (the
+   * receive loop counts the held messages); given back on close.
    */
   #hold(subscription: ReceiveSubscription, message: ServiceBusReceivedMessage, delayMs: number): void {
     const timer = setTimeout(() => {
       subscription.held.delete(message)
-      void this.#abandon(subscription, message, 'abandon a message after its retry delay')
+      void this.#abandon(subscription, message, 'abandon a message after its retry delay').then(() =>
+        subscription.wake?.(),
+      )
     }, delayMs)
     subscription.held.set(message, timer)
   }
@@ -631,12 +643,7 @@ export class AzureServiceBusDriver implements MessagingDriver {
       settings = await this.#provision(admin, source, retries, options)
     }
     if (source.deadLetter) return true
-    if (settings.requiresSession) {
-      throw consumerError(
-        `Azure Service Bus: ${kind} requires sessions, which the driver does not support yet (${options.consumer})`,
-        ['Consume an entity without sessions (ordering: one consumer with concurrency 1)'],
-      )
-    }
+    if (settings.requiresSession) throw sessionsRefused(kind, options.consumer)
     const max = settings.maxDeliveryCount
     const forwards = `${kind} dead-letters messages after ${max} delivery attempt(s), but ${options.consumer} allows ${options.maxAttempts} attempt(s)`
     if (retries === 'znight' && max < options.maxAttempts) {
@@ -717,7 +724,8 @@ export class AzureServiceBusDriver implements MessagingDriver {
     const signal = subscription.abort.signal
     let errorDelay = 500
     while (subscription.active) {
-      const free = options.concurrency - subscription.inflight
+      // a message held for a delayed retry stays locked: it keeps its slot
+      const free = options.concurrency - subscription.inflight - subscription.held.size
       if (free <= 0) {
         await new Promise<void>(resolve => {
           subscription.wake = resolve
@@ -732,6 +740,14 @@ export class AzureServiceBusDriver implements MessagingDriver {
         errorDelay = 500
       } catch (error) {
         if (!subscription.active) break
+        if (requiresSessions(error)) {
+          // permanent: the entity was made session-enabled after the subscribe-time check
+          this.#logger.error(`Azure Service Bus: stopped receiving from "${subscription.queue}"`, {
+            err: sessionsRefused(describeSource(subscription.source, subscription.queue), options.consumer),
+          })
+          subscription.active = false
+          break
+        }
         this.#logger.warn(
           `Azure Service Bus: receiving from "${subscription.queue}" failed, retrying in ${errorDelay} ms`,
           { err: error },
@@ -785,11 +801,13 @@ export class AzureServiceBusDriver implements MessagingDriver {
     const native = Number.isSafeInteger(message.deliveryCount) ? Math.max(0, message.deliveryCount as number) : 0
     // the delivery count a dead-letter sub-queue kept: recorded by the driver that dead-lettered the
     // message, else the count of its first delivery from the sub-queue seen by this process
+    // (ignored elsewhere: a dead letter resubmitted to its entity starts its deliveries over)
     const recorded = Number(transport[DELIVERY_BASE])
     let base = 0
     let memo: string | undefined
-    if (Number.isSafeInteger(recorded)) base = recorded
-    else if (subscription.source.deadLetter) {
+    if (subscription.source.deadLetter && Number.isSafeInteger(recorded) && recorded >= 0 && recorded <= native) {
+      base = recorded
+    } else if (subscription.source.deadLetter) {
       memo = `${subscription.source.path}\u0000${message.sequenceNumber?.toString() ?? messageIdOf(message.messageId) ?? ''}`
       base = this.#firstDelivery(memo, native)
     }
@@ -900,6 +918,18 @@ async function closeReceiver(subscription: ReceiveSubscription): Promise<void> {
   if (subscription.closed) return
   subscription.closed = true
   await subscription.receiver.close()
+}
+
+/** A non-session receiver attached to a session-enabled entity (`amqp:not-allowed` from the service). */
+function requiresSessions(error: unknown): boolean {
+  return /requires sessions/i.test(errorMessage(error))
+}
+
+function sessionsRefused(kind: string, consumer: string): Error {
+  return consumerError(
+    `Azure Service Bus: ${kind} requires sessions, which the driver does not support yet (${consumer})`,
+    ['Consume an entity without sessions (ordering: one consumer with concurrency 1)'],
+  )
 }
 
 /** A missing entity: `MessagingEntityNotFound` (AMQP) or a 404 of the administration client. */

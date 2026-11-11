@@ -596,6 +596,8 @@
       },
       "peerDependencies": {
         "@aws-sdk/client-sqs": "^3.600.0",
+        "@azure/identity": "^4.0.0",
+        "@azure/service-bus": "^7.9.0",
         "@google-cloud/pubsub": "^6.0.0",
         "@platformatic/kafka": "^2.0.0",
         "@znight/compiler": "workspace:^",
@@ -603,6 +605,8 @@
       },
       "optionalPeers": [
         "@aws-sdk/client-sqs",
+        "@azure/identity",
+        "@azure/service-bus",
         "@google-cloud/pubsub",
         "@platformatic/kafka",
         "@znight/compiler",

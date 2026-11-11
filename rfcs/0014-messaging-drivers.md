@@ -149,7 +149,11 @@ letters, a driver option chooses **who retries**, never both layers at once: `'z
   and abandons it after the delay (delays bounded by `maxAutoLockRenewalDurationInMs`, checked at
   boot). The dead-letter sub-queue keeps the delivery count: the driver records it on the messages it
   dead-letters (`x-znight-delivery-base`) and otherwise counts from the first delivery it sees, so
-  that a sub-queue consumer starts at attempt 1. `key` is set as both `sessionId` and `partitionKey`
+  that a sub-queue consumer starts at attempt 1 (the recorded count is only read on a dead-letter
+  sub-queue: a dead letter resubmitted to its entity starts over). A message held for a delayed retry
+  keeps its concurrency slot. Without the Manage right, a first short receive replaces the
+  administration check (a peek would not detect a session-enabled entity: it does not attach a receive
+  link). `key` is set as both `sessionId` and `partitionKey`
   on every message (ignored by entities without sessions or partitions). Under `retries: 'entity'`,
   terminal failures (non-retryable, validation, decoding, no handler) go to the sub-queue at once and
   only exhausted attempts are left to `maxDeliveryCount`. A `fullyQualifiedNamespace` without

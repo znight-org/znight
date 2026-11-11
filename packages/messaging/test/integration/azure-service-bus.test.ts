@@ -182,6 +182,10 @@ describe.skipIf(!integration)('Azure Service Bus (emulator testcontainers)', () 
     await expect(startApp(driver(), [{ class: Consumer, queue, handlers: [handler('handle')] }])).rejects.toThrow(
       `queue "${queue}" requires sessions`,
     )
+    // without the administration client, the first receive detects it (a peek would not)
+    await expect(
+      startApp(driver({ administrationClient: false }), [{ class: Consumer, queue, handlers: [handler('handle')] }]),
+    ).rejects.toThrow(`queue "${queue}" requires sessions`)
   })
 
   it('renews the lock of long-running handlers', async () => {

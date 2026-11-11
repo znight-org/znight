@@ -510,6 +510,34 @@ describe('flow control and settlements', () => {
     expect(fake.callsOf('abandonMessage')).toHaveLength(2)
   })
 
+  it('keeps the concurrency slot of a message held for a retry delay', async () => {
+    const fake = new FakeServiceBus()
+    const entity = fake.createSubscription('events', 'billing')
+    let calls = 0
+    let maxLocked = 0
+    class FailingConsumer {
+      handle() {
+        calls++
+        throw new Error('down')
+      }
+    }
+    const { broker } = await startApp(driverFor(fake, { maxInProcessDelayMs: 0 }), [
+      {
+        class: FailingConsumer,
+        queue: 'events/billing',
+        options: { deadLetter: false, concurrency: 1 },
+        handlers: [handler('handle', { retry: { attempts: 2, backoff: 'fixed', delay: 80 } })],
+      },
+    ])
+    for (let index = 0; index < 3; index++) await broker.publish('events', index)
+    await waitFor(() => {
+      maxLocked = Math.max(maxLocked, entity.active.filter(stored => stored.lockToken !== undefined).length)
+      return calls === 6 && entity.active.length === 0
+    }, 'two attempts of each message')
+    expect(maxLocked).toBe(1)
+    for (const call of fake.callsOf('receiveMessages')) expect(call.args[0]).toBe(1)
+  })
+
   it('gives held messages back when the subscription closes', async () => {
     const fake = new FakeServiceBus()
     fake.createSubscription('events', 'billing')
@@ -573,6 +601,39 @@ describe('dead letters', () => {
     })
     expect(dead[0]?.headers[MessagingHeaders.Attempt]).toBeUndefined()
     expect(dead[0]?.headers['x-znight-delivery-base']).toBeUndefined()
+  })
+
+  it('ignores the delivery base of a dead letter resubmitted to its queue', async () => {
+    const fake = new FakeServiceBus()
+    fake.createQueue('orders', { maxDeliveryCount: 3 })
+    await fake.client.createSender('orders').sendMessages({
+      body: Buffer.from('{"id":1}'),
+      messageId: 'resubmitted',
+      contentType: 'application/json',
+      applicationProperties: { 'x-znight-delivery-base': 2 },
+    })
+    const attempts: number[] = []
+    class FailingConsumer {
+      handle(_payload: unknown, message: InboundMessage) {
+        attempts.push(message.attempt)
+        throw new Error('still failing')
+      }
+    }
+    await startApp(driverFor(fake), [
+      {
+        class: FailingConsumer,
+        queue: 'orders',
+        handlers: [handler('handle', { retry: { attempts: 3, backoff: 'fixed', delay: 0 } })],
+      },
+    ])
+    await waitFor(() => fake.pending('orders', true).length === 1, 'the dead letter')
+    expect(attempts).toEqual([1, 2, 3])
+    expect(fake.callsOf('deadLetterMessage')).toHaveLength(1)
+    expect(fake.pending('orders', true)[0]?.applicationProperties).toMatchObject({
+      DeadLetterReason: 'max-attempts',
+      [MessagingHeaders.Attempts]: '3',
+      'x-znight-delivery-base': 2,
+    })
   })
 
   it('sends dead letters to another entity, then completes', async () => {
@@ -833,7 +894,49 @@ describe('verification and provisioning', () => {
     expect(messageOf(nested)).toContain('a dead-letter sub-queue has no dead-letter sub-queue')
   })
 
-  it('checks the entity with a peek when the administration client is refused or disabled', async () => {
+  it('refuses a session-enabled entity the administration client cannot read', async () => {
+    const fake = new FakeServiceBus()
+    fake.createQueue('orders', { requiresSession: true })
+    fake.failures = method => (method.startsWith('get') ? restUnauthorized() : undefined)
+    class Consumer {
+      handle() {}
+    }
+    const refused = await caught(
+      startApp(driverFor(fake), [{ class: Consumer, queue: 'orders', handlers: [handler('handle')] }]),
+    )
+    expect(refused).toBeInstanceOf(ZnightError)
+    expect(messageOf(refused)).toContain('queue "orders" requires sessions')
+    const disabled = await caught(
+      startApp(driverFor(fake, { administrationClient: false }), [
+        { class: Consumer, queue: 'orders', handlers: [handler('handle')] },
+      ]),
+    )
+    expect(messageOf(disabled)).toContain('queue "orders" requires sessions')
+  })
+
+  it('stops receiving, with an error, from an entity that became session-enabled', async () => {
+    const fake = new FakeServiceBus()
+    const entity = fake.createQueue('orders')
+    class Consumer {
+      handle() {}
+    }
+    const { logs } = await startApp(driverFor(fake), [
+      { class: Consumer, queue: 'orders', handlers: [handler('handle')] },
+    ])
+    entity.requiresSession = true
+    await waitFor(
+      () => logs.some(entry => entry.level === 'error' && entry.message.includes('stopped receiving from "orders"')),
+      'the error',
+    )
+    const receives = fake.callsOf('receiveMessages').length
+    await sleep(150)
+    expect(fake.callsOf('receiveMessages')).toHaveLength(receives)
+    const error = logs.find(entry => entry.level === 'error')?.context?.['err']
+    expect(messageOf(error)).toContain('queue "orders" requires sessions')
+    expect(logs.some(entry => entry.level === 'warn' && entry.message.includes('retrying'))).toBe(false)
+  })
+
+  it('checks the entity with a first receive when the administration client is refused or disabled', async () => {
     const fake = new FakeServiceBus()
     fake.failures = method => (method.startsWith('get') ? restUnauthorized() : undefined)
     class Consumer {
@@ -850,10 +953,21 @@ describe('verification and provisioning', () => {
     expect(logs.some(entry => entry.level === 'warn' && entry.message.includes('its settings are not checked'))).toBe(
       true,
     )
-    const peeks = fake.callsOf('peekMessages').length
+    const reads = fake.calls.filter(call => call.method.startsWith('get')).length
     const disabled = driverFor(fake, { administrationClient: false })
-    await startApp(disabled, [{ class: Consumer, queue: 'orders', handlers: [handler('handle')] }])
-    expect(fake.callsOf('peekMessages').length).toBe(peeks + 1)
+    await fake.client.createSender('orders').sendMessages({ body: Buffer.from('1'), messageId: 'probed' })
+    const handled: string[] = []
+    class Recorder {
+      handle(_payload: unknown, message: InboundMessage) {
+        handled.push(message.id)
+      }
+    }
+    await startApp(disabled, [{ class: Recorder, queue: 'orders', handlers: [handler('handle')] }])
+    expect(fake.calls.filter(call => call.method.startsWith('get'))).toHaveLength(reads)
+    expect(fake.callsOf('peekMessages')).toHaveLength(0)
+    // the messages of the first receive are delivered like the others
+    await waitFor(() => handled.length === 1, 'the probed message')
+    expect(handled).toEqual(['probed'])
     expect(disabled.administrationClient).toBeUndefined()
   })
 })

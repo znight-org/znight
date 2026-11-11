@@ -589,7 +589,7 @@ of either (`orders/$deadletterqueue`); `subscriptions` maps a consumer queue to 
 the topic and give each consumer its subscription.
 
 The driver receives in peek-lock mode (`receiveMessages`), never more messages than the free
-concurrency slots, and the SDK renews the lock of each message while it is handled, up to
+concurrency slots (a message held for a retry delay keeps its slot), and the SDK renews the lock of each message while it is handled, up to
 `maxAutoLockRenewalDurationInMs` after it was received. `ack` completes the message, `release`
 abandons it. Attempts combine the delivery count (abandoned or expired deliveries) and the
 `x-znight-attempt` property of scheduled retry copies.
@@ -618,8 +618,11 @@ sub-queue). To never stack both layers, pick one owner with `retries`:
   `@Consumer({ retries: 'entity' })` under a `'znight'` driver fails the boot (ZNIGHT011).
 
 The sub-queue keeps the delivery count of a message: the driver records it on the messages it
-dead-letters, so that a consumer of the sub-queue starts over at attempt 1 (a message the entity
-dead-lettered after `maxDeliveryCount` starts at that count).
+dead-letters, so that a consumer of the sub-queue starts over at attempt 1. A message the entity
+dead-lettered itself (after `maxDeliveryCount`) also starts at attempt 1, counted from the first
+delivery from the sub-queue this process sees (approximate across restarts and instances). The
+recorded count only applies on a dead-letter sub-queue: a dead letter resubmitted to its entity
+starts over at attempt 1.
 
 Headers are application properties; the id is the message id (so duplicate detection applies to
 `publish(..., { id })`; retry and dead-letter copies get their own message id and keep the Znight id
@@ -632,9 +635,11 @@ writes is exposed as `traceparent` when there is none. Delayed publishing schedu
 Session-enabled entities are refused (ZNIGHT011): session receivers, for ordered processing, are
 planned. Nothing is created by default: at subscribe time the administration client reads the queue
 or subscription (missing, session-enabled or with a `maxDeliveryCount` below the attempts: the boot
-fails) and the dead-letter queue named after another entity. Without the Manage right (or with
-`administrationClient: false`), the driver logs a warning and peeks at the entity instead, which only
-proves it exists. `provision: true` creates the missing queue (`maxDeliveryCount` covering the
+fails) and the dead-letter queue named after another entity. Without the Manage right (a warning is
+logged) or with `administrationClient: false`, a first short receive checks the entity instead: the
+boot still fails when it is missing or session-enabled, but its `maxDeliveryCount` is not checked
+(messages it returns are delivered as usual). An entity made session-enabled after the boot stops its
+consumer with an error (ZNIGHT011) instead of retrying forever. `provision: true` creates the missing queue (`maxDeliveryCount` covering the
 attempts, at least 10), topic and subscription of a consumer, the queues published to and the
 dead-letter queues. With the [emulator](https://learn.microsoft.com/azure/service-bus-messaging/overview-emulator),
 use its connection string (`UseDevelopmentEmulator=true`) and point `administrationClient` at its

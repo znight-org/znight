@@ -186,8 +186,9 @@ MessagingPlugin.configure({
   lock renewed while a message is handled; attempts combine the delivery count and `x-znight-attempt`.
   `retries: 'znight'` (default) abandons for an immediate retry, schedules a copy on the queue for a
   delayed one (a subscription keeps the message locked during the delay instead), and dead-letters to
-  the entity's native sub-queue; `retries: 'entity'` abandons every failure so that
-  `maxDeliveryCount` and the sub-queue own redelivery. Delayed publishing schedules the message;
+  the entity's native sub-queue; `retries: 'entity'` abandons every retryable failure so that
+  `maxDeliveryCount` and the sub-queue own redelivery, and dead-letters terminal failures
+  (non-retryable, validation, decoding, no handler) to the sub-queue at once. Delayed publishing schedules the message;
   `key` is the session id (session-enabled entities are refused for now). Connection string, or
   `fullyQualifiedNamespace` with a credential (`DefaultAzureCredential` of `@azure/identity` by
   default). Entities are checked with the administration client and only created with
