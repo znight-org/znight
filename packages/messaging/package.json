@@ -1,7 +1,7 @@
 {
   "name": "@znight/messaging",
   "version": "0.7.3",
-  "description": "Znight messaging plugin: consumers, retries and dead-letter queues with RabbitMQ, SQS, Kafka, Google Cloud Pub/Sub or Redis Streams",
+  "description": "Znight messaging plugin: consumers, retries and dead-letter queues with RabbitMQ, SQS, Kafka, Google Cloud Pub/Sub, NATS JetStream or Redis Streams",
   "license": "MIT",
   "author": "Ugho STEPHAN",
   "homepage": "https://znight-org.github.io/znight/packages/messaging",
@@ -20,6 +20,8 @@
     "kafka",
     "pubsub",
     "google-cloud-pubsub",
+    "nats",
+    "jetstream",
     "redis",
     "redis-streams",
     "valkey",
@@ -64,6 +66,11 @@
       "types": "./dist/pubsub.d.mts",
       "default": "./dist/pubsub.mjs"
     },
+    "./nats": {
+      "@znight/source": "./src/drivers/nats.ts",
+      "types": "./dist/nats.d.mts",
+      "default": "./dist/nats.mjs"
+    },
     "./redis": {
       "@znight/source": "./src/drivers/redis.ts",
       "types": "./dist/redis.d.mts",
@@ -98,6 +105,8 @@
   "peerDependencies": {
     "@aws-sdk/client-sqs": "^3.600.0",
     "@google-cloud/pubsub": "^6.0.0",
+    "@nats-io/jetstream": "^3.0.0",
+    "@nats-io/transport-node": "^3.0.0",
     "@platformatic/kafka": "^2.0.0",
     "amqplib": "^2.0.0",
     "ioredis": "^5.4.0 || ^6.0.0",
@@ -108,6 +117,12 @@
       "optional": true
     },
     "@google-cloud/pubsub": {
+      "optional": true
+    },
+    "@nats-io/jetstream": {
+      "optional": true
+    },
+    "@nats-io/transport-node": {
       "optional": true
     },
     "@platformatic/kafka": {
@@ -126,10 +141,13 @@
   "devDependencies": {
     "@aws-sdk/client-sqs": "3.1164.0",
     "@google-cloud/pubsub": "6.3.2",
+    "@nats-io/jetstream": "3.4.0",
+    "@nats-io/transport-node": "3.4.0",
     "@platformatic/kafka": "2.15.0",
     "@testcontainers/gcloud": "12.2.1",
     "@testcontainers/kafka": "12.2.1",
     "@testcontainers/localstack": "12.2.1",
+    "@testcontainers/nats": "12.2.1",
     "@testcontainers/rabbitmq": "12.2.1",
     "@testcontainers/redis": "12.2.1",
     "@znight/compiler": "workspace:*",

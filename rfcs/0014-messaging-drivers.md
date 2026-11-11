@@ -160,6 +160,22 @@ letters, a driver option chooses **who retries**, never both layers at once: `'z
 - **Provisioning and tests.** Streams verified (`provision: true` creates them); durable consumers are
   created or updated by the driver, like Kafka consumer groups. Tests run `nats` with `-js` in
   Testcontainers.
+- **As implemented** (`@znight/messaging/nats`). Back-pressure is per process: one fetch at a time
+  asks for at most the free concurrency slots, and the consumer's `max_ack_pending` is left to its
+  configuration (`max_ack_pending = concurrency` would bound every replica of a service together).
+  Durable consumers are created when missing and only verified when they exist (pull, explicit
+  acks, exactly the subject as filter, `max_deliver` unlimited or at least the attempts), never
+  updated; a stream named in the options must capture the subject. A message waiting for a delayed
+  retry (`nak(delay)`) stays pending and holds a `max_ack_pending` slot until its redelivery, so long
+  retry delays call for a higher `max_ack_pending` (documented). Retries always send an
+  explicit `nak` delay (a delay of 0 becomes 1 ms) so that a consumer `backoff` never adds to the
+  `@Retry` delay; `nak` and `term` are followed by a flush. For a consumer with a finite
+  `max_deliver` (set by hand), the driver listens to the `MAX_DELIVERIES` advisories in a queue
+  group and dead-letters the messages JetStream stopped delivering from the stream (releases and
+  expired ack waits spend deliveries too); the dead-letter copies of a stream message by one durable
+  share a `Nats-Msg-Id` (`znight-dlq-<stream>-<durable>-<seq>`), so the stream stores one per
+  consumer. Advisories are core NATS messages: one published while no replica listens is lost
+  (documented; capturing them in a stream was left out).
 
 ### 4.3 Redis Streams (`/redis`, peer `ioredis` ^5.4 or ^6)
 

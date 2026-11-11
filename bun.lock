@@ -593,10 +593,13 @@
       "devDependencies": {
         "@aws-sdk/client-sqs": "3.1164.0",
         "@google-cloud/pubsub": "6.3.2",
+        "@nats-io/jetstream": "3.4.0",
+        "@nats-io/transport-node": "3.4.0",
         "@platformatic/kafka": "2.15.0",
         "@testcontainers/gcloud": "12.2.1",
         "@testcontainers/kafka": "12.2.1",
         "@testcontainers/localstack": "12.2.1",
+        "@testcontainers/nats": "12.2.1",
         "@testcontainers/rabbitmq": "12.2.1",
         "@testcontainers/redis": "12.2.1",
         "@znight/compiler": "workspace:*",
@@ -608,6 +611,8 @@
       "peerDependencies": {
         "@aws-sdk/client-sqs": "^3.600.0",
         "@google-cloud/pubsub": "^6.0.0",
+        "@nats-io/jetstream": "^3.0.0",
+        "@nats-io/transport-node": "^3.0.0",
         "@platformatic/kafka": "^2.0.0",
         "@znight/compiler": "workspace:^",
         "amqplib": "^2.0.0",
@@ -616,6 +621,8 @@
       "optionalPeers": [
         "@aws-sdk/client-sqs",
         "@google-cloud/pubsub",
+        "@nats-io/jetstream",
+        "@nats-io/transport-node",
         "@platformatic/kafka",
         "@znight/compiler",
         "amqplib",
@@ -1100,6 +1107,16 @@
 
     "@napi-rs/wasm-runtime": ["@napi-rs/wasm-runtime@1.2.6", "", { "dependencies": { "@tybys/wasm-util": "^0.10.3" }, "peerDependencies": { "@emnapi/core": "^1.7.1 || 2.0.0-beta.2", "@emnapi/runtime": "^1.7.1 || 2.0.0-beta.2" } }, "sha512-mRyDmEw9/fCDXCGfL1sbgIw/GUK0PVxRW4YwgPN61F3LQ+fSyoBFarJVzgGyhF6kRzEQZ0FejDqm4WLXSeqQmw=="],
 
+    "@nats-io/jetstream": ["@nats-io/jetstream@3.4.0", "", { "dependencies": { "@nats-io/nats-core": "3.4.0" } }, "sha512-GzHQodNJ942+R5LRb8PuZ5ugVWVWMRiufxUYLLVWkXKfwDXYN+Owo0d7L/b9O7BPyrbYD7jQWAC6+ZVuXa9Gyw=="],
+
+    "@nats-io/nats-core": ["@nats-io/nats-core@3.4.0", "", { "dependencies": { "@nats-io/nkeys": "2.0.3", "@nats-io/nuid": "3.0.0" } }, "sha512-QMDM86EUNm+wudlKC67HLar/KHHQUvJGLfb4jbahje3pUk3K9afeck9fwsxBZF0eUFox6T/TA6m/t+lQqf+QsQ=="],
+
+    "@nats-io/nkeys": ["@nats-io/nkeys@2.0.3", "", { "dependencies": { "tweetnacl": "^1.0.3" } }, "sha512-JVt56GuE6Z89KUkI4TXUbSI9fmIfAmk6PMPknijmuL72GcD+UgIomTcRWiNvvJKxA01sBbmIPStqJs5cMRBC3A=="],
+
+    "@nats-io/nuid": ["@nats-io/nuid@3.0.0", "", {}, "sha512-QbXZDrxmYlrn5AD06gYcUTmEHwxn96HBQMIk7XTjDlEcx6FPzVBBPjp4AMRh1lEv6B4iJ6Xb/Uz61JugPXFRQg=="],
+
+    "@nats-io/transport-node": ["@nats-io/transport-node@3.4.0", "", { "dependencies": { "@nats-io/nats-core": "3.4.0", "@nats-io/nkeys": "2.0.3", "@nats-io/nuid": "3.0.0" } }, "sha512-hH7u7ejIBTFEJIZ8rIcMrHJI6wl+HhpO5sVFs1+ppmXa8RuB2+Lh1+UwTzZ5xTNNm1TKcRkYy+2qCV56qp8RxA=="],
+
     "@nestjs/common": ["@nestjs/common@12.4.0", "", { "dependencies": { "@standard-schema/spec": "1.1.0", "file-type": "22.3.0", "iterare": "1.2.1", "load-esm": "1.0.3", "tslib": "2.9.1", "uid": "2.0.2" }, "peerDependencies": { "class-transformer": ">=0.4.1", "class-validator": ">=0.13.2", "reflect-metadata": "^0.1.12 || ^0.2.0", "rxjs": "^7.1.0" }, "optionalPeers": ["class-transformer", "class-validator"] }, "sha512-waVAKCvUJtH9icwnNOxLcx9MDV5hKMpftts3D25SGDIRR5n23jTi53q0lQapc5qmZHLFzNR1jxDsF2g6OdyJIQ=="],
 
     "@nestjs/core": ["@nestjs/core@12.4.0", "", { "dependencies": { "fast-safe-stringify": "2.1.1", "iterare": "1.2.1", "path-to-regexp": "8.4.2", "tslib": "2.9.1", "uid": "2.0.2" }, "peerDependencies": { "@nestjs/common": "^12.0.0", "@nestjs/microservices": "^12.0.0", "@nestjs/platform-express": "^12.0.0", "@nestjs/websockets": "^12.0.0", "reflect-metadata": "^0.1.12 || ^0.2.0", "rxjs": "^7.1.0" }, "optionalPeers": ["@nestjs/microservices", "@nestjs/platform-express", "@nestjs/websockets"] }, "sha512-gUH66sFy9gaZrmwMWC2LfM3R0Tacxautms+NgoIJ05J6YtvBbCyRlNslqtDC2f0wDVduswRWErIrJtIHtKon4w=="],
@@ -1387,6 +1404,8 @@
     "@testcontainers/kafka": ["@testcontainers/kafka@12.2.1", "", { "dependencies": { "compare-versions": "^6.1.1", "testcontainers": "^12.2.1" } }, "sha512-ZSjFVsGueu7qtMZBmUkTckPsX+0ybD/Jg4DxN22PLg/O56AxqymxtwObgDDq93KHIyPwkjhjcv6qeAJN2HsDwQ=="],
 
     "@testcontainers/localstack": ["@testcontainers/localstack@12.2.1", "", { "dependencies": { "testcontainers": "^12.2.1" } }, "sha512-STZXqPkXHvYdK73HgZxFzSaZEdpp+8BxiepYGzA2c749bZow0T/TtxsrXqjLDNK6+HN9uFqeKbMiM+1P65mYgA=="],
+
+    "@testcontainers/nats": ["@testcontainers/nats@12.2.1", "", { "dependencies": { "testcontainers": "^12.2.1" } }, "sha512-LSb4ylFObs2djdb6byA5vTQPpU9lIDDRKUtmJ1E9ngIVe2unl07IZ+/nZIuw1h5O4xv5Vi/6tyugm+iNUZwuEg=="],
 
     "@testcontainers/rabbitmq": ["@testcontainers/rabbitmq@12.2.1", "", { "dependencies": { "testcontainers": "^12.2.1" } }, "sha512-vPYI7OHGcV9vtmu9hp8lYRVNJJxky+AJLG5uHiwfckMBS2vIRZZr3TR1QkziZJpoO8/nWAXyVmxhSQeHomR7lw=="],
 
@@ -2532,7 +2551,7 @@
 
     "tsyringe": ["tsyringe@4.10.0", "", { "dependencies": { "tslib": "^1.9.3" } }, "sha512-axr3IdNuVIxnaK5XGEUFTu3YmAQ6lllgrvqfEoR16g/HGnYY/6We4oWENtAnzK6/LpJ2ur9PAb80RBt7/U4ugw=="],
 
-    "tweetnacl": ["tweetnacl@0.14.5", "", {}, "sha512-KXXFFdAbFXY4geFIwoyNK+f5Z1b7swfXABfL7HXCmoIWMKU3dmS26672A4EeQtDzLKy7SXmfBu51JolvEKwtGA=="],
+    "tweetnacl": ["tweetnacl@1.0.3", "", {}, "sha512-6rt+RN7aOi1nGMyC4Xa5DdYiukl2UWCbcJft7YhxReBGQD7OAM8Pbxw6YMo4r2diNEA8FEmu32YOn9rhaiE5yw=="],
 
     "type-is": ["type-is@2.1.0", "", { "dependencies": { "content-type": "^2.0.0", "media-typer": "^1.1.0", "mime-types": "^3.0.0" } }, "sha512-faYHw0anBbc/kWF3zFTEnxSFOAGUX9GFbOBthvDdLsIlEoWOFOtS0zgCiQYwIskL9iGXZL3kAXD8OoZ4GmMATA=="],
 
@@ -2831,6 +2850,8 @@
     "@vue/server-renderer/@vue/shared": ["@vue/shared@3.5.45", "", {}, "sha512-ue9fgHmVNPlP7iW3+cxoBX/Cnlw53dHlVSw0JKGY6z1lObg8pHoj928M2nzG4/yVsMZ3NaRZ2s2z61uC16NDwQ=="],
 
     "ajv/fast-uri": ["fast-uri@3.1.9", "", {}, "sha512-hS/0Wt3Ya043oKXs0sIxrMpKQITXhMLIrVAKKXi4gozGC9v7YRWVnXIZzjNPTO02M9BdxLCWqK1yRXgNziVyJQ=="],
+
+    "bcrypt-pbkdf/tweetnacl": ["tweetnacl@0.14.5", "", {}, "sha512-KXXFFdAbFXY4geFIwoyNK+f5Z1b7swfXABfL7HXCmoIWMKU3dmS26672A4EeQtDzLKy7SXmfBu51JolvEKwtGA=="],
 
     "bl/readable-stream": ["readable-stream@3.6.2", "", { "dependencies": { "inherits": "^2.0.3", "string_decoder": "^1.1.1", "util-deprecate": "^1.0.1" } }, "sha512-9u/sniCrY3D5WdsERHzHE4G2YCXqoG5FTHUiCC4SIbr6XcLZBY05ya9EKjYek9O5xOAwjGq+1JdGBAS7Q9ScoA=="],
 

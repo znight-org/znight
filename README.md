@@ -229,7 +229,7 @@ cron expressions: every diagnostic has a stable `ZNIGHTxxx` code, explained in t
   webhook signatures and CSRF are tested recipes in the [security guide](./docs/guide/security.md).
 - **Messaging.** Consumers with typed payloads, retries with backoff, dead-letter queues,
   per-consumer concurrency and a draining shutdown, on RabbitMQ, Amazon SQS, Kafka, Google Cloud
-  Pub/Sub, Redis Streams or in memory.
+  Pub/Sub, NATS JetStream, Redis Streams or in memory.
 - **Configuration.** Typed `@Config` classes loaded from the environment, `.env`, JSON/YAML files,
   HashiCorp Vault, AWS Secrets Manager, Google Cloud Secret Manager, Azure Key Vault or OCI Vault,
   validated all at once before anything starts; secrets masked in logs and errors.
@@ -332,7 +332,7 @@ amqplib, prom-client...) are optional peer dependencies loaded from subpath expo
 | [`@znight/core`](./packages/core)                   | Container, application lifecycle, plugins, hooks, AOP, marker decorators              | dependency    |
 | [`@znight/compiler`](./packages/compiler)           | Analysis, validation and code generation: Vite plugin, Bun preload, API               | devDependency |
 | [`@znight/http`](./packages/http)                   | Controllers, validation, files, cookies, SSE, security; node, Fastify, Express, Hono  | dependency    |
-| [`@znight/messaging`](./packages/messaging)         | Consumers, retries, dead letters; RabbitMQ, SQS, Kafka, Pub/Sub, Redis, in-memory     | dependency    |
+| [`@znight/messaging`](./packages/messaging)         | Consumers, retries, dead letters; RabbitMQ, SQS, Kafka, Pub/Sub, NATS, Redis, memory  | dependency    |
 | [`@znight/config`](./packages/config)               | Typed config classes from env, `.env`, JSON/YAML, Vault, AWS/GCP/Azure/OCI secrets    | dependency    |
 | [`@znight/observability`](./packages/observability) | Pino logging, Prometheus metrics, OpenTelemetry tracing                               | dependency    |
 | [`@znight/openapi`](./packages/openapi)             | OpenAPI 3.1 document built at compile time, served with Scalar or Swagger UI          | dependency    |
