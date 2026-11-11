@@ -17,10 +17,10 @@ import { afterAll, beforeAll, describe, expect, test as it } from 'bun:test'
 
 const TIMEOUT = 30_000
 
-const TEST_MODULE = `import { __ZNIGHT_METADATA__ } from '../src/.znight/container.generated.js'
+const TEST_MODULE = `import { metadata } from '../src/.znight/container.generated.js'
 
-export const tokens = Object.keys(__ZNIGHT_METADATA__.providers)
-export const clockSource = __ZNIGHT_METADATA__.providers['src/clock.ts#Clock']?.source
+export const tokens = Object.keys(metadata.providers)
+export const clockSource = metadata.providers['src/clock.ts#Clock']?.source
 `
 
 interface TestModule {

@@ -18,6 +18,7 @@ Design documents for significant changes. Each RFC is discussed before implement
 | [0012](./0012-messaging-pubsub.md)            | Pub/Sub driver (`@znight/messaging`)      | Accepted (implemented, unreleased)                                                                 |
 | [0013](./0013-config-secret-managers.md)      | Secret-store loaders (`@znight/config`)   | Accepted (implemented, unreleased)                                                                 |
 | [0014](./0014-messaging-drivers.md)           | Messaging drivers (`@znight/messaging`)   | Accepted (M1, NATS JetStream, Azure Service Bus and Redis Streams drivers implemented, unreleased) |
+| [0015](./0015-bootstrap-api.md)               | Generated application entry               | Accepted (implemented, unreleased)                                                                 |
 
 ## Error code allocation
 

@@ -132,7 +132,8 @@ describe.skipIf(!enabled)('golden: generated modules with and without @znight/so
       if (reference === undefined) throw new Error('no compile result')
       for (const mode of Object.keys(reference.result.modes)) {
         const expected = reference.result.modes[mode]?.code ?? ''
-        expect(expected).toContain('export const __ZNIGHT_METADATA__')
+        expect(expected).toContain('export const metadata: ZnightMetadata')
+        expect(expected).toContain('export function createApplication(')
         for (const other of others) {
           const difference = firstDifference(expected, other.result.modes[mode]?.code ?? '')
           const label = `${mode}: ${reference.runtime.name}/${reference.variant} vs ${other.runtime.name}/${other.variant}`

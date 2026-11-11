@@ -168,6 +168,6 @@ export async function compileAndLoad(
     throw new Error(`compile failed:\n${render({ root: app.root, diagnostics: errors }, codes).join('\n')}`)
   }
   app.write(path.relative(app.root, result.outFile), result.code)
-  const module = (await import(result.outFile)) as { __ZNIGHT_METADATA__: ZnightMetadata }
-  return { result, metadata: module.__ZNIGHT_METADATA__ }
+  const module = (await import(result.outFile)) as { metadata: ZnightMetadata }
+  return { result, metadata: module.metadata }
 }

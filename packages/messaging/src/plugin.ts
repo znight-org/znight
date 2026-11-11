@@ -76,8 +76,7 @@ const KEEP_ALIVE_INTERVAL_MS = 2 ** 30
  * import { MessagingPlugin } from '@znight/messaging'
  * import { rabbitmq } from '@znight/messaging/rabbitmq'
  *
- * const app = await Application.create({
- *   metadata: __ZNIGHT_METADATA__,
+ * const app = await createApplication({
  *   plugins: [MessagingPlugin.configure({ driver: rabbitmq({ url: 'amqp://localhost' }) })],
  * })
  * ```

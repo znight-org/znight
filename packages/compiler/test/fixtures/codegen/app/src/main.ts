@@ -1,4 +1,5 @@
 import type { ZnightMetadata } from '@znight/core'
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
+import { createApplication, metadata as generated } from './.znight/container.generated.js'
 
-export const metadata: ZnightMetadata = __ZNIGHT_METADATA__
+export const metadata: ZnightMetadata = generated
+export const create: typeof createApplication = createApplication

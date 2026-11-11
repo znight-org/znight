@@ -56,9 +56,9 @@ describe('graphql-codegen types', () => {
     fs.writeFileSync(result.outFile, result.code)
     expect(typecheck(app, [path.relative(app.root, result.outFile)])).toEqual([])
 
-    const generated = (await import(pathToFileURL(result.outFile).href)) as { __ZNIGHT_METADATA__: ZnightMetadata }
+    const generated = (await import(pathToFileURL(result.outFile).href)) as { metadata: ZnightMetadata }
     await using test = await TestApp.create({
-      metadata: generated.__ZNIGHT_METADATA__,
+      metadata: generated.metadata,
       plugins: [GraphQLPlugin.configure({ http: false })],
       logger: captureLogger(),
     })

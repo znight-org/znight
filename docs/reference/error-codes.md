@@ -664,11 +664,13 @@ initialization`).
 
 ```ts
 // src/users/user.service.ts
-import { __ZNIGHT_METADATA__ } from '../.znight/container.generated.js' // ✗
+import { metadata } from '../.znight/container.generated.js' // ✗
 ```
 
 **How to fix**: import the generated module only from entry points (`main.ts`, tests, scripts). A
-provider that needs the container injects `Container` from `@znight/core`.
+provider that needs the container injects `Container` from `@znight/core`. `metadata` and
+`createApplication` are short names: when the import is unexpected, check that your editor did not
+add it as an auto-import in place of the binding you meant.
 
 The check does not depend on the generated file being on disk (fresh checkout): relative imports
 and imports through an alias of a directory (`@/.znight/container.generated.js` with tsconfig

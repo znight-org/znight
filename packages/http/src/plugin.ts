@@ -285,8 +285,7 @@ const CONCRETE_METHODS: readonly Exclude<HttpMethod, 'ALL'>[] = [
  * adapter.
  *
  * ```ts
- * const app = await Application.create({
- *   metadata: __ZNIGHT_METADATA__,
+ * const app = await createApplication({
  *   plugins: [HttpPlugin.configure({ port: 3000, prefix: '/api' })],
  * })
  * await app.start()

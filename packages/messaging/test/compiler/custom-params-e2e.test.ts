@@ -181,7 +181,7 @@ describe('custom parameter decorators on message handlers', () => {
     app.write(path.relative(app.root, compiled.outFile), code)
     if (fs.existsSync(TSC)) expect(typecheck(app)).toEqual([])
 
-    const metadata = ((await import(compiled.outFile)) as { __ZNIGHT_METADATA__: ZnightMetadata }).__ZNIGHT_METADATA__
+    const metadata = ((await import(compiled.outFile)) as { metadata: ZnightMetadata }).metadata
     const { calls } = (await import(app.path('src/tenant.ts'))) as { calls: unknown[] }
     const driver = new MemoryDriver()
     const application = await Application.create({
@@ -226,7 +226,7 @@ describe('custom parameter decorators on message handlers', () => {
     app.write(path.relative(app.root, compiled.outFile), code)
     if (fs.existsSync(TSC)) expect(typecheck(app)).toEqual([])
 
-    const metadata = ((await import(compiled.outFile)) as { __ZNIGHT_METADATA__: ZnightMetadata }).__ZNIGHT_METADATA__
+    const metadata = ((await import(compiled.outFile)) as { metadata: ZnightMetadata }).metadata
     const { calls } = (await import(app.path('src/resolvers.ts'))) as { calls: unknown[] }
     const driver = new MemoryDriver()
     const application = await Application.create({

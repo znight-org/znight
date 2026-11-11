@@ -107,9 +107,9 @@ export async function loadApp(app: TempApp, options: Record<string, unknown> = {
   fs.mkdirSync(path.dirname(result.outFile), { recursive: true })
   fs.writeFileSync(result.outFile, result.code)
   const module = (await import(`${pathToFileURL(result.outFile).href}?v=${++counter}`)) as {
-    __ZNIGHT_METADATA__: ZnightMetadata
+    metadata: ZnightMetadata
   }
-  return module.__ZNIGHT_METADATA__
+  return module.metadata
 }
 
 /** `severity code file:line:column message` lines (paths relative to the app root). */

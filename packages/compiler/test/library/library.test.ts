@@ -465,7 +465,7 @@ describe('compiled provider libraries', () => {
     expect(result.watchFiles).toContain(`${library.root}/dist/znight.providers.json`)
     expect(result.watchFiles).toContain(`${library.root}/package.json`)
 
-    const metadata = (await import(result.outFile)).__ZNIGHT_METADATA__ as ZnightMetadata
+    const metadata = (await import(result.outFile)).metadata as ZnightMetadata
     const tool = { name: 'tool' }
     const application = await Application.create({
       metadata,

@@ -178,16 +178,16 @@ describe('custom parameter decorators on GraphQL resolvers (e2e)', () => {
     expect(render({ root: app.root, diagnostics: result.diagnostics })).toEqual([])
     fs.mkdirSync(path.dirname(result.outFile), { recursive: true })
     fs.writeFileSync(result.outFile, result.code)
-    const generated = (await import(pathToFileURL(result.outFile).href)) as { __ZNIGHT_METADATA__: ZnightMetadata }
-    section = generated.__ZNIGHT_METADATA__.extensions?.graphql as GraphQLMetadata
+    const generated = (await import(pathToFileURL(result.outFile).href)) as { metadata: ZnightMetadata }
+    section = generated.metadata.extensions?.graphql as GraphQLMetadata
     calls = ((await import(pathToFileURL(app.path('src/user.ts')).href)) as { calls: string[] }).calls
     test = await TestApp.create({
-      metadata: generated.__ZNIGHT_METADATA__,
+      metadata: generated.metadata,
       plugins: [HttpPlugin.configure({ port: 0, host: '127.0.0.1' }), GraphQLPlugin.configure()],
       logger: captureLogger(),
     })
     yoga = await TestApp.create({
-      metadata: generated.__ZNIGHT_METADATA__,
+      metadata: generated.metadata,
       plugins: [
         HttpPlugin.configure({ port: 0, host: '127.0.0.1' }),
         GraphQLPlugin.configure({ driver: yogaDriver() }),

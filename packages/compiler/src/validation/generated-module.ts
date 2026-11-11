@@ -86,7 +86,8 @@ export function checkGeneratedModuleImports(
       location: source.location(hop.request.span),
       hints: [
         'The generated module imports every provider: importing it from a provider module creates an ESM cycle (TDZ errors at startup)',
-        'Import the generated module only from the application entry point (src/main.ts)',
+        'Import the generated module only from the application entry point (src/main.ts) and tests',
+        'An editor auto-import? `metadata` and `createApplication` are short names: check that this import was not added by your editor in place of the binding you meant',
       ],
     })
   }

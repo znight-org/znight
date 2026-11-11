@@ -294,8 +294,7 @@ describe.skipIf(typeof compile !== 'function')('custom parameter decorators on H
     outFile = result.outFile
     fs.mkdirSync(path.dirname(result.outFile), { recursive: true })
     fs.writeFileSync(result.outFile, result.code)
-    metadata = ((await import(pathToFileURL(result.outFile).href)) as { __ZNIGHT_METADATA__: ZnightMetadata })
-      .__ZNIGHT_METADATA__
+    metadata = ((await import(pathToFileURL(result.outFile).href)) as { metadata: ZnightMetadata }).metadata
     http = HttpPlugin.configure({ port: 0, host: '127.0.0.1' })
     application = await Application.create({
       metadata,

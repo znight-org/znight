@@ -64,12 +64,12 @@ describe('the Yoga recipe', () => {
     expect(render({ root: app.root, diagnostics: result.diagnostics })).toEqual([])
     fs.mkdirSync(path.dirname(result.outFile), { recursive: true })
     fs.writeFileSync(result.outFile, result.code)
-    const generated = (await import(pathToFileURL(result.outFile).href)) as { __ZNIGHT_METADATA__: ZnightMetadata }
+    const generated = (await import(pathToFileURL(result.outFile).href)) as { metadata: ZnightMetadata }
     const recipe = (await import(pathToFileURL(path.join(app.root, 'src/graphql/yoga.plugins.ts')).href)) as {
       plugins(): Plugin[]
     }
     server = await TestApp.create({
-      metadata: generated.__ZNIGHT_METADATA__,
+      metadata: generated.metadata,
       plugins: recipe.plugins(),
       logger: captureLogger(),
     })

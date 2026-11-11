@@ -73,7 +73,7 @@ let types: Record<string, Any>
 beforeAll(async () => {
   const result = await generate({ root: app.root })
   expect(result.diagnostics).toEqual([])
-  metadata = (await import(result.outFile)).__ZNIGHT_METADATA__
+  metadata = (await import(result.outFile)).metadata
   types = await import(`${app.root}/src/types.ts`)
 })
 afterAll(() => app.cleanup())

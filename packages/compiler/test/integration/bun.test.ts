@@ -20,13 +20,13 @@ const BUNFIG = '[test]\npreload = ["@znight/compiler/bun"]\n'
 const APP_TEST = `import { Application } from '@znight/core'
 import { expect, test } from 'bun:test'
 
-import { __ZNIGHT_METADATA__ } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
 import { GreetingService } from '../src/greeting.service.ts'
 
 test('the container is generated before the tests', async () => {
-  const app = await Application.create({ metadata: __ZNIGHT_METADATA__, shutdown: { signals: false } })
+  const app = await Application.create({ metadata, shutdown: { signals: false } })
   expect(app.container.get(GreetingService).greet('Bun')).toBe('Hello Bun @42')
-  expect(__ZNIGHT_METADATA__.providers['src/clock.ts#Clock']?.source).toEqual({ file: 'src/clock.ts', line: 4, column: 14 })
+  expect(metadata.providers['src/clock.ts#Clock']?.source).toEqual({ file: 'src/clock.ts', line: 4, column: 14 })
   await app.stop()
 })
 `
@@ -76,13 +76,19 @@ export class ZnightError extends Error {
 export interface ZnightMetadata {
   readonly providers: Record<string, unknown>
 }
+export type CreateApplicationOptions = Record<string, unknown>
+export class Application {
+  static async create(_options: unknown): Promise<Application> {
+    return new Application()
+  }
+}
 `,
   'test/decorators.test.ts': `import { expect, test } from 'bun:test'
 
-import { __ZNIGHT_METADATA__ } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
 
 test('decorators', () => {
-  expect(Object.keys(__ZNIGHT_METADATA__.providers)).toHaveLength(4)
+  expect(Object.keys(metadata.providers)).toHaveLength(4)
   console.log('DECORATOR CALLS ' + JSON.stringify((globalThis as { __decoratorCalls?: string[] }).__decoratorCalls ?? []))
 })
 `,
@@ -234,10 +240,10 @@ describe('bun test with the @znight/compiler/bun preload', () => {
         'bunfig.toml': BUNFIG,
         'test/clock.test.ts': `import { expect, test } from 'bun:test'
 
-import { __ZNIGHT_METADATA__ } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
 
 test('clock', () => {
-  const clock = __ZNIGHT_METADATA__.providers['src/clock.ts#Clock']?.factory([]) as { now(): number }
+  const clock = metadata.providers['src/clock.ts#Clock']?.factory([]) as { now(): number }
   console.log('NOW ' + clock.now())
 })
 `,

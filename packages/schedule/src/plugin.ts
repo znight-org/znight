@@ -40,8 +40,7 @@ export const SCHEDULE_PLUGIN_NAME = 'schedule'
  * Cron, interval and timeout jobs (RFC 0004).
  *
  * ```ts
- * const app = await Application.create({
- *   metadata: __ZNIGHT_METADATA__,
+ * const app = await createApplication({
  *   plugins: [
  *     SchedulePlugin.configure({ timeZone: 'Europe/Paris', lock: new PostgresLockStore(db) }),
  *     HttpPlugin.configure({ adapter: honoAdapter(), port: 3000 }),

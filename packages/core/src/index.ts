@@ -13,6 +13,7 @@ export {
   Application,
   type ApplicationOptions,
   type ApplicationState,
+  type CreateApplicationOptions,
   type HotContext,
   type ProviderValues,
   type ShutdownOptions,

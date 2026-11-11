@@ -1,14 +1,12 @@
-import { Application } from '@znight/core'
-
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
+import { createApplication, metadata } from './.znight/container.generated.js'
 import { GreetingService } from './greeting.service.ts'
 
-const app = await Application.create({ metadata: __ZNIGHT_METADATA__, shutdown: { signals: false } })
+const app = await createApplication({ shutdown: { signals: false } })
 await app.start()
 const greeter = app.container.get(GreetingService)
 const report = {
   greeting: greeter.greet('Ada'),
-  providers: Object.keys(__ZNIGHT_METADATA__.providers).sort(),
+  providers: Object.keys(metadata.providers).sort(),
 }
 console.log(JSON.stringify(report))
 await app.stop()

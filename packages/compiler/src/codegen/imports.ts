@@ -98,7 +98,7 @@ export class NamePool {
     return lazy(() => this.#nameOf(entry))
   }
 
-  /** A name nothing may be bound to (arrow parameters, `__ZNIGHT_METADATA__`). */
+  /** A name nothing may be bound to (arrow parameters, `metadata`, `createApplication`). */
   reserve(name: string): void {
     this.#reserved.add(name)
   }
