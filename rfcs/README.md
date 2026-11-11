@@ -17,7 +17,7 @@ Design documents for significant changes. Each RFC is discussed before implement
 | [0011](./0011-application-events.md)          | Application events (`@znight/events`)     | Implemented (0.5.0)                   |
 | [0012](./0012-messaging-pubsub.md)            | Pub/Sub driver (`@znight/messaging`)      | Accepted (implemented, unreleased)    |
 | [0013](./0013-config-secret-managers.md)      | Secret-store loaders (`@znight/config`)   | Accepted (implemented, unreleased)    |
-| [0014](./0014-messaging-drivers.md)           | Messaging drivers (`@znight/messaging`)   | Accepted (M1 implemented, unreleased) |
+| [0014](./0014-messaging-drivers.md)           | Messaging drivers (`@znight/messaging`)   | Accepted (M1 + NATS done, unreleased) |
 
 ## Error code allocation
 

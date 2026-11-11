@@ -1,11 +1,11 @@
 # @znight/messaging
 
 Message consumers and publishing for [Znight](../../README.md), checked at build time and run on
-RabbitMQ, Amazon SQS, Kafka, Google Cloud Pub/Sub or in memory.
+RabbitMQ, Amazon SQS, Kafka, Google Cloud Pub/Sub, NATS JetStream or in memory.
 
 Retries with backoff, dead-letter queues, per-consumer concurrency and graceful shutdown, the same
-on **RabbitMQ**, **Amazon SQS**, **Kafka** and **Google Cloud Pub/Sub**; the in-memory broker serves
-tests and local development.
+on **RabbitMQ**, **Amazon SQS**, **Kafka**, **Google Cloud Pub/Sub** and **NATS JetStream**; the
+in-memory broker serves tests and local development.
 
 Like the rest of Znight, consumers are discovered **at build time**: `@znight/compiler` (with the
 `@znight/messaging/compiler` extension) reads the decorators and generates the consumer metadata. At
@@ -19,6 +19,7 @@ bun add amqplib              # optional: RabbitMQ driver
 bun add @aws-sdk/client-sqs  # optional: SQS driver
 bun add @platformatic/kafka  # optional: Kafka driver
 bun add @google-cloud/pubsub # optional: Pub/Sub driver
+bun add @nats-io/jetstream @nats-io/transport-node # optional: NATS JetStream driver
 
 # npm
 npm install @znight/core @znight/messaging
@@ -27,6 +28,7 @@ npm install amqplib              # optional: RabbitMQ driver
 npm install @aws-sdk/client-sqs  # optional: SQS driver
 npm install @platformatic/kafka  # optional: Kafka driver
 npm install @google-cloud/pubsub # optional: Pub/Sub driver
+npm install @nats-io/jetstream @nats-io/transport-node # optional: NATS JetStream driver
 ```
 
 Runs on Node.js >= 24 and Bun >= 1.3. Broker clients are optional peer dependencies: install only the
@@ -311,17 +313,20 @@ a `defaults.concurrency` that is not a positive integer...) make `Application.cr
 
 ## Drivers
 
-| Capability             | memory    | RabbitMQ                                | SQS                              | Kafka                                | Pub/Sub                                          |
-| ---------------------- | --------- | --------------------------------------- | -------------------------------- | ------------------------------------ | ------------------------------------------------ |
-| Subpath                | `/memory` | `/rabbitmq`                             | `/sqs`                           | `/kafka`                             | `/pubsub`                                        |
-| Client (optional peer) | —         | `amqplib` ^2                            | `@aws-sdk/client-sqs` ^3         | `@platformatic/kafka` ^2             | `@google-cloud/pubsub` ^6                        |
-| Attempt counting       | native    | `x-znight-attempt` + `x-delivery-count` | `ApproximateReceiveCount`        | `x-znight-attempt`                   | `deliveryAttempt` (in memory without DLQ policy) |
-| Native retry delay     | timers    | delay queues (TTL + DLX), ≤ 49 days     | visibility timeout, ≤ 12 h       | retry topic, ≤ `maxRetryDelayMs`     | ack deadline, ≤ 600 s                            |
-| In-process budget      | 1 s       | 5 s                                     | 1 s                              | 0 (always the retry topic)           | 1 s (0 with `retries: 'subscription'`)           |
-| Delayed publish        | yes       | yes (32 shared delay levels), ≤ 49 days | ≤ 15 min (not FIFO)              | no                                   | no                                               |
-| Dead letters           | `<q>.dlq` | `<q>.dlq` (publish confirmed + ack)     | `<q>-dlq` / RedrivePolicy target | `<topic>.dlq` (acks all + commit)    | topic `<q>-dlq` / dead-letter policy topic       |
-| Ordering               | FIFO      | none across retries                     | FIFO groups                      | per partition                        | ordering keys (ordered subscriptions)            |
-| Topology               | implicit  | declared (`assertTopology`) or verified | verified (queues must exist)     | verified or created (`createTopics`) | verified or created (`provision`)                |
+| Capability             | memory    | RabbitMQ                                | SQS                              | Kafka                                | Pub/Sub                                          | NATS JetStream                                         |
+| ---------------------- | --------- | --------------------------------------- | -------------------------------- | ------------------------------------ | ------------------------------------------------ | ------------------------------------------------------ |
+| Subpath                | `/memory` | `/rabbitmq`                             | `/sqs`                           | `/kafka`                             | `/pubsub`                                        | `/nats`                                                |
+| Client (optional peer) | —         | `amqplib` ^2                            | `@aws-sdk/client-sqs` ^3         | `@platformatic/kafka` ^2             | `@google-cloud/pubsub` ^6                        | `@nats-io/jetstream` ^3 + `@nats-io/transport-node` ^3 |
+| Attempt counting       | native    | `x-znight-attempt` + `x-delivery-count` | `ApproximateReceiveCount`        | `x-znight-attempt`                   | `deliveryAttempt` (in memory without DLQ policy) | JetStream delivery count                               |
+| Native retry delay     | timers    | delay queues (TTL + DLX), ≤ 49 days     | visibility timeout, ≤ 12 h       | retry topic, ≤ `maxRetryDelayMs`     | ack deadline, ≤ 600 s                            | `nak(delay)`, ≤ 104 days                               |
+| In-process budget      | 1 s       | 5 s                                     | 1 s                              | 0 (always the retry topic)           | 1 s (0 with `retries: 'subscription'`)           | 1 s                                                    |
+| Delayed publish        | yes       | yes (32 shared delay levels), ≤ 49 days | ≤ 15 min (not FIFO)              | no                                   | no                                               | no                                                     |
+| Dead letters           | `<q>.dlq` | `<q>.dlq` (publish confirmed + ack)     | `<q>-dlq` / RedrivePolicy target | `<topic>.dlq` (acks all + commit)    | topic `<q>-dlq` / dead-letter policy topic       | `<q>.dlq` (deduplicated copy + `term()`)               |
+| Ordering               | FIFO      | none across retries                     | FIFO groups                      | per partition                        | ordering keys (ordered subscriptions)            | per subject with `concurrency: 1`                      |
+| Topology               | implicit  | declared (`assertTopology`) or verified | verified (queues must exist)     | verified or created (`createTopics`) | verified or created (`provision`)                | streams verified or created (`provision`)              |
+
+OCI Streaming and Azure Event Hubs work through the Kafka driver ([below](#oracle-cloud-infrastructure-streaming));
+for another broker, [write your own driver](#writing-your-own-driver) and check it with the conformance kit.
 
 OCI Streaming and Azure Event Hubs work through the Kafka driver ([below](#oracle-cloud-infrastructure-streaming));
 for another broker, [write your own driver](#writing-your-own-driver) and check it with the conformance kit.
@@ -586,6 +591,98 @@ With `createTopics`, a topic created concurrently (by another consumer, such as 
 dead-letter topic, or another instance) counts as created. Transient broker errors are retried by the
 client (`connection.retries`), and by the driver for the topics still missing when an existing topic
 stopped those retries; startup then fails with the error code and message of each topic.
+
+### NATS JetStream
+
+```ts
+import { nats } from '@znight/messaging/nats'
+
+nats({ servers: 'nats://localhost:4222', durablePrefix: 'billing' })
+```
+
+| Option                | Default                 | Description                                                                               |
+| --------------------- | ----------------------- | ----------------------------------------------------------------------------------------- |
+| `servers`             | `127.0.0.1:4222`        | Server URLs of the connection the driver creates.                                         |
+| `connectionOptions`   | `{}`                    | Other options of that connection (`user` / `pass`, `token`, `authenticator`, `tls`...).   |
+| `connection`          | —                       | An existing `NatsConnection` (flushed on close, never closed).                            |
+| `jetstream`           | —                       | An existing JetStream context, created on `connection` (which it requires).               |
+| `jetstreamOptions`    | `{}`                    | Options of the JetStream context the driver creates (`domain`, `apiPrefix`, `timeout`).   |
+| `subjects`            | the queue name          | Subject of each queue: `{ queue: subject }` or a function (`undefined`: the default).     |
+| `streams`             | the stream capturing it | Stream of each queue: `{ queue: stream }` or a function (`undefined`: the default).       |
+| `durablePrefix`       | `'znight'`              | Durable consumer of a queue: `<durablePrefix>-<queue>`.                                   |
+| `ackWaitMs`           | `30000`                 | Ack wait of the consumers the driver creates (extended while handlers run).               |
+| `consumerConfig`      | `{}`                    | Other settings of the consumers the driver creates (`max_ack_pending`, `max_deliver`...). |
+| `maxInProcessDelayMs` | `1000`                  | Longest retry delay waited in-process before `nak()`.                                     |
+| `fetchExpiresMs`      | `30000`                 | Longest wait of a pull request for messages (at least 1000).                              |
+| `deadLetterName`      | `` `${queue}.dlq` ``    | Default dead-letter queue (a subject).                                                    |
+| `provision`           | `false`                 | Create a stream for each subject no stream captures (development).                        |
+| `streamConfig`        | `{}`                    | Other settings of the streams `provision` creates (`storage`, `max_age`, `num_replicas`). |
+
+`publish(queue)` publishes to the **subject** `queue` (map it with `subjects`), which a **stream**
+must capture; it resolves on the JetStream acknowledgement. The Znight message id is the
+`Nats-Msg-Id`, so a message published twice within the stream's duplicate window is stored once.
+`@Consumer(queue)` reads a **durable pull consumer**, `<durablePrefix>-<queue>` (characters other
+than letters, digits, `-` and `_` become `_`), filtering the subject on the stream that captures it
+(or `streams(queue)`, which must capture it unless a mirror or sources fill it). `@Consumer({ queue, durable: 'billing-orders', stream: 'ORDERS' })` names
+them for one consumer. For a fan-out, give each service its own `durablePrefix`: each durable
+consumer receives every message of the subject.
+
+Consumers are created when missing, with explicit acks, `ack_wait: ackWaitMs`, `max_deliver: -1`
+(Znight counts the attempts) and `consumerConfig`. An existing consumer is never updated, only
+checked: it must be a pull consumer with explicit acks, filtering exactly the subject of the queue
+(`filter_subject`, or `filter_subjects` with that one subject), whose `max_deliver` is unlimited or
+allows every attempt of the `@Consumer` (the boot fails with ZNIGHT011 otherwise, so that a durable
+left over from another subject or shared by two consumers is never reused silently). Streams are never
+created unless `provision: true`, which creates one per missing subject, named after it (`orders.dlq`
+→ `orders_dlq`, with the default limits retention and `streamConfig`).
+
+The driver fetches at most the free concurrency slots at a time (one pull request per subscription,
+waiting up to `fetchExpiresMs`), so `concurrency` bounds each process; the consumer's
+`max_ack_pending` (1000 by default) bounds all replicas together. A message waiting for a delayed
+retry stays pending until JetStream redelivers it, so it holds one of these slots: when
+`max_ack_pending` messages wait for their retry, JetStream delivers no new message to any replica
+until a delay expires. With long `@Retry` delays (minutes or more), raise `max_ack_pending` through
+`consumerConfig` (or on the existing consumer) above the number of messages that may be waiting.
+While a message is handled, its ack wait is extended (`working()`, every half ack wait).
+Settlements:
+
+- **ack**: a double ack (`ackAck()`), confirmed by the server;
+- **retry**: `nak(delay)`; JetStream redelivers the message after the delay and counts its
+  deliveries, which are the attempts (a delay of 0 is sent as 1 ms, so that a consumer `backoff`
+  never adds to the `@Retry` delay). A release (shutdown) or an expired ack wait counts as a
+  delivery too;
+- **dead letter**: the copy is published to the subject `<queue>.dlq` (a stream must capture it, the
+  boot checks it) with the `x-znight-*` dead-letter headers and the `Nats-Msg-Id`
+  `znight-dlq-<stream>-<durable>-<sequence>`, so that a copy written twice by one consumer is stored
+  once (two consumers of a fan-out each store theirs), then the original
+  is terminated (`term()`); with `deadLetter: false`, the original is only terminated;
+- **release**: `nak()`.
+
+`nak()` and `term()` are fire-and-forget in NATS: the driver flushes the connection after them, so
+they resolve once the server received them. **`max_deliver`.** When a consumer has a finite
+`max_deliver` (set beforehand, or through `consumerConfig`), JetStream stops delivering a message
+after that many deliveries, releases and expired ack waits included, and only publishes an
+advisory. The driver listens to these advisories (`MAX_DELIVERIES`, in a queue group: one replica
+handles each), reads the message from the stream and dead-letters it with the reason
+`max-attempts`; without a dead-letter queue, it logs an error. Advisories are core NATS messages,
+not stored: one published while no replica of the service is subscribed (every replica stopped or
+restarting when the last delivery's ack wait expires) is lost, and the message then stays in the
+stream, no longer delivered and not dead-lettered. Keep `max_deliver: -1` unless you need that
+bound.
+
+Headers are NATS headers (Znight uses `x-znight-id`, `x-znight-type`, `content-type` and
+`x-znight-key` for the key); values are single lines (a value with a line break is refused before
+publishing) and trimmed. The trace context (`traceparent`, `tracestate`) travels as headers.
+Headers starting with `Nats-` reach JetStream on publish (`Nats-TTL`, `Nats-Expected-*`...) and are
+hidden from handlers. `timestamp` is the time the stream stored the message. NATS has no ordering
+key: messages of a subject are handled in order with `concurrency: 1`. Delayed publishing is not
+supported.
+
+On stop, the driver ends the pull request in flight (messages it still yields are given back with
+`nak()`), waits for the messages in flight to be settled, then drains the connection it created
+(an existing connection is only flushed). The connection reconnects by itself (`connectionOptions`:
+`maxReconnectAttempts`, `reconnectTimeWait`); fetches failing meanwhile are retried with backoff.
+Design notes: [RFC 0014](../../rfcs/0014-messaging-drivers.md) §4.2.
 
 ### Oracle Cloud Infrastructure Streaming
 
