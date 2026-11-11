@@ -5,7 +5,7 @@ import { Logger } from '@znight/observability'
 import { TestBed } from '@znight/testing'
 import { type User, UserDirectory } from '@znight-examples/shared'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
 import { UserSnapshot } from '../src/users/user-snapshot.js'
 import { afterEach, beforeEach, describe, expect, test as it } from 'bun:test'
 

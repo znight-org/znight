@@ -4,7 +4,7 @@ import { Logger } from '@znight/observability'
 import { TestBed } from '@znight/testing'
 import { CLOCK, IdGenerator, type User, UserDirectory, type UserRegistered } from '@znight-examples/shared'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
 import { NotificationService } from '../src/notifications/notification.service.js'
 import { describe, expect, test as it } from 'bun:test'
 

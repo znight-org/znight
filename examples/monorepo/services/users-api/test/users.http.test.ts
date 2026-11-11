@@ -1,7 +1,7 @@
 import { TestApp } from '@znight/testing'
 import { CLOCK, type Clock, IdGenerator, type User } from '@znight-examples/shared'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
 import { usersHttpPlugin } from '../src/http.js'
 import { SortableIdGenerator } from '../src/ids/sortable-id.generator.js'
 import { afterEach, beforeEach, describe, expect, test as it } from 'bun:test'

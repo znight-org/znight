@@ -8,7 +8,7 @@ import { inline } from '@znight/config'
 import { SchedulerRegistry } from '@znight/schedule'
 import { TestApp } from '@znight/testing'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../../src/.znight/container.generated.js'
+import { metadata } from '../../src/.znight/container.generated.js'
 import { plugins } from '../../src/plugins.js'
 import { FakeProber } from './fake-prober.js'
 import { ADMIN_KEY, READER_KEY } from './fixtures.js'

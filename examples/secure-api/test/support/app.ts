@@ -4,7 +4,7 @@ import { ConfigPlugin, inline } from '@znight/config'
 import { ObservabilityPlugin } from '@znight/observability'
 import { TestApp, type TestAppOptions } from '@znight/testing'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../../src/.znight/container.generated.js'
+import { metadata } from '../../src/.znight/container.generated.js'
 import { httpPlugin } from '../../src/http.js'
 import {
   BROWSER_ORIGIN,

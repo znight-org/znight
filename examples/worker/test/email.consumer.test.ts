@@ -1,7 +1,7 @@
 import { NonRetryableError } from '@znight/messaging'
 import { TestBed } from '@znight/testing'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
 import { EmailConsumer } from '../src/emails/email.consumer.js'
 import { EmailService } from '../src/emails/email.service.js'
 import { RecipientRejectedError, SmtpUnavailableError } from '../src/emails/smtp.client.js'

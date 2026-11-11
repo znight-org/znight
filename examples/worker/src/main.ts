@@ -1,9 +1,8 @@
 import { ConfigPlugin } from '@znight/config'
-import { Application } from '@znight/core'
 import { MessagingPlugin } from '@znight/messaging'
 import { ObservabilityPlugin } from '@znight/observability'
 
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
+import { createApplication } from './.znight/container.generated.js'
 import { createDriver } from './messaging/driver.js'
 import { KeepAlivePlugin } from './messaging/keep-alive.plugin.js'
 import { StdinInboxPlugin } from './messaging/stdin-inbox.plugin.js'
@@ -11,8 +10,7 @@ import { WorkerConfig } from './worker.config.js'
 
 // A background worker: no HTTP server, only message consumers. The DI container was generated at
 // build time from the decorators (src/.znight/container.generated.ts): there is nothing to register.
-const app = await Application.create({
-  metadata: __ZNIGHT_METADATA__,
+const app = await createApplication({
   plugins: [
     // first, so that its hooks wrap everything: one structured log line per message (JSON on stdout),
     // a consumer span per message (with an OpenTelemetry SDK registered)

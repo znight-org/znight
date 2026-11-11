@@ -1,7 +1,7 @@
 import { Logger } from '@znight/observability'
 import { TestBed } from '@znight/testing'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
 import { CatalogService } from '../src/catalog/catalog.service.js'
 import { ProductRepository } from '../src/catalog/product.repository.js'
 import { CreateProduct } from '../src/catalog/product.schemas.js'

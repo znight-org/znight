@@ -1,6 +1,6 @@
 import { TestBed } from '@znight/testing'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
 import { ApiKeys } from '../src/auth/api-keys.js'
 import { describe, expect, test as it } from 'bun:test'
 

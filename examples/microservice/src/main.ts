@@ -1,12 +1,11 @@
 import { ConfigPlugin } from '@znight/config'
-import { Application } from '@znight/core'
 import { HttpPlugin } from '@znight/http'
 import { honoAdapter } from '@znight/http/hono'
 import { MessagingPlugin } from '@znight/messaging'
 import { ObservabilityPlugin } from '@znight/observability'
 
 // the dependency injection container, generated at build time by @znight/compiler
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
+import { createApplication } from './.znight/container.generated.js'
 import { HttpConfig } from './config/http.config.js'
 import { MessagingConfig } from './config/messaging.config.js'
 import { ObservabilityConfig } from './config/observability.config.js'
@@ -17,8 +16,7 @@ import { startTracing } from './observability/tracing.js'
 // OpenTelemetry first: the context manager must exist before the first span
 const tracing = startTracing()
 
-const app = await Application.create({
-  metadata: __ZNIGHT_METADATA__,
+const app = await createApplication({
   plugins: [
     tracing.plugin,
     // before the feature plugins, so that its hooks wrap everything: logs, metrics and spans of

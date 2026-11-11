@@ -1,15 +1,13 @@
 import { ConfigPlugin } from '@znight/config'
-import { Application } from '@znight/core'
 import { ObservabilityPlugin } from '@znight/observability'
 
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
+import { createApplication } from './.znight/container.generated.js'
 import { usersHttpPlugin } from './http.js'
 
-// __ZNIGHT_METADATA__ was generated at build time from this service AND from the sources of
+// The container (createApplication) was generated at build time from this service AND from the sources of
 // @znight-examples/shared (a source provider library): UserDirectory, SystemClock... are in it,
 // imported from '@znight-examples/shared'.
-const app = await Application.create({
-  metadata: __ZNIGHT_METADATA__,
+const app = await createApplication({
   plugins: [
     // first, so that its hooks wrap everything: JSON logs (one per request), traces.
     // Metrics need the optional prom-client peer: add it to the dependencies and drop `metrics: false`.

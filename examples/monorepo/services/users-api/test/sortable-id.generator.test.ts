@@ -1,7 +1,7 @@
 import { TestBed } from '@znight/testing'
 import { CLOCK } from '@znight-examples/shared'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
 import { SortableIdGenerator } from '../src/ids/sortable-id.generator.js'
 import { describe, expect, test as it } from 'bun:test'
 

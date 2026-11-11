@@ -10,7 +10,7 @@ import { type MemoryDriver, memory } from '@znight/messaging/memory'
 import { MetricsRegistry, ObservabilityPlugin } from '@znight/observability'
 import { TestApp } from '@znight/testing'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
 import { startTracing, type Tracing } from '../src/observability/tracing.js'
 import { ORDERS_CREATED_QUEUE } from '../src/orders/order.events.js'
 import { TestPaymentMethods } from '../src/payments/payment.gateway.js'

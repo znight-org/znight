@@ -1,11 +1,10 @@
 import type { GraphQLDriver } from '@znight/graphql'
 import type { HttpAdapter } from '@znight/http'
 
-import { Application } from '@znight/core'
 import { GraphQLPlugin } from '@znight/graphql'
 import { HttpPlugin, nodeAdapter } from '@znight/http'
 
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
+import { createApplication } from './.znight/container.generated.js'
 
 /** The adapter named by `ADAPTER`: the same resolvers are served by each of them. */
 async function adapter(name = 'node'): Promise<HttpAdapter> {
@@ -33,8 +32,7 @@ async function driver(name = 'builtin'): Promise<GraphQLDriver | undefined> {
 
 const graphql = await driver(process.env['GRAPHQL_DRIVER'])
 
-const app = await Application.create({
-  metadata: __ZNIGHT_METADATA__,
+const app = await createApplication({
   plugins: [
     HttpPlugin.configure({
       adapter: await adapter(process.env['ADAPTER']),

@@ -2,7 +2,7 @@ import type { ZnightMetadata } from '@znight/core'
 
 import { HttpPlugin } from '@znight/http'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
 import { createTestApp } from './support/app.js'
 import { READER_KEY } from './support/fixtures.js'
 import { describe, expect, test as it } from 'bun:test'

@@ -4,7 +4,7 @@ import type { Principal } from '../src/auth/principal.js'
 import { UnauthorizedException } from '@znight/http'
 import { TestBed } from '@znight/testing'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
 import { AuthGuard } from '../src/auth/auth.guard.js'
 import { Authenticator } from '../src/auth/authenticator.js'
 import { RequestUser } from '../src/auth/request-user.js'

@@ -9,7 +9,7 @@ import { type MemoryDriver, memory } from '@znight/messaging/memory'
 import { ObservabilityPlugin } from '@znight/observability'
 import { TestApp } from '@znight/testing'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
 import { EMAILS_QUEUE, SEND_EMAIL, type SendEmailInput } from '../src/emails/email.jobs.js'
 import { FakeSmtpClient, SmtpClient } from '../src/emails/smtp.client.js'
 import { SuppressionList } from '../src/emails/suppression.list.js'

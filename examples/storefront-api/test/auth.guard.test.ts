@@ -4,7 +4,7 @@ import { UnauthorizedException } from '@znight/http'
 import { Logger } from '@znight/observability'
 import { TestBed } from '@znight/testing'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
 import { AuthGuard } from '../src/auth/auth.guard.js'
 import { Credentials } from '../src/auth/credentials.js'
 import { CurrentCustomer } from '../src/auth/current-customer.js'

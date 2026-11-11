@@ -4,7 +4,7 @@ import type { TestApp } from '@znight/testing'
 import { readFileSync } from 'node:fs'
 import { buildOpenApiDocument, OpenApi } from '@znight/openapi'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
 import converters from '../src/openapi.converters.js'
 import { createTestApp } from './support/app.js'
 import { committedOpenApi, validateOpenApi } from './support/openapi.js'

@@ -4,7 +4,7 @@ import { UnauthorizedException } from '@znight/http'
 import { Logger } from '@znight/observability'
 import { TestBed } from '@znight/testing'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
 import { AuthGuard } from '../src/auth/auth.guard.js'
 import { RequestUser } from '../src/auth/request-user.js'
 import { ADMIN_KEY, READER_KEY } from './support/fixtures.js'

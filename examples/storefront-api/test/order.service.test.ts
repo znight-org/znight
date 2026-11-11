@@ -4,7 +4,7 @@ import type { Order } from '../src/orders/order.js'
 import { Logger } from '@znight/observability'
 import { TestBed } from '@znight/testing'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
 import { CartService } from '../src/carts/cart.service.js'
 import { CatalogService } from '../src/catalog/catalog.service.js'
 import { OrderRepository } from '../src/orders/order.repository.js'

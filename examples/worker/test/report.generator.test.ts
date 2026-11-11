@@ -1,7 +1,7 @@
 import { Logger } from '@znight/observability'
 import { createMock, TestBed } from '@znight/testing'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
 import { ReportGenerator } from '../src/reports/report.generator.js'
 import { GenerateReportJob } from '../src/reports/report.jobs.js'
 import { describe, expect, test as it } from 'bun:test'
