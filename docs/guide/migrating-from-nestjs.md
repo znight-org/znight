@@ -75,7 +75,7 @@ walks through a migration.
 | `OnModuleDestroy`, `BeforeApplicationShutdown`       | `OnStop` (`onStop()`)                                                                                                                    |
 | `OnApplicationShutdown`                              | `[Symbol.asyncDispose]()` or `@Provides({ dispose })`                                                                                    |
 | `app.enableShutdownHooks()`                          | On by default (`SIGINT`, `SIGTERM`)                                                                                                      |
-| `NestFactory.create(AppModule)` + `app.listen(3000)` | `Application.create({ metadata, plugins: [HttpPlugin.configure({ port: 3000 })] })` + `app.start()`                                      |
+| `NestFactory.create(AppModule)` + `app.listen(3000)` | `createApplication({ plugins: [HttpPlugin.configure({ port: 3000 })] })` + `app.start()` ([below](#bootstrap))                           |
 | `Test.createTestingModule({...}).compile()`          | `TestBed.create(Class, { metadata })` / `TestApp.create()`                                                                               |
 | `.overrideProvider(X).useValue(fake)`                | `overrides: [[X, fake]]`                                                                                                                 |
 | `new Logger(X.name)` (`@nestjs/common`)              | An injected `Logger`, or `getLogger(X.name)` outside DI ([below](#logger-to-getlogger))                                                  |
@@ -145,8 +145,7 @@ container, evaluated before the application starts:
 
 ```ts
 // Znight
-const app = await Application.create({
-  metadata: __ZNIGHT_METADATA__,
+const app = await createApplication({
   plugins: [ConfigPlugin.configure(), HttpPlugin.configure(container => ({ port: container.get(ServerConfig).port }))],
 })
 ```
@@ -452,16 +451,20 @@ await app.listen(3000)
 
 ```ts
 // Znight
-import { Application } from '@znight/core'
 import { HttpPlugin } from '@znight/http'
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
+import { createApplication } from './.znight/container.generated.js'
 
-const app = await Application.create({
-  metadata: __ZNIGHT_METADATA__,
+const app = await createApplication({
   plugins: [HttpPlugin.configure({ port: 3000 })],
 })
 await app.start()
 ```
+
+`NestFactory.create()` needs the `AppModule` you write and keep up to date. `createApplication()` is
+written by the compiler, in `src/.znight/container.generated.ts`, from your decorated classes: the
+whole graph, with no module to declare. It calls `Application.create({ ...options, metadata })`, so
+Ctrl+click steps into plain code. Shutdown hooks are on by default. Tests import the same
+`metadata` and pass it to `TestApp.create({ metadata })` and `TestBed.create(X, { metadata })`.
 
 ## Migration checklist
 

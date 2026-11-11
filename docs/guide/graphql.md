@@ -31,14 +31,12 @@ npm install -D @znight/compiler vite
 `GraphQLPlugin` serves its endpoint through `HttpPlugin`, so both are registered:
 
 ```ts [src/main.ts]
-import { Application } from '@znight/core'
 import { GraphQLPlugin } from '@znight/graphql'
 import { HttpPlugin } from '@znight/http'
 
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
+import { createApplication } from './.znight/container.generated.js'
 
-const app = await Application.create({
-  metadata: __ZNIGHT_METADATA__,
+const app = await createApplication({
   plugins: [HttpPlugin.configure({ port: 3000 }), GraphQLPlugin.configure()],
 })
 await app.start()
@@ -529,20 +527,18 @@ Give it to the `pubsub` option, and close it with the connections once everythin
 a plugin listed first is disposed last, after the requests and the streams are drained.
 
 ```ts [src/main.ts]
-import { Application } from '@znight/core'
 import { GraphQLPlugin } from '@znight/graphql'
 import { HttpPlugin } from '@znight/http'
 import Redis from 'ioredis'
 
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
+import { createApplication } from './.znight/container.generated.js'
 import { RedisPubSub } from './graphql/redis-pubsub.js'
 
 const publisher = new Redis(process.env['REDIS_URL'] ?? 'redis://localhost:6379')
 const subscriber = publisher.duplicate()
 const pubsub = new RedisPubSub({ publisher, subscriber })
 
-const app = await Application.create({
-  metadata: __ZNIGHT_METADATA__,
+const app = await createApplication({
   plugins: [
     {
       name: 'redis',
@@ -800,7 +796,7 @@ import { expect, test } from 'bun:test'
 import { fakeLoader } from '@znight/graphql/testing'
 import { TestBed } from '@znight/testing'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
 import type { AuthorsById } from '../src/catalog/authors-by-id.loader.js'
 import { BookResolver } from '../src/catalog/book.resolver.js'
 import { CatalogService } from '../src/catalog/catalog.service.js'
@@ -829,7 +825,7 @@ import { executeOperation, subscribeOperation } from '@znight/graphql/testing'
 import { HttpPlugin } from '@znight/http'
 import { TestApp } from '@znight/testing'
 
-import { __ZNIGHT_METADATA__ } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
 import { AuthorRepository } from '../src/catalog/author.repository.js'
 
 const BOOKS = `query Books($genre: Genre) { books(genre: $genre, limit: 2) { total items { title author { name } } } }`
@@ -837,7 +833,7 @@ const ADD_DUNE = `mutation { addBook(input: { title: "Dune", isbn: "978044101359
 
 function createTestApp(): Promise<TestApp> {
   return TestApp.create({
-    metadata: __ZNIGHT_METADATA__,
+    metadata,
     plugins: [HttpPlugin.configure({ port: 0 }), GraphQLPlugin.configure()],
   })
 }
@@ -989,7 +985,7 @@ export function plugins(): Plugin[] {
 ```
 
 ```ts [src/main.ts (excerpt)]
-const app = await Application.create({ metadata: __ZNIGHT_METADATA__, plugins: plugins() })
+const app = await createApplication({ plugins: plugins() })
 ```
 
 ```sh

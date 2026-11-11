@@ -36,7 +36,7 @@ export function overview(): string {
   x = b3.x + 14
   body.push(text(x, top + 26, 'src/.znight/', { size: 12.5, mono: true, fill: C.text3 }))
   body.push(text(x, top + 45, 'container.generated.ts', { size: 12.5, mono: true, weight: 600 }))
-  const [meta] = chip(x, top + 72, '__ZNIGHT_METADATA__', { mono: true, size: 12, padX: 7, h: 22, variant: 'violet' })
+  const [meta] = chip(x, top + 72, 'createApplication()', { mono: true, size: 12, padX: 7, h: 22, variant: 'violet' })
   body.push(meta)
   body.push(text(x, top + 108, 'providers, deps, order', { size: 12.5, fill: C.text3 }))
 
@@ -92,7 +92,7 @@ export function overview(): string {
   )
 
   body.push(rect(24, rt, 640, rh, { fill: '#F4F6FC', opacity: 0.035, stroke: C.nodeStroke, rx: 12 }))
-  body.push(text(38, rt + 26, 'Application.create({ metadata, plugins })', { size: 13, mono: true, weight: 600 }))
+  body.push(text(38, rt + 26, 'createApplication({ plugins })', { size: 13, mono: true, weight: 600 }))
 
   const iy = rt + 42
   const ih = rh - 56
@@ -123,7 +123,7 @@ export function overview(): string {
   return svg({
     h: rt + rh + 24,
     title: 'How Znight fits together',
-    desc: 'At build time, @znight/compiler (Vite plugin, CLI or Bun preload) reads your decorated classes in src, scans, analyses, binds and validates them, and generates src/.znight/container.generated.ts exporting __ZNIGHT_METADATA__; ZNIGHT errors fail the build. At run time, main.ts imports that module and passes it to Application.create with the plugins: the @znight/core container calls the generated factories in order, and plugins such as HttpPlugin, MessagingPlugin and ConfigPlugin add the runtime features.',
+    desc: 'At build time, @znight/compiler (Vite plugin, CLI or Bun preload) reads your decorated classes in src, scans, analyses, binds and validates them, and generates src/.znight/container.generated.ts exporting the metadata and createApplication(); ZNIGHT errors fail the build. At run time, main.ts imports that module and calls createApplication with the plugins: the @znight/core container calls the generated factories in order, and plugins such as HttpPlugin, MessagingPlugin and ConfigPlugin add the runtime features.',
     body,
   })
 }

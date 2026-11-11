@@ -69,9 +69,10 @@ plugins, guards and interceptors, testing utilities with auto-mocking.
 
 ## How it fits together
 
-![Build time: @znight/compiler (Vite plugin, CLI or Bun preload) reads your decorated classes and generates the metadata module src/.znight/container.generated.ts; ZNIGHT errors fail the build. Run time: main.ts passes it to Application.create({ metadata, plugins }), where the @znight/core container runs the generated factories in order and plugins such as HttpPlugin add the runtime features](/diagrams/overview.svg)
+![Build time: @znight/compiler (Vite plugin, CLI or Bun preload) reads your decorated classes and generates the metadata module src/.znight/container.generated.ts; ZNIGHT errors fail the build. Run time: main.ts calls its createApplication({ plugins }), where the @znight/core container runs the generated factories in order and plugins such as HttpPlugin add the runtime features](/diagrams/overview.svg)
 
-- [`@znight/compiler`](/packages/compiler) analyses the code and generates `__ZNIGHT_METADATA__`.
+- [`@znight/compiler`](/packages/compiler) analyses the code and generates the container module:
+  its `metadata` and the `createApplication()` function your `main.ts` calls.
 - [`@znight/core`](/packages/core) executes it: container, scopes, lifecycle, plugins, hooks, AOP.
 - Feature packages ([HTTP](/packages/http), [OpenAPI](/packages/openapi),
   [GraphQL](/packages/graphql), [WebSocket](/packages/websocket), [messaging](/packages/messaging),

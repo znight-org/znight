@@ -51,11 +51,10 @@ export class CreateUser {
 Register the plugin, before the plugins that receive traffic (it stops after them):
 
 ```ts
-import { Application } from '@znight/core'
 import { EventsPlugin } from '@znight/events'
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated.ts'
+import { createApplication } from './.znight/container.generated.ts'
 
-const app = await Application.create({ metadata: __ZNIGHT_METADATA__, plugins: [EventsPlugin.configure()] })
+const app = await createApplication({ plugins: [EventsPlugin.configure()] })
 ```
 
 ## Listen

@@ -165,7 +165,8 @@ every log line of the request, and the [security headers](#browsers-and-proxies)
 
 ```txt
 src/
-├─ main.ts                          # Application.create(): plugins, global guard, mapper, shutdown
+├─ main.ts                          # createApplication(): the plugins of app.ts, shutdown
+├─ app.ts                           # plugins(): global guard, mapper, events..., shared with the tests
 ├─ app.lifecycle.ts                 # onReady / onStop hooks
 ├─ config/                          # @Config classes: server, database, auth (@Secret)
 ├─ db/

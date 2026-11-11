@@ -69,13 +69,11 @@ export class DigestJobs {
 
 ```ts
 // src/main.ts
-import { Application } from '@znight/core'
 import { HttpPlugin } from '@znight/http'
 import { SchedulePlugin } from '@znight/schedule'
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
+import { createApplication } from './.znight/container.generated.js'
 
-const app = await Application.create({
-  metadata: __ZNIGHT_METADATA__,
+const app = await createApplication({
   // before HttpPlugin: HTTP stops taking requests first, then running jobs are drained
   plugins: [SchedulePlugin.configure({ timeZone: 'Europe/Paris' }), HttpPlugin.configure({ port: 3000 })],
 })

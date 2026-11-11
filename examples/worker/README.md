@@ -123,7 +123,7 @@ Secrets are masked wherever the config is printed (`[REDACTED]`), including erro
 
 ```txt
 src/
-├─ main.ts                    # Application.create(): plugins, shutdown deadlines, start()
+├─ main.ts                    # createApplication(): plugins, shutdown deadlines, start()
 ├─ worker.config.ts           # @Config('worker'): LOG_LEVEL, RABBITMQ_URL, WORKER_STDIN_INBOX
 ├─ .znight/                   # generated DI container (git-ignored)
 ├─ messaging/

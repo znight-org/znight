@@ -46,12 +46,10 @@ export class DigestJobs {
 ```
 
 ```ts [src/main.ts]
-import { Application } from '@znight/core'
 import { SchedulePlugin } from '@znight/schedule'
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
+import { createApplication } from './.znight/container.generated.js'
 
-const app = await Application.create({
-  metadata: __ZNIGHT_METADATA__,
+const app = await createApplication({
   plugins: [SchedulePlugin.configure()],
 })
 await app.start() // the process stays alive while the scheduler runs; SIGTERM drains running jobs

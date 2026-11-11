@@ -6,7 +6,9 @@
  *   `package.json#exports` subpaths, and only names that subpath exports (values and types);
  * - the root README, the landing page on GitHub that scaffolded projects and examples link to,
  *   only names existing packages, links to existing files and headings, and bootstraps the
- *   application with the generated metadata.
+ *   application with the generated `createApplication()`;
+ * - no page or README names the deprecated `__ZNIGHT_METADATA__` export (RFC 0015) outside a
+ *   deprecation note: samples import `metadata` or `createApplication`.
  * - a fenced block right after `<!-- sample: <repository path> -->` is that file, verbatim: the
  *   sample compiles and runs with the tests of its package (`bun run typecheck`, `bun run test`).
  *
@@ -350,6 +352,34 @@ describe('samples in Markdown', () => {
   })
 })
 
+/** The deprecated export of the generated module (RFC 0015), removed in 0.10. */
+const LEGACY_EXPORT = ['__ZNIGHT', 'METADATA__'].join('_')
+
+/** Lines naming the deprecated export outside a deprecation note (that line or the one before it). */
+function legacyExportProblems(markdown: string): string[] {
+  const lines = markdown.split('\n')
+  return lines.flatMap((line, index) =>
+    line.includes(LEGACY_EXPORT) && !/deprecat/i.test(`${lines[index - 1] ?? ''}\n${line}`)
+      ? [`line ${index + 1}: ${line.trim()}`]
+      : [],
+  )
+}
+
+describe('the deprecated metadata export', () => {
+  const rootDocuments = readdirSync(repoRoot).filter(name => name.endsWith('.md') && !name.startsWith('CHANGELOG'))
+
+  it('is only allowed in a deprecation note', () => {
+    expect(legacyExportProblems(`a\n// @deprecated alias\nexport const ${LEGACY_EXPORT} = metadata\nb`)).toEqual([])
+    expect(legacyExportProblems(`import { ${LEGACY_EXPORT} } from './x.js'`)).toEqual([
+      `line 1: import { ${LEGACY_EXPORT} } from './x.js'`,
+    ])
+  })
+
+  it.each([...new Set([...rootDocuments, ...documents])])('%s only names it in a deprecation note', document => {
+    expect(legacyExportProblems(readFileSync(join(repoRoot, document), 'utf8'))).toEqual([])
+  })
+})
+
 describe('README.md', () => {
   const readme = readFileSync(join(repoRoot, 'README.md'), 'utf8')
 
@@ -389,12 +419,13 @@ describe('README.md', () => {
     expect(targets.length).toBeGreaterThan(10)
   })
 
-  it('bootstraps applications with the generated metadata', () => {
-    const calls = codeOf(readme)
-      .flatMap(createCalls)
-      .filter(call => /^Application\.create\(\s*\{/.test(call))
+  it('bootstraps applications with the generated createApplication() (RFC 0015)', () => {
+    const code = codeOf(readme)
+    // the explicit form, when used, still passes the generated metadata
+    const calls = code.flatMap(createCalls).filter(call => /^Application\.create\(\s*\{/.test(call))
     expect(calls.filter(call => !/\bmetadata\b/.test(call))).toEqual([])
-    expect(calls.length).toBeGreaterThan(1)
+    expect(code.join('\n').match(/\bcreateApplication\(/g)?.length ?? 0).toBeGreaterThan(1)
+    expect(code.join('\n')).toContain("import { createApplication } from './.znight/container.generated.js'")
   })
 
   it('documents the repository workflow (Bun, znight-org/znight)', () => {

@@ -112,14 +112,12 @@ export class BookResolver {
 
 ```ts
 // src/main.ts
-import { Application } from '@znight/core'
 import { GraphQLPlugin } from '@znight/graphql'
 import { HttpPlugin } from '@znight/http'
 
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
+import { createApplication } from './.znight/container.generated.js'
 
-const app = await Application.create({
-  metadata: __ZNIGHT_METADATA__,
+const app = await createApplication({
   plugins: [HttpPlugin.configure({ port: 3000 }), GraphQLPlugin.configure()],
 })
 await app.start() // POST /graphql, GET /graphql (queries; GraphiQL in development), SSE subscriptions
@@ -1135,7 +1133,7 @@ import { expect, test } from 'bun:test'
 import { fakeLoader } from '@znight/graphql/testing'
 import { TestBed } from '@znight/testing'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
 
 test('author() goes through the loader', async () => {
   const { instance } = await TestBed.create(BookResolver, { metadata })
@@ -1155,14 +1153,14 @@ import { executeOperation, subscribeOperation } from '@znight/graphql/testing'
 import { HttpPlugin } from '@znight/http'
 import { TestApp } from '@znight/testing'
 
-import { __ZNIGHT_METADATA__ } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
 
 const ADD_BOOK = `mutation Add($input: NewBookInput!) { addBook(input: $input) { id title } }`
 const DUNE = { title: 'Dune', isbn: '9780441013593', authorId: 'a1', genre: 'ScienceFiction' } // enum names on the wire
 
 test('bookAdded streams new books', async () => {
   await using app = await TestApp.create({
-    metadata: __ZNIGHT_METADATA__,
+    metadata,
     plugins: [HttpPlugin.configure({ port: 0 }), GraphQLPlugin.configure()],
   })
   await using events = await subscribeOperation(app, { query: 'subscription { bookAdded { title } }' })

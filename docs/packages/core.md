@@ -16,8 +16,8 @@ Runs on Node.js 24+ and Bun 1.3+ (ESM only). Decorators require `"experimentalDe
 ## At a glance
 
 ```ts
-import { Application, Injectable, type OnStart } from '@znight/core'
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
+import { Injectable, type OnStart } from '@znight/core'
+import { createApplication } from './.znight/container.generated.js'
 
 @Injectable()
 export class Warmup implements OnStart {
@@ -28,7 +28,7 @@ export class Warmup implements OnStart {
   }
 }
 
-const app = await Application.create({ metadata: __ZNIGHT_METADATA__, plugins: [] })
+const app = await createApplication({ plugins: [] })
 await app.start()
 ```
 
@@ -78,9 +78,13 @@ await app.start()
 await app.stop()
 ```
 
+Applications usually call `createApplication(options)`, exported by the generated module: it is
+`Application.create({ ...options, metadata })`, and its options (`CreateApplicationOptions`) are the
+ones below without `metadata`.
+
 | Option      | Type                                | Description                                                                                                                  |
 | ----------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `metadata`  | `ZnightMetadata`                    | The generated `__ZNIGHT_METADATA__` (required).                                                                              |
+| `metadata`  | `ZnightMetadata`                    | The generated `metadata` (required; `createApplication()` binds it).                                                         |
 | `plugins`   | `Plugin[]`                          | Runtime features, in order.                                                                                                  |
 | `providers` | `Map` / `[key, value][]` / `Record` | Values for externals or replacements of compiled providers. Keys: classes or tokens.                                         |
 | `overrides` | same as `providers`                 | Applied last, highest precedence (tests). Definitions (`{ scope, deps, factory }`) accepted.                                 |

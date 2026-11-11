@@ -197,7 +197,7 @@ response carries the security headers, `cache-control: no-store` and an `x-reque
 
 ```txt
 src/
-├─ main.ts                         # Application.create(): observability, config, httpPlugin()
+├─ main.ts                         # createApplication(): observability, config, httpPlugin()
 ├─ http.ts                         # HttpPlugin options shared with the tests: guards, CORS, headers, proxies, cookie secrets
 ├─ app.lifecycle.ts                # onReady / onStop logs
 ├─ config/                         # @Config classes: server, auth, cors, session, webhook (@Secret)

@@ -24,12 +24,10 @@ npm install @znight/events
 ```
 
 ```ts
-import { Application } from '@znight/core'
 import { EventsPlugin } from '@znight/events'
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated.ts'
+import { createApplication } from './.znight/container.generated.ts'
 
-const app = await Application.create({
-  metadata: __ZNIGHT_METADATA__,
+const app = await createApplication({
   plugins: [EventsPlugin.configure()], // list it before HttpPlugin, MessagingPlugin, SchedulePlugin
 })
 ```

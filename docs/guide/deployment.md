@@ -160,8 +160,7 @@ then closes infrastructure. See [Lifecycle](./lifecycle#graceful-shutdown-app-st
 Align the timeouts with your platform:
 
 ```ts
-const app = await Application.create({
-  metadata: __ZNIGHT_METADATA__,
+const app = await createApplication({
   plugins,
   shutdown: { timeoutMs: 25_000, hookTimeoutMs: 10_000 },
 })
@@ -233,13 +232,11 @@ A queue-triggered function (AWS Lambda with SQS) using a single service:
 ::: code-group
 
 ```ts [src/lambda.ts]
-import { Application } from '@znight/core'
 import type { SQSEvent } from 'aws-lambda'
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
+import { createApplication } from './.znight/container.generated.js'
 import { OrderService } from './orders/order.service.js'
 
-const app = await Application.create({
-  metadata: __ZNIGHT_METADATA__,
+const app = await createApplication({
   init: { only: [OrderService] }, // build OrderService and its dependencies only
   shutdown: { signals: false },
 })
@@ -272,14 +269,12 @@ would listen on a port:
 ::: code-group
 
 ```ts [src/worker.ts]
-import { Application } from '@znight/core'
 import { HttpPlugin } from '@znight/http'
 import { honoAdapter } from '@znight/http/hono'
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
+import { createApplication } from './.znight/container.generated.js'
 
 const adapter = honoAdapter()
-await Application.create({
-  metadata: __ZNIGHT_METADATA__,
+await createApplication({
   plugins: [HttpPlugin.configure({ adapter })],
   shutdown: { signals: false },
 })

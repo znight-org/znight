@@ -220,7 +220,7 @@ changes and checks every diagnostic, so this section stays true.
 
 ```txt
 src/
-├─ main.ts                          # Application.create(): plugins(), shutdown timeouts
+├─ main.ts                          # createApplication(): plugins(), shutdown timeouts
 ├─ plugins.ts                       # Observability, Config, Schedule (lock store, overrides), Http: shared with the tests
 ├─ app.lifecycle.ts                 # "ready" and "stopping" log lines
 ├─ config/                          # @Config classes: server, database, auth (@Secret), schedule, digest, probes

@@ -94,12 +94,10 @@ the [migration guide](./docs/guide/migrating-from-nestjs.md).
 
 ```ts
 // src/main.ts
-import { Application } from '@znight/core'
 import { HttpPlugin } from '@znight/http'
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
+import { createApplication } from './.znight/container.generated.js'
 
-const app = await Application.create({
-  metadata: __ZNIGHT_METADATA__,
+const app = await createApplication({
   plugins: [HttpPlugin.configure({ port: 3000 })], // the built-in node:http server
 })
 
@@ -260,7 +258,6 @@ discovered automatically, and a runtime plugin. Plugins start in order and stop 
 ```ts
 // src/main.ts
 import { ConfigPlugin } from '@znight/config'
-import { Application } from '@znight/core'
 import { HttpPlugin } from '@znight/http'
 import { fastifyAdapter } from '@znight/http/fastify'
 import { MessagingPlugin } from '@znight/messaging'
@@ -268,11 +265,10 @@ import { rabbitmq } from '@znight/messaging/rabbitmq'
 import { ObservabilityPlugin } from '@znight/observability'
 import { OpenApiPlugin } from '@znight/openapi'
 import { SchedulePlugin } from '@znight/schedule'
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
+import { createApplication } from './.znight/container.generated.js'
 import { AmqpConfig } from './config/amqp.config.js'
 
-const app = await Application.create({
-  metadata: __ZNIGHT_METADATA__,
+const app = await createApplication({
   plugins: [
     ObservabilityPlugin.configure(), // first: its hooks wrap every request, message and job
     ConfigPlugin.configure(), // loads and validates every @Config class before anything is created

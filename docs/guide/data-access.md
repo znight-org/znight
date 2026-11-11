@@ -488,7 +488,7 @@ import type { BookRepository } from '../src/books/book.repository.js'
 import { Logger } from '@znight/observability'
 import { TestBed } from '@znight/testing'
 
-import { __ZNIGHT_METADATA__ as metadata } from '../src/.znight/container.generated.js'
+import { metadata } from '../src/.znight/container.generated.js'
 import { BookNotFoundError } from '../src/books/book.js'
 import { BookService } from '../src/books/book.service.js'
 import { describe, expect, test as it } from 'bun:test'

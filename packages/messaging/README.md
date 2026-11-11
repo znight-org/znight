@@ -91,13 +91,11 @@ export class OrderService {
 
 ```ts
 // src/main.ts
-import { Application } from '@znight/core'
 import { MessagingPlugin } from '@znight/messaging'
 import { rabbitmq } from '@znight/messaging/rabbitmq'
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
+import { createApplication } from './.znight/container.generated.js'
 
-const app = await Application.create({
-  metadata: __ZNIGHT_METADATA__,
+const app = await createApplication({
   plugins: [MessagingPlugin.configure({ driver: rabbitmq({ url: process.env.AMQP_URL! }) })],
 })
 await app.start() // consumers subscribe; SIGTERM drains them gracefully

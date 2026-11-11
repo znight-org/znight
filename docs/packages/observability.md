@@ -17,9 +17,9 @@ npm install -D pino-pretty                       # optional: pretty logs in deve
 
 ```ts [src/main.ts]
 import { ObservabilityPlugin } from '@znight/observability'
+import { createApplication } from './.znight/container.generated.js'
 
-const app = await Application.create({
-  metadata: __ZNIGHT_METADATA__,
+const app = await createApplication({
   plugins: [
     ObservabilityPlugin.configure({
       logging: { level: 'info', redact: ['*.password', 'req.headers.authorization'] },

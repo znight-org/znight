@@ -67,13 +67,11 @@ from the jsDelivr copy pinned by this release, with Subresource Integrity (`asse
 
 ```ts
 // src/main.ts
-import { Application } from '@znight/core'
 import { HttpPlugin } from '@znight/http'
 import { OpenApiPlugin } from '@znight/openapi'
-import { __ZNIGHT_METADATA__ } from './.znight/container.generated.js'
+import { createApplication } from './.znight/container.generated.js'
 
-const app = await Application.create({
-  metadata: __ZNIGHT_METADATA__,
+const app = await createApplication({
   plugins: [HttpPlugin.configure({ port: 3000 }), OpenApiPlugin.configure({ ui: 'scalar' })],
 })
 await app.start() // GET /openapi.json, GET /docs (Scalar)
@@ -505,7 +503,7 @@ test('GET /books/:id answers what its documentation says', async () => {
 import { buildOpenApiDocument } from '@znight/openapi'
 
 test('the committed openapi.json is up to date', async () => {
-  const { json } = await buildOpenApiDocument(__ZNIGHT_METADATA__)
+  const { json } = await buildOpenApiDocument(metadata)
   expect(json).toBe(await Bun.file(new URL('../openapi.json', import.meta.url)).text())
 })
 ```
