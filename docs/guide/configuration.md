@@ -29,8 +29,10 @@ const app = await createApplication({
 ```
 
 `ConfigPlugin.configure()` loads `.env` files, then the real environment, and validates every config
-class before any other provider is created. List it before the plugins whose options read
-configuration.
+class when it registers, before any provider is created. Its place in the list does not matter for
+configuration: plugin options that read a config class use the
+[function form](#plugin-options), which runs once the configuration is loaded, whatever the order.
+Keep `ObservabilityPlugin` first when you use it ([Observability](./observability#setup)).
 
 ## Declare a config class {#config-classes}
 

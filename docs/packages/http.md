@@ -173,10 +173,25 @@ Plugin-wide limits: `HttpPlugin.configure({ uploads: { maxFileSize, maxFiles, ma
 (defaults: 10 MiB, 10, 1000, 1 MiB). The body limit of an upload route defaults to the sum of what
 its upload parameters accept plus `bodyLimit`; `@BodyLimit(size)` caps it.
 
-`HttpResponse.file(path | URL | Blob | LazyFile, { root?, dotfiles?, filename?, disposition?, contentType? })`
-and `HttpResponse.stream(source, options?)` are described in
-[downloads](/guide/files-and-streaming#downloads) and
-[streaming responses](/guide/files-and-streaming#streaming-responses).
+### Downloads
+
+Moved to [Downloads](/guide/files-and-streaming#downloads):
+`HttpResponse.file(path | URL | Blob | LazyFile, { root?, dotfiles?, filename?, disposition?, contentType? })`,
+and [lazy files](/guide/files-and-streaming#lazy-files) for content stored elsewhere.
+
+### Streaming responses
+
+Moved to [Streaming responses](/guide/files-and-streaming#streaming-responses):
+`HttpResponse.stream(source, options?)`.
+
+### Large files
+
+Moved to [Large files](/guide/files-and-streaming#large-files).
+
+### Security {#security}
+
+Moved to [Security](/guide/files-and-streaming#file-security): client file names and types, `root`,
+where to store uploads and limits.
 
 ## Errors
 
@@ -307,7 +322,9 @@ then follows the Znight option and ignores the framework's address.
 
 ## Cookies
 
-How to read, set, sign and test cookies: [Cookies](/guide/http#cookies). The reference:
+How to read, set, sign and test cookies: [Cookies](/guide/http#cookies). The reference follows.
+
+### Reading cookies
 
 | Decorator / member          | Injects                                                                                      |
 | --------------------------- | -------------------------------------------------------------------------------------------- |
@@ -370,6 +387,10 @@ signed value.
 Sessions and encrypted cookies are not included. Use `__Host-` names for authentication cookies,
 and see the [CSRF recipe](/guide/security#csrf) for cookie authentication.
 
+### Testing cookies
+
+Moved to [Testing cookies](/guide/http#testing-cookies).
+
 ## Server-Sent Events
 
 Moved to [Files and streaming](/guide/files-and-streaming#server-sent-events): `@Sse()`, the event
@@ -384,6 +405,11 @@ and `HttpResponse.sse(source, options?)`:
 
 `encodeSseEvent()` and `parseSseStream()` (a `ReadableStream` to its events) are exported.
 
+### Stream lifecycle
+
+Moved to [Stream lifecycle](/guide/files-and-streaming#stream-lifecycle): backpressure, client
+disconnects, errors, `maxDuration` and shutdown.
+
 ### Testing event streams
 
 Moved to [Files and streaming](/guide/files-and-streaming#testing-event-streams): `injectSse()` and
@@ -394,8 +420,11 @@ Moved to [Files and streaming](/guide/files-and-streaming#testing-event-streams)
 `HttpContext` (the adapter-neutral request and response) and `RequestId` are request-scoped
 externals: inject them in request-scoped providers, or through `Lazy<HttpContext>` in singletons.
 [The request context](/guide/http#request-context) shows how; the
-[package README](../../packages/http/README.md) lists every member of `HttpContext`. The request
-pipeline is drawn in [the HTTP guide](/guide/http#pipeline).
+[package README](../../packages/http/README.md) lists every member of `HttpContext`.
+
+## The request pipeline
+
+Moved to [The request pipeline](/guide/http#pipeline).
 
 ## Plugin options
 
