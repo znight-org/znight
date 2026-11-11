@@ -180,16 +180,20 @@ MessagingPlugin.configure({
 })
 ```
 
-- **Redis Streams** (or Valkey): `publish(queue)` adds an entry to the stream `queue` (body, `id`,
-  `type`, `key`, `content-type`, `timestamp` and `h:<header>` fields) and `@Consumer(queue)` reads it
-  through a consumer group (`znight`, or `@Consumer({ queue, group })`), created at subscribe time.
-  Redis has no redelivery policy, so Znight owns retries and dead letters: a retry, a release or a
-  dead letter adds a copy (to the stream, its delayed sorted set `<queue>:delayed` or the stream
-  `<queue>.dlq`) and acknowledges the original in one Lua script. Entries left pending by a crashed
-  consumer are claimed back (`XAUTOCLAIM`) after `claimIdleMs`, and their deliveries count as
-  attempts. Delayed publishing goes through the same sorted set. `maxLength` trims the streams
-  (`MAXLEN ~`, regardless of the consumers: size it above any backlog), `replicas` waits for replicas
-  (`WAIT`). Built on ioredis, the most widespread Node.js Redis client; Redis Cluster is not supported.
+- **Redis Streams** (Redis 7.0+ or Valkey): `publish(queue)` adds an entry to the stream `queue`
+  (body, `id`, `type`, `key`, `content-type`, `timestamp` and `h:<header>` fields) and
+  `@Consumer(queue)` reads it through a consumer group (`znight`, or `@Consumer({ queue, group })`),
+  created at subscribe time. Redis has no redelivery policy, so Znight owns retries and dead letters:
+  a retry, a release or a dead letter adds a copy and acknowledges the original in one Lua script.
+  Retries and releases go to the retry stream of the group (`<queue>:retry:<group>`, with its delayed
+  sorted set), read next to the queue stream, so the other groups of a fan-out never see them; dead
+  letters go to the stream `<queue>.dlq`. Entries left pending by a crashed consumer are claimed back
+  (`XAUTOCLAIM`) after `claimIdleMs`, and their deliveries count as attempts. Delayed publishing goes
+  through the sorted set `<queue>:delayed`. A housekeeping pass trims what every group acknowledged
+  (`XTRIM MINID`, `keepAcknowledged: true` keeps it) and removes the consumers of crashed processes.
+  `maxLength` caps the streams (`MAXLEN ~`, regardless of the consumers: size it above any backlog),
+  `replicas` waits for replicas (`WAIT`). Built on ioredis, the most widespread Node.js Redis client;
+  Redis Cluster is not supported.
 
 ```ts
 import { MessagingPlugin } from '@znight/messaging'

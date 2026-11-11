@@ -329,9 +329,6 @@ a `defaults.concurrency` that is not a positive integer...) make `Application.cr
 OCI Streaming and Azure Event Hubs work through the Kafka driver ([below](#oracle-cloud-infrastructure-streaming));
 for another broker, [write your own driver](#writing-your-own-driver) and check it with the conformance kit.
 
-OCI Streaming and Azure Event Hubs work through the Kafka driver ([below](#oracle-cloud-infrastructure-streaming));
-for another broker, [write your own driver](#writing-your-own-driver) and check it with the conformance kit.
-
 ### Memory
 
 Deterministic in-process broker: FIFO queues, round-robin between competing subscribers, delays (of
@@ -568,7 +565,8 @@ redis({ url: process.env['REDIS_URL'], maxLength: 1_000_000 })
 | `prefix`              | `''`                        | Prefix of the stream keys: `<prefix><queue>`.                                              |
 | `group`               | `'znight'`                  | Consumer group; `@Consumer({ queue, group })` names another one for a consumer.            |
 | `consumerName`        | `<hostname>-<pid>-<random>` | Prefix of this process' consumer names (a counter is appended per consumer).               |
-| `maxLength`           | none                        | `MAXLEN ~` of the queue streams on every write (see trimming below).                       |
+| `maxLength`           | none                        | `MAXLEN ~` of the queue streams on every write (see retention below).                      |
+| `keepAcknowledged`    | `false`                     | Keeps what every group acknowledged in the queue streams (see retention below).            |
 | `deadLetterMaxLength` | none                        | `MAXLEN ~` of the dead-letter streams.                                                     |
 | `claimIdleMs`         | `60000`                     | Idle time after which an entry left pending by a crashed consumer is claimed back.         |
 | `blockMs`             | `2000`                      | Longest wait of a blocking read.                                                           |
@@ -581,18 +579,31 @@ redis({ url: process.env['REDIS_URL'], maxLength: 1_000_000 })
 **Client.** The driver is built on [ioredis](https://github.com/redis/ioredis) (5.4+ or 6), the most
 widespread Node.js Redis client (about twice the weekly downloads of `redis`, the official
 node-redis, and already installed by BullMQ users), with first-class Sentinel and TLS support. Its
-raw `call()` / `callBuffer()` keep message bodies binary-safe. Redis 6.2+ (`XAUTOCLAIM`) and Valkey
-are supported; Redis Cluster is not (a queue, its delayed set and its dead-letter stream would live in
-different slots).
+raw `call()` / `callBuffer()` keep message bodies binary-safe. Redis 7.0+ and Valkey are supported
+(the version is checked at connect, when `INFO` is allowed: on 6.2, `XAUTOCLAIM` leaves the entries
+deleted while pending in the pending list for good); Redis Cluster is not (a queue, its retry stream,
+its delayed sets and its dead-letter stream would live in different slots).
+
+**Keys.** For a queue `orders` and the group `billing`:
+
+| Key                            | Type       | Holds                                                |
+| ------------------------------ | ---------- | ---------------------------------------------------- |
+| `orders`                       | stream     | the published messages, read by every group          |
+| `orders:delayed`               | sorted set | delayed publications, moved into `orders` when due   |
+| `orders:retry:billing`         | stream     | the retries and releases of the group `billing` only |
+| `orders:retry:billing:delayed` | sorted set | its delayed retries                                  |
+| `orders.dlq`                   | stream     | dead letters (`deadLetterName`)                      |
+
+With `prefix`, every key starts with it. A key holding another type fails the boot (ZNIGHT011).
 
 **Streams and groups.** `publish(queue)` is an `XADD` to the stream `<prefix><queue>`.
 `@Consumer(queue)` reads it through a consumer group (`znight` by default), created idempotently at
-subscribe time (`XGROUP CREATE ... 0 MKSTREAM`: a new group starts at the beginning of the stream, so
-messages published before the first consumer started are delivered; create the group yourself with
-`$` to skip them). Every application of the group competes for the entries; give each service its own
-`group` for a fan-out. Each consumer reads on its own blocking connection (`XREADGROUP ... BLOCK`),
-never more entries than its free `concurrency` slots. A key holding another type (the stream, its
-delayed set, the dead-letter stream) fails the boot (ZNIGHT011).
+subscribe time (`XGROUP CREATE ... 0 MKSTREAM`: a new group starts at the oldest entry still in the
+stream, so messages published before the first consumer started are delivered; create the group
+yourself with `$` to skip them). Every application of the group competes for the entries; give each
+service its own `group` for a fan-out. Each consumer reads the queue stream and the retry stream of
+its group on its own blocking connection (`XREADGROUP ... BLOCK`), asking for its free `concurrency`
+slots; the entries beyond them (both streams answered) wait in the process, kept claimed.
 
 **Wire format.** An entry carries the fields `id`, `type`, `key`, `content-type`, `timestamp`, `body`
 (binary safe) and one `h:<name>` field per header, trace context included (`h:traceparent`). The names
@@ -603,31 +614,53 @@ a header.
 **Settlements.** `ack` is `XACK`. Redis has no redelivery policy, so retries and dead letters are
 Znight's: a retry adds a copy carrying `x-znight-attempt` and acknowledges the original in **one Lua
 script** (atomic: never lost, never duplicated by the driver; nothing is copied when the entry is no
-longer pending, e.g. settled by another member). A delayed retry goes to the stream's sorted set
-`<stream>:delayed` (scored with the server time), which a script moves back into the stream when due;
-the driver runs it every `delayPollIntervalMs` for the streams it consumes and the streams it
-published delayed messages to (a delayed publication to a queue that no running application consumes
-waits in the set). The same set serves `publish(..., { delay })`, without limit. A dead letter is a
-copy (with the `x-znight-dead-letter-reason`... headers) added to the stream `<q>.dlq`, acknowledged
-in the same script; without dead-lettering, the entry is only acknowledged. `release` adds a copy
-keeping the attempt, so the message is redelivered at once.
+longer pending, e.g. settled by another member). The copy goes to the **retry stream of the group**,
+never to the queue stream: the other groups of a fan-out do not see it, and their attempts stay their
+own. A delayed retry goes to the sorted set of the retry stream (scored with the server time), which a
+script moves into the retry stream when due; the driver runs it every `delayPollIntervalMs` for the
+streams it consumes and the streams it published delayed messages to (a delayed publication to a queue
+that no running application consumes waits in its set). `publish(..., { delay })` goes through
+`<queue>:delayed`, without limit. A dead letter is a copy (with the `x-znight-dead-letter-reason`...
+headers) added to the stream `<q>.dlq`, acknowledged in the same script; without dead-lettering, the
+entry is only acknowledged. `release` adds a copy keeping the attempt to the retry stream, so the
+message is redelivered at once.
 
 **Crashed consumers.** Entries read but never settled stay in the group's pending entries list. Every
 member runs `XAUTOCLAIM` every `claimIdleMs / 2` and takes over the entries idle for `claimIdleMs`;
 their deliveries count as attempts (a message whose handler crashes the process ends in the
 dead-letter stream once its attempts are exhausted). While a handler runs, the driver keeps its entry
-claimed (`XCLAIM ... JUSTID` every `claimIdleMs / 3`), so long handlers are not taken over.
+claimed (`XCLAIM ... JUSTID` every `claimIdleMs / 3`), so long handlers are not taken over. A crashed
+process also leaves its consumers in the groups: the housekeeping removes them (below).
 
-**Trimming and durability.** Streams keep their entries after `XACK` (other groups may read them):
-`maxLength` trims with `MAXLEN ~` on every write. Trimming ignores the consumers, so an entry trimmed
-before it was read is lost: size it well above any backlog. A confirmation means Redis executed the
-command; durability follows the server's persistence (AOF with `appendfsync everysec` or `always`), and
+**Housekeeping and retention.** Every `claimIdleMs / 2` (30 s at most), each process looks after the
+streams it consumes:
+
+- it **trims what every group acknowledged** (`XTRIM MINID ~`, in one script): the entries below,
+  for each group of the stream, its oldest pending entry, or its last delivered one when nothing is
+  pending. A group that has not read an entry keeps it, so no group loses a message; an abandoned group
+  keeps everything from where it stopped: delete it (`XGROUP DESTROY`). Approximate trimming removes
+  whole macro nodes (100 entries by default), so a few acknowledged entries stay. With
+  `keepAcknowledged: true`, the queue streams keep them (a log, bounded by `maxLength` only); retry
+  streams are always trimmed.
+- it **removes the consumers of crashed processes**: consumers of its groups without pending entries
+  and idle for ten times `claimIdleMs` (or `blockMs` when larger: 10 minutes by default), except its
+  own (`XGROUP DELCONSUMER`, in one script with the check). Removing a consumer without pending entries
+  loses nothing. On Redis 7.0 and 7.1, where an empty read does not reset the idle time, a live
+  consumer of another process that received nothing for that long is removed too, and comes back with
+  its next message.
+
+`maxLength` adds `MAXLEN ~` on every write. It ignores the consumers, so an entry trimmed before it
+was read is lost: size it well above any backlog. A confirmation means Redis executed the command;
+durability follows the server's persistence (AOF with `appendfsync everysec` or `always`), and
 `replicas` waits until the given number of replicas acknowledged the write (`WAIT`).
 
 **Shutdown.** On stop, the driver unblocks the blocking reads (`CLIENT UNBLOCK`, else they end within
-`blockMs`), gives back the entries read meanwhile, waits for the deliveries in flight, removes its
-consumers from their groups when they have no pending entry, then closes the connections it created.
-ACL permissions: the stream commands, `EVALSHA`/`EVAL`, `TYPE`, `PING`, `CLIENT ID`/`CLIENT UNBLOCK`
+`blockMs`), gives back the entries read meanwhile (to the retry stream), waits for the deliveries in
+flight, removes its consumers from their groups when they have no pending entry, then closes the
+connections it created. The client id of a reading connection is read again after a reconnection,
+so the driver never unblocks a stale id (until the next read, the read resent by ioredis ends within
+`blockMs`). ACL permissions: the stream commands, `EVALSHA`/`EVAL` (the scripts call `XINFO`,
+`XTRIM`, `XGROUP DELCONSUMER`), `TYPE`, `PING`, `INFO` (optional), `CLIENT ID`/`CLIENT UNBLOCK`
 (optional) and `WAIT` with `replicas`. Design notes: [RFC 0014](../../rfcs/0014-messaging-drivers.md).
 
 ### Kafka
