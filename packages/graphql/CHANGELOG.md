@@ -1,5 +1,16 @@
 # @znight/graphql
 
+## 0.9.0
+
+### Patch Changes
+
+- Updated dependencies [394c247]
+- Updated dependencies [394c247]
+  - @znight/compiler@0.9.0
+  - @znight/core@0.9.0
+  - @znight/testing@0.9.0
+  - @znight/http@0.9.0
+
 ## 0.8.0
 
 ### Patch Changes
