@@ -195,23 +195,53 @@ letters, a driver option chooses **who retries**, never both layers at once: `'z
   consumer. Advisories are core NATS messages: one published while no replica listens is lost
   (documented; capturing them in a stream was left out).
 
-### 4.3 Redis Streams (`/redis`, peer `redis` ^5)
+### 4.3 Redis Streams (`/redis`, peer `ioredis` ^5.4 or ^6)
 
-- **Names.** `publish(queue)` is an `XADD` to the stream `<prefix><queue>` (body, type, id, content
-  type and headers as fields; optional `MAXLEN ~`); `@Consumer(queue)` reads through a consumer group
-  (`XREADGROUP`, `COUNT` = free slots), created idempotently with `MKSTREAM`. Valkey works the same.
+- **Client.** ioredis rather than `redis` (node-redis), decided at implementation time: it is the
+  more widespread client (about twice the weekly downloads), the one BullMQ users already have, with
+  mature Sentinel and TLS support, and its raw `call()` / `callBuffer()` keep bodies binary-safe.
+  Redis 7.0+ and Valkey, checked at connect: on 6.2, `XAUTOCLAIM` keeps entries deleted while pending
+  in the pending list for good. Redis Cluster is not supported (a queue, its retry stream, its delayed
+  sets and its dead-letter stream would live in different slots).
+- **Names.** `publish(queue)` is an `XADD` to the stream `<prefix><queue>` (body, id, type, key,
+  content type, timestamp and `h:<header>` fields; optional `MAXLEN ~`); `@Consumer(queue)` reads
+  through a consumer group (`XREADGROUP` on a blocking connection per consumer, `COUNT` = free
+  slots), created idempotently with `MKSTREAM`. Valkey works the same.
 - **Settlement.** `ack` is `XACK`. Messages received but never settled stay in the pending entries
-  list and are claimed back (`XAUTOCLAIM` after `claimIdleMs`) by any member, including a restarted
-  one: that is `release`, and the shutdown path.
+  list and are claimed back (`XAUTOCLAIM` after `claimIdleMs`) by any member, their deliveries
+  counting as attempts; a heartbeat (`XCLAIM ... JUSTID`) keeps in-flight entries claimed. `release`
+  adds a copy keeping the attempt and acknowledges the original, so the message comes back at once.
 - **Retries.** Redis has no redelivery policy, so retries are Znight's only: a copy with
-  `x-znight-attempt` is added and the original acknowledged in one `MULTI`. Delays go through a sorted
-  set per stream (`<stream>:delayed`, score = due time) moved back into the stream by an atomic script
-  polled by the driver; the same set serves delayed publishing. In-process budget 1 s.
-- **Dead letters.** The stream `<queue>.dlq`, written and acknowledged in one `MULTI`.
+  `x-znight-attempt` is added and the original acknowledged in one Lua script (rather than a
+  `MULTI`: atomic too, and it adds nothing when the entry is no longer pending). Retry and release
+  copies go to a **retry stream per group** (`<stream>:retry:<group>`), read next to the queue stream
+  in the same `XREADGROUP`, never to the queue stream: every group of a fan-out reads the queue
+  stream, so a copy added there would be delivered again to the other groups, with the attempt count
+  of the failing one (decided at review). Delays go through a sorted set per stream (score = server
+  time + delay) moved back into its stream by an atomic script polled by the driver:
+  `<retry stream>:delayed` for retries, `<stream>:delayed` for delayed publishing. In-process budget
+  1 s.
+- **Dead letters.** The stream `<queue>.dlq`, written and acknowledged in the same script.
+- **Retention (decided at review).** Streams keep entries after `XACK`, and every retry or release
+  adds one: without trimming, Redis memory grows until `maxmemory`. The driver therefore trims by
+  default what **every group** has read and acknowledged (`XTRIM MINID ~`, below the oldest pending or
+  next undelivered entry over the stream's groups, in one script), every `claimIdleMs / 2` (30 s at
+  most), for the streams it consumes; `keepAcknowledged` keeps the queue streams as a log. This never
+  drops an entry a group has not settled, unlike a time-based retention, at the cost that an abandoned
+  group stops the trimming (documented: `XGROUP DESTROY`). `maxLength` stays available as a hard cap.
+- **Consumers.** Consumer names are unique per process (`<hostname>-<pid>-<random>-<n>`), so the
+  consumers of crashed processes stay in the groups. The same housekeeping removes the consumers idle
+  for ten times `claimIdleMs` without pending entries (except the process' own), which loses nothing:
+  `XREADGROUP` recreates a consumer when needed.
 - **Durability and ordering.** A confirmation means Redis executed the command; durability follows
   the server's persistence (AOF), and an option waits for replicas (`WAIT`). No ordering across
   members of a group.
-- **Tests.** The `redis` image in Testcontainers.
+- **Shutdown.** `cancel()` unblocks the blocking read (`CLIENT UNBLOCK`, else it ends within
+  `blockMs`); the client id is forgotten when the connection closes and read again before the next
+  read, so a reconnection never makes it unblock a stale id (possibly another client's after a server
+  restart). `close()` removes the consumer from its group when it has no pending entry.
+- **Tests.** The conformance kit against an in-memory fake server in the regular run, and against
+  the `redis` 7.0, `redis` 7.4 and `valkey` 9 images in Testcontainers.
 
 ## 5. Oracle Cloud Infrastructure and other brokers
 

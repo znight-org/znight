@@ -1,11 +1,13 @@
 # @znight/messaging
 
 Message consumers and publishing for [Znight](../../README.md), checked at build time and run on
-RabbitMQ, Amazon SQS, Kafka, Google Cloud Pub/Sub, NATS JetStream, Azure Service Bus or in memory.
+RabbitMQ, Amazon SQS, Kafka, Google Cloud Pub/Sub, NATS JetStream, Azure Service Bus, Redis Streams
+or in memory.
 
 Retries with backoff, dead-letter queues, per-consumer concurrency and graceful shutdown, the same
-on **RabbitMQ**, **Amazon SQS**, **Kafka**, **Google Cloud Pub/Sub**, **NATS JetStream** and
-**Azure Service Bus**; the in-memory broker serves tests and local development.
+on **RabbitMQ**, **Amazon SQS**, **Kafka**, **Google Cloud Pub/Sub**, **NATS JetStream**, **Azure
+Service Bus** and **Redis Streams** (or Valkey); the in-memory broker serves tests and local
+development.
 
 Like the rest of Znight, consumers are discovered **at build time**: `@znight/compiler` (with the
 `@znight/messaging/compiler` extension) reads the decorators and generates the consumer metadata. At
@@ -21,6 +23,7 @@ bun add @platformatic/kafka  # optional: Kafka driver
 bun add @google-cloud/pubsub # optional: Pub/Sub driver
 bun add @nats-io/jetstream @nats-io/transport-node # optional: NATS JetStream driver
 bun add @azure/service-bus   # optional: Azure Service Bus driver (+ @azure/identity for Entra ID)
+bun add ioredis              # optional: Redis Streams driver
 
 # npm
 npm install @znight/core @znight/messaging
@@ -31,6 +34,7 @@ npm install @platformatic/kafka  # optional: Kafka driver
 npm install @google-cloud/pubsub # optional: Pub/Sub driver
 npm install @nats-io/jetstream @nats-io/transport-node # optional: NATS JetStream driver
 npm install @azure/service-bus   # optional: Azure Service Bus driver (+ @azure/identity for Entra ID)
+npm install ioredis              # optional: Redis Streams driver
 ```
 
 Runs on Node.js >= 24 and Bun >= 1.3. Broker clients are optional peer dependencies: install only the
@@ -147,7 +151,7 @@ receive ─► wait for a concurrency slot ─► request scope (InboundMessage)
    └─► decode ─► select handler by type ─► invoke (validate → handler)
          ├─ success ───────────────────────────────────────────────► ack
          ├─ failure, attempts left ─► wait in-process (≤ driver budget) ─► redeliver as attempt + 1
-         │                          └─ or native delayed redelivery (SQS visibility, RabbitMQ delay queue, Kafka retry topic, Pub/Sub ack deadline, Service Bus scheduled copy)
+         │                          └─ or native delayed redelivery (SQS visibility, RabbitMQ delay queue, Kafka retry topic, Pub/Sub ack deadline, Service Bus scheduled copy, Redis Streams delayed sorted set)
          └─ NonRetryableError / invalid payload / undecodable body / no handler / last attempt
               └─► @OnError ─ 'ack' ─► ack
                            └─ otherwise (or throws) ─► dead-letter: publish (confirmed) then ack
@@ -218,7 +222,8 @@ The original is acknowledged only once the copy is confirmed; if the publication
 is released after `defaults.requeueDelay` and redelivered. `deadLetter: false` disables
 dead-lettering: RabbitMQ rejects the message (a queue DLX policy applies), SQS and Kafka discard it,
 Pub/Sub nacks it (the subscription's dead-letter policy applies) or acknowledges it when the
-subscription is known to have no dead-letter policy, Service Bus completes it.
+subscription is known to have no dead-letter policy, Service Bus completes it, Redis Streams
+acknowledges it.
 
 ### Concurrency and graceful shutdown
 
@@ -276,7 +281,7 @@ const { id } = await broker.publish('orders', order, {
   type: 'order.placed', // handler selection
   headers: { 'x-tenant': 'acme' }, // string values
   key: order.customerId, // Kafka partition key / SQS FIFO group / Pub/Sub ordering key / Service Bus session id
-  delay: 5_000, // ms (RabbitMQ, SQS ≤ 15 min, Service Bus, memory; not Kafka nor Pub/Sub)
+  delay: 5_000, // ms (RabbitMQ, SQS ≤ 15 min, Service Bus, Redis Streams, memory; not Kafka nor Pub/Sub)
   id: order.id, // default: random UUID
 })
 ```
@@ -317,20 +322,17 @@ a `defaults.concurrency` that is not a positive integer...) make `Application.cr
 
 ## Drivers
 
-| Capability             | memory    | RabbitMQ                                | SQS                              | Kafka                                | Pub/Sub                                          | NATS JetStream                                         | Azure Service Bus                                  |
-| ---------------------- | --------- | --------------------------------------- | -------------------------------- | ------------------------------------ | ------------------------------------------------ | ------------------------------------------------------ | -------------------------------------------------- |
-| Subpath                | `/memory` | `/rabbitmq`                             | `/sqs`                           | `/kafka`                             | `/pubsub`                                        | `/nats`                                                | `/azure-service-bus`                               |
-| Client (optional peer) | —         | `amqplib` ^2                            | `@aws-sdk/client-sqs` ^3         | `@platformatic/kafka` ^2             | `@google-cloud/pubsub` ^6                        | `@nats-io/jetstream` ^3 + `@nats-io/transport-node` ^3 | `@azure/service-bus` ^7                            |
-| Attempt counting       | native    | `x-znight-attempt` + `x-delivery-count` | `ApproximateReceiveCount`        | `x-znight-attempt`                   | `deliveryAttempt` (in memory without DLQ policy) | JetStream delivery count                               | `deliveryCount` + `x-znight-attempt`               |
-| Native retry delay     | timers    | delay queues (TTL + DLX), ≤ 49 days     | visibility timeout, ≤ 12 h       | retry topic, ≤ `maxRetryDelayMs`     | ack deadline, ≤ 600 s                            | `nak(delay)`, ≤ 104 days                               | scheduled copy (queues), lock held (subscriptions) |
-| In-process budget      | 1 s       | 5 s                                     | 1 s                              | 0 (always the retry topic)           | 1 s (0 with `retries: 'subscription'`)           | 1 s                                                    | 1 s (0 with `retries: 'entity'`)                   |
-| Delayed publish        | yes       | yes (32 shared delay levels), ≤ 49 days | ≤ 15 min (not FIFO)              | no                                   | no                                               | no                                                     | yes (scheduled messages)                           |
-| Dead letters           | `<q>.dlq` | `<q>.dlq` (publish confirmed + ack)     | `<q>-dlq` / RedrivePolicy target | `<topic>.dlq` (acks all + commit)    | topic `<q>-dlq` / dead-letter policy topic       | `<q>.dlq` (deduplicated copy + `term()`)               | sub-queue `<q>/$deadletterqueue`                   |
-| Ordering               | FIFO      | none across retries                     | FIFO groups                      | per partition                        | ordering keys (ordered subscriptions)            | per subject with `concurrency: 1`                      | none (sessions refused)                            |
-| Topology               | implicit  | declared (`assertTopology`) or verified | verified (queues must exist)     | verified or created (`createTopics`) | verified or created (`provision`)                | streams verified or created (`provision`)              | verified or created (`provision`)                  |
-
-OCI Streaming and Azure Event Hubs work through the Kafka driver ([below](#oracle-cloud-infrastructure-streaming));
-for another broker, [write your own driver](#writing-your-own-driver) and check it with the conformance kit.
+| Capability             | memory    | RabbitMQ                                | SQS                              | Kafka                                | Pub/Sub                                          | NATS JetStream                                         | Azure Service Bus                                  | Redis Streams                                      |
+| ---------------------- | --------- | --------------------------------------- | -------------------------------- | ------------------------------------ | ------------------------------------------------ | ------------------------------------------------------ | -------------------------------------------------- | -------------------------------------------------- |
+| Subpath                | `/memory` | `/rabbitmq`                             | `/sqs`                           | `/kafka`                             | `/pubsub`                                        | `/nats`                                                | `/azure-service-bus`                               | `/redis`                                           |
+| Client (optional peer) | —         | `amqplib` ^2                            | `@aws-sdk/client-sqs` ^3         | `@platformatic/kafka` ^2             | `@google-cloud/pubsub` ^6                        | `@nats-io/jetstream` ^3 + `@nats-io/transport-node` ^3 | `@azure/service-bus` ^7                            | `ioredis` ^5.4 or ^6                               |
+| Attempt counting       | native    | `x-znight-attempt` + `x-delivery-count` | `ApproximateReceiveCount`        | `x-znight-attempt`                   | `deliveryAttempt` (in memory without DLQ policy) | JetStream delivery count                               | `deliveryCount` + `x-znight-attempt`               | `x-znight-attempt` + deliveries of claimed entries |
+| Native retry delay     | timers    | delay queues (TTL + DLX), ≤ 49 days     | visibility timeout, ≤ 12 h       | retry topic, ≤ `maxRetryDelayMs`     | ack deadline, ≤ 600 s                            | `nak(delay)`, ≤ 104 days                               | scheduled copy (queues), lock held (subscriptions) | delayed sorted set, unlimited                      |
+| In-process budget      | 1 s       | 5 s                                     | 1 s                              | 0 (always the retry topic)           | 1 s (0 with `retries: 'subscription'`)           | 1 s                                                    | 1 s (0 with `retries: 'entity'`)                   | 1 s                                                |
+| Delayed publish        | yes       | yes (32 shared delay levels), ≤ 49 days | ≤ 15 min (not FIFO)              | no                                   | no                                               | no                                                     | yes (scheduled messages)                           | yes (delayed sorted set), unlimited                |
+| Dead letters           | `<q>.dlq` | `<q>.dlq` (publish confirmed + ack)     | `<q>-dlq` / RedrivePolicy target | `<topic>.dlq` (acks all + commit)    | topic `<q>-dlq` / dead-letter policy topic       | `<q>.dlq` (deduplicated copy + `term()`)               | sub-queue `<q>/$deadletterqueue`                   | stream `<q>.dlq` (copy + `XACK` in one script)     |
+| Ordering               | FIFO      | none across retries                     | FIFO groups                      | per partition                        | ordering keys (ordered subscriptions)            | per subject with `concurrency: 1`                      | none (sessions refused)                            | none across group members                          |
+| Topology               | implicit  | declared (`assertTopology`) or verified | verified (queues must exist)     | verified or created (`createTopics`) | verified or created (`provision`)                | streams verified or created (`provision`)              | verified or created (`provision`)                  | groups created (`MKSTREAM`), key types verified    |
 
 OCI Streaming and Azure Event Hubs work through the Kafka driver ([below](#oracle-cloud-infrastructure-streaming));
 for another broker, [write your own driver](#writing-your-own-driver) and check it with the conformance kit.
@@ -654,6 +656,120 @@ locked until their lock expires), waits for the deliveries in flight, abandons t
 a retry, then closes the receivers, the senders and the client it created. Rights: Listen and Send
 (`Azure Service Bus Data Receiver` / `Data Sender` roles), Manage for the checks and `provision`.
 Design notes: [RFC 0014](../../rfcs/0014-messaging-drivers.md) §4.1.
+
+### Redis Streams
+
+```ts
+import { redis } from '@znight/messaging/redis'
+
+redis({ url: process.env['REDIS_URL'], maxLength: 1_000_000 })
+```
+
+| Option                | Default                     | Description                                                                                |
+| --------------------- | --------------------------- | ------------------------------------------------------------------------------------------ |
+| `url`                 | `redis://localhost:6379`    | Connection URL (`redis://`, `rediss://`). Not with `client`.                               |
+| `redisOptions`        | `{}`                        | Options of the ioredis client created by the driver (password, TLS, Sentinel...).          |
+| `client`              | —                           | An existing ioredis `Redis` (not closed); the driver duplicates it for its blocking reads. |
+| `prefix`              | `''`                        | Prefix of the stream keys: `<prefix><queue>`.                                              |
+| `group`               | `'znight'`                  | Consumer group; `@Consumer({ queue, group })` names another one for a consumer.            |
+| `consumerName`        | `<hostname>-<pid>-<random>` | Prefix of this process' consumer names (a counter is appended per consumer).               |
+| `maxLength`           | none                        | `MAXLEN ~` of the queue streams on every write (see retention below).                      |
+| `keepAcknowledged`    | `false`                     | Keeps what every group acknowledged in the queue streams (see retention below).            |
+| `deadLetterMaxLength` | none                        | `MAXLEN ~` of the dead-letter streams.                                                     |
+| `claimIdleMs`         | `60000`                     | Idle time after which an entry left pending by a crashed consumer is claimed back.         |
+| `blockMs`             | `2000`                      | Longest wait of a blocking read.                                                           |
+| `delayPollIntervalMs` | `250`                       | Interval of the delayed-set scheduler: the precision of delays.                            |
+| `maxInProcessDelayMs` | `1000`                      | Longest retry delay waited in-process.                                                     |
+| `readErrorDelayMs`    | `500`                       | First wait after a failed read (doubled up to 30 s).                                       |
+| `deadLetterName`      | `<q>.dlq`                   | Default dead-letter stream.                                                                |
+| `replicas`            | none                        | `{ count, timeoutMs? }`: `WAIT` for replicas after every write; fewer replicas fail it.    |
+
+**Client.** The driver is built on [ioredis](https://github.com/redis/ioredis) (5.4+ or 6), the most
+widespread Node.js Redis client (about twice the weekly downloads of `redis`, the official
+node-redis, and already installed by BullMQ users), with first-class Sentinel and TLS support. Its
+raw `call()` / `callBuffer()` keep message bodies binary-safe. Redis 7.0+ and Valkey are supported
+(the version is checked at connect, when `INFO` is allowed: on 6.2, `XAUTOCLAIM` leaves the entries
+deleted while pending in the pending list for good); Redis Cluster is not (a queue, its retry stream,
+its delayed sets and its dead-letter stream would live in different slots).
+
+**Keys.** For a queue `orders` and the group `billing`:
+
+| Key                            | Type       | Holds                                                |
+| ------------------------------ | ---------- | ---------------------------------------------------- |
+| `orders`                       | stream     | the published messages, read by every group          |
+| `orders:delayed`               | sorted set | delayed publications, moved into `orders` when due   |
+| `orders:retry:billing`         | stream     | the retries and releases of the group `billing` only |
+| `orders:retry:billing:delayed` | sorted set | its delayed retries                                  |
+| `orders.dlq`                   | stream     | dead letters (`deadLetterName`)                      |
+
+With `prefix`, every key starts with it. A key holding another type fails the boot (ZNIGHT011).
+
+**Streams and groups.** `publish(queue)` is an `XADD` to the stream `<prefix><queue>`.
+`@Consumer(queue)` reads it through a consumer group (`znight` by default), created idempotently at
+subscribe time (`XGROUP CREATE ... 0 MKSTREAM`: a new group starts at the oldest entry still in the
+stream, so messages published before the first consumer started are delivered; create the group
+yourself with `$` to skip them). Every application of the group competes for the entries; give each
+service its own `group` for a fan-out. Each consumer reads the queue stream and the retry stream of
+its group on its own blocking connection (`XREADGROUP ... BLOCK`), asking for its free `concurrency`
+slots; the entries beyond them (both streams answered) wait in the process, kept claimed.
+
+**Wire format.** An entry carries the fields `id`, `type`, `key`, `content-type`, `timestamp`, `body`
+(binary safe) and one `h:<name>` field per header, trace context included (`h:traceparent`). The names
+are exported as `RedisStreamFields`. Entries written by other producers are read too: a missing `id`
+falls back to the entry id, a missing `timestamp` to the entry time, and any other field is exposed as
+a header.
+
+**Settlements.** `ack` is `XACK`. Redis has no redelivery policy, so retries and dead letters are
+Znight's: a retry adds a copy carrying `x-znight-attempt` and acknowledges the original in **one Lua
+script** (atomic: never lost, never duplicated by the driver; nothing is copied when the entry is no
+longer pending, e.g. settled by another member). The copy goes to the **retry stream of the group**,
+never to the queue stream: the other groups of a fan-out do not see it, and their attempts stay their
+own. A delayed retry goes to the sorted set of the retry stream (scored with the server time), which a
+script moves into the retry stream when due; the driver runs it every `delayPollIntervalMs` for the
+streams it consumes and the streams it published delayed messages to (a delayed publication to a queue
+that no running application consumes waits in its set). `publish(..., { delay })` goes through
+`<queue>:delayed`, without limit. A dead letter is a copy (with the `x-znight-dead-letter-reason`...
+headers) added to the stream `<q>.dlq`, acknowledged in the same script; without dead-lettering, the
+entry is only acknowledged. `release` adds a copy keeping the attempt to the retry stream, so the
+message is redelivered at once.
+
+**Crashed consumers.** Entries read but never settled stay in the group's pending entries list. Every
+member runs `XAUTOCLAIM` every `claimIdleMs / 2` and takes over the entries idle for `claimIdleMs`;
+their deliveries count as attempts (a message whose handler crashes the process ends in the
+dead-letter stream once its attempts are exhausted). While a handler runs, the driver keeps its entry
+claimed (`XCLAIM ... JUSTID` every `claimIdleMs / 3`), so long handlers are not taken over. A crashed
+process also leaves its consumers in the groups: the housekeeping removes them (below).
+
+**Housekeeping and retention.** Every `claimIdleMs / 2` (30 s at most), each process looks after the
+streams it consumes:
+
+- it **trims what every group acknowledged** (`XTRIM MINID ~`, in one script): the entries below,
+  for each group of the stream, its oldest pending entry, or its last delivered one when nothing is
+  pending. A group that has not read an entry keeps it, so no group loses a message; an abandoned group
+  keeps everything from where it stopped: delete it (`XGROUP DESTROY`). Approximate trimming removes
+  whole macro nodes (100 entries by default), so a few acknowledged entries stay. With
+  `keepAcknowledged: true`, the queue streams keep them (a log, bounded by `maxLength` only); retry
+  streams are always trimmed.
+- it **removes the consumers of crashed processes**: consumers of its groups without pending entries
+  and idle for ten times `claimIdleMs` (or `blockMs` when larger: 10 minutes by default), except its
+  own (`XGROUP DELCONSUMER`, in one script with the check). Removing a consumer without pending entries
+  loses nothing. On Redis 7.0 and 7.1, where an empty read does not reset the idle time, a live
+  consumer of another process that received nothing for that long is removed too, and comes back with
+  its next message.
+
+`maxLength` adds `MAXLEN ~` on every write. It ignores the consumers, so an entry trimmed before it
+was read is lost: size it well above any backlog. A confirmation means Redis executed the command;
+durability follows the server's persistence (AOF with `appendfsync everysec` or `always`), and
+`replicas` waits until the given number of replicas acknowledged the write (`WAIT`).
+
+**Shutdown.** On stop, the driver unblocks the blocking reads (`CLIENT UNBLOCK`, else they end within
+`blockMs`), gives back the entries read meanwhile (to the retry stream), waits for the deliveries in
+flight, removes its consumers from their groups when they have no pending entry, then closes the
+connections it created. The client id of a reading connection is read again after a reconnection,
+so the driver never unblocks a stale id (until the next read, the read resent by ioredis ends within
+`blockMs`). ACL permissions: the stream commands, `EVALSHA`/`EVAL` (the scripts call `XINFO`,
+`XTRIM`, `XGROUP DELCONSUMER`), `TYPE`, `PING`, `INFO` (optional), `CLIENT ID`/`CLIENT UNBLOCK`
+(optional) and `WAIT` with `replicas`. Design notes: [RFC 0014](../../rfcs/0014-messaging-drivers.md).
 
 ### Kafka
 

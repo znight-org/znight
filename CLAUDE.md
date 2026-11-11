@@ -41,9 +41,9 @@ Every change must keep these. A change that bends one starts with an RFC (see [R
    (`@znight/<pkg>/compiler`, discovered through `package.json#znight`) and a runtime plugin
    (`XxxPlugin.configure()`). Install only what you use.
 6. **Adapter-agnostic.** HTTP on the built-in `node:http` server, Fastify, Express or Hono;
-   messaging on RabbitMQ, SQS, Kafka, Pub/Sub, Azure Service Bus or in memory. Same behaviour on
-   every adapter, on Node.js and Bun. Integrations are optional peer dependencies behind subpath
-   exports.
+   messaging on RabbitMQ, SQS, Kafka, Pub/Sub, NATS JetStream, Azure Service Bus, Redis Streams or in
+   memory. Same behaviour on every adapter, on Node.js and Bun. Integrations are optional peer
+   dependencies behind subpath exports.
 7. **Observable by default.** `@znight/observability` wires logs, metrics and traces into every HTTP
    request, message delivery and scheduled run.
 8. **Fail loudly, early, precisely.** A misconfiguration detectable at build time is a `ZNIGHTxxx`
@@ -62,7 +62,7 @@ Every change must keep these. A change that bends one starts with an RFC (see [R
 | `@znight/compiler`      | Analysis, binding, validation, code generation; programmatic API, Vite plugin (`znight()`), Bun preload (`@znight/compiler/bun`)                                                                                         |
 | `@znight/http`          | Controllers, Standard Schema validation, guards, interceptors, uploads, streams, cookies, SSE, route decisions, CORS, security headers; `/node`, `/fastify`, `/express`, `/hono`                                         |
 | `@znight/openapi`       | OpenAPI 3.1 document built at compile time, served with Scalar or Swagger UI, emitted by `znight openapi` (RFC 0002)                                                                                                     |
-| `@znight/messaging`     | Consumers, retries, dead letters; `/memory`, `/rabbitmq`, `/sqs`, `/kafka`, `/pubsub`, `/azure-service-bus` drivers                                                                                                      |
+| `@znight/messaging`     | Consumers, retries, dead letters; `/memory`, `/rabbitmq`, `/sqs`, `/kafka`, `/pubsub`, `/nats`, `/azure-service-bus`, `/redis` drivers, `/testing` conformance kit                                                       |
 | `@znight/schedule`      | `@Cron`, `@Interval`, `@Timeout`, `SchedulerRegistry`, lock stores, virtual clock for tests (RFC 0004)                                                                                                                   |
 | `@znight/graphql`       | Code-first GraphQL (schema derived from TypeScript types, RFC 0005) or schema-first (SDL files, resolvers checked against them, RFC 0007), loaders, guards, HTTP and SSE; built-in executor or `/yoga` driver (RFC 0009) |
 | `@znight/events`        | In-process application events: `@OnEvent` listeners wired at build time, `EventPublisher`, inline or detached dispatch (RFC 0011)                                                                                        |
@@ -110,22 +110,22 @@ decision changes.
 
 ## Stack
 
-| Area                  | Choice                                                                                                  |
-| --------------------- | ------------------------------------------------------------------------------------------------------- |
-| Workspace             | Bun 1.4 workspaces + catalogs (`package.json#workspaces`); `bunfig.toml` pins exact versions on install |
-| Runtimes              | Node.js >= 24 (`.nvmrc`), Bun >= 1.3; ESM only                                                          |
-| Language              | TypeScript 7 (native `tsc`, `--noEmit` only), `experimentalDecorators`                                  |
-| Compiler internals    | `oxc-parser`, `oxc-resolver`, `magic-string`, `tinyglobby`, `picocolors`                                |
-| Application build     | Vite 8 with the `znight()` plugin; Bun preload `@znight/compiler/bun` for `bun test` / `bun --watch`    |
-| Package build         | tsdown (ESM `.mjs` + `.d.mts`, entries in each `tsdown.config.ts`)                                      |
-| Lint and format       | Biome 2.6 (`biome.jsonc`); husky + lint-staged run `biome check --write` on staged files                |
-| Tests                 | `bun test` (`bun:test`); Testcontainers for broker integration tests                                    |
-| Documentation         | VitePress 1.6 (`docs/`)                                                                                 |
-| HTTP (optional peers) | built-in `node:http`, Fastify 5, Express 5, Hono 4 (+ `@hono/node-server` on Node.js)                   |
-| Validation            | any Standard Schema library (Zod 4 in the examples, Valibot, ArkType...)                                |
-| Messaging (peers)     | `amqplib`, `@aws-sdk/client-sqs`, `@platformatic/kafka`, `@google-cloud/pubsub`, `@azure/service-bus`   |
-| Observability         | `pino`, `@opentelemetry/api`; optional `prom-client`, `pino-pretty`                                     |
-| CLI                   | `citty`, `@clack/prompts`                                                                               |
+| Area                  | Choice                                                                                                                                                                                   |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Workspace             | Bun 1.4 workspaces + catalogs (`package.json#workspaces`); `bunfig.toml` pins exact versions on install                                                                                  |
+| Runtimes              | Node.js >= 24 (`.nvmrc`), Bun >= 1.3; ESM only                                                                                                                                           |
+| Language              | TypeScript 7 (native `tsc`, `--noEmit` only), `experimentalDecorators`                                                                                                                   |
+| Compiler internals    | `oxc-parser`, `oxc-resolver`, `magic-string`, `tinyglobby`, `picocolors`                                                                                                                 |
+| Application build     | Vite 8 with the `znight()` plugin; Bun preload `@znight/compiler/bun` for `bun test` / `bun --watch`                                                                                     |
+| Package build         | tsdown (ESM `.mjs` + `.d.mts`, entries in each `tsdown.config.ts`)                                                                                                                       |
+| Lint and format       | Biome 2.6 (`biome.jsonc`); husky + lint-staged run `biome check --write` on staged files                                                                                                 |
+| Tests                 | `bun test` (`bun:test`); Testcontainers for broker integration tests                                                                                                                     |
+| Documentation         | VitePress 1.6 (`docs/`)                                                                                                                                                                  |
+| HTTP (optional peers) | built-in `node:http`, Fastify 5, Express 5, Hono 4 (+ `@hono/node-server` on Node.js)                                                                                                    |
+| Validation            | any Standard Schema library (Zod 4 in the examples, Valibot, ArkType...)                                                                                                                 |
+| Messaging (peers)     | `amqplib`, `@aws-sdk/client-sqs`, `@platformatic/kafka`, `@google-cloud/pubsub`, `@nats-io/jetstream` + `@nats-io/transport-node`, `@azure/service-bus` (+ `@azure/identity`), `ioredis` |
+| Observability         | `pino`, `@opentelemetry/api`; optional `prom-client`, `pino-pretty`                                                                                                                      |
+| CLI                   | `citty`, `@clack/prompts`                                                                                                                                                                |
 
 ## Repository layout
 

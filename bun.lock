@@ -604,8 +604,10 @@
         "@testcontainers/localstack": "12.2.1",
         "@testcontainers/nats": "12.2.1",
         "@testcontainers/rabbitmq": "12.2.1",
+        "@testcontainers/redis": "12.2.1",
         "@znight/compiler": "workspace:*",
         "amqplib": "2.2.1",
+        "ioredis": "6.0.0",
         "testcontainers": "12.2.1",
         "zod": "catalog:",
       },
@@ -619,6 +621,7 @@
         "@platformatic/kafka": "^2.0.0",
         "@znight/compiler": "workspace:^",
         "amqplib": "^2.0.0",
+        "ioredis": "^5.4.0 || ^6.0.0",
       },
       "optionalPeers": [
         "@aws-sdk/client-sqs",
@@ -630,6 +633,7 @@
         "@platformatic/kafka",
         "@znight/compiler",
         "amqplib",
+        "ioredis",
       ],
     },
     "packages/observability": {
