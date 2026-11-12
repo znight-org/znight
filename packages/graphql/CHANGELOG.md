@@ -1,5 +1,16 @@
 # @znight/graphql
 
+## 0.9.1
+
+### Patch Changes
+
+- 5e828fc: Schema-first: the `ignoredDirectives` compiler option lists the custom directives kept in the SDL for other tools (graphql-codegen transforms...), left out of the served schema without the ZNIGHT067 warning.
+- Updated dependencies [5e828fc]
+  - @znight/compiler@0.9.1
+  - @znight/http@0.9.1
+  - @znight/core@0.9.1
+  - @znight/testing@0.9.1
+
 ## 0.9.0
 
 ### Patch Changes
