@@ -69,6 +69,12 @@ describe('ModuleResolver (scan mode)', () => {
     expect(scan.resolve(MAIN, 'node:events')).toEqual({ kind: 'builtin', specifier: 'node:events' })
   })
 
+  it('treats the Bun modules as builtins', () => {
+    expect(scan.resolve(MAIN, 'bun')).toEqual({ kind: 'builtin', specifier: 'bun' })
+    expect(scan.resolve(MAIN, 'bun:sqlite')).toEqual({ kind: 'builtin', specifier: 'bun:sqlite' })
+    expect(scan.resolve(MAIN, 'bunyan').kind).toBe('not-found')
+  })
+
   it('reports missing modules', () => {
     expect(scan.resolve(MAIN, './nope.ts').kind).toBe('not-found')
     expect(scan.resolve(MAIN, 'not-installed')).toMatchObject({

@@ -36,10 +36,10 @@ export interface ResolvedFile {
   readonly casingMismatch: boolean
 }
 
-/** A Node.js builtin module. */
+/** A Node.js or Bun builtin module. */
 export interface ResolvedBuiltin {
   readonly kind: 'builtin'
-  /** Normalized specifier, always `node:`-prefixed (`fs` → `node:fs`). */
+  /** Normalized specifier: `node:`-prefixed for Node.js (`fs` → `node:fs`), as is for Bun (`bun`, `bun:sqlite`). */
   readonly specifier: string
 }
 
@@ -129,6 +129,7 @@ export class ModuleResolver {
     if (cached) {
       return cached
     }
+    if (isBunBuiltin(specifier)) return { kind: 'builtin', specifier }
     const factory = mode === 'scan' ? this.#scan : this.#runtime
     const result =
       this.options.tsconfig === 'auto'
@@ -187,6 +188,14 @@ function tsconfigOption(tsconfig: ModuleResolverOptions['tsconfig']): Pick<NapiR
     return {}
   }
   return { tsconfig: tsconfig === 'auto' ? 'auto' : { configFile: tsconfig, references: 'auto' } }
+}
+
+/**
+ * Bun's own modules (`bun`, `bun:sqlite`...), which oxc-resolver does not know: their types come from
+ * `@types/bun` (`declare module 'bun'`), so they are builtins like `node:*`, never files.
+ */
+function isBunBuiltin(specifier: string): boolean {
+  return specifier === 'bun' || specifier.startsWith('bun:')
 }
 
 function toResolution(result: ResolveResult): ModuleResolution {

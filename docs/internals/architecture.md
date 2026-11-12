@@ -383,8 +383,8 @@ functions) has a canonical identity string:
 - Declarations only exported from a subpath entry: `<package>/<subpath>#Export` (the root entry wins
   when it exports the declaration too). `@types/x` maps to `x`. Namespace members use a dotted path
   (`@lib#tokens.Holder`). Package-internal (non-exported) declarations get
-  `<package>/<relpath>#Name` and are never valid import routes. Node built-ins and untyped packages:
-  `node:events#EventEmitter`, `cjs-only#Thing`; globals: `globalThis#Date`.
+  `<package>/<relpath>#Name` and are never valid import routes. Node.js and Bun built-ins and untyped
+  packages: `node:events#EventEmitter`, `bun#SQL`, `cjs-only#Thing`; globals: `globalThis#Date`.
 - Known limitation: a `const` widened by declaration emit (`PREFIX: string` in `.d.ts`) evaluates
   to a value from sources but to a reference from `dist`.
 - Compiler options that name types (`externals`) take identities, never bare names.
