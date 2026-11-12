@@ -66,18 +66,23 @@ export function buildSchemaFirstModel(
   ctx: Context,
   patterns: readonly string[],
   artifact: string | false,
+  ignoredDirectives: readonly string[] = [],
 ): GraphQLModel | undefined {
   // the artifact is the output: matched by the globs, it would define every type a second time
-  return new SchemaFirstBuilder(ctx).build(artifact === false ? patterns : [...patterns, `!${artifact}`])
+  return new SchemaFirstBuilder(ctx, ignoredDirectives).build(
+    artifact === false ? patterns : [...patterns, `!${artifact}`],
+  )
 }
 
 class SchemaFirstBuilder {
   readonly #ctx: Context
   #errors = 0
   readonly #methods = new Map<string, MethodInfo | undefined>()
+  readonly #ignoredDirectives: readonly string[]
 
-  constructor(ctx: Context) {
+  constructor(ctx: Context, ignoredDirectives: readonly string[]) {
     this.#ctx = ctx
+    this.#ignoredDirectives = ignoredDirectives
   }
 
   build(patterns: readonly string[]): GraphQLModel | undefined {
@@ -87,7 +92,7 @@ class SchemaFirstBuilder {
     const rejected = stored.filter(resolver => resolver.invalid === true)
     checkLoaders(this.#ctx, resolvers, report)
     const scalarDeclarations = readScalars(this.#ctx, report)
-    const sdl = loadSdl(this.#ctx, patterns, report)
+    const sdl = loadSdl(this.#ctx, patterns, report, this.#ignoredDirectives)
     if (sdl === undefined) {
       checkDecisions(this.#ctx, resolvers, report)
       return undefined

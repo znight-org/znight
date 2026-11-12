@@ -188,7 +188,8 @@ model assembly. Errors stop before emission; the generated module is the error m
 
 ### 5.2 Unsupported constructs
 
-- A custom directive definition is a ZNIGHT067 **warning** (once per directive, at its definition);
+- A custom directive definition is a ZNIGHT067 **warning** (once per directive, at its definition;
+  none for the names of the `ignoredDirectives` option, added in 0.9.1 for directives kept for other tools);
   the directive and its uses are left out of the served schema and the artifact.
 - `@oneOf` input objects: ZNIGHT067 error (the runtime does not model them yet).
 - `scalar DateTime`, `BigInt` and `JSON` without a `scalar<T>()` definition of that name are the

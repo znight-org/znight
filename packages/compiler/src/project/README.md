@@ -185,7 +185,7 @@ project.symbols.resolveInScope({ file, namespace }, name) // inside a namespace 
 | `declaration` | `declaration` (picked for the meaning) + all merged `declarations`                                                    |
 | `module`      | a namespace object (`import * as ns`, `export * as ns`)                                                               |
 | `expression`  | `export default <expression>`                                                                                         |
-| `external`    | builtin (`node:events`) or untyped/CommonJS package export: `specifier` + `path`                                      |
+| `external`    | builtin (`node:events`, `bun`) or untyped/CommonJS package export: `specifier` + `path`                               |
 | `global`      | not declared nor imported (`Promise`, `Date`, or a typo)                                                              |
 | `unresolved`  | `reason` (`module-not-found`, `export-not-found`, `ambiguous-export`, `circular`, `not-a-namespace`, ...) + `message` |
 
@@ -201,19 +201,19 @@ project.identityOf(symbolOrDeclaration)
 project.lookupIdentity('@acme/lib#tokens.Holder') // reverse: identity → SymbolResolution
 ```
 
-| entity                                     | identity                                          |
-| ------------------------------------------ | ------------------------------------------------- |
-| application declaration                    | `src/users/user.service.ts#UserService`           |
-| application namespace member               | `src/ns.ts#Models.Inner`                          |
-| application anonymous / expression default | `src/x.ts#default`                                |
-| package export (root entry)                | `@acme/lib#Logger`                                |
-| package export only from a subpath entry   | `@acme/lib/testing#FakeLogger`                    |
-| member of an exported namespace            | `@acme/lib#tokens.Holder`                         |
-| namespace object exported by a package     | `@acme/lib#tokens` (`export * as tokens`)         |
-| DefinitelyTyped declaration                | `pg#Pool` (from `@types/pg`)                      |
-| package-internal (not public)              | `@acme/lib/src/internal.ts#Base`, `public: false` |
-| builtin / untyped CommonJS export          | `node:events#EventEmitter`, `cjs-pkg#Thing`       |
-| global                                     | `globalThis#Date`                                 |
+| entity                                     | identity                                               |
+| ------------------------------------------ | ------------------------------------------------------ |
+| application declaration                    | `src/users/user.service.ts#UserService`                |
+| application namespace member               | `src/ns.ts#Models.Inner`                               |
+| application anonymous / expression default | `src/x.ts#default`                                     |
+| package export (root entry)                | `@acme/lib#Logger`                                     |
+| package export only from a subpath entry   | `@acme/lib/testing#FakeLogger`                         |
+| member of an exported namespace            | `@acme/lib#tokens.Holder`                              |
+| namespace object exported by a package     | `@acme/lib#tokens` (`export * as tokens`)              |
+| DefinitelyTyped declaration                | `pg#Pool` (from `@types/pg`)                           |
+| package-internal (not public)              | `@acme/lib/src/internal.ts#Base`, `public: false`      |
+| builtin / untyped CommonJS export          | `node:events#EventEmitter`, `bun#SQL`, `cjs-pkg#Thing` |
+| global                                     | `globalThis#Date`                                      |
 
 Package identities are computed by the **public export index** of the package
 (`project.identities.publicIndex(pkg)`): every public entry (root, then `exports` subpaths in

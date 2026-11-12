@@ -130,6 +130,7 @@ export function loadSdl(
   ctx: ValidateContext<GraphQLData>,
   patterns: readonly string[],
   report: (diagnostic: Diagnostic) => void,
+  ignoredDirectives: readonly string[] = [],
 ): SdlSource | undefined {
   const files = ctx.inputFiles(patterns)
   if (files.length === 0) {
@@ -195,15 +196,17 @@ export function loadSdl(
     return undefined
   }
   const document = utilities.concatAST(documents)
-  const customDirectives = checkStructure(document, fail, (message, node) => {
+  const ignored = new Set(ignoredDirectives)
+  const customDirectives = checkStructure(document, fail, (name, node) => {
+    if (ignored.has(name)) return
     const location = locator.locate(node)
     report({
       code: Codes.InvalidSdl,
       severity: 'warning',
-      message,
+      message: `The custom directive @${name} is ignored`,
       ...(location === undefined ? {} : { location }),
       hints: [
-        'Znight serves the schema without custom directives (and so does the SDL artifact): remove it, or keep it for other tools',
+        `Znight serves the schema without custom directives (and so does the SDL artifact): remove it, or keep it for other tools and list it in graphql.configure({ ignoredDirectives: ['${name}'] })`,
       ],
     })
   })
@@ -243,12 +246,12 @@ export function loadSdl(
 /**
  * The checks graphql-js leaves to its SDL validation (not exported): unique type, field, value and
  * argument names, known types and directives, extensions of existing types of the same kind, one
- * schema definition. Returns the names of the custom directives (each reported as a warning).
+ * schema definition. Returns the names of the custom directives (each passed to `warn`).
  */
 function checkStructure(
   document: DocumentNode,
   fail: (message: string, node: ASTNode, hints?: readonly string[], related?: ASTNode) => void,
-  warn: (message: string, node: ASTNode) => void,
+  warn: (name: string, node: ASTNode) => void,
 ): ReadonlySet<string> {
   const definitions = new Map<string, TypeNodeLike>()
   const directives = new Map<string, ASTNode>()
@@ -284,7 +287,7 @@ function checkStructure(
           ),
           repeatable: definition.repeatable,
         })
-        warn(`The custom directive @${name} is ignored`, definition.name)
+        warn(name, definition.name)
       }
       continue
     }

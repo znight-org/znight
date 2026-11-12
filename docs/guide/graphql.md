@@ -1107,7 +1107,8 @@ export class BookResolver {
   optional, so make sure the returned objects carry it.
 - Every custom scalar is declared once in TypeScript with `scalar<T>('Name', definition)`, `T` being
   the type of its values; `DateTime`, `BigInt` and `JSON` are built in. A custom directive is
-  ignored with a warning.
+  ignored with a warning; a directive kept for another tool (a graphql-codegen transform, say) is
+  listed in `graphql.configure({ ignoredDirectives: ['resolved'] })` and ignored silently.
 
 **What the compiler checks.** A root field without resolver, a resolver for a field the SDL does not
 declare, an unknown argument, `@Resolver('Bok')`, or an object field that neither a resolver nor the

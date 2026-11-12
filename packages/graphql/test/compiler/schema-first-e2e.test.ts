@@ -73,7 +73,7 @@ describe('schema-first application (e2e)', () => {
     result = await compileSchemaFirst(app)
     expect(render({ root: app.root, diagnostics: result.diagnostics }, CODES)).toEqual([
       `warning ZNIGHT067 src/schema/base.graphql:7:12 The custom directive @resolved is ignored
-  = Znight serves the schema without custom directives (and so does the SDL artifact): remove it, or keep it for other tools`,
+  = Znight serves the schema without custom directives (and so does the SDL artifact): remove it, or keep it for other tools and list it in graphql.configure({ ignoredDirectives: ['resolved'] })`,
     ])
     again = await compileSchemaFirst(app)
     sdl = result.extraFiles.find(file => file.file === app.path('schema.graphql'))?.content ?? ''

@@ -164,7 +164,7 @@ type Query {
       }),
     ).toEqual([
       `warning ZNIGHT067 src/schema.graphql:1:12 The custom directive @resolved is ignored
-  = Znight serves the schema without custom directives (and so does the SDL artifact): remove it, or keep it for other tools`,
+  = Znight serves the schema without custom directives (and so does the SDL artifact): remove it, or keep it for other tools and list it in graphql.configure({ ignoredDirectives: ['resolved'] })`,
       `error ZNIGHT067 src/schema.graphql:5:12 Unknown directive @key
   = Define it (directive @key on FIELD_DEFINITION), or remove it`,
     ])
@@ -177,6 +177,27 @@ type Query {
       `warning ZNIGHT067 src/schema.graphql:2:8 scalar DateTime is the built-in scalar of @znight/graphql: its description and @specifiedBy in the SDL are ignored
   = Remove them, or implement the scalar yourself: export const DateTimeScalar = scalar<T>('DateTime', { ... })`,
     ])
+  })
+
+  it('custom directives listed in ignoredDirectives are left out without warning', async () => {
+    const files = {
+      'src/schema.graphql': `directive @resolved on FIELD_DEFINITION
+directive @internal on FIELD_DEFINITION
+type Book {
+  id: ID!
+  title: String! @resolved @internal
+}
+type Query {
+  book(id: ID!): Book
+}
+`,
+      'src/book.resolver.ts': resolver(BOOK_QUERY),
+    }
+    expect(await diagnostics(files, { ignoredDirectives: ['resolved'] })).toEqual([
+      `warning ZNIGHT067 src/schema.graphql:2:12 The custom directive @internal is ignored
+  = Znight serves the schema without custom directives (and so does the SDL artifact): remove it, or keep it for other tools and list it in graphql.configure({ ignoredDirectives: ['internal'] })`,
+    ])
+    expect(await diagnostics(files, { ignoredDirectives: ['resolved', 'internal'] })).toEqual([])
   })
 
   it('a scalar without scalar() definition, and @oneOf inputs', async () => {

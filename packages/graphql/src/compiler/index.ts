@@ -80,7 +80,9 @@ function createExtension(options: ResolvedGraphQLCompilerOptions): GraphQLCompil
       const schema = options.schema
       models.set(
         ctx.graph.extensions,
-        schema === false ? buildModel(ctx, options) : buildSchemaFirstModel(ctx, schema, options.sdl),
+        schema === false
+          ? buildModel(ctx, options)
+          : buildSchemaFirstModel(ctx, schema, options.sdl, options.ignoredDirectives),
       )
     },
     generate(ctx) {

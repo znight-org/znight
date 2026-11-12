@@ -383,8 +383,8 @@ functions) has a canonical identity string:
 - Declarations only exported from a subpath entry: `<package>/<subpath>#Export` (the root entry wins
   when it exports the declaration too). `@types/x` maps to `x`. Namespace members use a dotted path
   (`@lib#tokens.Holder`). Package-internal (non-exported) declarations get
-  `<package>/<relpath>#Name` and are never valid import routes. Node built-ins and untyped packages:
-  `node:events#EventEmitter`, `cjs-only#Thing`; globals: `globalThis#Date`.
+  `<package>/<relpath>#Name` and are never valid import routes. Node.js and Bun built-ins and untyped
+  packages: `node:events#EventEmitter`, `bun#SQL`, `cjs-only#Thing`; globals: `globalThis#Date`.
 - Known limitation: a `const` widened by declaration emit (`PREFIX: string` in `.d.ts`) evaluates
   to a value from sources but to a reference from `dist`.
 - Compiler options that name types (`externals`) take identities, never bare names.
@@ -3434,8 +3434,8 @@ TypeScript types are only checked against them; the two modes never mix (JSDoc, 
   with suggestions; files without definitions are skipped, and the `sdl` artifact is never read
   back), builds it with `buildASTSchema` and validates it with
   `validateSchema` (each error a ZNIGHT067 at its first AST node, the others related).
-- A custom directive definition is a ZNIGHT067 warning (once); the directive and its uses are left
-  out of the served schema. `@oneOf` inputs are ZNIGHT067. A scalar binds the `scalar<T>()`
+- A custom directive definition is a ZNIGHT067 warning (once), unless its name is listed in the
+  `ignoredDirectives` option; the directive and its uses are left out of the served schema. `@oneOf` inputs are ZNIGHT067. A scalar binds the `scalar<T>()`
   declaration of its name (its description and `@specifiedBy` come from the SDL and are emitted in
   the metadata with `sdl: true`, replacing the definition's, absent ones included); without one, `DateTime`, `BigInt` and `JSON` are the built-in scalars (a description
   or another `@specifiedBy` on them is a ZNIGHT067 warning) and any other is ZNIGHT067.
