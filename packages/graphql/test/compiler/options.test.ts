@@ -14,7 +14,7 @@ describe('graphql.configure()', () => {
     expect(graphql).toMatchObject({
       apiVersion: 1,
       name: 'graphql',
-      options: { sdl: false, number: 'Float', schema: false },
+      options: { sdl: false, number: 'Float', schema: false, ignoredDirectives: [] },
     })
     expect(Object.isFrozen(graphql)).toBe(true)
   })
@@ -23,10 +23,15 @@ describe('graphql.configure()', () => {
     const sdl = graphql.configure({ sdl: 'schema.graphql' })
     const both = sdl.configure({ number: 'Int' })
     expect(sdl).not.toBe(graphql)
-    expect(sdl.options).toEqual({ sdl: 'schema.graphql', number: 'Float', schema: false })
-    expect(both.options).toEqual({ sdl: 'schema.graphql', number: 'Int', schema: false })
-    expect(both.configure({ sdl: false }).options).toEqual({ sdl: false, number: 'Int', schema: false })
-    expect(graphql.options).toEqual({ sdl: false, number: 'Float', schema: false })
+    expect(sdl.options).toEqual({ sdl: 'schema.graphql', number: 'Float', schema: false, ignoredDirectives: [] })
+    expect(both.options).toEqual({ sdl: 'schema.graphql', number: 'Int', schema: false, ignoredDirectives: [] })
+    expect(both.configure({ sdl: false }).options).toEqual({
+      sdl: false,
+      number: 'Int',
+      schema: false,
+      ignoredDirectives: [],
+    })
+    expect(graphql.options).toEqual({ sdl: false, number: 'Float', schema: false, ignoredDirectives: [] })
     expect(both.decorators).toBe(graphql.decorators)
   })
 
@@ -41,6 +46,13 @@ describe('graphql.configure()', () => {
     expect(schemaFirst.configure({ schema: false }).options.schema).toBe(false)
   })
 
+  it('takes the names of the custom directives kept for other tools', () => {
+    const ignoring = graphql.configure({ ignoredDirectives: ['resolved', 'key'] })
+    expect(ignoring.options.ignoredDirectives).toEqual(['resolved', 'key'])
+    expect(ignoring.configure({ sdl: 'schema.graphql' }).options.ignoredDirectives).toEqual(['resolved', 'key'])
+    expect(ignoring.configure({ ignoredDirectives: [] }).options.ignoredDirectives).toEqual([])
+  })
+
   it('rejects invalid options', () => {
     expect(() => graphql.configure(null as never)).toThrow('graphql.configure() expects an options object')
     expect(() => graphql.configure({ schemas: 'x' } as never)).toThrow('unknown option "schemas"')
@@ -50,6 +62,10 @@ describe('graphql.configure()', () => {
     expect(() => graphql.configure({ sdl: '' })).toThrow('"sdl" must be a path relative to the project root')
     expect(() => graphql.configure({ sdl: true as never })).toThrow('"sdl" must be a path')
     expect(() => graphql.configure({ number: 'Double' as never })).toThrow(`"number" must be 'Float' or 'Int'`)
+    expect(() => graphql.configure({ ignoredDirectives: ['@resolved'] })).toThrow(
+      '"ignoredDirectives" must be a list of directive names without @',
+    )
+    expect(() => graphql.configure({ ignoredDirectives: 'resolved' as never })).toThrow('"ignoredDirectives" must be')
   })
 })
 

@@ -1199,11 +1199,12 @@ export default {
 } satisfies ZnightOptions
 ```
 
-| Option   | Default   | Description                                                                                                         |
-| -------- | --------- | ------------------------------------------------------------------------------------------------------------------- |
-| `sdl`    | `false`   | Path of the SDL artifact, relative to the root, written with the generated module and checked by `generate --check` |
-| `number` | `'Float'` | GraphQL type of `number` (`'Int'` suits applications whose numbers are counts and identifiers)                      |
-| `schema` | `false`   | Glob(s) of the `.graphql` files of the [schema-first mode](#schema-first), relative to the root                     |
+| Option              | Default   | Description                                                                                                                       |
+| ------------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `sdl`               | `false`   | Path of the SDL artifact, relative to the root, written with the generated module and checked by `generate --check`               |
+| `number`            | `'Float'` | GraphQL type of `number` (`'Int'` suits applications whose numbers are counts and identifiers)                                    |
+| `schema`            | `false`   | Glob(s) of the `.graphql` files of the [schema-first mode](#schema-first), relative to the root                                   |
+| `ignoredDirectives` | `[]`      | Schema-first: custom directives kept in the SDL for other tools (`['resolved']`, without `@`), left out without ZNIGHT067 warning |
 
 An invalid option is a `TypeError` when `znight.config.ts` is loaded. The SDL artifact is
 byte-identical to graphql-js `printSchema()` of the schema the plugin builds (descriptions on one
@@ -1250,7 +1251,8 @@ export default {
   only), with the SDL rules graphql-js keeps internal (directive locations, arguments and
   repetitions, unique names) checked too. Object types, interfaces (implementing interfaces too), unions, enums, input objects,
   `schema { ... }` root names, `@deprecated` and `@specifiedBy` are supported. Custom directives
-  are a ZNIGHT067 warning and left out; `@oneOf` inputs are not supported yet (ZNIGHT067).
+  are a ZNIGHT067 warning and left out (no warning for the names listed in `ignoredDirectives`,
+  directives kept for other tools such as graphql-codegen); `@oneOf` inputs are not supported yet (ZNIGHT067).
 - **Scalars.** A scalar of the SDL binds the `scalar<T>('Name', definition)` declaration of its
   name (its description and `@specifiedBy` come from the SDL, emitted in the metadata with
   `sdl: true`: they replace the definition's, absent ones included, so the served schema is the

@@ -1509,7 +1509,7 @@ or validated. Every problem is located in the `.graphql` file.
 | An error of graphql-js schema validation (interfaces not implemented, union members...)                                               | error    |
 | A scalar without `scalar<T>()` declaration of its name (other than `DateTime`, `BigInt`, `JSON`)                                      | error    |
 | A `@oneOf` input object (not supported yet)                                                                                           | error    |
-| A custom directive (left out of the served schema)                                                                                    | warning  |
+| A custom directive not listed in `ignoredDirectives` (left out of the served schema)                                                  | warning  |
 | A description or another `@specifiedBy` on the built-in `DateTime`, `BigInt` or `JSON`                                                | warning  |
 
 ```graphql

@@ -18,6 +18,12 @@ export interface GraphQLCompilerOptions {
    * fields by name and checked against the SDL. Default `false`: code-first.
    */
   readonly schema?: string | readonly string[] | false
+  /**
+   * Schema-first: names of custom directives kept in the SDL for other tools (graphql-codegen...),
+   * without `@` (`['resolved']`). They are left out of the served schema like any custom directive,
+   * without the ZNIGHT067 warning. Default `[]`.
+   */
+  readonly ignoredDirectives?: readonly string[]
 }
 
 /** {@link GraphQLCompilerOptions} with their defaults. */
@@ -26,6 +32,7 @@ export interface ResolvedGraphQLCompilerOptions {
   readonly number: 'Float' | 'Int'
   /** The schema-first globs; `false`: code-first. */
   readonly schema: readonly string[] | false
+  readonly ignoredDirectives: readonly string[]
 }
 
 /** The defaults. */
@@ -33,9 +40,12 @@ export const DEFAULT_OPTIONS: ResolvedGraphQLCompilerOptions = Object.freeze({
   sdl: false,
   number: 'Float',
   schema: false,
+  ignoredDirectives: Object.freeze([]),
 })
 
-const KNOWN = new Set(['sdl', 'number', 'schema'])
+const KNOWN = new Set(['sdl', 'number', 'schema', 'ignoredDirectives'])
+
+const DIRECTIVE_NAME = /^[_A-Za-z][_0-9A-Za-z]*$/
 
 /**
  * Merges `options` onto `base`. Throws a `TypeError` naming the option on an invalid value: options
@@ -46,11 +56,15 @@ export function resolveOptions(
   options: GraphQLCompilerOptions,
 ): ResolvedGraphQLCompilerOptions {
   if (typeof options !== 'object' || options === null || Array.isArray(options)) {
-    throw new TypeError('[znight] graphql.configure() expects an options object: { sdl?, number?, schema? }')
+    throw new TypeError(
+      '[znight] graphql.configure() expects an options object: { sdl?, number?, schema?, ignoredDirectives? }',
+    )
   }
   for (const key of Object.keys(options)) {
     if (!KNOWN.has(key))
-      throw new TypeError(`[znight] graphql.configure(): unknown option "${key}" (options: sdl, number, schema)`)
+      throw new TypeError(
+        `[znight] graphql.configure(): unknown option "${key}" (options: sdl, number, schema, ignoredDirectives)`,
+      )
   }
   const sdl = options.sdl === undefined ? base.sdl : options.sdl
   if (sdl !== false && (typeof sdl !== 'string' || sdl.trim() === '')) {
@@ -62,7 +76,25 @@ export function resolveOptions(
   if (number !== 'Float' && number !== 'Int') {
     throw new TypeError(`[znight] graphql.configure(): "number" must be 'Float' or 'Int'`)
   }
-  return Object.freeze({ sdl, number, schema: resolveSchema(base.schema, options.schema) })
+  return Object.freeze({
+    sdl,
+    number,
+    schema: resolveSchema(base.schema, options.schema),
+    ignoredDirectives: resolveIgnoredDirectives(base.ignoredDirectives, options.ignoredDirectives),
+  })
+}
+
+function resolveIgnoredDirectives(
+  base: readonly string[],
+  names: GraphQLCompilerOptions['ignoredDirectives'],
+): readonly string[] {
+  if (names === undefined) return base
+  if (!Array.isArray(names) || names.some(name => typeof name !== 'string' || !DIRECTIVE_NAME.test(name))) {
+    throw new TypeError(
+      '[znight] graphql.configure(): "ignoredDirectives" must be a list of directive names without @ ([\'resolved\'])',
+    )
+  }
+  return Object.freeze([...names])
 }
 
 function resolveSchema(
