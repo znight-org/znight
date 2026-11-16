@@ -21,7 +21,7 @@
     "@znight/core": "workspace:*",
     "@znight/graphql": "workspace:*",
     "@znight/http": "workspace:*",
-    "autocannon": "8.0.0",
+    "autocannon": "9.0.0",
     "graphql": "17.1.0",
     "inversify": "8.2.4",
     "reflect-metadata": "0.2.2",
