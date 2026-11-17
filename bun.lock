@@ -467,7 +467,7 @@
         "@aws-sdk/client-secrets-manager": "3.1164.0",
         "@azure/identity": "4.14.0",
         "@azure/keyvault-secrets": "4.12.0",
-        "@google-cloud/secret-manager": "7.2.0",
+        "@google-cloud/secret-manager": "8.0.0",
         "@znight/compiler": "workspace:*",
         "oci-common": "2.144.0",
         "oci-secrets": "2.144.0",
@@ -1052,7 +1052,7 @@
 
     "@google-cloud/pubsub-api": ["@google-cloud/pubsub-api@0.7.0", "", { "dependencies": { "google-gax": "^6.0.0" } }, "sha512-HlBt8JEceIJX9pgikVavq+6umuiEqc1loRwPPJgE8WNiRx1IgAyk9ohhwXwskFbPdzScpb/NKnSQOPy6lJYLFA=="],
 
-    "@google-cloud/secret-manager": ["@google-cloud/secret-manager@7.2.0", "", { "dependencies": { "google-gax": "^6.5.0" } }, "sha512-SQ/e9mo7Pl5QpFIn3GOa8K/PhS+3HgQnlWpMZbaE1UiZBa42AFB+EqxWQZOljv0kNwemo/PWiesAh8TywU9uVw=="],
+    "@google-cloud/secret-manager": ["@google-cloud/secret-manager@8.0.0", "", { "dependencies": { "google-gax": "^6.5.0" } }, "sha512-RUvUiFBuhsNvK8Mj9Mo116rLB3TsS+8r+LufOWiFvyF8r4A8m/l5Tx5+8PcfL4OTrHjGdCBdcERsvuDFGD/pMw=="],
 
     "@graphql-hive/logger": ["@graphql-hive/logger@1.1.1", "", { "peerDependencies": { "@logtape/logtape": "^1.2.0 || ^2.0.0", "pino": "^9.13.0 || ^10.0.0", "winston": "*" }, "optionalPeers": ["@logtape/logtape", "pino", "winston"] }, "sha512-fVUlEQCpnJnR/KJeEDHZbEDwEq4fMNTjKvicauCFMfxPLlcpIWdrscXpI/azwQkpsARyWPV0RnwdgjZIrFBmwQ=="],
 
