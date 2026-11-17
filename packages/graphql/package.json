@@ -74,7 +74,7 @@
     }
   },
   "devDependencies": {
-    "@graphql-yoga/plugin-response-cache": "4.0.1",
+    "@graphql-yoga/plugin-response-cache": "4.1.0",
     "@testcontainers/redis": "12.2.1",
     "@znight/compiler": "workspace:*",
     "@znight/http": "workspace:*",
@@ -82,7 +82,7 @@
     "graphql": "17.1.0",
     "graphql-http": "1.23.1",
     "graphql-sse": "2.6.3",
-    "graphql-yoga": "6.0.1",
+    "graphql-yoga": "6.1.0",
     "ioredis": "6.0.0",
     "testcontainers": "12.2.1",
     "valibot": "1.5.0",

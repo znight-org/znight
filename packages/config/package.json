@@ -93,12 +93,12 @@
     }
   },
   "devDependencies": {
-    "@azure/identity": "4.14.0",
+    "@azure/identity": "4.14.1",
     "@azure/keyvault-secrets": "4.12.0",
-    "@aws-sdk/client-secrets-manager": "3.1164.0",
+    "@aws-sdk/client-secrets-manager": "3.1169.0",
     "@google-cloud/secret-manager": "8.0.0",
-    "oci-common": "2.144.0",
-    "oci-secrets": "2.144.0",
+    "oci-common": "2.146.0",
+    "oci-secrets": "2.146.0",
     "yaml": "2.9.1",
     "@znight/compiler": "workspace:*"
   },
