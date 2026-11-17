@@ -292,18 +292,18 @@ configure it shortly before the release that publishes the package:
 GitHub (repository `znight-org/znight`, public):
 
 - [ ] **Actions may open pull requests** (the version pull request): Settings → Actions → General
-  → _Workflow permissions_: keep _Read repository contents and packages permissions_ (the workflows
-  declare what they need), check **Allow GitHub Actions to create and approve pull requests**,
-  **Save**. If the checkbox is greyed out, do the same first in the organization settings
-  (`https://github.com/organizations/znight-org/settings/actions`). Or:
-  `gh api -X PUT repos/znight-org/znight/actions/permissions/workflow -f default_workflow_permissions=read -F can_approve_pull_request_reviews=true`.
+      → _Workflow permissions_: keep _Read repository contents and packages permissions_ (the workflows
+      declare what they need), check **Allow GitHub Actions to create and approve pull requests**,
+      **Save**. If the checkbox is greyed out, do the same first in the organization settings
+      (`https://github.com/organizations/znight-org/settings/actions`). Or:
+      `gh api -X PUT repos/znight-org/znight/actions/permissions/workflow -f default_workflow_permissions=read -F can_approve_pull_request_reviews=true`.
 - [ ] **Ruleset on `main`** (Settings → Rules → Rulesets → New ruleset → New branch ruleset):
-  enforcement _Active_, target _Default branch_; **Require a pull request before merging**, with
-  _Required approvals_ at **0** while there is a single maintainer (GitHub does not let authors
-  approve their own pull requests: with 1 approval and an empty bypass list, nobody can merge their
-  own pull request), or keep 1 and add **Repository admin** to the _Bypass list_ in _For pull
+      enforcement _Active_, target _Default branch_; **Require a pull request before merging**, with
+      _Required approvals_ at **0** while there is a single maintainer (GitHub does not let authors
+      approve their own pull requests: with 1 approval and an empty bypass list, nobody can merge their
+      own pull request), or keep 1 and add **Repository admin** to the _Bypass list_ in _For pull
   requests only_ mode; **Require status checks to pass** with one check, **All Checks Complete**
-  (source _GitHub Actions_; it appears in the picker once it has run on a pull request); **Block
+      (source _GitHub Actions_; it appears in the picker once it has run on a pull request); **Block
   force pushes**; **Restrict deletions**.
 - [ ] **Environment `npm`** (the approval of every release):
   1. Settings → Environments → **New environment**, name `npm` (lowercase) → **Configure
@@ -315,15 +315,15 @@ GitHub (repository `znight-org/znight`, public):
      tag rule** → _Ref type_ Branch, pattern `main` → **Add rule**.
   4. _Environment secrets_: none, releases publish through [trusted publishing](#npm-setup).
 - [ ] **GitHub Pages**: Settings → Pages → _Build and deployment_ → _Source_: **GitHub Actions**
-  (instead of _Deploy from a branch_; ignore the suggested workflows). It is saved at once, and
-  creates the `github-pages` environment, which deploys from `main` (the release workflow and the
-  manual runs of Docs both run on `main`). Or:
-  `gh api -X POST repos/znight-org/znight/pages -f build_type=workflow`. The site appears at
-  `https://znight-org.github.io/znight/` after the first deployment.
+      (instead of _Deploy from a branch_; ignore the suggested workflows). It is saved at once, and
+      creates the `github-pages` environment, which deploys from `main` (the release workflow and the
+      manual runs of Docs both run on `main`). Or:
+      `gh api -X POST repos/znight-org/znight/pages -f build_type=workflow`. The site appears at
+      `https://znight-org.github.io/znight/` after the first deployment.
 - [ ] **Dependabot changesets** ([`dependabot-changesets.yml`](.github/workflows/dependabot-changesets.yml)):
-  a GitHub App, because a push with its token starts CI where one with the default `GITHUB_TOKEN`
-  does not, and its credentials as **Dependabot** secrets (a run started by Dependabot reads no
-  Actions secret).
+      a GitHub App, because a push with its token starts CI where one with the default `GITHUB_TOKEN`
+      does not, and its credentials as **Dependabot** secrets (a run started by Dependabot reads no
+      Actions secret).
   1. Create the App in the organization (Settings → Developer settings → GitHub Apps → New GitHub
      App), or open the link below, which fills the form: no webhook, _Only on this account_, and one
      repository permission, _Contents_: read and write. Nothing else is needed: the workflow only
@@ -340,23 +340,23 @@ GitHub (repository `znight-org/znight`, public):
      ```
 
 - [ ] **Private vulnerability reporting**: Settings → Code security → Private vulnerability
-  reporting → Enable (used by [SECURITY.md](SECURITY.md) and the issue template), or
-  `gh api -X PUT repos/znight-org/znight/private-vulnerability-reporting`. Also enable
-  Dependabot alerts, secret scanning and push protection on the same page.
+      reporting → Enable (used by [SECURITY.md](SECURITY.md) and the issue template), or
+      `gh api -X PUT repos/znight-org/znight/private-vulnerability-reporting`. Also enable
+      Dependabot alerts, secret scanning and push protection on the same page.
 - [ ] **Social preview**: Settings → General → Social preview → upload
-  [`docs/public/social-preview.png`](docs/public/social-preview.png).
+      [`docs/public/social-preview.png`](docs/public/social-preview.png).
 - [ ] **About**: description, homepage and topics, e.g.
-  `gh repo edit znight-org/znight --homepage https://znight-org.github.io/znight/ --add-topic typescript --add-topic dependency-injection --add-topic compile-time --add-topic framework --add-topic nodejs --add-topic bun --add-topic vite`.
+      `gh repo edit znight-org/znight --homepage https://znight-org.github.io/znight/ --add-topic typescript --add-topic dependency-injection --add-topic compile-time --add-topic framework --add-topic nodejs --add-topic bun --add-topic vite`.
 - [ ] **Discussions** (optional): Settings → General → Features → Discussions, then add a
-  _Questions_ contact link to [`.github/ISSUE_TEMPLATE/config.yml`](.github/ISSUE_TEMPLATE/config.yml).
+      _Questions_ contact link to [`.github/ISSUE_TEMPLATE/config.yml`](.github/ISSUE_TEMPLATE/config.yml).
 
 npm (organization `@znight`):
 
 - [ ] Your npm account has 2FA enabled and can publish to the `@znight` organization.
 - [ ] Trusted publishing and _Require two-factor authentication and disallow tokens_ on every
-  package, no `NPM_TOKEN` secret ([npm setup](#npm-setup)).
+      package, no `NPM_TOKEN` secret ([npm setup](#npm-setup)).
 - [ ] A new package (a new `packages/*` folder): its name reserved, then its trusted publisher
-  configured at most two days before its first release ([A new package](#a-new-package)).
+      configured at most two days before its first release ([A new package](#a-new-package)).
 
 ## Troubleshooting
 
