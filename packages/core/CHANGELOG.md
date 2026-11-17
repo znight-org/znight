@@ -1,5 +1,9 @@
 # @znight/core
 
+## 0.9.2
+
+No changes in this release.
+
 ## 0.9.1
 
 No changes in this release.

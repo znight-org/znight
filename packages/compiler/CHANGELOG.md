@@ -1,5 +1,12 @@
 # @znight/compiler
 
+## 0.9.2
+
+### Patch Changes
+
+- 5dda63f: Update @clack/prompts from ^1.8.1 to ^1.9.0, oxc-parser from ^0.157.0 to ^0.158.0.
+- @znight/core@0.9.2
+
 ## 0.9.1
 
 ### Patch Changes
