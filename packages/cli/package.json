@@ -40,7 +40,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@clack/prompts": "^1.8.1",
+    "@clack/prompts": "^1.9.0",
     "@znight/core": "workspace:*",
     "citty": "^0.2.2",
     "picocolors": "^1.1.1"

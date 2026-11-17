@@ -153,10 +153,10 @@
     }
   },
   "devDependencies": {
-    "@aws-sdk/client-sqs": "3.1164.0",
+    "@aws-sdk/client-sqs": "3.1169.0",
     "@azure/identity": "4.14.1",
     "@azure/service-bus": "7.10.0",
-    "@google-cloud/pubsub": "6.3.2",
+    "@google-cloud/pubsub": "6.4.1",
     "@nats-io/jetstream": "3.4.0",
     "@nats-io/transport-node": "3.4.0",
     "@platformatic/kafka": "2.15.0",
@@ -168,7 +168,7 @@
     "@testcontainers/rabbitmq": "12.2.1",
     "@testcontainers/redis": "12.2.1",
     "@znight/compiler": "workspace:*",
-    "amqplib": "2.2.1",
+    "amqplib": "2.3.1",
     "ioredis": "6.0.0",
     "testcontainers": "12.2.1",
     "zod": "catalog:"
