@@ -51,7 +51,7 @@
   "dependencies": {
     "@znight/core": "workspace:*",
     "magic-string": "^1.4.5",
-    "oxc-parser": "^0.158.0",
+    "oxc-parser": "^0.159.0",
     "oxc-resolver": "^11.24.2",
     "picocolors": "^1.1.1",
     "tinyglobby": "^0.2.17"

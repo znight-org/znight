@@ -60,10 +60,10 @@
   "devDependencies": {
     "@znight/compiler": "workspace:*",
     "@znight/testing": "workspace:*",
-    "croner": "11.0.0",
-    "fast-check": "4.10.2",
-    "testcontainers": "12.2.1",
-    "@testcontainers/redis": "12.2.1"
+    "croner": "11.0.1",
+    "fast-check": "4.10.3",
+    "testcontainers": "12.2.2",
+    "@testcontainers/redis": "12.2.2"
   },
   "znight": {
     "apiVersion": 1,

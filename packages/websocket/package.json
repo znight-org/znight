@@ -74,7 +74,7 @@
   "devDependencies": {
     "@znight/compiler": "workspace:*",
     "@znight/testing": "workspace:*",
-    "hono": "4.13.18",
+    "hono": "4.13.19",
     "ws": "8.23.0",
     "zod": "catalog:"
   },
