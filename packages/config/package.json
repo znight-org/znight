@@ -95,10 +95,10 @@
   "devDependencies": {
     "@azure/identity": "4.14.1",
     "@azure/keyvault-secrets": "4.12.0",
-    "@aws-sdk/client-secrets-manager": "3.1169.0",
+    "@aws-sdk/client-secrets-manager": "3.1173.0",
     "@google-cloud/secret-manager": "8.0.0",
-    "oci-common": "2.146.0",
-    "oci-secrets": "2.146.0",
+    "oci-common": "2.147.0",
+    "oci-secrets": "2.147.0",
     "yaml": "2.9.1",
     "@znight/compiler": "workspace:*"
   },

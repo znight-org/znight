@@ -30,6 +30,6 @@
     "@types/bun": "catalog:",
     "@types/node": "catalog:",
     "@types/express": "5.0.6",
-    "light-my-request": "6.8.0"
+    "light-my-request": "6.8.1"
   }
 }

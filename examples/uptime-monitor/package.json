@@ -19,9 +19,9 @@
     "@znight/schedule": "workspace:*",
     "@znight/config": "workspace:*",
     "@znight/observability": "workspace:*",
-    "hono": "4.13.18",
-    "@hono/node-server": "2.1.8",
-    "@electric-sql/pglite": "0.5.16",
+    "hono": "4.13.19",
+    "@hono/node-server": "2.1.11",
+    "@electric-sql/pglite": "0.5.17",
     "zod": "catalog:"
   },
   "devDependencies": {
@@ -32,7 +32,7 @@
     "typescript": "catalog:",
     "@types/bun": "catalog:",
     "@types/node": "catalog:",
-    "testcontainers": "12.2.1",
-    "@testcontainers/redis": "12.2.1"
+    "testcontainers": "12.2.2",
+    "@testcontainers/redis": "12.2.2"
   }
 }
