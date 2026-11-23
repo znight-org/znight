@@ -62,7 +62,7 @@ jobs:
         id: app-token
         if: steps.commit.outputs.changed == 'true'
         # an exact tag, not `v3`: actionlint 1.7.12 does not know the `client-id` input of v3 and rejects it
-        uses: actions/create-github-app-token@v3.3.0
+        uses: actions/create-github-app-token@v3.4.0
         with:
           client-id: ${{ secrets.DEPENDABOT_APP_CLIENT_ID }}
           private-key: ${{ secrets.DEPENDABOT_APP_PRIVATE_KEY }}
